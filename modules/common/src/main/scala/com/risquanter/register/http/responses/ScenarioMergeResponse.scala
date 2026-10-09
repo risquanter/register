@@ -16,12 +16,18 @@ object MergeConflictEntry:
 
 /** Response DTO for `GET /w/{key}/scenarios/{name}/merge-preview`.
   *
-  * `status` is `"clean"` (merge would apply without conflicts), `"conflicts"`
-  * (`conflicts` populated), or `"missing-scenario"` (the scenario does not
-  * exist — a non-error outcome of a read-only preview, mirroring
-  * `ScenarioDiffResponse`'s missing-tree statuses).
+  * `status` is `"clean"` (the merge would apply), `"conflicts"` (`conflicts`
+  * populated — paths changed on both branches), `"duplicate-names"`
+  * (`duplicateNames` populated — the merged node set would repeat a name
+  * within a tree), or `"missing-scenario"` (the scenario does not exist — a
+  * non-error outcome of a read-only preview, mirroring `ScenarioDiffResponse`'s
+  * missing-tree statuses).
   */
-final case class MergePreviewResponse(status: String, conflicts: List[MergeConflictEntry])
+final case class MergePreviewResponse(
+  status: String,
+  conflicts: List[MergeConflictEntry],
+  duplicateNames: Option[String] = None
+)
 
 object MergePreviewResponse:
   given codec: JsonCodec[MergePreviewResponse] = DeriveJsonCodec.gen[MergePreviewResponse]

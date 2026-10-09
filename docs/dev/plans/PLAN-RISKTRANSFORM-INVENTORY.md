@@ -365,3 +365,13 @@ PATCH bump; plan close = MINOR bump.
 - modules/server/src/main/scala/com/risquanter/register/services/cache/NodeValuation.scala
 - modules/common/src/main/scala/com/risquanter/register/http/responses/NodeReading.scala
 - modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
+- modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala
+- modules/server/src/main/scala/com/risquanter/register/http/controllers/ScenarioController.scala
+- modules/app/src/main/scala/app/components/MergeModal.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceLive.scala
+- docs/dev/plans/PLAN-RISKTRANSFORM.md
+- modules/app/src/main/scala/app/state/GlobalError.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala

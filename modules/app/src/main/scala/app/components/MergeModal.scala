@@ -74,6 +74,19 @@ object MergeModal:
             div(cls := "merge-modal-status", "No conflicts — merging applies this scenario's changes to main.")
           case "missing-scenario" =>
             div(cls := "merge-modal-error", "This scenario no longer exists.")
+          case "duplicate-names" =>
+            div(
+              div(
+                cls := "merge-modal-error",
+                "Merging would give two risks in one tree the same name:"
+              ),
+              div(cls := "merge-modal-conflicts", result.duplicateNames.getOrElse("")),
+              div(
+                cls := "merge-modal-hint",
+                "Rename one of them on either branch, then re-check."
+              ),
+              recheckButton(state)
+            )
           case _ =>
             div(
               div(

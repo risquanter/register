@@ -146,12 +146,14 @@ object RiskTreeRequests {
   }
 
   // Guard: ensure names are unique across all nodes so parent references are unambiguous; returns the deduped set.
-  private[requests] def requireUniqueNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Set[SafeName.SafeName]] = {
-    val duplicates = allNames.groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
-    if duplicates.nonEmpty then
-      Validation.fail(ValidationError("request.names", ValidationErrorCode.AMBIGUOUS_REFERENCE, s"Duplicate names: ${duplicates.map(_.value).mkString(", ")}"))
-    else Validation.succeed(allNames.toSet)
-  }
+  // Which names count as repeated is decided by SafeName.duplicates, the one
+  // definition shared with RiskTree.fromNodes and the scenario merge name scan;
+  // this boundary contributes only the field path and the message.
+  private[requests] def requireUniqueNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Set[SafeName.SafeName]] =
+    SafeName.duplicates(allNames) match
+      case Nil  => Validation.succeed(allNames.toSet)
+      case dups =>
+        Validation.fail(ValidationError("request.names", ValidationErrorCode.AMBIGUOUS_REFERENCE, s"Duplicate names: ${dups.map(_.value).mkString(", ")}"))
 
   // Guard: provided seedVarIds must be unique across all nodes of one tree
   // (PLAN-SEED-IDENTITY.md §5.1 — scope is per-tree, deliberately not workspace-wide:

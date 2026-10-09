@@ -86,6 +86,8 @@ class ScenarioController private (
         "conflicts",
         paths.map(p => MergeConflictEntry(p.path, p.treeId.map(_.value), p.nodeId.map(_.value)))
       )
+    case MergePreviewResult.DuplicateNames(details) =>
+      MergePreviewResponse("duplicate-names", Nil, Some(details))
     case MergePreviewResult.ScenarioMissing => MergePreviewResponse("missing-scenario", Nil)
 
   val deleteScenario: ServerEndpoint[Any, Task] = deleteScenarioEndpoint.serverLogic {

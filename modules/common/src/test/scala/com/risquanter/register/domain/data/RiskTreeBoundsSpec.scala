@@ -53,6 +53,23 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       )
     },
 
+    test("accepts two names differing only by an inner space, agreeing with SafeName.duplicates") {
+      // fromNodes decides repetition through SafeName.duplicates, which the
+      // scenario merge name scan also reads. This pins the two to one answer on
+      // the input where a looser notion of "the same name" would diverge: the
+      // doubled space renders away in hypertext but is significant here.
+      val l1 = leaf("space-a", "Server Outage", 1L, "root-pf")
+      val l2 = leaf("space-b", "Server  Outage", 2L, "root-pf")
+      val root = unsafeGet(RiskPortfolio.createFromStrings(
+        id = idStr("root-pf"), name = "Root",
+        childIds = Array(l1.id.value, l2.id.value)), "portfolio")
+      val result = RiskTree.fromNodes(treeId("bounds-space"), name("Bounds Space"), Seq(root, l1, l2), root.id, mitigations = Nil)
+      assertTrue(
+        SafeName.duplicates(Seq(l1.name, l2.name)).isEmpty,
+        result.isSuccess
+      )
+    },
+
     test("rejects a tree above the node-count limit of 10 000 with CONSTRAINT_VIOLATION") {
       // A valid two-level tree just over the cap. A single portfolio caps at
       // 1000 children, so the count is reached via 10 sub-portfolios of 1000

@@ -47,7 +47,6 @@ object RiskTree {
   import sttp.tapir.Schema
   import sttp.tapir.generic.auto.*
   import com.risquanter.register.http.codecs.IronTapirCodecs.given
-  import com.risquanter.register.domain.data.iron.SafeId
 
   // Wire-shape DTO: mirrors JSON wire format (omits non-serialized TreeIndex).
   // `mitigations` is optional on the wire: absent (pre-mitigation payloads and
@@ -129,16 +128,16 @@ object RiskTree {
     * (RiskTreeRequests.requireUniqueNames) enforces the same rule on the write
     * paths; folding it into fromNodes makes it hold for merges, store-loads, and
     * programmatic construction too (correct-by-construction layering, matching
-    * requireDistinctSeedVarIds). */
-  private def requireDistinctNodeNames(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] = {
-    val dups = nodes.groupBy(_.name.value).collect { case (n, ns) if ns.sizeIs > 1 => n }
-    if (dups.isEmpty) Validation.succeed(())
-    else Validation.fail(ValidationError(
-      field = "nodes.name",
-      code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
-      message = s"duplicate node name(s): ${dups.toList.sorted.mkString(", ")}"
-    ))
-  }
+    * requireDistinctSeedVarIds). Which names count as repeated is decided by
+    * SafeName.duplicates, the one definition this and the merge name scan share. */
+  private def requireDistinctNodeNames(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
+    SafeName.duplicates(nodes.map(_.name)) match
+      case Nil  => Validation.succeed(())
+      case dups => Validation.fail(ValidationError(
+        field = "nodes.name",
+        code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
+        message = s"duplicate node name(s): ${dups.map(_.value).mkString(", ")}"
+      ))
 
   /** Create a RiskTree from a flat list of nodes.
     *

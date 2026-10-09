@@ -52,6 +52,60 @@ object MergeConflictRuleSpec extends ZIOSpecDefault:
       }
     ),
 
+    suite("MergeConflictRule.merged — what a non-conflicting path becomes")(
+      test("the two sides agree, so that value is the result") {
+        assertTrue(
+          MergeConflictRule.merged(base, base, base) == base,
+          MergeConflictRule.merged(base, reProbed, reProbed) == reProbed
+        )
+      },
+      test("main still at the base, so the scenario's value wins") {
+        assertTrue(MergeConflictRule.merged(base, base, renamed) == renamed)
+      },
+      test("the scenario still at the base, so main's value wins") {
+        assertTrue(MergeConflictRule.merged(base, reProbed, base) == reProbed)
+      },
+      test("a side absent is a delete the winner's absence carries through") {
+        assertTrue(
+          // deleted on main, untouched on the scenario: the delete wins
+          MergeConflictRule.merged(base, None, base).isEmpty,
+          // deleted on the scenario, untouched on main: the delete wins
+          MergeConflictRule.merged(base, base, None).isEmpty,
+          // added on one side only: the addition wins
+          MergeConflictRule.merged(None, base, None) == base,
+          MergeConflictRule.merged(None, None, base) == base,
+          // deleted on both: absent
+          MergeConflictRule.merged(base, None, None).isEmpty
+        )
+      },
+      test("the two functions partition the same inputs: exactly one applies to every triple") {
+        // `merged` is defined only where `isConflict` is false, so over the
+        // whole input space the conflicting triples and the triples with a
+        // merged value must not overlap, and together must cover everything.
+        val values = List(None, base, renamed, reProbed)
+        val triples = for
+          b <- values
+          m <- values
+          s <- values
+        yield (b, m, s)
+
+        val conflicting = triples.filter { case (b, m, s) => MergeConflictRule.isConflict(b, m, s) }
+        val clean       = triples.filterNot { case (b, m, s) => MergeConflictRule.isConflict(b, m, s) }
+
+        assertTrue(
+          conflicting.nonEmpty,
+          clean.nonEmpty,
+          conflicting.size + clean.size == triples.size,
+          // Every clean triple's merged value is one of the three inputs —
+          // the merge never invents a value.
+          clean.forall { case (b, m, s) =>
+            val out = MergeConflictRule.merged(b, m, s)
+            out == m || out == s || out == b
+          }
+        )
+      }
+    ),
+
     suite("MergeConflictPath.fromRelativePath")(
       test("node path yields tree and node coordinates") {
         val parsed = MergeConflictPath.fromRelativePath(s"risk-trees/$treeId/nodes/$nodeId")
