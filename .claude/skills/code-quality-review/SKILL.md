@@ -353,12 +353,16 @@ restrictive default; **SHOULD-FIX** on missing documentation.
 
 **API9:2023 Improper Inventory Management.** Every new Tapir endpoint is
 automatically inventoried via the generated OpenAPI/swagger-ui — no action
-needed there. But dead-but-reachable-if-misused code (see `WorkspaceStore.resolveById`,
-warned 2026-07-20) is the same root problem in a different shape: an
-undocumented, unmonitored surface. Any method that bypasses the normal
-key-resolution path must carry an explicit warning and zero controller call
-sites, checked at review time. **MUST-FIX** if such a method gains a call
-site without the ownership check being added alongside it.
+needed there. But dead-but-reachable-if-misused code is the same root problem in
+a different shape: an undocumented, unmonitored surface. `WorkspaceStore` had
+one — a by-identifier lookup with no capability check, guarded only by a
+scaladoc warning and with no production caller. It was deleted rather than
+guarded, and that is the preferred resolution: a method nothing calls is removed,
+not documented. Any method that bypasses the normal key-resolution path must
+carry `using Checked[Permission]` so the authorization is in its signature.
+**MUST-FIX** on a new unscoped lookup that names a resource without proving the
+caller may read it, and on any method kept alive by a warning comment instead of
+a type.
 
 **API10:2023 Unsafe Consumption of APIs.** Applies to the Irmin GraphQL client
 — already handled via typed `IrminError` decoding and `StartupReadiness`

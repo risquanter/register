@@ -126,10 +126,30 @@ the identifier makes the server widen what it looks at. An identifier that
 merely *names* something inside a set the caller already earned the right to
 read has no scoping power of its own, and hiding it buys nothing.
 
-`WorkspaceId` has that power. `WorkspaceStore.resolveById` looks one up in a
-store spanning every workspace, with no accompanying capability check. A
-`WorkspaceId` in a client's hands would therefore be an ingredient a future
-feature could turn into cross-tenant access, which is what §1 forecloses.
+`WorkspaceId` has no such power today either, and that is deliberate rather than
+incidental: `WorkspaceStore` has no by-identifier lookup at all. Every method on
+it takes the capability key, so there is no entry point that names a workspace
+without proving the caller holds its credential. The method that used to be the
+exception, `resolveById`, resolved a workspace from an identifier alone with no
+capability check; it had no production caller and was deleted.
+
+So the case for §1 is not that an exposed identifier is exploitable now. It is
+that **confinement is cheap and keeps it that way.** An identifier a client
+never receives cannot be the ingredient a future feature turns into a
+cross-tenant lookup, because the feature's author would have to add the client
+exposure deliberately rather than find it already there. The control is on the
+design, not on an attacker — which is why §3 records it as the lighter
+confinement and not as credential hardening.
+
+Two facts bound how much that control is worth, and both argue for keeping it
+rather than leaning on it. The identifier is a ULID generated from ZIO's
+`Random`, not `SecureRandom` (ADR-021 §5 says so of ULIDs deliberately), so its
+safety was never entropy. And tree and node identifiers come from the same
+generator and **are** returned to clients, so correlated values are already on
+the wire. Confinement of `WorkspaceId` therefore buys design discipline, not
+secrecy. The control that would actually stop a cross-tenant lookup is the one
+above: no by-identifier entry point exists. Should one ever be needed, it takes
+`using Checked[Permission]` so the authorization is in its signature.
 
 A node id has no such power, and the reason is structural rather than a
 convention anyone has to remember. Every lookup of a client-supplied node id

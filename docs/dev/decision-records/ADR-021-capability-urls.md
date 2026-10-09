@@ -30,18 +30,25 @@ A dedicated `WorkspaceKeySecret` type — a 128-bit `SecureRandom` value, base64
 A `WorkspaceStore` maps `WorkspaceKeySecret → Workspace` (containing tree list, creation time, TTL) with automatic expiry:
 
 ```scala
+// Protected methods additionally require `using Checked[Permission]` (ADR-030);
+// `resolve` is the Layer 0 capability gate and is the one call that precedes it.
 trait WorkspaceStore:
-  def create(): UIO[WorkspaceKeySecret]
+  def create(seedEntityId: Option[SeedEntityId]): IO[AppError, WorkspaceKeySecret]
   def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit]
-  def resolve(key: WorkspaceKeySecret): IO[AppError, Workspace]
+  def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord]
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean]
   def listTrees(key: WorkspaceKeySecret): IO[AppError, List[TreeId]]
+  def checkTreeCapacity(key: WorkspaceKeySecret): IO[AppError, Unit]
   def delete(key: WorkspaceKeySecret): IO[AppError, Unit]
   def rotate(key: WorkspaceKeySecret): IO[AppError, WorkspaceKeySecret]
-  def evictExpired: UIO[Int]
+  def evictExpired: UIO[List[WorkspaceRecord]]
 ```
 
-In-memory `Ref[Map[WorkspaceKeySecret, Workspace]]` implementation with a background reaper fiber (configurable interval, default 5 minutes). Default TTL: 24 hours.
+There is no by-identifier lookup. Every method takes the capability key, so no
+entry point exists that names a workspace without proving the caller holds its
+credential.
+
+In-memory `Ref[Map[WorkspaceKeyHash, WorkspaceRecord]]` implementation with a background reaper fiber (configurable interval, default 5 minutes). The raw key is never stored: the map is keyed by its SHA-256 digest. Default absolute TTL 72 hours, idle timeout 1 hour; either expiring is enough.
 
 ### 3. Workspace Endpoint Surface
 
@@ -61,11 +68,19 @@ DELETE /w/{key}                                → delete workspace + cascade tr
 
 ### 4. Rate Limiting & Abuse Prevention
 
-- **Creation rate limit:** Max N workspaces per IP per hour (configurable, default 10)
+- **Creation rate limit:** max N workspace creations per caller address per hour,
+  counted in-application (`REGISTER_WORKSPACE_MAX_CREATES_PER_IP`, default 5).
+  This holds only because the address is infrastructure-supplied: a proxy
+  appends the real peer to `X-Forwarded-For`, and the application reads the
+  entry its own outermost proxy wrote (`REGISTER_TRUSTED_PROXY_HOPS`), ignoring
+  anything the caller placed to the left of it. Reading the leftmost value
+  instead would count an identity the caller chooses, and the limit would not
+  hold. The in-application counter is the limit in **every** deployment,
+  production included. An edge rate limit at the Istio ingress gateway is
+  additional defence against flooding and is **not implemented**.
 - **HTTPS-only:** Prevents URL sniffing on the wire
 - **No Referer leakage:** `Referrer-Policy: no-referrer` header on workspace responses
 - **Cache-Control:** `no-store` on workspace responses to prevent proxy caching of keys
-- In production: Istio rate limiting at ingress; for standalone: simple in-app `Ref`-based counter
 
 ### 5. PRNG — Cryptographic Randomness Required
 
@@ -108,7 +123,7 @@ val tree = workspaceGetTreeEndpoint  // under /w/{key}/risk-trees/{treeId}
 workspaceStore.create()  // no expiry
 
 // GOOD: Mandatory TTL with background eviction
-// Workspace created with configurable TTL (default 24h)
+// Workspace created with configurable TTL (default 72h) and idle timeout (1h)
 // Background reaper fiber runs evictExpired every 5 minutes
 ```
 

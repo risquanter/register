@@ -1,6 +1,6 @@
 # Plan: SSE event wire-string enums
 
-**Status:** Awaiting approval. **Date:** 2026-07-27.
+**Status:** Implemented. **Date:** 2026-07-27.
 **ADR reference:** ADR-001 (validate-at-boundary / no raw domain-value strings).
 
 Single self-contained, independently landable and revertable change, scoped to

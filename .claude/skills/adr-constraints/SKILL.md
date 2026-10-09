@@ -107,6 +107,17 @@ serialization/escaping helpers.
 ✅ INSTEAD: `SecureRandom` — cryptographically secure, required by ADR-021.
 *ADR-021*
 
+❌ NEVER derive a rate-limit or audit identity from the leftmost `X-Forwarded-For`
+entry, or from any request header a caller can set. A caller who varies the value
+gets a fresh window per value, which disables the limit silently — no error, no
+log, the limiter still appears to work.
+✅ INSTEAD: a proxy appends the real peer, and the application reads the entry its
+own outermost proxy wrote, indexed from the right by a configured hop count
+(`REGISTER_TRUSTED_PROXY_HOPS`). A header too short for that count yields no
+identity, and all such requests share one window. The in-application limiter is
+the control in every deployment; an edge limit is additional and unimplemented.
+*ADR-021 §4*
+
 ❌ NEVER include secrets, PII, or internal paths in error messages.
 ✅ INSTEAD: typed error codes (`ValidationErrorCode`) with safe human-readable messages.
 *ADR-010, ADR-035*
@@ -118,11 +129,29 @@ excluding every character that carries special meaning in a downstream parser
 *ADR-029*
 
 ❌ NEVER concatenate a user string into text that will be parsed again.
-✅ INSTEAD: reach a downstream interpreter only through parameterised, structured or
-AST-level interfaces — a per-sort literal validator (`riskNameToId.get`,
-`NodeId.fromString`), the typed Quill DSL, zio-json codecs, Laminar `textContent`.
-Never string interpolation followed by a second parse; `innerHTML` is never called.
+✅ INSTEAD, in this order of preference. **Preferred:** a parameterised, structured or
+AST-level interface — a per-sort literal validator (`riskNameToId.get`,
+`NodeId.fromString`), the typed Quill DSL, zio-json codecs, Laminar `textContent`, a
+GraphQL document's `variables` member. **Approved alternative, recorded as a row in
+ADR-029 §3:** interpolating a value whose Iron refinement admits no character
+carrying meaning in that interpreter — the guarantee is then the type's, at compile
+time. **Rejected:** everything else, and in particular escaping a raw value at the
+interpolation site as the primary guard; escaping is only ever a second layer over
+free text with no narrower type. `innerHTML` is never called.
 *ADR-029*
+
+❌ NEVER interpolate into an Irmin GraphQL document a value that is not derived from
+an Iron-refined type.
+✅ INSTEAD: that boundary is approved under ADR-029 §2's alternative precisely
+because every interpolated value is Iron-derived and nothing else — branch names,
+paths and commit hashes by their own refinements, and a stored node because every
+string-bearing field of `RiskLeaf` and `RiskPortfolio` is refined, so neither has a
+free-text field. A new raw `String` interpolated there removes the property the
+approval rests on. The branch selector holds the one interpolation that is structure
+rather than a value: a read of a named branch aliases it as `main` so every response
+decodes identically, and choosing between that and the bare `main` selector chooses
+between two document shapes. The branch name inside it is an ordinary argument value.
+*ADR-029 §3, ADR-004a*
 
 ❌ NEVER call a `WorkspaceStore` or `RiskTreeService` method from another service for
 cross-cutting orchestration.
@@ -150,6 +179,13 @@ server logs, internal storage paths and merge commit messages — what closes th
 the boundary is enumeration-oracle / BOLA (Broken Object-Level Authorization) risk,
 not secret leakage. Masking the value in `toString` is not an alternative to
 removing it: it defends one rendering, where removal defends the boundary.
+`WorkspaceStore` has **no by-identifier lookup** — every method takes the
+capability key, so no entry point names a workspace without proving the caller
+holds its credential. Confinement is therefore design discipline rather than
+secrecy: an identifier a client never receives cannot become the ingredient of a
+future cross-tenant lookup. A new lookup that resolves a resource from an
+identifier takes `using Checked[Permission]`, so the authorization is in its
+signature rather than in a warning comment.
 *ADR-036*
 
 ❌ NEVER pick the client-facing substitute for a `BranchRef` by habit. Two are

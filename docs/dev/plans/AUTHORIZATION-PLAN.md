@@ -742,6 +742,23 @@ trait AuthorizationService:
   // has the given permission; no local DB join required.
 ```
 
+**Discovery — "show my workspaces" cannot be built on `listAccessible` alone.**
+
+`listAccessible` returns workspace identifiers. A workspace is opened through
+its capability URL, `/w/{key}/…`, and the server cannot produce that URL from
+an identifier: `WorkspaceRecord` stores only `keyHash`, the SHA-256 digest of a
+128-bit random key (`WorkspaceKeyCrypto.hash`). The digest is irreversible,
+which is the correct property for a stored credential and the reason this
+feature does not follow from the lookup.
+
+A listing could show names and dates, but nothing the user can click. So the
+feature needs a prior decision on how an identified user reaches a workspace
+they own — a per-user stored reference to the key, reissuing a key on demand to
+a proven owner, or a different access path altogether. `WorkspaceId` is not a
+candidate for the wire (ADR-036 §1).
+
+Open: that decision. Until it is made, `listAccessible` has no caller.
+
 #### SpiceDB HTTP API Mapping
 
 **Check — POST `/v1/permissions/check`:**

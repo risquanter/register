@@ -2123,6 +2123,76 @@ class LECChartState(...):
 - [ ] SSE connection established on tree selection
 - [ ] `CacheInvalidated` events trigger LEC re-fetch for visible nodes
 - [ ] Stale indicators shown while re-fetching
+- [ ] A view pointing at a node the tree no longer contains leaves that view instead of holding a stale row
+- [ ] The publisher inventory below is written before the client's recovery rules
+
+**Recovery when a displayed node no longer exists.**
+
+A `CacheInvalidated` event names the node identifiers a client should
+re-fetch. It cannot name a node that no longer exists. So a view pointing at a
+removed node receives no signal at all, and keeps rendering a row the server
+will never confirm again. The client needs its own recovery step for that
+case: when a re-fetch shows that the node a view is pointing at is absent from
+the tree, leave the view and show the user something they can act on, rather
+than holding the row until the page is reloaded.
+
+The SPA already has this pattern for the one analogous case it handles today.
+When workspace pre-validation finds the workspace gone,
+`WorkspaceState.preValidate` clears the stored key, resets the URL and raises
+`GlobalError.WorkspaceExpired`, which is rendered as an informational banner
+and not an error one. A removed node is the same situation one level down, so
+take the same shape: drop to the tree level, and say what happened.
+
+**Write a full inventory of the event publishers before the recovery rules.**
+
+The publishers are not uniform, and each leaves the client a different
+situation to reconcile. A mutation publishes the precise set of nodes whose
+figures moved, plus their ancestors. A tree deletion publishes every node
+identifier in the tree, so each view re-fetches and receives `NOT_FOUND`. A
+revert publishes the precise set when the state before the revert can be read,
+and every node identifier of the tree it restored when that state cannot be
+read. The removed-node case above is reachable from more than one of these.
+
+So enumerate every code path that publishes an event, and for each one record
+what a view can be left displaying. That inventory is what makes the client's
+recovery rules complete, rather than written against whichever publisher was
+looked at first.
+
+**Open — decide how an open stream learns its key was revoked.**
+
+`SSEController.treeEvents` validates the workspace key and tree ownership once,
+with `workspaceStore.resolveTree`, and then returns a stream that a 30-second
+heartbeat keeps open indefinitely. Nothing re-checks the key afterwards. Two
+consequences follow, and they share one cause: authorization is granted as an
+instant while the stream lasts for a duration.
+
+Revocation does not reach an open stream. `WorkspaceStore.rotate` documents
+itself as instant revocation with no grace period. A stream opened with the old
+key keeps delivering events after a rotation, after a workspace delete, and
+after expiry, for as long as the connection survives. The holder of a leaked
+key therefore keeps receiving every change to the tree even once the owner has
+rotated. Reaching this needs no browser — a command-line client opens the same
+stream.
+
+A live stream does not count as activity against the idle timeout. `resolveTree`
+reaches `resolve`, which updates `lastAccessedAt` once at subscribe time;
+heartbeats never touch it. A user watching a stream and doing nothing else has
+their workspace idle-expire after an hour while the connection keeps running.
+This half is latent until this phase ships, because nothing subscribes today.
+
+Three mechanisms are available and the choice is open. Re-check the key
+periodically inside the stream and terminate on failure, which bounds
+revocation latency by the interval and fixes the idle timer in the same step.
+Give every stream a bounded lifetime and let the client reconnect, which
+re-runs the full authorization but leaves the idle timer untouched. Or notify
+the hub from `rotate`, `delete` and eviction so it closes the affected
+subscriptions, which is immediate and costs nothing while idle but needs new
+state linking subscriptions to workspaces, and does not cover expiry.
+
+The server half of whichever is chosen is independent of this phase and can
+land before it. What belongs here is the client's side of it: Phase I.b's
+reconnection logic has to tell a stream closed for re-authorization, which
+should reconnect, from one closed because the key is gone, which should not.
 
 ### Phase I.b: SSE Reconnection
 

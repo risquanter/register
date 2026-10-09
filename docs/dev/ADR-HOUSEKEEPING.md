@@ -282,9 +282,13 @@ logs.
 
 **Settled by a security review**, which tested the claim against the code rather
 than the ADR text alone. The finding: confinement is warranted only where
-presenting an identifier makes the server widen its lookup. `WorkspaceId` has
-that property, because `WorkspaceStore.resolveById` spans every workspace with no
-capability check. A node id does not: every lookup of one runs against
+presenting an identifier makes the server widen its lookup. Neither identifier
+has that property now: the one method that spanned every workspace without a
+capability check had no production caller and was deleted, so `WorkspaceStore`
+has no by-identifier entry point at all. `WorkspaceId` stays confined for the
+lighter reason ADR-036 §4 now gives — an identifier a client never receives
+cannot become the ingredient of a future cross-tenant lookup. A node id does not
+need even that: every lookup of one runs against
 `tree.index.nodes`, a map belonging to a single tree the caller already passed
 `ws.trees.contains(treeId)` for, and no code path takes a bare node id and
 searches across trees. A node id from another workspace is therefore
