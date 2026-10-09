@@ -77,6 +77,23 @@ trait InvalidationHandler {
     * @return Notification result containing all node IDs and subscriber count
     */
   def handleTreeDeletion(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult]
+
+  /**
+    * Publish a single event naming every node in `tree`, for a change whose
+    * precise extent cannot be computed.
+    *
+    * `handleMutation` needs both the before and after states to name the nodes
+    * whose figures moved. When the before state is unavailable — it was never
+    * stored, or it cannot be read — this is the honest alternative: every node
+    * is named, so a subscriber re-fetches the whole tree and converges, at the
+    * cost of fetching more than changed. A node that existed before and does
+    * not exist now cannot be named, because it is not in `tree`.
+    *
+    * @param tree The tree as it now stands
+    * @param branch Client-facing branch name the change landed on
+    * @return Notification result containing every node id and subscriber count
+    */
+  def handleWholeTreeChange(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult]
 }
 
 object InvalidationHandler {
@@ -93,6 +110,9 @@ object InvalidationHandler {
 
   def handleTreeDeletion(tree: RiskTree, branch: BranchChoice): URIO[InvalidationHandler, InvalidationResult] =
     ZIO.serviceWithZIO[InvalidationHandler](_.handleTreeDeletion(tree, branch))
+
+  def handleWholeTreeChange(tree: RiskTree, branch: BranchChoice): URIO[InvalidationHandler, InvalidationResult] =
+    ZIO.serviceWithZIO[InvalidationHandler](_.handleWholeTreeChange(tree, branch))
 }
 
 /**
@@ -135,6 +155,9 @@ final case class InvalidationHandlerLive(
   override def handleTreeDeletion(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
     val allNodeIds = tree.index.nodes.keys.toList // browser re-fetches → gets NOT_FOUND
     publishInvalidation(tree.id, allNodeIds, branch, "Tree deletion notification")
+
+  override def handleWholeTreeChange(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
+    publishInvalidation(tree.id, tree.index.nodes.keys.toList, branch, "Whole-tree change notification")
 
   // ========================================
   // Tree diff logic

@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPo
 import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure, TreeLoadFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, unsafeGet}
@@ -61,7 +61,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CascadeTestStubs.stubCommit)))
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] =
       rev match
         case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => Right(tree) }.toList)
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
@@ -184,6 +184,126 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       t => RiskTree.fromNodesUnsafe(t.id, t.name, t.nodes, t.rootId, Some(t.seedVarHighWater), ms.toList),
       BranchRef.Main
     )
+
+  // ── revert fixtures ──────────────────────────────────────────────────────
+  // revert is the only operation whose storage half reads at the target commit
+  // and never at the head, so it is the only one that can repair a stored tree
+  // that breaks a tree invariant. These fixtures pin that a failing head read
+  // no longer stops it, and that the notification degrades to naming every node
+  // rather than being skipped.
+
+  private val revertRootId = nodeId("revert-root")
+  private val revertLeafId = nodeId("revert-leaf")
+
+  private val revertedTree: RiskTree =
+    val leaf = unsafeGet(RiskLeaf.create(
+      id = revertLeafId.value.toString,
+      name = "Restored Leaf",
+      distributionType = "lognormal",
+      probability = 0.2,
+      minLoss = Some(1000L),
+      maxLoss = Some(20000L),
+      parentId = Some(revertRootId),
+      seedVarId = 1L
+    ), "revert leaf")
+    val root = unsafeGet(RiskPortfolio.createFromStrings(
+      id = revertRootId.value.toString,
+      name = "Restored Root",
+      childIds = Array(revertLeafId.value.toString),
+      parentId = None
+    ), "revert root")
+    unsafeGet(RiskTree.fromNodes(
+      id = treeId("revert-tree"),
+      name = SafeName.SafeName("Restored Tree".refineUnsafe),
+      nodes = Seq(root, leaf),
+      rootId = revertRootId,
+      mitigations = Nil
+    ), "revert tree")
+
+  /** Repository stub for the revert path. `headReadFails` models a stored tree
+    * that breaks a tree invariant: every head read fails, while the read at the
+    * target commit that `revert` performs internally still succeeds.
+    */
+  private def revertRepo(headReadFails: Boolean) = new RiskTreeRepository {
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+      ZIO.succeed(revertedTree)
+
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+      if headReadFails then ZIO.fail(RepositoryFailure("duplicate node name(s): Restored Leaf"))
+      else ZIO.succeed(Some((revertedTree, CascadeTestStubs.stubCommit)))
+
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision) = ZIO.die(new NotImplementedError("unused"))
+  }
+
+  /** Records which notification the service chose, which is the thing under
+    * test — the real handler publishes to a hub and reports only counts.
+    */
+  private final class RecordingInvalidationHandler(
+    calls: Ref[List[(String, List[NodeId])]]
+  ) extends com.risquanter.register.services.pipeline.InvalidationHandler {
+    import com.risquanter.register.services.pipeline.InvalidationResult
+    import com.risquanter.register.domain.data.iron.BranchChoice
+
+    private def record(kind: String, ids: List[NodeId]): UIO[InvalidationResult] =
+      calls.update(_ :+ (kind, ids)).as(InvalidationResult(invalidatedNodes = ids, subscribersNotified = 0))
+
+    override def handleMutation(oldTree: RiskTree, newTree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
+      record("mutation", newTree.index.nodes.keys.toList)
+    override def handleTreeDeletion(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
+      record("deletion", tree.index.nodes.keys.toList)
+    override def handleWholeTreeChange(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
+      record("wholeTree", tree.index.nodes.keys.toList)
+  }
+
+  private def revertSuite = suite("revertTree — the head read is not fatal")(
+    test("a readable head reverts and the before-state reaches handleMutation") {
+      for
+        calls   <- Ref.make(List.empty[(String, List[NodeId])])
+        svc     <- ZIO.service[RiskTreeService].provide(
+                     RiskTreeServiceLive.layer,
+                     ZLayer.succeed[RiskTreeRepository](revertRepo(headReadFails = false)),
+                     ZLayer.succeed[com.risquanter.register.services.pipeline.InvalidationHandler](
+                       new RecordingInvalidationHandler(calls)),
+                     com.risquanter.register.configs.TestConfigs.simulationLayer,
+                     com.risquanter.register.services.cache.CachedResultResolverLive.layer,
+                     com.risquanter.register.services.cache.ContentCacheRegistry.layer,
+                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
+                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+                   )
+        result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
+        recorded <- calls.get
+      yield assertTrue(
+        result.id == revertedTree.id,
+        recorded.map(_._1) == List("mutation")
+      )
+    },
+    test("a failing head read still reverts, and the whole-tree notification fires instead") {
+      for
+        calls   <- Ref.make(List.empty[(String, List[NodeId])])
+        svc     <- ZIO.service[RiskTreeService].provide(
+                     RiskTreeServiceLive.layer,
+                     ZLayer.succeed[RiskTreeRepository](revertRepo(headReadFails = true)),
+                     ZLayer.succeed[com.risquanter.register.services.pipeline.InvalidationHandler](
+                       new RecordingInvalidationHandler(calls)),
+                     com.risquanter.register.configs.TestConfigs.simulationLayer,
+                     com.risquanter.register.services.cache.CachedResultResolverLive.layer,
+                     com.risquanter.register.services.cache.ContentCacheRegistry.layer,
+                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
+                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+                   )
+        result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
+        recorded <- calls.get
+      yield assertTrue(
+        result.id == revertedTree.id,
+        recorded.map(_._1) == List("wholeTree"),
+        // every node of the restored tree is named, so a subscriber converges
+        recorded.head._2.toSet == revertedTree.index.nodes.keys.toSet
+      )
+    }
+  )
 
   private def isDuplicateName(exit: Exit[Throwable, Any]): Boolean =
     exit match
@@ -731,7 +851,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               updated.mitigations.map(_.name.value) == Seq("surviving-control")
           }
         }
-      )
+      ),
+
+      revertSuite
     ).provide(
       RiskTreeServiceLive.layer,
       stubRepoLayer,

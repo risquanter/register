@@ -1,6 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.json.*
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, RiskLeaf}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, CommitHash, Revision}
@@ -8,6 +9,9 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
+import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.configs.TestConfigs
+import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
 import io.github.iltotore.iron.*
@@ -19,6 +23,8 @@ import io.github.iltotore.iron.*
   * by `IrminRevertSemanticsSpec`.
   */
 object TreeRevertItSpec extends ZIOSpecDefault:
+
+  private given Checked[Permission] = TestChecked.value
 
   private val wsId = WorkspaceId(safeId("revert-it-ws"))
 
@@ -43,12 +49,37 @@ object TreeRevertItSpec extends ZIOSpecDefault:
     RiskTree.fromNodesUnsafe(original.id, original.name, Seq(root, l1), rootId,
       Some(original.seedVarHighWater), mitigations = original.mitigations)
 
+  /** The JSON of a leaf that carries leaf-1's name while keeping leaf-2's id
+    * and seed-variable id.
+    *
+    * Writing this at leaf-2's own storage path gives the stored node set two
+    * nodes with one name. That is a property of the whole set, so no single
+    * blob is malformed and nothing rejects the write — which is exactly how
+    * the merge can produce it, since Irmin merges one path at a time. Every
+    * subsequent read fails, because a read runs `fromNodes`.
+    */
+  private def duplicateNameLeafJson: String =
+    RiskLeaf.create(id = leaf2Id.value, name = "Leaf 1", distributionType = "lognormal",
+      probability = 0.2, minLoss = Some(1500L), maxLoss = Some(3000L),
+      parentId = Some(rootId), seedVarId = 2L).toEither.toOption.get.toJson
+
   private def treeRoot(id: TreeId): String = s"workspaces/${wsId.value}/risk-trees/${id.value}"
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe
 
-  private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =
-    ZLayer.make[RiskTreeRepository & IrminClient](
-      IrminCompose.irminConfigLayer, IrminClientLive.layer, RiskTreeRepositoryIrmin.layer
+  private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient & RiskTreeService] =
+    ZLayer.make[RiskTreeRepository & IrminClient & RiskTreeService](
+      IrminCompose.irminConfigLayer, IrminClientLive.layer, RiskTreeRepositoryIrmin.layer,
+      // The service's revert publishes a change notification, so the whole
+      // notification stack is wired; the assertions here are about the stored
+      // state, which is what the integration tier can observe.
+      RiskTreeServiceLive.layer,
+      TestConfigs.simulationLayer,
+      com.risquanter.register.services.cache.CachedResultResolverLive.layer,
+      com.risquanter.register.services.cache.ContentCacheRegistry.layer,
+      com.risquanter.register.services.pipeline.InvalidationHandler.live,
+      com.risquanter.register.services.sse.SSEHub.live,
+      TestConfigs.telemetryLayer >>> TracingLive.console,
+      TestConfigs.telemetryLayer >>> MetricsLive.console
     )
 
   override def spec =
@@ -79,6 +110,42 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           headAfter.exists(_.info.message.endsWith(":revert")),
           // non-destructive: every pre-revert commit is still present in history
           histU.map(_.hash).toSet.subsetOf(histR.map(_.hash).toSet)
+        )
+      },
+
+      test("revert repairs a stored tree that no head read can load") {
+        // A tree can reach a state that breaks a whole-set invariant — the
+        // merge is the one write path the application does not perform itself.
+        // Every head read then fails, because the read runs fromNodes. revert
+        // is the only operation that can repair it, because its storage half
+        // reads at the target commit and never at the head.
+        val tid = treeId("revert-broken")
+        val v1  = treeV1(tid)
+        for
+          repo     <- ZIO.service[RiskTreeRepository]
+          irmin    <- ZIO.service[IrminClient]
+          _        <- repo.create(wsId, v1, BranchRef.Main)
+          hist     <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
+          goodHash <- ZIO.fromEither(CommitHash.fromString(hist.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
+          // Written one blob at a time, the way a merge writes, so no
+          // whole-set check runs and the invalid state lands.
+          _        <- irmin.set(
+                        IrminPath.unsafeFrom(s"${treeRoot(tid)}/nodes/${leaf2Id.value}"),
+                        duplicateNameLeafJson,
+                        s"workspace:${wsId.value}:risk-tree:${tid.value}:break-invariant",
+                        BranchRef.Main
+                      )
+          brokenRead <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).exit
+          service  <- ZIO.service[RiskTreeService]
+          repaired <- service.revertTree(wsId, tid, goodHash, BranchRef.Main)
+          loaded   <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
+        yield assertTrue(
+          // the broken state is unreadable at head
+          brokenRead.isFailure,
+          // and the service's revert still completed and restored a readable tree
+          repaired.index.nodes.size == 3,
+          loaded.exists(_.index.nodes.size == 3),
+          loaded.exists(_.index.nodes.values.map(_.name.value).toSet.size == 3)
         )
       },
 

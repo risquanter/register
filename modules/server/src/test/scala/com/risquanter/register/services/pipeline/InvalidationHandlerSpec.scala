@@ -280,6 +280,19 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       )
     },
 
+    test("a whole-tree change publishes every node ID") {
+      // The extent of the change is unknown, so every node is named and a
+      // subscriber re-fetches the whole tree. Same node set as a deletion,
+      // reached without a before-state to diff against.
+      for {
+        handler <- ZIO.service[InvalidationHandler]
+        result  <- handler.handleWholeTreeChange(testTree, BranchChoice.Main)
+      } yield assertTrue(
+        result.invalidatedNodes.map(_.value).toSet ==
+          Set(idStr("ops-risk"), idStr("cyber"), idStr("it-risk"), idStr("hardware"), idStr("software"))
+      )
+    },
+
     test("SSE subscribers are counted when present") {
       val changedCyber = unsafeGet(RiskLeaf.create(
         id = idStr("cyber"),

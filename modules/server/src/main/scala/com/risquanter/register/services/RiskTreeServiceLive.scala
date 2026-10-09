@@ -12,7 +12,7 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTre
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice, ScenarioName}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
@@ -107,12 +107,12 @@ class RiskTreeServiceLive private (
   // name) is checked against exactly this set.
   private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): Task[List[RiskTree]] =
     repo.getAllForWorkspace(wsId, Revision.Head(branch)).flatMap { results =>
-      val (errs, trees) = results.foldLeft((List.empty[RepositoryFailure], List.empty[RiskTree])) {
+      val (errs, trees) = results.foldLeft((List.empty[TreeLoadFailure], List.empty[RiskTree])) {
         case ((es, ts), Left(err))  => (err :: es, ts)
         case ((es, ts), Right(t))   => (es, t :: ts)
       }
       if errs.nonEmpty then
-        ZIO.fail(RepositoryFailure(errs.reverse.map(_.reason).mkString("; ")))
+        ZIO.fail(RepositoryFailure(errs.reverse.map(_.getMessage).mkString("; ")))
       else
         ZIO.succeed(trees.reverse)
     }
@@ -305,21 +305,21 @@ class RiskTreeServiceLive private (
     (domainNodes, rootId)
   }
   
-  /** Client-facing branch identity for the SSE tag: `Main` or the scenario
-    * name. Never the internal `BranchRef.toBranchRef` — that embeds the
-    * WorkspaceId, which must not cross the client boundary. The branch is always
-    * composed from this same `wsId` (ActiveBranch.resolve), so the prefix strip
-    * always yields a valid scenario slug; a parse failure is an unreachable
-    * invariant violation, mirroring `ActiveBranch.resolve`'s own die-on-compose. */
-  private def clientBranchName(wsId: WorkspaceId, branch: BranchRef): BranchChoice =
-    if branch == BranchRef.Main then BranchChoice.Main
-    else
-      val slug = branch.toBranchRef.stripPrefix(s"scenarios.${wsId.value.toLowerCase}.")
-      ScenarioName.fromString(slug) match
-        case Right(name) => BranchChoice.Scenario(name)
-        case Left(errs)  => throw new IllegalStateException(
-          s"scenario branch slug is not a valid ScenarioName: ${errs.map(_.message).mkString(", ")} — " +
-          "unreachable (composed from a valid ScenarioName)")
+  /** Client-facing branch identity for the change-notification tag: `Main` or
+    * the scenario name. Never the internal `BranchRef.toBranchRef` — that
+    * embeds the WorkspaceId, which must not cross the client boundary
+    * (ADR-036).
+    *
+    * The branch is always composed from this same `wsId` (ActiveBranch.resolve)
+    * moments earlier, so the decomposition cannot fail here; a failure is an
+    * unreachable invariant violation, which dies rather than being reported,
+    * mirroring `ActiveBranch.resolve`'s own treatment of the composition. */
+  private def clientBranch(wsId: WorkspaceId, branch: BranchRef): UIO[BranchChoice] =
+    BranchChoice.fromBranchRef(wsId, branch) match
+      case Right(choice) => ZIO.succeed(choice)
+      case Left(errors)  => ZIO.die(new IllegalStateException(
+        s"branch ${branch.toBranchRef} is not a branch of workspace ${wsId.value}: " +
+        errors.map(_.message).mkString("; ")))
 
   // Config CRUD - only persist, no execution
   override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
@@ -386,7 +386,8 @@ class RiskTreeServiceLive private (
         mitigations = oldTree.mitigations
       ).toZIOValidation
       updated <- repo.update(wsId, id, _ => riskTree, branch)
-      _ <- invalidationHandler.handleMutation(oldTree, updated, clientBranchName(wsId, branch))
+      tag     <- clientBranch(wsId, branch)
+      _ <- invalidationHandler.handleMutation(oldTree, updated, tag)
     } yield updated
     
     operation.tapBoth(
@@ -397,7 +398,7 @@ class RiskTreeServiceLive private (
   
   override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] =
     repo.delete(wsId, id, branch)
-      .tap(tree => invalidationHandler.handleTreeDeletion(tree, clientBranchName(wsId, branch)))
+      .tap(tree => clientBranch(wsId, branch).flatMap(invalidationHandler.handleTreeDeletion(tree, _)))
       .tapBoth(
       error => logIfUnexpected("delete")(error) *> recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
@@ -405,13 +406,26 @@ class RiskTreeServiceLive private (
 
   override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
-      // Head state (for invalidation) — None when the tree was deleted at head;
-      // reverting then recreates it, which behaves like create (nothing cached).
+      // The head state feeds the change notification and nothing else, so a
+      // failure to read it must not stop the revert. A stored tree that breaks
+      // a tree invariant fails every read, and revert is the only operation
+      // that can repair it, because its storage half reads at the target
+      // commit and never at the head. The cause is logged rather than
+      // discarded: a broken invariant and an unreachable store are
+      // indistinguishable here and only the log tells them apart.
       oldTree  <- repo.getById(wsId, id, Revision.Head(branch))
+                    .catchAll(error =>
+                      ZIO.logWarning(
+                        s"revert of tree ${id.value}: head read failed, notifying the whole tree instead: " +
+                        s"${error.getMessage}"
+                      ).as(None))
       reverted <- repo.revert(wsId, id, toCommit, branch)
+      tag      <- clientBranch(wsId, branch)
+      // None covers two situations: the tree was deleted at head, and the head
+      // state could not be read. Both leave no before-state to diff against.
       _        <- oldTree match
-                    case Some((prev, _)) => invalidationHandler.handleMutation(prev, reverted, clientBranchName(wsId, branch))
-                    case None            => ZIO.unit
+                    case Some((prev, _)) => invalidationHandler.handleMutation(prev, reverted, tag)
+                    case None            => invalidationHandler.handleWholeTreeChange(reverted, tag)
     } yield reverted
 
     operation.tapBoth(
