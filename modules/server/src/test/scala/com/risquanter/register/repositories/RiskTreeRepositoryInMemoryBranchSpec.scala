@@ -7,10 +7,10 @@ import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
 
 /**
-  * Branch-threading contract of the in-memory backend (milestone 2b, DD-4):
-  * branches are an Irmin capability, so the in-memory repository must reject
-  * a non-main branch request with a typed failure instead of silently
-  * answering with main-branch data.
+  * Branch-threading contract of the in-memory backend: branches are an Irmin
+  * capability, so the in-memory repository must reject a non-main branch
+  * request with a typed failure instead of silently answering with
+  * main-branch data.
   */
 object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
 

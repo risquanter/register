@@ -13,7 +13,7 @@ import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
-import com.risquanter.register.domain.errors.RepositoryFailure
+import com.risquanter.register.domain.errors.TreeLoadFailure
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
@@ -43,7 +43,7 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
     override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
       ZIO.fail(RuntimeException("stub"))
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] = ZIO.succeed(None)
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] = ZIO.succeed(Nil)
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] = ZIO.succeed(Nil)
 
   // ── Shared layer for controller instantiation ────────────────────────
 
