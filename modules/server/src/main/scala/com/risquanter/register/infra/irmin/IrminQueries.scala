@@ -401,12 +401,27 @@ object IrminQueries:
     |}
     """.stripMargin.trim
 
-  /**
-    * Escape special characters for GraphQL string literals.
+  /** Escape a value for a GraphQL string literal.
+    *
+    * The GraphQL grammar admits no unescaped source character below U+0020 in
+    * a string literal, so every one of them is emitted — the five with short
+    * escape forms as those, the rest as `\uXXXX`. The quote and the backslash
+    * are the two that would otherwise end the literal or start an escape of
+    * their own.
+    *
+    * One pass over the characters rather than a chain of replacements, so an
+    * escape this function introduces is never re-examined and the order of the
+    * cases carries no meaning.
     */
   private def escapeGraphQLString(s: String): String =
-    s.replace("\\", "\\\\")
-     .replace("\"", "\\\"")
-     .replace("\n", "\\n")
-     .replace("\r", "\\r")
-     .replace("\t", "\\t")
+    s.flatMap {
+      case '"'          => "\\\""
+      case '\\'         => "\\\\"
+      case '\b'         => "\\b"
+      case '\f'         => "\\f"
+      case '\n'         => "\\n"
+      case '\r'         => "\\r"
+      case '\t'         => "\\t"
+      case c if c < ' ' => "\\" + f"u${c.toInt}%04x"
+      case c            => c.toString
+    }

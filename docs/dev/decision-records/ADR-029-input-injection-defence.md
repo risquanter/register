@@ -46,9 +46,31 @@ display-name fields).
 
 ### 2. Never concatenate user strings into parser input
 
-User-supplied values must flow into downstream interpreters only via
-parameterised, structured, or AST-level interfaces — never via string
-concatenation followed by a second parse.
+User-supplied values reach a downstream interpreter by one of two routes, in
+this order of preference. A boundary using the second records that choice as a
+row in §3. Any third route is rejected.
+
+**Preferred — a parameterised, structured, or AST-level interface.** Values
+travel beside the text rather than inside it, so the interpreter never lexes
+them and no character they contain can become syntax. The typed Quill DSL,
+zio-json codecs, Laminar's `textContent`, and a GraphQL document's `variables`
+member are all this route.
+
+**Approved alternative — interpolation of values whose type excludes the
+interpreter's syntax.** Where the target offers no parameterised interface for
+what is being built, a value may be interpolated if its Iron refinement admits
+no character carrying meaning in that interpreter. The guarantee is then held by
+the type at compile time rather than by the protocol at run time, which is why
+it is approved rather than merely tolerated — but it holds only for values that
+carry such a type. A raw `String` interpolated into parser input is never this
+case, whatever its provenance.
+
+**Rejected — everything else**, and in particular escaping a raw value at the
+interpolation site as the primary guard. Escaping defends one rendering and
+depends on the escaper being complete and on every site remembering to call it;
+neither property is checked by the compiler. Escaping remains correct as a
+second layer over free text that has no narrower type available, which is the
+only role §3 records it in.
 
 ```scala
 // Wrong: string interpolation into a FOL query that will be re-parsed
@@ -65,6 +87,7 @@ val result = riskNameToId.get(userInput)  // Set.contains / Map.get only
 | FOL `VagueQueryParser.parse` | Query text is user-typed; node references resolve at bind time through per-sort literal validators — `riskNameToId.get` for a name (`Node` / `NodeNameLiteral` sorts), `NodeId.fromString` for an id (`NodeIdLiteral`) — whitelist-constrained, never interpolated |
 | FOL `TargetingPredicate.create` | Mitigation targeting text is user-typed; length-bounded (1–256) then parsed via `FOLParser`, then restricted to the targeting fragment (no quantifiers, no function terms), a single free variable, and no mitigation-state predicate. `decode == create`, so no `TargetingPredicate` exists whose source was not validated; the parsed formula is derived state, never re-serialised or interpolated |
 | JDBC / Quill | Parameterised queries via typed DSL; no hand-rolled SQL |
+| Irmin GraphQL (`IrminQueries`) | **Approved alternative (§2).** Documents are built by interpolation, and every value interpolated into one is derived from an Iron-refined type and nothing else. Branch names (`BranchRefStr`, `MergeStagingRefStr`), paths (`IrminPath`) and commit hashes (`CommitHash`) carry refinements whose character classes exclude `"` and `\`. A stored node is zio-json output whose every string-bearing field is refined — `SafeId`, `SafeName`, `NodeId`, `DistributionType` — so neither `RiskLeaf` nor `RiskPortfolio` has a free-text field, and no user-supplied character that carries meaning in GraphQL can enter the document. Commit message and author are server-constructed, not user-supplied. `escapeGraphQLString` is the second layer over those free-text values and emits every character below U+0020. One interpolation in the branch **selector** is structure rather than a value and so could not move to `variables` even if the rest did: a read of a named branch aliases it as `main` so that every response decodes identically, and the choice between that aliased call and the bare `main` selector is a choice between two document shapes. The branch name inside it is an ordinary argument value |
 | zio-json encode/decode | Codecs handle escaping; no manual string construction |
 | Laminar DOM | `textContent` / typed setters; `innerHTML` is never called |
 | ZIO logging | `s"…${treeId.value}…"` — interpolated values are Iron-validated wrappers, not raw user input |
