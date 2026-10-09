@@ -36,6 +36,47 @@ sbt ~server/compile
 sbt ~app/compile
 ```
 
+### A warning category is enforced by the compiler or it is not a rule
+
+The project required zero warnings in two places — the working-protocol's phase
+completion criteria and the code-quality-review skill's compiler-hygiene
+section — and a measurement on 2026-10-07 found 197 unused imports across the
+four modules. A rule that depends on someone reading warning output does not
+hold. So:
+
+**A warning category this project cares about is escalated to a compile error.
+If it is not escalated, it is not a rule and must not be written as one.**
+
+Escalation uses the pattern already in `build.sbt`, which matches on the
+warning text:
+
+```scala
+"-Wconf:msg=match may not be exhaustive:error"   // ADR-035 Decision 1
+"-Wconf:msg=unused import:error"                 // added per module as it reaches zero
+```
+
+Two consequences when adding a category:
+
+- **Measure before escalating.** Turn the warning on build-wide first, count
+  the sites per source root with a *clean* compile of every module, and only
+  then escalate. An incremental compile reports nothing for a module it did not
+  rebuild, which silently reads as zero.
+- **Escalate per module as each reaches zero**, by adding the `-Wconf` option
+  to that module's own `scalacOptions` rather than to `ThisBuild`. A cleaned
+  module then cannot regress while the others are still being fixed.
+
+Current state of the unused-import category: `-Wunused:imports` is on
+build-wide as a warning; no module is escalated yet. Counts at the last clean
+measurement were app/main 61, server/test 56, server/main 32, common/main 18,
+common/test 15, server-it/test 14, app/test 1.
+
+Every unused import in a file is removed whenever that file is edited for any
+other reason. No separate request is needed and none is asked for. This covers a
+file edited to fix a review finding, and any file the approved plan's inventory
+already authorizes. The cleanup belongs to that edit rather than to a later
+pass, so the counts above fall as ordinary work proceeds and a module reaches
+zero without a dedicated sweep.
+
 ---
 
 ## Unit Tests
