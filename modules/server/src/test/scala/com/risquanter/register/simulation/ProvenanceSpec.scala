@@ -1,16 +1,17 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.simulation
 
 import com.risquanter.register.BuildInfo
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, SeedEntityId}
-import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.domain.data.{
+  DistributionParams, ExpertDistributionParams, LognormalDistributionParams,
+  NodeProvenance, RiskLeaf, RiskPortfolio, RiskTree
+}
+import com.risquanter.register.domain.data.iron.{SafeName, SeedEntityId}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
-import com.risquanter.register.simulation.{LossDistribution, SeedDerivation}
-import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import zio.json.*
 import java.time.Instant
 import io.github.iltotore.iron.*

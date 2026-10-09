@@ -3,9 +3,10 @@
 **Status:** Closed 2026-10-03 — implemented and landed green. **No open
 decisions;** all eight of §10 were ruled. Step 1 (§1) landed as `dc78902` at
 version 0.10.39; the type change (§3 onward) landed as `ad2576c` at 0.10.42,
-followed by the scaladoc trim `6311e95`. One item of §5's scope is outstanding:
-`ProvenanceSpec` carries its content changes but has not yet moved to the
-`simulation` package, which needs the approval token pointed back at this plan.
+followed by the scaladoc trim `6311e95`. §5's last item closed on 2026-10-09:
+`ProvenanceSpec` moved to the `simulation` package alongside the type it
+exercises. **Every item of this plan's scope has landed; the approval token can
+be closed.**
 **Authority (ruled 2026-09-27, user):** this document is the specification for
 the four valuation types. PLAN-RISKTRANSFORM §8.17 and §8.18 are superseded in
 that respect and are retained as informative material — how this work sits in
