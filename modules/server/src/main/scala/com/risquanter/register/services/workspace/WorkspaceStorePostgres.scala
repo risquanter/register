@@ -8,7 +8,7 @@ import io.getquill.jdbczio.Quill
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.QuillMappings.given
 import com.risquanter.register.util.IdGenerators
 
@@ -102,6 +102,7 @@ final class WorkspaceStorePostgres private (
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       ws  <- resolveInternal(key)
+      _   <- ZIO.fromEither(WorkspaceStore.treeCapacity(ws, treeId, config.maxTreesPerWorkspace))
       now <- Clock.instant
       row  = WorkspaceTreeRow(ws.id, treeId, toOffsetDateTime(now))
       _   <- db(run(query[WorkspaceTreeRow].insertValue(lift(row)).onConflictIgnore)).unit
@@ -122,6 +123,14 @@ final class WorkspaceStorePostgres private (
   override def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
+  /** Refuse a creation that would exceed the tree ceiling, before the tree is
+    * written.
+    */
+  override def checkTreeCapacity(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+    resolveInternal(key).flatMap(ws =>
+      ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
+    )
+
   override def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
       ws  <- loadWorkspaceByKey(key)
@@ -130,24 +139,6 @@ final class WorkspaceStorePostgres private (
               run(
                 query[WorkspaceRow]
                   .filter(_.id == lift(ws.id))
-                  .update(_.lastAccess -> lift(toOffsetDateTime(now)))
-              )
-            ).unit
-    yield ws.touch(now)
-
-  /** No capability check — see the security warning on `WorkspaceStore.resolveById`.
-    * Never call with a client-supplied `WorkspaceId`.
-    */
-  override def resolveById(id: WorkspaceId): IO[AppError, WorkspaceRecord] =
-    for
-      row <- loadWorkspaceRowById(id)
-      ws  <- toRecord(row)
-      now <- Clock.instant
-      _   <- ZIO.fail(WorkspaceExpiredById(id, ws.createdAt, ws.ttl)).when(ws.isExpired(now))
-      _   <- db(
-              run(
-                query[WorkspaceRow]
-                  .filter(_.id == lift(id))
                   .update(_.lastAccess -> lift(toOffsetDateTime(now)))
               )
             ).unit
@@ -208,11 +199,6 @@ final class WorkspaceStorePostgres private (
   private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError, WorkspaceRow] =
     db(run(query[WorkspaceRow].filter(_.keyHash == lift(WorkspaceKeyCrypto.hash(key))))).flatMap(rows =>
       ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFound(key))
-    )
-
-  private def loadWorkspaceRowById(id: WorkspaceId): IO[AppError, WorkspaceRow] =
-    db(run(query[WorkspaceRow].filter(_.id == lift(id)))).flatMap(rows =>
-      ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFoundById(id))
     )
 
   private def loadTrees(workspaceId: WorkspaceId): IO[AppError, Set[TreeId]] =

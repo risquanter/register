@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, Revisi
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
-import com.risquanter.register.services.workspace.{ClientIp, RateLimiter, WorkspaceStore}
+import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
 
 /** Workspace lifecycle controller.
   *
@@ -42,14 +42,10 @@ class WorkspaceLifecycleController private (
 ) extends BaseController
     with WorkspaceLifecycleEndpoints:
 
-  private def normaliseIp(xff: Option[String]): Option[ClientIp] =
-    xff.flatMap(_.split(",").headOption).map(_.trim).filter(_.nonEmpty).map(ClientIp.apply)
-
   val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
     case (xff, maybeUserId, seedEntityId, req) =>
-      val ip = normaliseIp(xff)
       (for
-        _      <- rateLimiter.checkCreate(ip)
+        _      <- rateLimiter.checkCreate(xff)
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
         // exempt: pre-resource-creation — no resource exists yet to check
@@ -85,6 +81,10 @@ class WorkspaceLifecycleController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
+        // Before the tree is written, not after: a tree refused its association
+        // would stay in storage unreachable by every read path and unseen by the
+        // reaper's cascade.
+        _      <- workspaceStore.checkTreeCapacity(key)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         // A tree-creating write (unlike update/delete/getById) has no read step
         // that would naturally fail on a nonexistent branch — Irmin's set_tree

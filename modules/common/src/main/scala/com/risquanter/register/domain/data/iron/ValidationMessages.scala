@@ -155,6 +155,10 @@ object ValidationMessages:
     s"seedEntityId $id is already used by another workspace — " +
     "choose another value or omit to auto-assign"
 
+  def maxTreesPerWorkspaceReached(limit: Int): String =
+    s"workspace already holds the maximum of $limit risk trees — " +
+    "delete one before creating another"
+
   val seedVarIdImmutable: String =
     "seedVarId is immutable once assigned — omit it for existing nodes; " +
     "to change a risk's stream, delete the leaf and recreate it"

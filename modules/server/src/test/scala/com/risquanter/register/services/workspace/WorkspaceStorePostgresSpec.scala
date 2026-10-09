@@ -7,8 +7,8 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
@@ -16,9 +16,12 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
   private given Checked[Permission] = TestChecked.value
 
+  // One tree per workspace, so the ceiling is reachable in a test. Every test
+  // creates its own workspace, so the low ceiling constrains none of the others.
   private val storeConfig: WorkspaceConfig = TestConfigs.workspace.copy(
     ttl = Duration.ofHours(24),
-    idleTimeout = Duration.ofSeconds(1)
+    idleTimeout = Duration.ofSeconds(1),
+    maxTreesPerWorkspace = 1
   )
 
   private val storeLayer: ZLayer[Scope, Throwable, WorkspaceStore] =
@@ -33,15 +36,6 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       yield assertTrue(ws.keyHash == WorkspaceKeyCrypto.hash(key))
     },
 
-    test("resolveById resolves same workspace") {
-      for
-        store <- ZIO.service[WorkspaceStore]
-        key   <- store.create()
-        ws1   <- store.resolve(key)
-        ws2   <- store.resolveById(ws1.id)
-      yield assertTrue(ws1.id == ws2.id, ws1.keyHash == ws2.keyHash)
-    },
-
     test("addTree/listTrees/removeTree roundtrip") {
       for
         store  <- ZIO.service[WorkspaceStore]
@@ -54,44 +48,50 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       yield assertTrue(listed.contains(treeId), !after.contains(treeId))
     },
 
-    test("rotate preserves resolveById and invalidates old key") {
+    test("rotate preserves the workspace's identity and invalidates old key") {
       for
         store   <- ZIO.service[WorkspaceStore]
         oldKey  <- store.create()
         ws1     <- store.resolve(oldKey)
         newKey  <- store.rotate(oldKey)
-        ws2     <- store.resolveById(ws1.id)
+        viaKey  <- store.resolve(newKey)
         oldExit <- store.resolve(oldKey).exit
       yield assertTrue(
-        ws2.id == ws1.id,
-        ws2.keyHash == WorkspaceKeyCrypto.hash(newKey)
+        viaKey.id == ws1.id,
+        viaKey.keyHash == WorkspaceKeyCrypto.hash(newKey)
       ) && assert(oldExit)(fails(isSubtype[WorkspaceNotFound](anything)))
     },
 
-    test("resolveById returns keyless expired error") {
+    test("an expired workspace reports expired") {
       for
         store <- ZIO.service[WorkspaceStore]
         key   <- store.create()
-        ws    <- store.resolve(key)
         _     <- ZIO.sleep(2.seconds)
         byKey <- store.resolve(key).exit
-        byId  <- store.resolveById(ws.id).exit
-      yield assert(byKey)(fails(isSubtype[WorkspaceExpired](anything))) &&
-        assert(byId)(fails(isSubtype[WorkspaceExpiredById](anything)))
+      yield assert(byKey)(fails(isSubtype[WorkspaceExpired](anything)))
     },
 
-    test("delete and unknown-id lookup report not-found") {
+    test("delete reports not-found on the deleted key") {
       for
         store   <- ZIO.service[WorkspaceStore]
         key     <- store.create()
-        ws      <- store.resolve(key)
-        rawId   <- IdGenerators.nextId
         _       <- store.delete(key)
         keyExit <- store.resolve(key).exit
-        idExit  <- store.resolveById(WorkspaceId(rawId)).exit
-      yield assert(keyExit)(fails(isSubtype[WorkspaceNotFound](anything))) &&
-        assert(idExit)(fails(isSubtype[WorkspaceNotFoundById](anything))) &&
-        assertTrue(ws.id != WorkspaceId(rawId))
+      yield assert(keyExit)(fails(isSubtype[WorkspaceNotFound](anything)))
+    },
+
+    test("the tree ceiling refuses a new tree and allows re-association") {
+      for
+        store  <- ZIO.service[WorkspaceStore]
+        key    <- store.create()
+        first  <- IdGenerators.nextTreeId
+        second <- IdGenerators.nextTreeId
+        _      <- store.addTree(key, first)
+        again  <- store.addTree(key, first).either
+        exit   <- store.addTree(key, second).exit
+        listed <- store.listTrees(key)
+      yield assertTrue(again.isRight, listed == List(first)) &&
+        assert(exit)(fails(isSubtype[ValidationFailed](anything)))
     },
 
     test("evictExpired returns expired workspace records") {

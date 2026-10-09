@@ -4,7 +4,7 @@ import zio.*
 import java.time.Instant
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.util.IdGenerators
 
@@ -86,7 +86,6 @@ final class WorkspaceStoreLive private (
             )
             (Right(workspace), state.copy(
               byHash = state.byHash + (keyHash -> workspace),
-              byId = state.byId + (workspace.id -> keyHash),
               nextSeedEntityId = nextCounter
             ))
       }
@@ -127,7 +126,8 @@ final class WorkspaceStoreLive private (
     */
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
-      _       <- resolveInternal(key)
+      ws      <- resolveInternal(key)
+      _       <- ZIO.fromEither(WorkspaceStore.treeCapacity(ws, treeId, config.maxTreesPerWorkspace))
       keyHash  = WorkspaceKeyCrypto.hash(key)
       _ <- ref.update(state =>
              state.copy(byHash = state.byHash.updatedWith(keyHash)(_.map(w => w.copy(trees = w.trees + treeId))))
@@ -150,6 +150,14 @@ final class WorkspaceStoreLive private (
   override def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
+  /** Refuse a creation that would exceed the tree ceiling, before the tree is
+    * written.
+    */
+  override def checkTreeCapacity(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+    resolveInternal(key).flatMap(ws =>
+      ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
+    )
+
   /** Resolve a workspace with dual timeout check (A11) and access tracking (A10).
     *
     * Atomic: single Ref.modify validates + touches in one step.
@@ -169,30 +177,6 @@ final class WorkspaceStoreLive private (
       ws <- ZIO.fromEither(result)
     yield ws
 
-  /** Resolve by immutable workspace ID (delegates to key-based resolve).
-    * No capability check — see the security warning on `WorkspaceStore.resolveById`.
-    * Never call with a client-supplied `WorkspaceId`.
-    */
-  override def resolveById(id: WorkspaceId): IO[AppError, WorkspaceRecord] =
-    for
-      now    <- Clock.instant
-      result <- ref.modify { state =>
-                  state.byId.get(id) match
-                    case None =>
-                      (Left(WorkspaceNotFoundById(id)), state)
-                    case Some(keyHash) =>
-                      state.byHash.get(keyHash) match
-                        case None =>
-                          (Left(RepositoryFailure(s"Workspace record missing for id ${id.value}")), state)
-                        case Some(ws) if ws.isExpired(now) =>
-                          (Left(WorkspaceExpiredById(id, ws.createdAt, ws.ttl)), state)
-                        case Some(ws) =>
-                          val touched = ws.touch(now)
-                          (Right(touched), state.copy(byHash = state.byHash.updated(keyHash, touched)))
-                }
-      ws <- ZIO.fromEither(result)
-    yield ws
-
   /** Check if a tree belongs to a workspace. */
   override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
@@ -203,9 +187,7 @@ final class WorkspaceStoreLive private (
       now     <- Clock.instant
       evicted <- ref.modify { map =>
         val (expired, aliveByHash) = map.byHash.partition((_, ws) => ws.isExpired(now))
-        val expiredIds = expired.values.map(_.id).toSet
-        val aliveById = map.byId.filter((id, _) => !expiredIds.contains(id))
-        (expired.values.toList, map.copy(byHash = aliveByHash, byId = aliveById))
+        (expired.values.toList, map.copy(byHash = aliveByHash))
       }
       _ <- logSecurity("workspace.eviction", "evicted_count" -> evicted.size.toString)(
              s"Workspace reaper: evicted ${evicted.size} expired workspaces"
@@ -222,12 +204,7 @@ final class WorkspaceStoreLive private (
     for
       ws      <- resolveInternal(key)
       keyHash  = WorkspaceKeyCrypto.hash(key)
-      _ <- ref.update(state =>
-             state.copy(
-               byHash = state.byHash - keyHash,
-               byId = state.byId - ws.id
-             )
-           )
+      _ <- ref.update(state => state.copy(byHash = state.byHash - keyHash))
       _ <- logSecurity("workspace.deleted", "workspace_id" -> ws.id.value)("Workspace deleted")
     yield ()
 
@@ -246,8 +223,7 @@ final class WorkspaceStoreLive private (
           case Right(ws) =>
             val rotated = ws.copy(keyHash = newHash, createdAt = now, lastAccessedAt = now)
             (Right(newKey), map.copy(
-              byHash = (map.byHash - oldHash) + (newHash -> rotated),
-              byId = map.byId.updated(ws.id, newHash)
+              byHash = (map.byHash - oldHash) + (newHash -> rotated)
             ))
       }
       newK  <- ZIO.fromEither(result)
@@ -286,11 +262,10 @@ object WorkspaceStoreLive:
 
   private final case class State(
     byHash: Map[WorkspaceKeyHash, WorkspaceRecord],
-    byId: Map[WorkspaceId, WorkspaceKeyHash],
     nextSeedEntityId: Long
   )
 
-  private def emptyState: State = State(Map.empty, Map.empty, SeedEntityIdBase)
+  private def emptyState: State = State(Map.empty, SeedEntityIdBase)
 
   val layer: ZLayer[WorkspaceConfig, Nothing, WorkspaceStore] =
     ZLayer.fromZIO {

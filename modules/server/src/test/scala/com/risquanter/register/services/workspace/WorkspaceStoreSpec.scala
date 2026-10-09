@@ -5,11 +5,10 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.test.TestClock
 import java.time.Duration
-import scala.concurrent.duration.*
 
-import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId}
-import com.risquanter.register.domain.errors.{TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.configs.TestConfigs
+import com.risquanter.register.domain.data.iron.{SafeId, TreeId, SeedEntityId}
+import com.risquanter.register.domain.errors.{TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
@@ -25,6 +24,18 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
 
   private def mkStore = WorkspaceStoreLive.make(testConfig)
 
+  /** A distinct TreeId from a literal ULID.
+    *
+    * `IdGenerators` cannot be used where two distinct ids are needed: this
+    * suite runs on the test clock and test randomness, under which every
+    * generated ULID is the same value.
+    */
+  private def treeId(ulid: String): TreeId =
+    TreeId(SafeId.fromString(ulid).toOption.get)
+
+  private val treeA = treeId("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+  private val treeB = treeId("01ARZ3NDEKTSV4RRFFQ69G5FAW")
+
   override def spec = suite("WorkspaceStoreLive security regressions")(
     test("create + resolve succeeds") {
       for
@@ -32,15 +43,6 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         key   <- store.create()
         ws    <- store.resolve(key)
       yield assertTrue(ws.keyHash == WorkspaceKeyCrypto.hash(key))
-    },
-
-    test("resolveById resolves same workspace") {
-      for
-        store <- mkStore
-        key   <- store.create()
-        ws1   <- store.resolve(key)
-        ws2   <- store.resolveById(ws1.id)
-      yield assertTrue(ws1.id == ws2.id, ws1.keyHash == ws2.keyHash)
     },
 
     test("resolve updates lastAccessedAt (A10)") {
@@ -62,16 +64,6 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       yield assert(exit)(fails(isSubtype[WorkspaceExpired](anything)))
     },
 
-    test("resolveById returns keyless expired error when workspace is idle-expired") {
-      for
-        store <- mkStore
-        key   <- store.create()
-        ws    <- store.resolve(key)
-        _     <- TestClock.adjust(2.minutes)
-        exit  <- store.resolveById(ws.id).exit
-      yield assert(exit)(fails(isSubtype[WorkspaceExpiredById](anything)))
-    },
-
     test("addTree/listTrees/belongsTo operate within workspace") {
       for
         store  <- mkStore
@@ -81,6 +73,50 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         list   <- store.listTrees(key)
         inWs   <- store.belongsTo(key, treeId)
       yield assertTrue(list.contains(treeId), inWs)
+    },
+
+    // ── Tree ceiling (REGISTER_WORKSPACE_MAX_TREES) ─────────────────────
+
+    test("addTree succeeds while the workspace is below its tree ceiling") {
+      for
+        store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 2))
+        key   <- store.create()
+        _     <- store.addTree(key, treeA)
+        _     <- store.addTree(key, treeB)
+        list  <- store.listTrees(key)
+      yield assertTrue(list.size == 2)
+    },
+
+    test("addTree refuses a new tree once the ceiling is reached") {
+      for
+        store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
+        key   <- store.create()
+        _     <- store.addTree(key, treeA)
+        exit  <- store.addTree(key, treeB).exit
+        list  <- store.listTrees(key)
+      yield assert(exit)(fails(isSubtype[ValidationFailed](anything))) &&
+        assertTrue(list == List(treeA))
+    },
+
+    test("re-associating a tree the workspace already holds succeeds at the ceiling") {
+      for
+        store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
+        key   <- store.create()
+        _     <- store.addTree(key, treeA)
+        res   <- store.addTree(key, treeA).either
+        list  <- store.listTrees(key)
+      yield assertTrue(res.isRight, list == List(treeA))
+    },
+
+    test("checkTreeCapacity refuses before a tree is created, and allows below the ceiling") {
+      for
+        store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
+        key   <- store.create()
+        below <- store.checkTreeCapacity(key).either
+        _     <- store.addTree(key, treeA)
+        atMax <- store.checkTreeCapacity(key).exit
+      yield assertTrue(below.isRight) &&
+        assert(atMax)(fails(isSubtype[ValidationFailed](anything)))
     },
 
     test("resolveTreeWorkspace returns workspace for member tree") {
@@ -142,17 +178,14 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         assert(oldExit)(fails(isSubtype[WorkspaceNotFound](anything)))
     },
 
-    test("rotate preserves resolveById lookup") {
+    test("rotate preserves the workspace's identity and moves the key hash") {
       for
         store   <- mkStore
         oldKey  <- store.create()
         ws1     <- store.resolve(oldKey)
         newKey  <- store.rotate(oldKey)
-        ws2     <- store.resolveById(ws1.id)
         viaKey  <- store.resolve(newKey)
       yield assertTrue(
-        ws2.id == ws1.id,
-        ws2.keyHash == WorkspaceKeyCrypto.hash(newKey),
         viaKey.id == ws1.id,
         viaKey.keyHash == WorkspaceKeyCrypto.hash(newKey)
       )
@@ -165,14 +198,6 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         _     <- store.delete(key)
         exit  <- store.resolve(key).exit
       yield assert(exit)(fails(isSubtype[WorkspaceNotFound](anything)))
-    },
-
-    test("resolveById on unknown id returns keyless not-found error") {
-      for
-        store   <- mkStore
-        rawId   <- IdGenerators.nextId
-        exit    <- store.resolveById(WorkspaceId(rawId)).exit
-      yield assert(exit)(fails(isSubtype[WorkspaceNotFoundById](anything)))
     },
 
     test("evictExpired removes expired workspaces and returns evicted entries") {

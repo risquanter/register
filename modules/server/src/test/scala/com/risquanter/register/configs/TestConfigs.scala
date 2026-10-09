@@ -33,7 +33,8 @@ object TestConfigs {
     idleTimeout = Duration.ofMinutes(1),
     reaperInterval = Duration.ofMinutes(1),
     maxCreatesPerIpPerHour = 100,
-    maxTreesPerWorkspace = 10
+    maxTreesPerWorkspace = 10,
+    trustedProxyHops = 1
   )
 
   val workspaceLayer: ULayer[WorkspaceConfig] = ZLayer.succeed(workspace)
