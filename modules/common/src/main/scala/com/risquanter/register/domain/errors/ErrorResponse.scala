@@ -65,10 +65,6 @@ object ErrorResponse {
       case 403 =>
         AccessDenied(message)
 
-      // 429 → RateLimitExceeded
-      case 429 =>
-        RateLimitExceeded("unknown", 0)
-
       // 409 → disambiguate by field/code
       case 409 => firstCode match
         case ValidationErrorCode.SIMULATION_REQUIRED =>
@@ -173,7 +169,6 @@ object ErrorResponse {
   private def encodeSimError(error: SimError): (StatusCode, ErrorResponse) = error match {
     case ValidationFailed(errors)                  => makeValidationResponse(errors)
     case AccessDenied(reason)                      => makeAccessDeniedResponse(reason)
-    case RateLimitExceeded(ip, limit, window)      => makeRateLimitExceededResponse(ip, limit, window)
     // Workspace errors — intentionally collapsed to opaque 404 (A13)
     case _: WorkspaceNotFound                      => makeWorkspaceOpaqueNotFoundResponse()
     case _: WorkspaceExpired                       => makeWorkspaceOpaqueNotFoundResponse()
@@ -276,10 +271,6 @@ object ErrorResponse {
   def makeAccessDeniedResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.Forbidden, "authorization", ValidationErrorCode.ACCESS_DENIED,
       "Forbidden", domain, requestId)
-
-  def makeRateLimitExceededResponse(ip: String, limit: Int, window: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.TooManyRequests, "rate-limit", ValidationErrorCode.RATE_LIMIT_EXCEEDED,
-      "Too many requests", domain, requestId)
 
   /** A13: constant opaque 404 — intentionally resource-neutral to avoid leaking
     * whether the workspace key, tree association, or TTL caused the failure.

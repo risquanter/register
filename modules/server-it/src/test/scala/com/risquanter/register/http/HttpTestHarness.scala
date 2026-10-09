@@ -22,7 +22,7 @@ import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.pipeline.InvalidationHandler
-import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
+import com.risquanter.register.services.workspace.WorkspaceStoreLive
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisionerNoOp, UserContextExtractor}
@@ -149,7 +149,6 @@ object HttpTestHarness:
       SSEHub.live,
       InvalidationHandler.live,
       WorkspaceStoreLive.layer,
-      RateLimiterLive.layer,
       AuthorizationServiceNoOp.layer,
       BootstrapProvisionerNoOp.layer,
       ZLayer.succeed(UserContextExtractor.noOp),

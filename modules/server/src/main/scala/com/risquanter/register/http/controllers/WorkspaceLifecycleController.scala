@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, Revisi
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
-import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
+import com.risquanter.register.services.workspace.WorkspaceStore
 
 /** Workspace lifecycle controller.
   *
@@ -34,7 +34,6 @@ import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
 class WorkspaceLifecycleController private (
   riskTreeService:      RiskTreeService,
   workspaceStore:       WorkspaceStore,
-  rateLimiter:          RateLimiter,
   userCtx:              UserContextExtractor,
   authzService:         AuthorizationService,
   bootstrapProvisioner: BootstrapProvisioner,
@@ -43,9 +42,8 @@ class WorkspaceLifecycleController private (
     with WorkspaceLifecycleEndpoints:
 
   val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
-    case (xff, maybeUserId, seedEntityId, req) =>
+    case (maybeUserId, seedEntityId, req) =>
       (for
-        _      <- rateLimiter.checkCreate(xff)
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
         // exempt: pre-resource-creation — no resource exists yet to check
@@ -161,13 +159,12 @@ class WorkspaceLifecycleController private (
     )
 
 object WorkspaceLifecycleController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & RateLimiter & UserContextExtractor & AuthorizationService & BootstrapProvisioner & ScenarioService, Nothing, WorkspaceLifecycleController] =
+  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & UserContextExtractor & AuthorizationService & BootstrapProvisioner & ScenarioService, Nothing, WorkspaceLifecycleController] =
     for
       riskTreeService      <- ZIO.service[RiskTreeService]
       workspaceStore       <- ZIO.service[WorkspaceStore]
-      rateLimiter          <- ZIO.service[RateLimiter]
       userCtx              <- ZIO.service[UserContextExtractor]
       authzService         <- ZIO.service[AuthorizationService]
       bootstrapProvisioner <- ZIO.service[BootstrapProvisioner]
       scenarioService      <- ZIO.service[ScenarioService]
-    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, rateLimiter, userCtx, authzService, bootstrapProvisioner, scenarioService)
+    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, userCtx, authzService, bootstrapProvisioner, scenarioService)

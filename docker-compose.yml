@@ -88,16 +88,6 @@ services:
       # CORS configuration
       REGISTER_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
 
-      # Workspace creation rate limit — defaults to 5/hour (anti-abuse).
-      # Test suites override by exporting REGISTER_WORKSPACE_MAX_CREATES_PER_IP
-      # before 'docker compose up' (see tests/bats/suite-*.bats setup_file).
-      REGISTER_WORKSPACE_MAX_CREATES_PER_IP: "${REGISTER_WORKSPACE_MAX_CREATES_PER_IP:-5}"
-
-      # How many proxies this stack puts in front of the server, each appending
-      # its peer to X-Forwarded-For. One here: the nginx in the frontend image.
-      # A deployment behind the Istio ingress gateway as well sets 2.
-      REGISTER_TRUSTED_PROXY_HOPS: "${REGISTER_TRUSTED_PROXY_HOPS:-1}"
-
       # Repository backend — defaults to in-memory. Set to 'irmin' for
       # persistent storage. Suite D injects these for E2E testing.
       REGISTER_REPOSITORY_TYPE: "${REGISTER_REPOSITORY_TYPE:-in-memory}"

@@ -18,7 +18,7 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, Content
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
-import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
+import com.risquanter.register.services.workspace.WorkspaceStoreLive
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
 import com.risquanter.register.infra.irmin.IrminClientLive
@@ -68,7 +68,6 @@ object StubHttpTestHarness {
         SSEHub.live,
         InvalidationHandler.live,
         WorkspaceStoreLive.layer,
-        RateLimiterLive.layer,
         AuthorizationServiceNoOp.layer,
         ZLayer.succeed(UserContextExtractor.noOp),
         ZLayer.succeed(BootstrapProvisionerNoOp),

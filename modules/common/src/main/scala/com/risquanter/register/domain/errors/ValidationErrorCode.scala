@@ -34,7 +34,6 @@ enum ValidationErrorCode(val code: String, val description: String):
   // ── Resource & access codes ───────────────────────────────────────────────
   case NOT_FOUND extends ValidationErrorCode("NOT_FOUND", "Requested resource does not exist")
   case ACCESS_DENIED extends ValidationErrorCode("ACCESS_DENIED", "Insufficient permissions for this operation")
-  case RATE_LIMIT_EXCEEDED extends ValidationErrorCode("RATE_LIMIT_EXCEEDED", "Too many requests in the current window")
 
   // ── Concurrency codes ─────────────────────────────────────────────────────
   case VERSION_CONFLICT extends ValidationErrorCode("VERSION_CONFLICT", "Optimistic concurrency conflict on resource version")

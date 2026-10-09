@@ -3,7 +3,6 @@ package com.risquanter.register.http.controllers
 import zio.*
 import zio.json.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.testing.SttpBackendStub
 import sttp.monad.MonadError
@@ -17,7 +16,7 @@ import com.risquanter.register.auth.{
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash, Revision}
-import com.risquanter.register.domain.errors.RepositoryFailure
+import com.risquanter.register.domain.errors.TreeLoadFailure
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -25,7 +24,7 @@ import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, Risk
 import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.services.workspace.{RateLimiterLive, WorkspaceStoreLive}
+import com.risquanter.register.services.workspace.WorkspaceStoreLive
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
 
 /** Unit tests for [[WorkspaceLifecycleController]] bootstrap endpoint (Wave 6).
@@ -71,7 +70,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(branchOf(rev).flatMap(b => db.get((wsId, b, id))).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] =
       ZIO.succeed(branchOf(rev) match
         case Some(b) => db.collect { case ((wid, bb, _), t) if wid == wsId && bb == b => Right(t) }.toList
         case None    => Nil)
@@ -99,7 +98,6 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         SSEHub.live,
         InvalidationHandler.live,
         WorkspaceStoreLive.layer,
-        RateLimiterLive.layer,
         AuthorizationServiceNoOp.layer,
         ZLayer.succeed(extractor),
         ZLayer.succeed(provisioner),

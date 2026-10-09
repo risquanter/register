@@ -12,10 +12,6 @@
 # ============================================================================
 
 setup_file() {
-    # Relax workspace-creation rate limit for test runs (prod default: 5/hour).
-    # The HOCON config has: maxCreatesPerIpPerHour = ${?REGISTER_WORKSPACE_MAX_CREATES_PER_IP}
-    export REGISTER_WORKSPACE_MAX_CREATES_PER_IP=100
-
     # Start register-server + frontend (no persistence profile → in-memory mode)
     docker compose --profile frontend up -d --wait 2>&1 || {
         echo "Failed to start compose services" >&2

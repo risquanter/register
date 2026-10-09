@@ -50,17 +50,6 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
       },
 
-      test("encodes RateLimitExceeded to TooManyRequests") {
-        val error = RateLimitExceeded("127.0.0.1", 5)
-        val (status, response) = ErrorResponse.encode(error)
-
-        assertTrue(
-          status == StatusCode.TooManyRequests,
-          response.error.code == 429,
-          response.error.message == "Too many requests"
-        )
-      },
-
       test("encodes WorkspaceNotFound to opaque 404") {
         val key = WorkspaceKeySecret.fromString("abcdefghijklmnopqrstuv").toOption.get
         val (status, response) = ErrorResponse.encode(WorkspaceNotFound(key))
@@ -348,16 +337,6 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
         val throwable = ErrorResponse.decode((StatusCode.Forbidden, response))
         assertTrue(throwable.isInstanceOf[AccessDenied])
-      },
-
-      test("decodes 429 to RateLimitExceeded") {
-        val response = ErrorResponse(
-          JsonHttpError(429, "Too many requests", List(
-            ErrorDetail("risk-trees", "rate-limit", ValidationErrorCode.RATE_LIMIT_EXCEEDED, "Too many requests")
-          ))
-        )
-        val throwable = ErrorResponse.decode((StatusCode.TooManyRequests, response))
-        assertTrue(throwable.isInstanceOf[RateLimitExceeded])
       },
 
       test("decodes 504 to NetworkTimeout") {

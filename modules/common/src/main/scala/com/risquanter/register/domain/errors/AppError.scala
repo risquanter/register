@@ -66,11 +66,6 @@ case class DataConflict(reason: String) extends SimError:
 case class AccessDenied(reason: String) extends SimError:
   override def getMessage: String = reason
 
-/** Rate limiting failure for abuse-prevention controls */
-case class RateLimitExceeded(ip: String, limit: Int, window: String = "1h") extends SimError {
-  override def getMessage: String = s"Rate limit exceeded for $ip: max $limit per $window"
-}
-
 // ============================================================================
 // Workspace Errors (A13: all map to opaque 404 at HTTP layer)
 // ============================================================================

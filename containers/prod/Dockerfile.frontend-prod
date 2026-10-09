@@ -188,13 +188,6 @@ http {
         server_name _;
         root        /srv/app;
 
-        # X-Forwarded-For is infrastructure-owned, never caller-owned. A caller
-        # may send one; appending our peer address means the entry THIS proxy
-        # wrote is the one the server reads, selected by the hop count in
-        # REGISTER_TRUSTED_PROXY_HOPS. Without this the server would read a
-        # value the caller chose, and the bootstrap rate limit would not hold.
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
         # ----------------------------------------------------------------
         # Static assets — longest-prefix regex wins over location / below.
         # Cache-Control and X-Content-Type-Options on nginx-generated responses.

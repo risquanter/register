@@ -24,7 +24,6 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .description("Create workspace + first tree")
       .in("workspaces")
       .post
-      .in(header[Option[String]]("X-Forwarded-For"))
       .in(header[Option[UserId.Authenticated]]("x-user-id"))
       .in(query[Option[SeedEntityId.SeedEntityId]]("seedEntityId")
         .description("HDR Entity-axis seed for the new workspace (1..99999999). Omit to auto-assign; provide to reproduce an exported workspace's figures."))

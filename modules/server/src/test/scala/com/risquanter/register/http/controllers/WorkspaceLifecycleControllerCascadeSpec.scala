@@ -2,7 +2,6 @@ package com.risquanter.register.http.controllers
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import zio.test.TestClock
 import java.time.Duration
 import sttp.client3.*
@@ -15,7 +14,7 @@ import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisio
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, TreeId}
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, ScenarioService, ScenarioSummary}
-import com.risquanter.register.services.workspace.{RateLimiterLive, WorkspaceStore, WorkspaceStoreLive}
+import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 import com.risquanter.register.util.IdGenerators
 
 /** HTTP-layer tests for [[WorkspaceLifecycleController]]'s cascade-delete behaviour
@@ -53,7 +52,6 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         ZLayer.succeed(riskTreeService),
         ZLayer.succeed(store),
         TestConfigs.workspaceLayer,
-        RateLimiterLive.layer,
         ZLayer.succeed(UserContextExtractor.noOp),
         AuthorizationServiceNoOp.layer,
         ZLayer.succeed(BootstrapProvisionerNoOp),

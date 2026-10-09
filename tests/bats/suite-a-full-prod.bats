@@ -25,9 +25,6 @@ setup_file() {
     # Compose-internal URL: the server container resolves 'irmin' via Docker DNS.
     export IRMIN_URL="http://irmin:8080"
 
-    # Relax workspace-creation rate limit for test runs (prod default: 5/hour).
-    export REGISTER_WORKSPACE_MAX_CREATES_PER_IP=100
-
     docker compose --profile persistence --profile frontend up -d --wait 2>&1 || {
         echo "Failed to start compose services" >&2
         docker compose --profile persistence --profile frontend logs 2>&1

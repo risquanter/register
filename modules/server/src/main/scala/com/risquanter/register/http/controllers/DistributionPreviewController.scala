@@ -24,9 +24,9 @@ import com.risquanter.register.services.DistributionPreviewService
   *     endpoint has no resource to authorize against. Not a deviation from ADR-024;
   *     PEP applies at the resource boundary, and this endpoint has none.
   *
-  * Rate limiting: deferred to nginx/ingress level. Future hook: inject RateLimiter
-  * following the WorkspaceLifecycleController.bootstrapWorkspace pattern if
-  * per-IP limiting on this endpoint becomes necessary.
+  * Rate limiting: a per-address limit belongs at the ingress gateway, not here.
+  * Only the component holding the connection knows the caller; the application
+  * implements no per-address limit on any endpoint (ADR-021 §4).
   *
   * @see AUTHORIZATION-PLAN.md -- Layered Model
   * @see ADR-024 -- Application as Pure PEP

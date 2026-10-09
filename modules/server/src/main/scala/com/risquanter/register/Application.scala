@@ -23,7 +23,7 @@ import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{ContentCacheRegistry, CachedResultResolverLive, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive, WorkspaceStorePostgres, RateLimiterLive, WorkspaceReaper}
+import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive, WorkspaceStorePostgres, WorkspaceReaper}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import zio.telemetry.opentelemetry.tracing.Tracing
@@ -110,6 +110,7 @@ object Application extends ZIOAppDefault {
     ZLayer.make[ScenarioMergeService](
       IrminConfig.layer,
       IrminClientLive.layer >>> irminHealthCheck,
+      RiskTreeRepositoryIrmin.layer,
       ScenarioMergeServiceLive.layer
     )
 
@@ -290,7 +291,6 @@ object Application extends ZIOAppDefault {
       QueryServiceLive.layer,       // Requires RiskTreeRepository + CachedResultResolver + MitigationScopeResolverRegistry + Tracing
       chooseWorkspaceStore,
       chooseFlywayService,
-      RateLimiterLive.layer,
       WorkspaceReaper.layer,
       chooseAuthorizationService,
       chooseBootstrapProvisioner,
