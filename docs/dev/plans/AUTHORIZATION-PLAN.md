@@ -473,14 +473,27 @@ stops it:
 - **The Istio waypoint.** `/admin/*` is absent from `allow-capability-urls`,
   so in capability-only mode no policy matches it and it is denied. In
   identity and fine-grained modes `require-jwt` matches any valid principal,
-  so were nginx to proxy it, any authenticated user could trigger a sweep.
+  so the waypoint would admit it.
+- **The Open Policy Agent check.** `allow.rego` in `register-infra` runs on
+  every request that reaches the waypoint. Its final rule allows any path to a
+  caller holding a recognised role, unless a `denied` clause fires. The two
+  that exist cover viewer-only callers performing writes, and the cache
+  administration paths. Neither covers `/admin/*`. So a caller holding
+  `analyst`, `editor` or `team_admin` is allowed; a viewer-only caller is
+  blocked, but only incidentally, by the viewer-write rule.
 - **The application.** No check at all.
+
+So if nginx ever proxied the path, any user holding a write-capable role could
+trigger a sweep across every workspace.
 
 The mesh is the right owner for "not reachable from outside", because a deny
 there is explicit rather than incidental, and because nginx is the component
 that would be edited to add a route. A deny rule naming `/admin/*` belongs in
-`register-infra`'s `authorization-policy.yaml`. Whether the application should
-also require a credential is a separate question and is open.
+`register-infra`'s `authorization-policy.yaml`. A path-based deny carries none
+of the filter-ordering hazard that retired the previous deny policy there,
+which matched on an identity header that the JWT filter re-adds before the
+authorization filter runs. Whether the application should also require a
+credential is a separate question and is open.
 
 Out of scope: the Docker Compose stack is a local development environment and
 is not defended here.
