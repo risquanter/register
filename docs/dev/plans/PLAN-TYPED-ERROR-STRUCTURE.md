@@ -2,10 +2,13 @@
 
 **Plan code:** `TES`. Decisions in this document are labelled `TES-D-<n>`.
 
-**Status:** implementation-grade, no open decisions. The three decisions this
-plan raised were ruled on 2026-10-05, and TES-D-4 — a contradiction between
-§3.5 and §6 that a complex review of the merge guard surfaced — was ruled on
-2026-10-07; all four are recorded with their rulings in §7. Phase 0 (§2) has
+**Status:** implementation-grade. All ten decisions are ruled — TES-D-1 to
+TES-D-3 on 2026-10-05, TES-D-4 on 2026-10-07, and TES-D-5 to TES-D-10 on
+2026-10-10, when the workspace-error work was folded in. One field inside
+TES-D-9 awaits a word from the user: whether the configured workspace lifetime
+reaches the client in the expiry response or through `/config.json`. §4.8 is
+written for the first and names the second, and nothing else in the plan depends
+on it. Phase 0 (§2) has
 landed, and the merge guard half of Defect 1 below was closed by the staging-
 branch merge that `PLAN-RISKTRANSFORM.md` §8.19.9 landed; everything else from
 §3 onward is unwritten. The dependencies this plan has on other plans are
@@ -734,6 +737,216 @@ constant `"Internal server error"`, because the problem's text is
 storage-internal and the tree id alone tells a client nothing it can act on.
 That is the behaviour Phase 0 shipped and this plan keeps.
 
+### 4.7 The workspace errors stop carrying the credential
+
+The three workspace errors each hold a `WorkspaceKeySecret` that nothing reads.
+`ErrorResponse.encode` routes all three to one opaque 404 that discards their
+content, and the one server-side reader, `WorkspaceStoreLive.logResolveFailure`,
+logs `key.toString`, which ADR-022 R3 renders as the constant
+`WorkspaceKeySecret(***)`. So the credential travels through the error channel
+and no site reads its value.
+
+Carrying it defeats ADR-022 R1. That rule requires a credential to be a
+`final class`, so the compiler generates no `copy`, no `unapply` and no product
+serialisation for it, and `WorkspaceKeySecret` is such a class. Placing one
+inside a `case class` returns all three for the container: `.copy()` on the
+error yields a second error holding the same credential, `unapply` destructures
+it out again, and a derived product codec would serialise it. The rule is
+satisfied for the credential and defeated one level up.
+
+The replacement shapes, in
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala`:
+
+```scala
+/** A workspace key that resolved to no live workspace.
+  *
+  * Carries nothing: at the point this is constructed the lookup has already
+  * failed, so no workspace identity exists to name. A `case class` with no
+  * parameters rather than a `case object`, because `AppError` extends
+  * `Throwable` — a singleton captures one stack trace when it initialises
+  * instead of one per failure, and it would turn every
+  * `case _: WorkspaceNotFound` match arm into a value match for no gain.
+  */
+case class WorkspaceNotFound() extends DomainError:
+  override def getMessage: String = "Workspace not found"
+
+/** A workspace past its absolute or idle timeout.
+  *
+  * `ttl` is the configured workspace lifetime, which the client states to the
+  * user. The workspace identifier and the creation time are deliberately
+  * absent: this is the one workspace error `ErrorResponse.decode` rebuilds
+  * (TES-D-9), so every field it holds has to be a field the wire carries, and
+  * the identifier must not cross that boundary (ADR-036). Both travel to the
+  * server's log instead, annotated at the construction site.
+  */
+case class WorkspaceExpired(ttl: JDuration) extends DomainError:
+  override def getMessage: String = s"Workspace expired (lifetime: $ttl)"
+
+/** A tree the resolved workspace does not hold.
+  *
+  * `wsId` serves the server's logs on the same terms as `WorkspaceExpired.id`.
+  * `treeId` stays in `getMessage`: a tree identifier is not confidential, and
+  * it is the useful diagnostic.
+  */
+case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends DomainError:
+  override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
+```
+
+`DomainError` is `SimError` renamed under TES-D-3. `WorkspaceId` already lives
+in `common`, in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`,
+so no type changes module.
+
+**The log line is where the diagnostics go, and it gains what the types shed.**
+Both resolve-failure log lines annotate `"workspace_key" -> key.toString`
+today, and that renders as the same redacted constant for every workspace, so
+two failures are indistinguishable in the log. The expiry arm annotates
+`"workspace_id" -> ws.id.value`, `"created_at" -> ws.createdAt.toString` and
+`"expires_at" -> ws.expiresAt.toString` instead. `WorkspaceNotFound` has
+nothing to annotate and keeps `"reason" -> "not_found"` alone, which is
+correct — there is no workspace to name.
+
+So each value sits where its reader is: the error type says what happened and
+carries only what the client may hold, and the structured log says which
+workspace and when.
+
+The construction sites that change, each already holding what the new shape
+needs:
+
+| Site | Today | Becomes |
+|---|---|---|
+| `WorkspaceStoreLive.validateWorkspace` | `WorkspaceNotFound(key)` | `WorkspaceNotFound()` |
+| `WorkspaceStoreLive.validateWorkspace` | `WorkspaceExpired(key, ws.createdAt, ws.ttl)` | `WorkspaceExpired(config.ttl)` |
+| `WorkspaceStorePostgres.resolveInternal` | `WorkspaceNotFound(key)` | `WorkspaceNotFound()` |
+| `WorkspaceStorePostgres.resolveInternal` | `WorkspaceExpired(key, ws.createdAt, ws.ttl)` | `WorkspaceExpired(config.ttl)` |
+| `WorkspaceStore.resolveTreeWorkspace` | `TreeNotInWorkspace(key, treeId)` | `TreeNotInWorkspace(ws.id, treeId)` |
+
+`resolveTreeWorkspace` binds `ws` from `resolve(key)` on the line above, so the
+identifier is in scope with no extra read. Both stores hold `config`, so the
+configured lifetime is in scope at each expiry arm.
+
+**One point to settle when the lifetime question is.** `WorkspaceRecord` carries
+a per-record `ttl` and `WorkspaceConfig` carries the configured one. The ruling
+says the client states "whatever is configured", which is `config.ttl`, and the
+table above reads it from there. If the per-record value is wanted instead —
+they differ only for a record written under an earlier configuration — the arms
+read `ws.ttl` and nothing else changes.
+
+`WorkspaceKeySecret` leaves `AppError.scala`'s import list, which is the
+mechanical check that no error carries a credential any more.
+
+### 4.8 The expiry response and the client's two workarounds
+
+TES-D-9 and TES-D-10 are ruled, so this section is specified apart from one
+field: whether the configured lifetime reaches the client in the response or
+from `/config.json`. Everything below is written for the response, and the
+alternative is noted where it differs.
+
+**What crosses the boundary, and what each side rebuilds.** Three errors go in
+and two come out, which is A13's substance kept and its expiry coverage dropped:
+
+| Server error | Status | Response carries | `decode` rebuilds |
+|---|---|---|---|
+| `WorkspaceNotFound()` | 404 | nothing beyond the code | `WorkspaceNotFound()` |
+| `TreeNotInWorkspace(wsId, treeId)` | 404 | nothing beyond the code — the same body as not-found | `WorkspaceNotFound()` |
+| `WorkspaceExpired(ttl)` | 404 | a distinct code, and the lifetime | `WorkspaceExpired(ttl)` |
+
+The first two share one body, so a caller cannot learn whether a tree exists in
+a workspace that is not theirs. That is what A13 was ruled for and it is intact.
+The third is distinguishable, carries no creation time and no identifier, and is
+rebuilt exactly — so the sentinel has nothing left to stand in for.
+
+`ErrorResponse.WorkspaceSentinelPrefix` and
+`RepositoryFailure.isWorkspaceSentinel` are deleted, together with the string
+comparison in `decode`'s 404 arm. `GlobalError.fromAppError` matches
+`WorkspaceNotFound` and `WorkspaceExpired` as the types they are, which is what
+routes the informational banner instead of a prefix test on a storage failure's
+text.
+
+**`preValidate` narrows to the two errors that mean what it assumes.** The
+wildcard becomes a match, so a network failure or a 500 leaves the key alone:
+
+```scala
+          .tapError {
+            case _: WorkspaceNotFound | _: WorkspaceExpired =>
+              zio.ZIO.succeed {
+                workspaceKey.set(None)
+                clearURL()
+                onExpired()
+              }
+            case _ => zio.ZIO.unit
+          }
+```
+
+A failure that is not a workspace-lifecycle outcome then falls through to the
+ordinary global banner, which is what `runJsQuiet` was suppressing. The method's
+comment is rewritten to say what the code now does: the two workspace errors
+mean the key is dead, and nothing else does.
+
+**The wording, owned once.** `ErrorTemplates` renders both, and the two copies
+of today's sentence — in `Main.scala`'s `onExpired` callback and in
+`GlobalError.fromAppError` — are replaced by one call. The expiry text names the
+lifetime and not a date; the not-found text claims no cause:
+
+| Error | Text |
+|---|---|
+| `WorkspaceExpired(ttl)` | "This workspace has expired. Workspaces are kept for <ttl>. Creating a new tree will start a fresh workspace." |
+| `WorkspaceNotFound()` | "This workspace is no longer available. Creating a new tree will start a fresh workspace." |
+
+`<ttl>` is rendered from the `JDuration` in whole hours where it divides evenly
+and otherwise in hours and minutes; the helper lives beside `ErrorTemplates` and
+takes the duration, so no call site formats it.
+
+If the lifetime comes from `/config.json` instead, `WorkspaceExpired` carries no
+field, `AppConfigState.ConfigPayload` gains one, and the frontend container's
+entrypoint template and its environment wiring gain the value — three more files
+and a value duplicated between the server's configuration and the container's.
+The table above is otherwise unchanged.
+
+**The defects this removes, recorded because each explains a shape above.**
+
+**Workaround 1 — a sentinel string stands in for a type.** Because the opaque
+404 discards every field, `decode` can rebuild none of the three errors, so it
+fabricates a different one:
+
+```scala
+      case 404 =>
+        val firstDomain = details.headOption.map(_.domain).getOrElse("")
+        if firstDomain == WorkspaceDomain then
+          RepositoryFailure(s"${RepositoryFailure.WorkspaceSentinelPrefix}not-found")
+```
+
+and the client recognises it by string prefix, through
+`RepositoryFailure.isWorkspaceSentinel`. A workspace error therefore reaches the
+client as a storage failure whose `reason` begins `"workspace:"`. This is
+Defect 2 one layer along: a field carries a tag naming the row's role instead of
+the value it declares.
+
+**Workaround 2 — a transient failure destroys the user's capability URL.**
+`WorkspaceState.preValidate` treats every failure as expiry:
+
+```scala
+          .tapError { _ =>
+            zio.ZIO.succeed {
+              workspaceKey.set(None)
+              clearURL()
+              onExpired()
+            }
+          }
+```
+
+The wildcard catches a network failure and a 500 as readily as a 404. The
+workspace key is the only credential for that workspace, and the URL is the only
+place the user holds it, so one failed pre-validation call discards it
+permanently. The method's own comment asserts the opposite — "we KNOW this is a
+pre-validation check, so failure means expired workspace" — which is true of the
+call's intent and false of its error channel.
+
+**The duplicated sentence.** The expiry message is written out twice, at the
+`onExpired` callback in `modules/app/src/main/scala/app/Main.scala` and again in
+`GlobalError.fromAppError`. Phase 4's `ErrorTemplates` owns it once, which is
+where §6 already puts every other message.
+
 ---
 
 ## 5. Phase 3 — the repository stops building strings
@@ -823,7 +1036,11 @@ exhaustive match on the preview status.
 
 ---
 
-## 7. Decisions — all ruled
+## 7. Decisions
+
+All ten are ruled. TES-D-10 supersedes TES-D-6's field list and TES-D-9
+supersedes TES-D-8's, in both cases narrowing what the error carries; the
+superseded decisions are kept because the later ones are read against them.
 
 ### TES-D-1 — `ValidationError` carries `ErrorLocation` — RULED 2026-10-05
 
@@ -907,7 +1124,7 @@ All five affected files are already in this plan's inventory, four directly and
 `modules/app/src/test/scala/app/state/GlobalErrorSpec.scala` through the hook's
 same-module test authorization, so the ruling adds no inventory entry.
 
-### 7.4 TES-D-4 — the preview status discriminator — RULED 2026-10-07
+### TES-D-4 — the preview status discriminator — RULED 2026-10-07
 
 §6 states that `MergeModal`'s `case _ =>` fallback arm "is replaced by an
 exhaustive match on the preview status". §3.5 keeps `status: String`. No match
@@ -962,6 +1179,236 @@ are, so no response body changes shape. Exact signatures:
 consequence, and §6's "exhaustive match on the preview status" becomes
 achievable as written.
 
+### TES-D-5 — the credential leaves all three workspace errors — RULED 2026-10-10
+
+`WorkspaceNotFound`, `WorkspaceExpired` and `TreeNotInWorkspace` each hold a
+`WorkspaceKeySecret`. No site reads its value: the encoder discards it and the
+one log line that touches it prints the redacted `toString`.
+
+**Ruled: it leaves all three.** The shapes are in §4.7. The deciding reason is
+ADR-022 R1 — a credential is a `final class` precisely so that no `copy`,
+`unapply` or product serialisation exists for it, and a `case class` wrapping
+one returns all three for the wrapper. A field nothing reads, which weakens a
+credential rule, has no argument for staying.
+
+The alternative was to keep the field and rely on the redacted `toString`. That
+defends one rendering, where removing the field defends the type.
+
+This work lands in this plan rather than its own, because it changes the same
+three files Phases 2 and 4 already rewrite — `AppError.scala`,
+`ErrorResponse.scala` and the client's error classification — and a separate
+plan would rewrite each of them twice.
+
+### TES-D-6 — `WorkspaceExpired` carries the workspace identifier — RULED 2026-10-10
+
+With the credential gone, an expiry failure would name nothing, and the two
+resolve-failure log lines already annotate a value that is the same constant for
+every workspace.
+
+**Superseded in its field list by TES-D-10, which is where the shipped shape
+is.** Its purpose — a resolve failure that names which workspace it was about —
+is served by the log line TES-D-10 specifies, so what changed is where the
+identifier is read and not whether it is available.
+
+**Ruled: carry it.** `WorkspaceExpired(id: WorkspaceId, createdAt: Instant, ttl: JDuration)`.
+The identifier is what makes the log line able to tell two failures apart. It
+stays out of `getMessage` (ADR-035 §3) and off the wire (ADR-036); §4.7 states
+both.
+
+### TES-D-7 — `TreeNotInWorkspace` carries the workspace identifier — RULED 2026-10-10
+
+**Ruled: carry it.** `TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId)`.
+`resolveTreeWorkspace` resolves the workspace on the line above the failure, so
+the value is in scope and the alternative — naming the tree alone — would leave
+a membership failure unable to say which workspace refused it.
+
+`WorkspaceNotFound` takes no identifier, and that is a consequence rather than a
+choice: the lookup that failed is what would have produced one.
+
+### TES-D-8 — expiry gets its own response — RULED 2026-10-10
+
+All three workspace errors encode to one opaque 404 that carries no field. The
+question was whether expiry keeps sharing it.
+
+**Ruled: expiry gets its own response, carrying `createdAt` and `ttl`.** A
+workspace that expired is one the caller did hold, so telling them so discloses
+nothing they did not already have, and withholding it is what forced both
+workarounds in §4.8.
+
+**This ruling contradicts an earlier one and TES-D-9 resolves that**; the shape
+of what the client receives is open as TES-D-10. Until both are ruled, §4.8
+records the defects and specifies no encoder arm.
+
+### TES-D-9 — A13's constant response, now contradicted — RULED 2026-10-10
+
+**Ruled: expiry is distinguishable, and the response carries no creation
+time.** A caller who presented a key that was valid is told that it expired,
+rather than being told the resource is absent. The response states the
+configured lifetime so the client can say how long a workspace lasts, and it
+does not state when this workspace expired.
+
+**A13 is amended, not overridden silently.** Its scope narrows to the two cases
+ADR-035 §3's purpose clause names — "not yours" and "does not exist" — and
+expiry leaves it. `TreeNotInWorkspace` and `WorkspaceNotFound` therefore keep
+sharing one opaque 404, which is A13's substance: a caller cannot learn whether
+a tree exists but belongs to another workspace. What A13 loses is only its
+coverage of expiry, and the facts below are why that costs nothing.
+
+The disclosure this admits, measured rather than asserted. The workspace key is
+128-bit `SecureRandom`, and A28 in the same index records that brute force is
+"separately infeasible" for that reason, so only a caller who held the key can
+present one. `WorkspaceBootstrapResponse` already returns `expiresAt` to
+whoever creates a workspace and `WorkspaceRotateResponse` returns it again on
+rotation, so the lifetime is already on the wire to the holder. The incremental
+disclosure is one bit — expired rather than absent — to a caller who proved
+possession.
+
+Dropping the creation time is what separates this ruling from simply admitting
+expiry wholesale: a user needs to know that their workspace expired and how long
+workspaces live, and neither of those requires the moment it happened.
+
+The original options and their reasoning are retained below, because A13's
+amendment is read against them.
+
+`docs/dev/plans/IMPLEMENTATION-PLAN.md`'s actionable-item index rules item A13:
+
+> | A13 | Constant response for not-found vs expired | Low | W.3 | Collapse to single opaque 404 at HTTP layer |
+
+and its risk table lists A13 together with A14 under "Timing side-channel
+(not-found vs expired)", at Medium severity. A13 names expiry explicitly, so
+TES-D-8 contradicts it directly.
+
+ADR-035 §3 is the other source that bears on this, and it is ambiguous rather
+than contradicted. Its bullet reads in full:
+
+> - Resource-neutral errors collapse to an opaque status (a missing resource is
+>   a plain 404 regardless of variant), so the message cannot distinguish "not
+>   yours" from "does not exist"
+
+The purpose clause names two cases and expiry is neither of them, while
+"regardless of variant" reads as covering expiry as well. The ADR therefore
+supports both readings and settles nothing here. A13 does name expiry, so the
+conflict is with A13, and a conflict between two rulings is resolved by the
+user rather than by this plan picking the reading that suits it.
+
+What the disclosure actually amounts to, as the facts bear on every option
+below. The workspace key is 128-bit `SecureRandom`, and A28 in the same index
+records that brute force is "separately infeasible" for that reason, so only a
+caller who held the key can present one. `WorkspaceBootstrapResponse` already
+returns `expiresAt` to whoever creates a workspace, and `WorkspaceRotateResponse`
+returns it again on rotation, so a holder already knows when their workspace
+ends. The incremental disclosure of TES-D-8 is therefore one bit — expired
+rather than absent — to a caller who proved possession.
+
+**Option A — amend A13 to cover not-found and not-yours, and admit expiry.**
+A13's scope becomes the two cases ADR-035 §3 names, and the expiry response
+carries `createdAt` and `ttl` as TES-D-8 ruled. The client can say when the
+workspace ended and how long workspaces last. Concretely: a user returning to a
+bookmarked `/w/{key}` three days later reads "this workspace expired on 7
+October; workspaces last 72 hours", instead of today's "your previous workspace
+has expired" written for every 404 including ones that are not expiry at all.
+
+**Option B — keep A13 as it stands, and withdraw TES-D-8.** Not-found and
+expiry stay one response. The two workarounds in §4.8 are then fixed without
+distinguishing them: `decode` returns a typed workspace-404 error instead of the
+`RepositoryFailure` sentinel, and `preValidate` narrows its `tapError` to that
+one error instead of every failure. Concretely: the same returning user reads
+"this workspace is no longer available", and a network failure no longer
+destroys their key — but the system still cannot tell them which of the two
+happened, and the blue banner still says "expired" for a workspace that was
+deleted or whose key was rotated away.
+
+**Option C — distinguish expiry, withhold the figures.** A13 is amended as in
+Option A, but the response carries only the fact of expiry, with no `createdAt`
+and no `ttl`. The client gets the one bit it needs to choose its wording and the
+deployment's configured lifetime is not restated in an error body. Concretely:
+the returning user reads "this workspace has expired" and a user whose key was
+rotated reads "this workspace is no longer available" — two correct sentences,
+neither carrying a date. TES-D-8's `createdAt`/`ttl` are dropped.
+
+**What was ruled is Option C with one field admitted**: expiry distinguishable
+as in Option A, no creation time as in Option C, and the configured lifetime
+carried so the client can state it. My recommendation had been Option A; the
+ruling kept its distinguishability and dropped the figure that answers a
+question no user asks.
+
+**One field is pending the user's word, and §4.8 marks it.** The ruling says the
+message "should display the expiry limit whatever is configured", and the
+sentence that follows it — "so the response does not hold createdAt and no ttl"
+— is incomplete in the original. The lifetime has to reach the client somehow,
+and `/config.json` does not carry it: `AppConfigState.ConfigPayload` has
+`scenariosEnabled`, `appVersion` and `debugUi` and nothing else. So either the
+response carries the lifetime, which is one field and no new plumbing, or the
+lifetime is added to `/config.json`, which touches the frontend container's
+entrypoint template and its environment wiring as well. §4.8 is written for the
+first and names the second.
+
+### TES-D-10 — what `decode` rebuilds from a workspace 404 — RULED 2026-10-10
+
+**Ruled: Option C — `WorkspaceExpired` carries no workspace identifier.** The
+reason given is that the caller owns the workspace and so has no use for its
+identifier. The identifier is annotated on the resolve-failure log line at the
+construction site, where `ws` is already bound, so TES-D-6's purpose is served
+and only the place the value is read changes.
+
+**TES-D-6 is superseded in its field list and stands in its purpose.** It was
+ruled so that two resolve failures could be told apart in the log, and they can
+be: the log line annotates `"workspace_id" -> ws.id.value` whether or not the
+error type carries it.
+
+**TES-D-7 is unaffected, and the asymmetry has a reason.**
+`TreeNotInWorkspace` keeps `wsId: WorkspaceId`. Under TES-D-9 that error still
+shares the opaque 404 with `WorkspaceNotFound`, so `decode` never rebuilds it
+and its identifier has no wire counterpart to reconcile. `WorkspaceExpired` is
+the one error TES-D-9 made distinguishable, which is exactly why it is the one
+whose fields must be reconstructible.
+
+**The consequence for the type, which follows rather than being chosen.** A
+field the wire does not carry cannot be rebuilt, so what the type holds is
+settled by what TES-D-9 puts in the response and nothing else. With the
+lifetime in the response the type is `WorkspaceExpired(ttl: JDuration)`; with
+the lifetime sourced from `/config.json` instead it is `WorkspaceExpired()`.
+That is the single open field §4.8 marks, and §4.7 carries both forms until it
+is settled.
+
+The original options and their reasoning are retained below.
+
+`ErrorResponse.decode` turns a response back into an `AppError` so the client
+can match on types rather than parse strings. It cannot rebuild
+`WorkspaceExpired` as TES-D-6 shapes it, because that type carries a
+`WorkspaceId` and ADR-036 forbids the identifier from crossing to the client in
+either direction. This is the same gap that produced the sentinel in §4.8, and
+it has to be closed deliberately rather than worked around a second time.
+
+Reading the rows directly instead of rebuilding an error is not an option here:
+`GlobalError.fromThrowable` takes a `Throwable`, `decode` must return one, and
+§6 already commits `GlobalError.fromAppError` to keeping its exhaustive match.
+
+**Option A — a second, client-facing error type.** The server keeps
+`WorkspaceExpired(id, createdAt, ttl)` and `decode` returns a new sibling
+carrying only what the wire holds. Each side's type then says exactly what that
+side knows, and no field is optional. The cost: `ErrorResponse.encode` matches
+exhaustively over the sealed hierarchy, so it needs an arm for a type the server
+never produces — which is the shape of the `RepositoryFailure` sentinel this
+plan is removing, reintroduced with a better name.
+
+**Option B — `id` becomes `Option[WorkspaceId]`.** One type on both sides,
+`None` after a decode. The cost: the absence of a value encodes "this error was
+rebuilt on the client", which is a field carrying a tag about its own
+provenance — Defect 2's shape, in a new place.
+
+**Option C — `WorkspaceExpired` carries no identifier, and the construction
+site logs it.** `WorkspaceExpired(createdAt: Instant, ttl: JDuration)` is one
+type, produced by the server and rebuilt identically by the client, so `decode`
+is a true inverse for this case. Both construction sites bind `ws` already, so
+`"workspace_id" -> ws.id.value` is annotated there, and the log line gains
+exactly what TES-D-6 was ruled for. The cost: it reverses TES-D-6, and a handler
+downstream of the store could no longer name the workspace from the error alone.
+No such handler exists today — the error travels store → controller → `.either`
+→ `ErrorResponse`, and the controller does not log.
+
+Option C was my recommendation and is what was ruled.
+
 ---
 
 ## 8. ADR alignment
@@ -970,7 +1417,8 @@ achievable as written.
 |---|---|---|
 | ADR-036 (confidential internal identifiers) | Defect 1, and `StoredPathConstraint` | Compliant, and it closes a live violation. The constraint's anchor at `risk-trees` makes the absolute form unrepresentable, so the boundary is enforced by the type rather than by review. `BackendMessage` carries on the type that its content may name an absolute path and must not be sent. |
 | ADR-010 (typed errors) | `MergeRefusal`, `TreeLoadProblem`, `ErrorLocation`, `ErrorValues`, `ErrorDetail` | Compliant in direction — it replaces strings with typed values, which is the ADR's own principle. **The ADR is amended by this plan, in three places:** §1's hierarchy listing gains `TreeLoadFailure` and renames `SimError` to `DomainError` (TES-D-3); §2's `ValidationError` definition takes `location: ErrorLocation` in place of `field: String` (TES-D-1); and the error envelope — `ErrorResponse`, `JsonHttpError`, `ErrorDetail` — is specified in an ADR for the first time. The `adr-constraints` skill distillation is updated in the same pass, in `.github/skills/adr-constraints/SKILL.md` and its byte-identical mirror `.claude/skills/adr-constraints/SKILL.md`. |
-| ADR-035 (error leakage prevention) | The encoders, and the opaque 500 | Compliant. `ErrorResponse` stays the only type reaching the wire, `encode` stays an exhaustive typed match, and `TreeLoadFailure` keeps routing to the constant "Internal server error". |
+| ADR-022 (secret handling) | The three workspace errors | **Compliant after §4.7, and it closes a live defect.** R1 makes a credential a `final class` so no `copy`, `unapply` or product serialisation exists for it; each of the three errors is a `case class` wrapping one, which returns all three for the wrapper. Removing the field is what satisfies R1 at the container, and the redacted `toString` that defends it today defends one rendering rather than the type. |
+| ADR-035 (error leakage prevention) | The encoders, the opaque 500, and `getMessage` on the workspace errors | Compliant. `ErrorResponse` stays the only type reaching the wire, `encode` stays an exhaustive typed match, and `TreeLoadFailure` keeps routing to the constant "Internal server error". §3's `getMessage` discipline is why `TreeNotInWorkspace.wsId` is absent from its message while present as a field, and it is one of the two reasons `WorkspaceExpired` carries no identifier at all (TES-D-10). §3 is ambiguous about expiry and is quoted in full in TES-D-9 so the ambiguity is visible rather than resolved by this plan: its purpose clause names "not yours" and "does not exist", while its parenthetical says "regardless of variant". A13 is not ambiguous — it names expiry — so A13 is the ruling TES-D-8 contradicts, and TES-D-9 resolves that. |
 | ADR-001 (validate once, at the boundary) | `FieldPath`, `StoredPath` | Compliant. Both are constructed through smart constructors returning `Either[List[ValidationError], _]`, and `decode` refines what it receives, which is the client's boundary. |
 | ADR-018 (nominal wrappers for distinct ids) | `ErrorLocation`'s cases | Compliant. Each case names the typed id it carries rather than a `String`. |
 | ADR-029 (user-input string types) | `FieldPathConstraint`, `StoredPathConstraint` | Compliant. Both carry a `Match` whitelist as narrow as their domain permits, not only a length bound. |
@@ -994,11 +1442,28 @@ it is stated in neither ADR alone:
 Listed in `docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE-INVENTORY.md`, beside this
 document. It holds 57 paths, three of them marked as files this plan creates.
 
-**One path is still missing**: `ErrorDomain.scala`, the new file §4.4 adds. When
-the inventory is next amended it needs the line
-`new: modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorDomain.scala`.
-The agent prints the block and the user pastes it into
-`.claude/protocol/pending` and runs `.claude/bin/approve-inventory`.
+**Four paths are still missing.** The agent prints the amendment block and the
+user pastes it into `.claude/protocol/pending` and runs
+`.claude/bin/approve-inventory`.
+
+| Path | Needed by | Why the inventory does not already name it |
+|---|---|---|
+| `modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorDomain.scala` | §4.4 | A file this plan creates |
+| `modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStore.scala` | §4.7 | The trait's `resolveTreeWorkspace` is where `TreeNotInWorkspace` is constructed; the inventory names the two implementations but not the trait |
+| `modules/app/src/main/scala/app/state/WorkspaceState.scala` | §4.8 | `preValidate`'s `tapError` is workaround 2; §4.8 narrows it to the two workspace errors |
+| `modules/app/src/main/scala/app/Main.scala` | §4.8 | The `onExpired` callback holds the second copy of the expiry sentence |
+
+`modules/app/src/main/scala/app/views/ErrorBanner.scala` is deliberately not
+requested. §4.8 keeps `GlobalError.WorkspaceExpired(message: String)` as the
+single informational case and changes only who composes the message, so the
+banner's match arms are untouched.
+
+One path depends on the open field in TES-D-9 and is therefore not requested
+yet: if the configured lifetime is sourced from `/config.json` rather than from
+the response, `modules/app/src/main/scala/app/state/AppConfigState.scala` is
+needed as well. `containers/prod/Dockerfile.frontend-prod` would change in the
+same case and needs no inventory entry, because the hook gates `modules/**` and
+`build.sbt` only.
 
 The approval hook gates `modules/**` and `build.sbt`. It also auto-authorizes
 same-module unit-test edits when the plan lists any file under that module's
@@ -1056,6 +1521,39 @@ error carries no such text.
 kind is reached by its error family, and `ErrorTemplates.render` produces
 different text for a merge refusal than for a field validation failure given the
 same `JsonHttpError.message`, which is the assertion that pins Phase 4's point.
+
+**New, `modules/common/src/test/scala/com/risquanter/register/domain/errors/WorkspaceErrorSpec.scala`** —
+the assertions for §4.7, which are about what the three types do and do not
+carry:
+
+- `TreeNotInWorkspace.getMessage` contains the tree identifier and not the
+  workspace identifier, which pins ADR-035 §3 against the field TES-D-7 keeps;
+- the encoded response for each of the three contains neither the workspace
+  identifier nor the key, which is the wire-side half and extends to workspace
+  errors the assertion `ErrorResponseSpec` already makes for scenario errors;
+- `WorkspaceNotFound()` and `TreeNotInWorkspace` encode to byte-identical
+  bodies, which is the assertion that pins what A13 still covers after TES-D-9
+  narrowed it;
+- `WorkspaceExpired` encodes to a body that differs from those two, carries the
+  configured lifetime, and carries no creation time;
+- each of the three survives `encode` then `decode` as the type TES-D-10
+  specifies — the two 404-sharing errors both rebuild as `WorkspaceNotFound()`
+  and expiry rebuilds as itself with its lifetime intact. This is the assertion
+  that replaces the sentinel test, and it is the one that would fail if a
+  future field were added to a workspace error without a wire counterpart.
+
+**`modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceStoreSpec.scala`
+and `WorkspaceStorePostgresSpec.scala`** — resolving an expired workspace fails
+with `WorkspaceExpired` carrying the configured lifetime, and resolving an
+unknown key fails with `WorkspaceNotFound()`. Both specs already create, resolve
+and expire a workspace, so each case is an assertion on an exit they already
+produce.
+
+**`modules/app/src/test/scala/app/state/WorkspaceStateSpec.scala`** — the
+assertion for workaround 2, and the one with a user-visible consequence: a
+failure that is not a workspace-lifecycle error leaves the workspace key in
+place, while `WorkspaceNotFound` and `WorkspaceExpired` clear it. Without this,
+nothing stops the wildcard returning.
 
 ---
 
@@ -1171,3 +1669,12 @@ mirrored into both `.env` and `.env.irmin`. The current value is `0.10.44`.
 `docs/dev/TODO.md` item 54 is deleted. It recorded this work as a future item;
 once this plan's scope is landed the item is spent, and nothing in it is being
 deferred.
+
+A13's two index rows in `docs/dev/plans/IMPLEMENTATION-PLAN.md` and the forward
+pointer beside its rationale paragraph were amended on 2026-10-10, when TES-D-9
+narrowed the item. The remaining passages in that document which describe the
+collapsed 404 as shipped are accurate for the code as it stands, so they are
+swept when §4.8 lands rather than ahead of it: the W.3 resolve-flow step that
+routes `WorkspaceExpired` to the same 404 as not-found, the verification item
+asserting the two are identical, and the frontend-classification section that
+describes the sentinel. This is part of §4.8's landing, not a follow-up.

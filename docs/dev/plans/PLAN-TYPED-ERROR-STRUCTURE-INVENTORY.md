@@ -64,3 +64,16 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala
 - modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorValues.scala
 - modules/app/src/main/scala/app/state/ErrorTemplates.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStore.scala
+- modules/app/src/main/scala/app/state/WorkspaceState.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorDomain.scala
+- docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStore.scala
+- modules/app/src/main/scala/app/state/WorkspaceState.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorDomain.scala
+- docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStore.scala
+- modules/app/src/main/scala/app/state/WorkspaceState.scala
+- modules/app/src/main/scala/app/Main.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorDomain.scala
+- modules/app/src/main/scala/app/core/ZJS.scala

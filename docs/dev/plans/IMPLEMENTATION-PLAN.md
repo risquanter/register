@@ -902,7 +902,7 @@ This tier replaces the standalone Phase X by combining:
 | 🟠 High | A10-A11 | No dual timeout (idle + absolute) | W.2 |
 | 🟠 High | A29-A33 | No lifecycle logging | W.2–W.4 (inline) |
 | ~~🟡 Medium~~ | ~~A8-A9~~ | ~~No token fingerprint binding~~ | Rejected — incompatible with capability-token sharing model |
-| 🟡 Medium | A13-A14 | Timing side-channel (not-found vs expired) | W.3 |
+| 🟡 Medium | A13-A14 | Timing side-channel (not-found vs not-yours; expiry removed from A13's scope by TES-D-9) | W.3 |
 | 🟡 Medium | A18-A20 | CORS too permissive (`reflectHeaders`) | W.5 |
 | 🟡 Medium | A21-A23 | Missing global security headers | W.5 |
 | 🟡 Medium | A24-A26 | Error information leakage (`IrminHttpError`, `RepositoryFailure`) | W.3, W.7 |
@@ -925,7 +925,7 @@ This tier replaces the standalone Phase X by combining:
 | A10 | Add `lastAccessedAt` to `Workspace` model | Low | W.2 | Bake into initial domain model |
 | A11 | Dual timeout logic (idle + absolute) in `resolve()` | Medium | W.2 | Single branch in resolve |
 | A12 | *(reserved)* | — | — | — |
-| A13 | Constant response for not-found vs expired | Low | W.3 | Collapse to single opaque 404 at HTTP layer |
+| A13 | Constant response for not-found vs not-yours | Low | W.3 | Collapse to single opaque 404 at HTTP layer. **Narrowed on 2026-10-10 by TES-D-9 in `docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md`:** expiry leaves this item and gets its own response. `WorkspaceNotFound` and `TreeNotInWorkspace` still share one body, which is what keeps a caller from learning whether a tree exists in a workspace that is not theirs. Expiry was never that case — a caller who presents an expired key held it — and the key is 128-bit `SecureRandom`, so by A28's own reasoning only a holder can present one. The lifetime the expiry response states is already returned to that holder by `WorkspaceBootstrapResponse.expiresAt` at creation and again on rotation |
 | A14 | Constant-time workspace lookup | Low | W.2/W.3 | `Map.get` already O(1); document principle |
 | A15 | SSE scope to workspace key | Low | W.3 | ✅ SSE endpoint moved to `/w/{key}/events/tree/{treeId}`, validates workspace ownership |
 | A16 | Close SSE on workspace expiry/revocation | Medium | Deferred | Client-side `WorkspaceExpired` error handling is the reliability mechanism; SSE notification deferred |
@@ -1251,10 +1251,18 @@ All `/w/{key}/*` endpoints include a workspace resolution step:
 5. If `WorkspaceExpired` → 404 (same as not-found — A13: constant response, no timing oracle)
 6. For tree-specific endpoints: verify `belongsTo(key, treeId)` → 404 if not
 
-**A13 rationale:** At the HTTP layer, not-found and expired return identical 404 responses.
+**A13 rationale, as ruled in W.3:** At the HTTP layer, not-found and expired return identical 404 responses.
 This eliminates the timing side-channel that would let an attacker distinguish "this key
 never existed" from "this key existed but expired." The `WorkspaceError` ADT retains the
 distinction for internal logging (A30). Deleted workspaces simply don't exist → `WorkspaceNotFound`.
+
+**Narrowed on 2026-10-10 — read A13's index row above and TES-D-9 in
+`docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md` before relying on this
+paragraph.** Expiry leaves A13 and gets its own response; not-found and
+tree-not-in-workspace keep sharing one body. Step 5 above and the W.3
+verification item that asserts identical 404s change with it. The passages in
+this document that describe the collapsed behaviour as shipped are still
+accurate for the code as it stands and are swept when that plan's §4.8 lands.
 
 **Rotation endpoint (`POST /w/{key}/rotate`):**
 1. Call `WorkspaceStore.rotate(key)` — atomic key rotation (instant, no grace period)
