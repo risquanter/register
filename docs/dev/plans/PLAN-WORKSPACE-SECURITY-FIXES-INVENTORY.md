@@ -32,3 +32,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala
 - modules/app/src/main/scala/app/state/WorkspaceState.scala
 - modules/server/src/main/scala/com/risquanter/register/http/controllers/DistributionPreviewController.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceReaper.scala

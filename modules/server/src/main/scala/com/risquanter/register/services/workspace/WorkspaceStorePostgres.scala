@@ -41,7 +41,7 @@ final class WorkspaceStorePostgres private (
   /** seedEntityId: None lets the workspace_seed_entity_id_seq DEFAULT assign;
     * Some(v) inserts explicitly — the UNIQUE constraint rejects duplicates
     * race-free (mapped to ValidationFailed), and the sequence is bumped past v
-    * so later assignments cannot collide (PLAN-SEED-IDENTITY §5.2).
+    * so later assignments cannot collide.
     */
   override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
     for
@@ -84,6 +84,7 @@ final class WorkspaceStorePostgres private (
                    ))))
                  case other => ZIO.die(other)
                } *> bumpSeedEntitySequence(entityId.value).orDie
+      _ <- logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created")
     yield key
 
   /** Advance the assignment sequence past a provided value (never backwards). */
@@ -99,14 +100,41 @@ final class WorkspaceStorePostgres private (
       )
     ).unit
 
+  /** Associate a tree with this workspace, refusing one beyond the tree ceiling.
+    *
+    * Counts and inserts in one transaction holding a row lock on the parent
+    * `workspaces` row. The rows being counted do not exist yet, so the lock has
+    * to be on the parent; it serialises concurrent associations for this
+    * workspace. The refusal travels as a `Left` so the transaction commits,
+    * keeping the typed error out of `db`'s mapping to `RepositoryFailure`.
+    */
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
-      ws  <- resolveInternal(key)
-      _   <- ZIO.fromEither(WorkspaceStore.treeCapacity(ws, treeId, config.maxTreesPerWorkspace))
-      now <- Clock.instant
-      row  = WorkspaceTreeRow(ws.id, treeId, toOffsetDateTime(now))
-      _   <- db(run(query[WorkspaceTreeRow].insertValue(lift(row)).onConflictIgnore)).unit
+      ws     <- resolveInternal(key)
+      now    <- Clock.instant
+      result <- db(transaction {
+                  for
+                    _        <- run(quote {
+                                  infix"""SELECT 1 FROM workspaces WHERE id = ${lift(ws.id)} FOR UPDATE"""
+                                    .as[Query[Int]]
+                                })
+                    existing <- run(query[WorkspaceTreeRow].filter(_.workspaceId == lift(ws.id)).map(_.treeId))
+                    outcome  <- associate(ws.id, treeId, now, existing)
+                  yield outcome
+                })
+      _      <- ZIO.fromEither(result)
     yield ()
+
+  /** Already present: nothing to write. At the ceiling: the refusal. Otherwise
+    * inserts the row.
+    */
+  private def associate(wsId: WorkspaceId, treeId: TreeId, now: Instant, existing: Seq[TreeId]) =
+    (existing.contains(treeId), existing.size >= config.maxTreesPerWorkspace) match
+      case (true, _) => ZIO.succeed(Right(()): Either[AppError, Unit])
+      case (_, true) => ZIO.succeed(Left(WorkspaceStore.maxTreesReached(config.maxTreesPerWorkspace)))
+      case _         =>
+        run(query[WorkspaceTreeRow].insertValue(lift(WorkspaceTreeRow(wsId, treeId, toOffsetDateTime(now)))))
+          .as(Right(()): Either[AppError, Unit])
 
   override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
@@ -147,8 +175,8 @@ final class WorkspaceStorePostgres private (
   override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
 
-  override def evictExpired: UIO[List[WorkspaceRecord]] =
-    (for
+  override def evictExpired: IO[AppError, List[WorkspaceRecord]] =
+    for
       rows    <- db(run(query[WorkspaceRow]))
       now     <- Clock.instant
       evicted <- ZIO.foreach(rows.toList) { row =>
@@ -159,12 +187,16 @@ final class WorkspaceStorePostgres private (
       _       <- ZIO.foreachDiscard(doomedIds)(id =>
                    db(run(query[WorkspaceRow].filter(_.id == lift(id)).delete)).unit
                  )
-    yield doomed).orDie
+      _       <- logSecurity("workspace.eviction", "evicted_count" -> doomed.size.toString)(
+                   s"Evicted ${doomed.size} expired workspace(s)"
+                 )
+    yield doomed
 
   override def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(run(query[WorkspaceRow].filter(_.id == lift(ws.id)).delete)).unit
+      _  <- logSecurity("workspace.deleted", "workspace_id" -> ws.id.value)("Workspace deleted")
     yield ()
 
   override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
@@ -183,6 +215,7 @@ final class WorkspaceStorePostgres private (
                       )
                   )
                 ).unit
+      _      <- logSecurity("workspace.rotated", "workspace_id" -> ws.id.value)("Workspace key rotated")
     yield newKey
 
   private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
@@ -231,6 +264,15 @@ final class WorkspaceStorePostgres private (
 
   private def db[A](effect: Task[A]): IO[AppError, A] =
     effect.mapError(err => RepositoryFailure(Option(err.getMessage).getOrElse(err.toString)))
+
+  /** Structured security event log with arbitrary key-value annotations. Event
+    * and field names match the in-memory store's.
+    */
+  private def logSecurity(eventType: String, fields: (String, String)*)(msg: String): UIO[Unit] =
+    val allAnnotations = ("event_type" -> eventType) +: fields
+    allAnnotations.foldRight(ZIO.logInfo(msg): UIO[Unit]) { case ((k, v), effect) =>
+      ZIO.logAnnotate(k, v)(effect)
+    }
 
   private def parseInterval(value: String): IO[AppError, Duration] =
     ZIO

@@ -209,8 +209,10 @@ http {
                 break;
             }
             # Browser navigation — Accept contains text/html.
+            # no-store, not no-cache: this path carries the workspace key, so a
+            # stored entry is indexed by a credential.
             add_header X-Content-Type-Options nosniff;
-            add_header Cache-Control "no-cache";
+            add_header Cache-Control "no-store";
             try_files $uri /index.html;
         }
 

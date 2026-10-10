@@ -57,12 +57,13 @@ final class WorkspaceStoreLive private (
 
   // ── Public API ────────────────────────────────────────────────────────
 
-  /** Create a new workspace with configured TTL and idle timeout. (A29: logs creation)
+  /** Create a new workspace with configured TTL and idle timeout. Logs a
+    * creation event.
     *
-    * seedEntityId: None assigns from the fixed-base counter (deterministic per
-    * fresh store, PLAN-SEED-IDENTITY §5.5); Some(v) provides it — rejected when
-    * a live workspace holds v, and the counter is bumped past v (§5.2).
-    * Assignment and uniqueness check are atomic in a single Ref.modify.
+    * seedEntityId: None assigns from the fixed-base counter, which is
+    * deterministic per fresh store; Some(v) provides it — rejected when a live
+    * workspace holds v, and the counter is bumped past v. Assignment and
+    * uniqueness check are atomic in a single Ref.modify.
     */
   override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
     for
@@ -117,21 +118,27 @@ final class WorkspaceStoreLive private (
             s"seedEntityId assignment space exhausted at ${state.nextSeedEntityId}"
           ))
 
-  /** Associate a tree with a workspace.
+  /** Associate a tree with a workspace, refusing one beyond the tree ceiling.
     *
-    * Note: resolve + update are two separate Ref operations. This is safe because
-    * addTree is append-only — a concurrent delete between resolve and update simply
-    * means the updatedWith finds None and the no-op map produces no change.
-    * Making this atomic via Ref.modify would add complexity for no practical gain.
+    * Resolve, capacity check and write are one `Ref.modify`, so concurrent
+    * calls cannot all pass a ceiling only one of them may pass. Re-associating
+    * a tree the workspace already holds stays allowed at the ceiling.
     */
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
-      ws      <- resolveInternal(key)
-      _       <- ZIO.fromEither(WorkspaceStore.treeCapacity(ws, treeId, config.maxTreesPerWorkspace))
+      now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
-      _ <- ref.update(state =>
-             state.copy(byHash = state.byHash.updatedWith(keyHash)(_.map(w => w.copy(trees = w.trees + treeId))))
-           )
+      result  <- ref.modify { state =>
+                   validateWorkspace(state.byHash, keyHash, key, now) match
+                     case Left(err) => (Left(err), state)
+                     case Right(ws) =>
+                       WorkspaceStore.treeCapacity(ws, treeId, config.maxTreesPerWorkspace) match
+                         case Left(err) => (Left(err), state)
+                         case Right(_)  =>
+                           val updated = ws.copy(trees = ws.trees + treeId)
+                           (Right(()), state.copy(byHash = state.byHash.updated(keyHash, updated)))
+                 }
+      _       <- ZIO.fromEither(result).tapError(logResolveFailure(key))
     yield ()
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op.
@@ -158,10 +165,10 @@ final class WorkspaceStoreLive private (
       ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
     )
 
-  /** Resolve a workspace with dual timeout check (A11) and access tracking (A10).
+  /** Resolve a workspace, checking both timeouts and recording the access.
     *
-    * Atomic: single Ref.modify validates + touches in one step.
-    * No TOCTOU race between read and write.
+    * One Ref.modify validates and touches in a single step, so there is no
+    * window between the read and the write.
     */
   override def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
@@ -181,7 +188,9 @@ final class WorkspaceStoreLive private (
   override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
 
-  /** Evict all expired workspaces. Returns evicted entries for cascade. (A31: logs eviction) */
+  /** Evict all expired workspaces. Returns evicted entries for the caller's
+    * cascade. Logs an eviction event.
+    */
   override def evictExpired: UIO[List[WorkspaceRecord]] =
     for
       now     <- Clock.instant
@@ -194,11 +203,11 @@ final class WorkspaceStoreLive private (
            ).when(evicted.nonEmpty)
     yield evicted
 
-  /** Hard delete. Removes workspace from the store. (A29: logs deletion)
+  /** Hard delete. Removes the workspace from the store. Logs a deletion event.
     *
-    * Note: resolve + remove are two separate Ref operations. This is safe because
-    * delete is idempotent — a concurrent delete between resolve and update simply
-    * removes a key that is already gone, which is a no-op on Map.
+    * Resolve and remove are two separate Ref operations, which is safe because
+    * delete is idempotent: a concurrent delete in between removes a key that is
+    * already gone, a no-op on Map.
     */
   override def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
@@ -208,8 +217,8 @@ final class WorkspaceStoreLive private (
       _ <- logSecurity("workspace.deleted", "workspace_id" -> ws.id.value)("Workspace deleted")
     yield ()
 
-  /** Atomic rotation via single Ref.modify — no window where neither key works.
-    * Reuses validateWorkspace for DRY validation. (A29: logs rotation)
+  /** Atomic rotation via one Ref.modify — no window where neither key works.
+    * Validates through `validateWorkspace`. Logs a rotation event.
     */
   override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
     for
@@ -233,30 +242,33 @@ final class WorkspaceStoreLive private (
 
   // ── Internal ──────────────────────────────────────────────────────────
 
-  /** Internal resolve without lastAccessedAt update — used by addTree, listTrees, etc.
-    * Logs on failure for security audit (A29/A33).
+  /** Internal resolve without lastAccessedAt update — used by listTrees and the
+    * other reads that must not count as access. Logs on failure.
     */
   private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
       result <- ref.get.map(state => validateWorkspace(state.byHash, keyHash, key, now))
-      ws     <- ZIO.fromEither(result).tapError {
-                  case _: WorkspaceNotFound =>
-                    logSecurityWarning("workspace.resolve_failed",
-                      "workspace_key" -> key.toString, "reason" -> "not_found"
-                    )("Workspace resolve failed")
-                  case _: WorkspaceExpired =>
-                    logSecurityWarning("workspace.resolve_failed",
-                      "workspace_key" -> key.toString, "reason" -> "expired"
-                    )("Workspace resolve failed")
-                  case _ => ZIO.unit
-                }
+      ws     <- ZIO.fromEither(result).tapError(logResolveFailure(key))
     yield ws
+
+  /** Security log for a failed resolve, shared by every caller that validates. */
+  private def logResolveFailure(key: WorkspaceKeySecret)(error: AppError): UIO[Unit] =
+    error match
+      case _: WorkspaceNotFound =>
+        logSecurityWarning("workspace.resolve_failed",
+          "workspace_key" -> key.toString, "reason" -> "not_found"
+        )("Workspace resolve failed")
+      case _: WorkspaceExpired =>
+        logSecurityWarning("workspace.resolve_failed",
+          "workspace_key" -> key.toString, "reason" -> "expired"
+        )("Workspace resolve failed")
+      case _ => ZIO.unit
 
 object WorkspaceStoreLive:
   /** Fixed counter base: fresh stores assign seedEntityIds 1, 2, 3… in creation
-    * order — the determinism the demo suites rely on (PLAN-SEED-IDENTITY §5.5).
+    * order, which is the determinism the demo suites rely on.
     */
   private val SeedEntityIdBase: Long = 1L
 

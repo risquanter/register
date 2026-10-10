@@ -160,12 +160,13 @@ One new trait method, called before a tree is created:
 ```
 
 Both implementations are one expression over the shared function, and `addTree`
-in each gains the same check as a backstop. A check-then-act window remains
-between `checkTreeCapacity` and `addTree`: two concurrent creations at exactly
-the limit can both pass the check, and the backstop then refuses one
-association, which is the orphan case. The window is a genuine race at the
-boundary rather than the default path, and closing it entirely would require
-reserving a slot.
+in each enforces the ceiling atomically as the backstop. The in-memory store
+resolves, checks and writes in one `Ref.modify`. The Postgres store counts and
+inserts in one transaction holding a row lock on the parent `workspaces` row;
+the lock is on the parent because the rows being counted do not exist yet, so
+there is nothing in `workspace_trees` to lock. `checkTreeCapacity` stays a
+separate earlier read, so a creation refused at the ceiling is refused before a
+tree is written; it is an early exit, not the enforcement point.
 
 `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`:
 
@@ -279,9 +280,7 @@ Deleting the two `*ById` error types removes two types that carried a
 
 ## Open decisions
 
-None. All three changes are ruled (see the decisions table). One residual
-behaviour is recorded above rather than left as a choice: the check-then-act
-window in WSF-D-2.
+None. All three changes are ruled (see the decisions table).
 
 ---
 

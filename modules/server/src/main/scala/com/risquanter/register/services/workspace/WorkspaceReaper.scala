@@ -99,4 +99,9 @@ object WorkspaceReaper:
                        CascadeDelete.workspace(ws.id, ws.trees, treeService, scenarioService))
                    }
       yield ()
-    (ZIO.sleep(zio.Duration.fromJava(interval)) *> cycle).forever
+    // A failed cycle costs one interval, so it is logged and the loop carries
+    // on. Ending the fiber would stop every later eviction with no symptom.
+    val survivingCycle = cycle.catchAll(error =>
+      ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: ${error.getMessage}")
+    )
+    (ZIO.sleep(zio.Duration.fromJava(interval)) *> survivingCycle).forever

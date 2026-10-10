@@ -36,6 +36,13 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
   private val treeA = treeId("01ARZ3NDEKTSV4RRFFQ69G5FAV")
   private val treeB = treeId("01ARZ3NDEKTSV4RRFFQ69G5FAW")
 
+  /** Eight distinct tree ids for the concurrency case. The suffix letters are
+    * Crockford base32, which a ULID requires.
+    */
+  private val manyTrees: List[TreeId] =
+    List("B", "C", "D", "E", "F", "G", "H", "J")
+      .map(suffix => treeId(s"01ARZ3NDEKTSV4RRFFQ69G5F${suffix}A"))
+
   override def spec = suite("WorkspaceStoreLive security regressions")(
     test("create + resolve succeeds") {
       for
@@ -106,6 +113,20 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         res   <- store.addTree(key, treeA).either
         list  <- store.listTrees(key)
       yield assertTrue(res.isRight, list == List(treeA))
+    },
+
+    test("concurrent associations cannot exceed the ceiling between them") {
+      // Eight callers, one slot, one winner.
+      for
+        store     <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
+        key       <- store.create()
+        outcomes  <- ZIO.foreachPar(manyTrees)(t => store.addTree(key, t).either)
+        list      <- store.listTrees(key)
+      yield assertTrue(
+        outcomes.count(_.isRight) == 1,
+        outcomes.count(_.isLeft) == manyTrees.size - 1,
+        list.size == 1
+      )
     },
 
     test("checkTreeCapacity refuses before a tree is created, and allows below the ceiling") {

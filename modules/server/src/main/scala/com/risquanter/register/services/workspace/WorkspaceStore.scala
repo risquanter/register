@@ -21,18 +21,23 @@ import com.risquanter.register.domain.errors.{AppError, TreeNotInWorkspace, Vali
 trait WorkspaceStore:
   /** Create a new workspace with the configured TTL.
     *
-    * `seedEntityId` is the workspace's stochastic identity (HDR Entity axis,
-    * PLAN-SEED-IDENTITY §5.2). `None` assigns the next value from the store's
-    * monotonic counter (contract responsibility, per backend: Postgres sequence /
-    * fixed-base in-memory counter — §12.2). `Some(v)` provides it explicitly;
+    * `seedEntityId` is the workspace's stochastic identity on the HDR Entity
+    * axis. `None` assigns the next value from the store's monotonic counter,
+    * which each backend owns: a Postgres sequence, or a fixed-base in-memory
+    * counter. `Some(v)` provides it explicitly;
     * fails with ValidationFailed(DUPLICATE_VALUE) when a live workspace already
     * holds `v`, and bumps the counter past `v` so later assignments cannot collide.
     *
-    * Security: logs creation event (A29).
+    * Logs a creation event.
     */
   def create(seedEntityId: Option[SeedEntityId.SeedEntityId] = None): IO[AppError, WorkspaceKeySecret]
 
-  /** Associate a tree with a workspace. Fails if workspace expired or not found. */
+  /** Associate a tree with a workspace. Fails if the workspace is expired or not
+    * found, or already holds the configured maximum number of trees.
+    * Re-associating a tree it already holds succeeds at the maximum.
+    *
+    * Implementations resolve, check and write atomically.
+    */
   def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op. */
@@ -43,8 +48,9 @@ trait WorkspaceStore:
 
   /** Resolve a workspace. Fails with WorkspaceExpired or WorkspaceNotFound.
     * Implements dual timeout: absolute (createdAt + ttl) AND idle (lastAccessedAt + idleTimeout).
-    * Updates lastAccessedAt on successful resolution (A10).
-    * Constant response for not-found vs expired at HTTP layer (A13).
+    * Updates lastAccessedAt on successful resolution. Not-found and expired
+    * encode to one constant response at the HTTP layer, so neither is
+    * distinguishable by a caller.
     */
   def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord]
 
@@ -89,21 +95,22 @@ trait WorkspaceStore:
     * derivable via `.size`.
     *
     * Called by both the background reaper fiber and the admin endpoint.
-    * Security: logs eviction events (A31).
+    * Logs an eviction event.
+    *
+    * Fails rather than dying when the backing store is unreachable, so the
+    * reaper can log and retry on its next tick instead of its fiber ending.
     */
-  def evictExpired: UIO[List[WorkspaceRecord]]
+  def evictExpired: IO[AppError, List[WorkspaceRecord]]
 
-  /** Hard delete. Removes workspace from the store.
-    * Tree cascade-deletion is orchestrated by the controller (Option B).
-    * Security: logs deletion event (A29).
+  /** Hard delete. Removes workspace from the store. Tree cascade-deletion is
+    * orchestrated by the controller. Logs a deletion event.
     */
   def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
 
   /** Atomic rotation. Generates new key, transfers all tree associations,
     * instantly invalidates old key. No grace period — old key is immediately
     * dead, new key is immediately live.
-    * Returns new key.
-    * Security: logs rotation event (A29).
+    * Returns new key. Logs a rotation event.
     */
   def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret]
 
@@ -119,16 +126,19 @@ object WorkspaceStore:
     ZIO.serviceWithZIO[WorkspaceStore](_.checkTreeCapacity(key))
 
   /** Refuses room for a tree the workspace does not already hold. */
+  /** The refusal a workspace already holding `limit` trees produces. A value
+    * rather than a function of a record, because a backend deciding capacity
+    * inside a transaction holds the count there and no record.
+    */
+  def maxTreesReached(limit: Int): AppError =
+    ValidationFailed(List(ValidationError(
+      field   = "workspace.trees",
+      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message = ValidationMessages.maxTreesPerWorkspaceReached(limit)
+    )))
+
   def treeCapacityForNew(ws: WorkspaceRecord, limit: Int): Either[AppError, Unit] =
-    Either.cond(
-      ws.trees.size < limit,
-      (),
-      ValidationFailed(List(ValidationError(
-        field   = "workspace.trees",
-        code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = ValidationMessages.maxTreesPerWorkspaceReached(limit)
-      )))
-    )
+    Either.cond(ws.trees.size < limit, (), maxTreesReached(limit))
 
   /** Refuses a new tree association once the workspace holds the configured
     * maximum. Re-associating a tree the workspace already holds is always
@@ -156,7 +166,7 @@ object WorkspaceStore:
   def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolveTree(key, treeId))
 
-  def evictExpired: ZIO[WorkspaceStore, Nothing, List[WorkspaceRecord]] =
+  def evictExpired: ZIO[WorkspaceStore, AppError, List[WorkspaceRecord]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)
 
   def delete(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =

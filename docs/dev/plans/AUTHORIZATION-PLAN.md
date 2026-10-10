@@ -452,6 +452,39 @@ when **any** policy matches. Authenticated routes match `require-jwt`; public
 routes match `allow-capability-urls`. A request matching neither is denied by
 default.
 
+#### Open: `DELETE /admin/workspaces/expired` has no owner
+
+The endpoint triggers an eviction sweep across every workspace. It is built
+from `baseEndpoint`, not `authedBaseEndpoint`, so the application performs no
+check of any kind — unlike `DELETE /w/{key}`, which requires a JWT and an
+`AdminWorkspace` permission.
+
+Three layers bear on whether it is reachable, and only one of them currently
+stops it:
+
+- **nginx, by omission.** The ingress `HTTPRoute` in `register-infra`
+  (`infra/k8s/istio/ingress-gateway.yaml`) carries no path matches and sends
+  everything to the `frontend` Service, which is the nginx in
+  `containers/prod/Dockerfile.frontend-prod`. That nginx proxies only `/w/`,
+  `/workspaces`, `/distribution`, `/health` and `/docs`; `/admin` has no
+  location, so it falls to the single-page-application fallback and never
+  reaches the server. This is what blocks the route today, and it holds only
+  for as long as nobody adds a location or changes the fallback.
+- **The Istio waypoint.** `/admin/*` is absent from `allow-capability-urls`,
+  so in capability-only mode no policy matches it and it is denied. In
+  identity and fine-grained modes `require-jwt` matches any valid principal,
+  so were nginx to proxy it, any authenticated user could trigger a sweep.
+- **The application.** No check at all.
+
+The mesh is the right owner for "not reachable from outside", because a deny
+there is explicit rather than incidental, and because nginx is the component
+that would be edited to add a route. A deny rule naming `/admin/*` belongs in
+`register-infra`'s `authorization-policy.yaml`. Whether the application should
+also require a credential is a separate question and is open.
+
+Out of scope: the Docker Compose stack is a local development environment and
+is not defended here.
+
 ### Task L1.6: Tests
 
 - `UserContextExtractor` parses claims correctly
@@ -628,13 +661,18 @@ object UserId:
     UserId.fromString(s).left.map(_.mkString(", ")))
 ```
 
-**`WorkspaceId`** — stable non-secret ULID identifier for SpiceDB resource references. **Does not yet exist in the codebase.** The current `Workspace` domain model uses only `WorkspaceKeySecret` as its identity, which was intentional at Layer 0.
+**`WorkspaceId`** — stable confidential ULID identifier for SpiceDB resource
+references. **It exists**: `WorkspaceRecord` carries it, and it already names Irmin
+storage paths, scenario branch names, the `workspace_trees` foreign key and the
+cache-registry key. Confidential rather than non-secret: it is not a credential and
+possessing it grants nothing, but it must not cross the client boundary in either
+direction (ADR-036).
 
 `WorkspaceKeySecret` cannot serve as the SpiceDB `objectId` for two reasons:
 - It is a **secret credential** — SpiceDB logs relationship tuples for auditing; logging the capability key would be a security incident
 - It **changes on `rotate()`** — `WorkspaceStore.rotate()` exists; using the key as a stable resource ID would invalidate all SpiceDB tuples on rotation
 
-This type mirrors `TreeId` exactly: nominal `case class` wrapper over `SafeId` (ULID), compiler-distinct, non-secret, stable for the workspace's lifetime.
+This type mirrors `TreeId` exactly: nominal `case class` wrapper over `SafeId` (ULID), compiler-distinct, confidential, stable for the workspace's lifetime.
 
 ```scala
 // Nominal case class wrapper over SafeId (ULID) — compiler-distinct from TreeId.
@@ -650,7 +688,7 @@ object WorkspaceId:
     WorkspaceId.fromString(s).left.map(_.mkString(", ")))
 ```
 
-**Implementation note:** `workspaceId: WorkspaceId` should be added to `Workspace` at **Layer 1** implementation time (generated alongside the capability key at creation), not Layer 2. This avoids a data migration — workspaces created before Layer 2 will already have a stable non-secret ID when SpiceDB integration is added.
+**Implementation note:** this has landed. `WorkspaceId` is generated alongside the capability key at workspace creation, so no data migration is needed when SpiceDB integration is added — every workspace already carries a stable identifier that is not the credential.
 
 **`ResourceType`** — sealed enum. Values match Zed schema `definition` names exactly. Used to construct the `objectType` field in SpiceDB requests.
 
@@ -1068,7 +1106,10 @@ Complete route census as of the current codebase. Every route is assigned a `Per
 
 #### Prerequisite: `WorkspaceId` must exist before Wave 0
 
-`ws.asResource` requires a stable, non-secret identifier for the workspace (see Task L2.2 design questions). `WorkspaceId` does not yet exist in the codebase. Before any wave can write or check SpiceDB workspace relations, the following changes must land as a separate atomic commit:
+`ws.asResource` requires a stable identifier for the workspace that is not the
+credential (see Task L2.2 design questions). `WorkspaceId` exists and is already
+generated at workspace creation, so the prerequisite below is met; it is retained
+as the record of what the type had to satisfy:
 
 1. Add `WorkspaceId` to `OpaqueTypes.scala` — mirrors `TreeId` exactly:
    ```scala

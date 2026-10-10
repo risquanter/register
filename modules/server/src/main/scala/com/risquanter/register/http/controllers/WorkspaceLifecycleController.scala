@@ -134,8 +134,8 @@ class WorkspaceLifecycleController private (
     yield ()).either
   }
 
-  val evictExpired: ServerEndpoint[Any, Task] = evictExpiredEndpoint.serverLogicSuccess { _ =>
-    for
+  val evictExpired: ServerEndpoint[Any, Task] = evictExpiredEndpoint.serverLogic { _ =>
+    (for
       // exempt: system maintenance — no user context (ADR-030 §2; same token
       // WorkspaceReaper uses for the identical TTL-driven cascade — this
       // endpoint is the admin-triggered, on-demand equivalent of that sweep)
@@ -145,7 +145,7 @@ class WorkspaceLifecycleController private (
                    ZIO.foreachParDiscard(evicted)(ws =>
                      CascadeDelete.workspace(ws.id, ws.trees, riskTreeService, scenarioService))
                  }
-    yield Map("evicted" -> evicted.size)
+    yield Map("evicted" -> evicted.size)).either
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

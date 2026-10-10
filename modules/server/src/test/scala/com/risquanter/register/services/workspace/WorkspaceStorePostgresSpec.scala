@@ -94,6 +94,21 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         assert(exit)(fails(isSubtype[ValidationFailed](anything)))
     },
 
+    test("concurrent associations cannot exceed the ceiling between them") {
+      // Eight callers, one slot, one winner.
+      for
+        store    <- ZIO.service[WorkspaceStore]
+        key      <- store.create()
+        trees    <- ZIO.foreach(1 to 8)(_ => IdGenerators.nextTreeId)
+        outcomes <- ZIO.foreachPar(trees.toList)(t => store.addTree(key, t).either)
+        listed   <- store.listTrees(key)
+      yield assertTrue(
+        outcomes.count(_.isRight) == 1,
+        outcomes.count(_.isLeft) == 7,
+        listed.size == 1
+      )
+    },
+
     test("evictExpired returns expired workspace records") {
       for
         store   <- ZIO.service[WorkspaceStore]
