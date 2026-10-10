@@ -452,48 +452,55 @@ when **any** policy matches. Authenticated routes match `require-jwt`; public
 routes match `allow-capability-urls`. A request matching neither is denied by
 default.
 
-#### Open: `DELETE /admin/workspaces/expired` has no owner
+#### `DELETE /admin/workspaces/expired` — the mesh owns reachability
 
 The endpoint triggers an eviction sweep across every workspace. It is built
 from `baseEndpoint`, not `authedBaseEndpoint`, so the application performs no
 check of any kind — unlike `DELETE /w/{key}`, which requires a JWT and an
 `AdminWorkspace` permission.
 
-Three layers bear on whether it is reachable, and only one of them currently
-stops it:
+Closed on 2026-10-10 in the `register-infra` repository: the
+`deny-admin-paths` AuthorizationPolicy in
+`infra/k8s/istio/authorization-policy.yaml` denies `/admin` and `/admin/*` at
+the waypoint. Istio evaluates a DENY before every ALLOW, so the refusal holds
+in every authorization mode and does not depend on which ALLOW policies match.
 
+Why a deny was required rather than an adjustment to the existing policies:
+the two ALLOW policies constrain different dimensions, and Istio admits a
+request when any ALLOW matches. `require-jwt` constrains identity and carries
+no path clause, so one valid token admits every path. `allow-capability-urls`
+constrains path and not identity. Neither can express "no path under
+`/admin`", and the route's apparent closure in capability-only mode was only
+the absence of a matching ALLOW — turning identity on opened it.
+
+The four layers that bear on reachability, as they now stand:
+
+- **The Istio waypoint.** `deny-admin-paths` refuses the path outright. This is
+  the owner, because a deny there is explicit rather than incidental, and
+  because nginx is the component that would be edited to add a route.
 - **nginx, by omission.** The ingress `HTTPRoute` in `register-infra`
   (`infra/k8s/istio/ingress-gateway.yaml`) carries no path matches and sends
   everything to the `frontend` Service, which is the nginx in
   `containers/prod/Dockerfile.frontend-prod`. That nginx proxies only `/w/`,
   `/workspaces`, `/distribution`, `/health` and `/docs`; `/admin` has no
-  location, so it falls to the single-page-application fallback and never
-  reaches the server. This is what blocks the route today, and it holds only
-  for as long as nobody adds a location or changes the fallback.
-- **The Istio waypoint.** `/admin/*` is absent from `allow-capability-urls`,
-  so in capability-only mode no policy matches it and it is denied. In
-  identity and fine-grained modes `require-jwt` matches any valid principal,
-  so the waypoint would admit it.
+  location, so it falls to the single-page-application fallback. This still
+  holds, but it is a routing table rather than an authorization decision, and
+  the waypoint now refuses the request one hop earlier.
 - **The Open Policy Agent check.** `allow.rego` in `register-infra` runs on
-  every request that reaches the waypoint. Its final rule allows any path to a
-  caller holding a recognised role, unless a `denied` clause fires. The two
-  that exist cover viewer-only callers performing writes, and the cache
-  administration paths. Neither covers `/admin/*`. So a caller holding
-  `analyst`, `editor` or `team_admin` is allowed; a viewer-only caller is
-  blocked, but only incidentally, by the viewer-write rule.
+  every request that reaches it. Its final rule allows any path to a caller
+  holding a recognised role, unless a `denied` clause fires; the two that exist
+  cover viewer-only callers performing writes, and the cache administration
+  paths. Neither covers `/admin/*`. The authorization filter runs before the
+  external authorization filter, so OPA is never consulted for this path.
 - **The application.** No check at all.
 
-So if nginx ever proxied the path, any user holding a write-capable role could
-trigger a sweep across every workspace.
+An operator retains access: the policy is attached to the waypoint, which only
+sees service-addressed traffic, so `kubectl port-forward` reaches the pod
+directly and the sweep can still be triggered from inside the cluster.
 
-The mesh is the right owner for "not reachable from outside", because a deny
-there is explicit rather than incidental, and because nginx is the component
-that would be edited to add a route. A deny rule naming `/admin/*` belongs in
-`register-infra`'s `authorization-policy.yaml`. A path-based deny carries none
-of the filter-ordering hazard that retired the previous deny policy there,
-which matched on an identity header that the JWT filter re-adds before the
-authorization filter runs. Whether the application should also require a
-credential is a separate question and is open.
+Still open: whether the application should also require a credential on this
+route. The mesh deny makes the route unreachable; it does not make the route
+defended.
 
 Out of scope: the Docker Compose stack is a local development environment and
 is not defended here.
