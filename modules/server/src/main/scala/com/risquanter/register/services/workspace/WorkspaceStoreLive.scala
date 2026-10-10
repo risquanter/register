@@ -11,9 +11,9 @@ import com.risquanter.register.util.IdGenerators
 /** In-memory Ref-based WorkspaceStore implementation.
   *
   * Security features:
-  * - A11: Dual timeout (absolute + idle) in resolve()
-  * - A14: O(1) lookup via Map.get — constant-time, no early-return timing branches
-  * - A29/A33: Structured security event logging on create, delete, rotate, evict
+  * - both timeouts, absolute and idle, applied in resolve()
+  * - constant-time lookup via Map.get, with no early-return timing branches
+  * - structured security event logging on create, delete, rotate and evict
   *
   * Data is ephemeral — lost on server restart (acceptable for free-tier).
   */
@@ -41,18 +41,18 @@ final class WorkspaceStoreLive private (
 
   /** Pure workspace validation: O(1) lookup + dual timeout check.
     *
-    * A14: Map.get is O(1). Both not-found and expired do identical work
-    * (lookup + instant comparison), preventing timing side-channels.
+    * `Map.get` is constant-time, and not-found and expired do identical work —
+    * one lookup plus one instant comparison — so neither is distinguishable by
+    * how long the call took.
     */
   private def validateWorkspace(
     map: Map[WorkspaceKeyHash, WorkspaceRecord],
     keyHash: WorkspaceKeyHash,
-    key: WorkspaceKeySecret,
     now: Instant
   ): Either[AppError, WorkspaceRecord] =
     map.get(keyHash) match
-      case None                          => Left(WorkspaceNotFound(key))
-      case Some(ws) if ws.isExpired(now) => Left(WorkspaceExpired(key, ws.createdAt, ws.ttl))
+      case None                          => Left(WorkspaceNotFound())
+      case Some(ws) if ws.isExpired(now) => Left(WorkspaceExpired())
       case Some(ws)                      => Right(ws)
 
   // ── Public API ────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ final class WorkspaceStoreLive private (
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
       result  <- ref.modify { state =>
-                   validateWorkspace(state.byHash, keyHash, key, now) match
+                   validateWorkspace(state.byHash, keyHash, now) match
                      case Left(err) => (Left(err), state)
                      case Right(ws) =>
                        WorkspaceStore.treeCapacity(ws, treeId, config.maxTreesPerWorkspace) match
@@ -175,7 +175,7 @@ final class WorkspaceStoreLive private (
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
       result <- ref.modify { map =>
-        validateWorkspace(map.byHash, keyHash, key, now) match
+        validateWorkspace(map.byHash, keyHash, now) match
           case Left(err) => (Left(err), map)
           case Right(ws) =>
             val touched = ws.touch(now)
@@ -227,7 +227,7 @@ final class WorkspaceStoreLive private (
       oldHash  = WorkspaceKeyCrypto.hash(key)
       newHash  = WorkspaceKeyCrypto.hash(newKey)
       result <- ref.modify { map =>
-        validateWorkspace(map.byHash, oldHash, key, now) match
+        validateWorkspace(map.byHash, oldHash, now) match
           case Left(err) => (Left(err), map)
           case Right(ws) =>
             val rotated = ws.copy(keyHash = newHash, createdAt = now, lastAccessedAt = now)
@@ -249,7 +249,7 @@ final class WorkspaceStoreLive private (
     for
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
-      result <- ref.get.map(state => validateWorkspace(state.byHash, keyHash, key, now))
+      result <- ref.get.map(state => validateWorkspace(state.byHash, keyHash, now))
       ws     <- ZIO.fromEither(result).tapError(logResolveFailure(key))
     yield ws
 

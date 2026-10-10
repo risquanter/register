@@ -226,12 +226,12 @@ final class WorkspaceStorePostgres private (
       row <- loadWorkspaceRowByHash(key)
       ws  <- toRecord(row)
       now <- Clock.instant
-      _   <- ZIO.fail(WorkspaceExpired(key, ws.createdAt, ws.ttl)).when(ws.isExpired(now))
+      _   <- ZIO.fail(WorkspaceExpired()).when(ws.isExpired(now))
     yield ws
 
   private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError, WorkspaceRow] =
     db(run(query[WorkspaceRow].filter(_.keyHash == lift(WorkspaceKeyCrypto.hash(key))))).flatMap(rows =>
-      ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFound(key))
+      ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFound())
     )
 
   private def loadTrees(workspaceId: WorkspaceId): IO[AppError, Set[TreeId]] =

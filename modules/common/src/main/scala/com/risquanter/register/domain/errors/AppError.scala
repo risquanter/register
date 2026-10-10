@@ -2,8 +2,7 @@ package com.risquanter.register.domain.errors
 
 import scala.concurrent.duration.Duration
 import sttp.model.StatusCode
-import java.time.{Duration as JDuration, Instant}
-import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, TreeId, WorkspaceId}
 
 sealed trait AppError extends Throwable
 sealed trait SimError extends AppError
@@ -28,11 +27,12 @@ case class RepositoryFailure(reason: String) extends SimError:
 object RepositoryFailure:
   /** Sentinel prefix for workspace-level errors reconstructed by `ErrorResponse.decode`.
     *
-    * A13 opaque 404s are decoded as `RepositoryFailure("workspace:…")` because
-    * the real `WorkspaceNotFound` requires a `WorkspaceKeySecret` that is lost
-    * through the opaque wire format.  Both `GlobalError.fromThrowable` and
-    * `ZJS.loadInto` use this predicate to route workspace errors to the blue
-    * info banner rather than inline error displays.
+    * The workspace errors collapse to one 404 whose body carries no field
+    * naming which of them it was, so `decode` cannot rebuild the error it
+    * received and returns `RepositoryFailure("workspace:…")` instead.
+    * `GlobalError.fromThrowable` and `ZJS.loadInto` test this prefix to route
+    * a workspace error to the informational banner rather than an inline error
+    * display.
     */
   val WorkspaceSentinelPrefix: String = "workspace:"
 
@@ -67,27 +67,47 @@ case class AccessDenied(reason: String) extends SimError:
   override def getMessage: String = reason
 
 // ============================================================================
-// Workspace Errors (A13: all map to opaque 404 at HTTP layer)
+// Workspace Errors — all three encode to one opaque 404, so a caller cannot
+// tell which of them it was.
 // ============================================================================
 
-/** Workspace not found — maps to opaque 404 (A13).
-  * ADR-035: getMessage omits raw key (zero diagnostic value — request URL identifies workspace).
+/** A workspace key that resolved to no live workspace.
+  *
+  * Carries nothing. At the point this is built the lookup has already failed,
+  * so there is no workspace identity to name, and the capability key is not a
+  * field: a credential is a `final class` so that no `copy`, `unapply` or
+  * product serialisation exists for it, and a `case class` holding one returns
+  * all three for the wrapper (ADR-022 R1).
+  *
+  * A parameterless `case class` rather than a `case object`, because this is a
+  * `Throwable` — a singleton would capture one stack trace when it initialises
+  * instead of one per failure.
   */
-case class WorkspaceNotFound(key: WorkspaceKeySecret) extends SimError {
+case class WorkspaceNotFound() extends SimError {
   override def getMessage: String = "Workspace not found"
 }
 
-/** Workspace expired — maps to same opaque 404 as not-found (A13).
-  * ADR-035: getMessage uses createdAt/ttl as diagnostics, not raw key.
+/** A workspace past its absolute or idle timeout.
+  *
+  * Carries nothing, for the same credential reason as `WorkspaceNotFound`, and
+  * because this is the one workspace error the client reconstructs from a
+  * response: every field it held would have to be a field the wire carries,
+  * and the workspace identifier must not cross that boundary (ADR-036). The
+  * identifier, the creation time and the expiry time are annotated on the
+  * resolve-failure log line instead, where the record is in scope.
   */
-case class WorkspaceExpired(key: WorkspaceKeySecret, createdAt: Instant, ttl: JDuration) extends SimError {
-  override def getMessage: String = s"Workspace expired (created: $createdAt, ttl: $ttl)"
+case class WorkspaceExpired() extends SimError {
+  override def getMessage: String = "Workspace expired"
 }
 
-/** Tree not associated with workspace — maps to opaque 404 (A13).
-  * ADR-035: getMessage omits raw key; treeId is the useful diagnostic.
+/** A tree the resolved workspace does not hold.
+  *
+  * `wsId` is a diagnostic for the server's own logs. It stays out of
+  * `getMessage`, which may name no confidential internal identifier
+  * (ADR-035 §3), and out of every response (ADR-036). The tree identifier is
+  * not confidential and is the useful part of the message.
   */
-case class TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId) extends SimError {
+case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends SimError {
   override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
 }
 

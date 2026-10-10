@@ -51,8 +51,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       },
 
       test("encodes WorkspaceNotFound to opaque 404") {
-        val key = WorkspaceKeySecret.fromString("abcdefghijklmnopqrstuv").toOption.get
-        val (status, response) = ErrorResponse.encode(WorkspaceNotFound(key))
+        val (status, response) = ErrorResponse.encode(WorkspaceNotFound())
 
         assertTrue(
           status == StatusCode.NotFound,
@@ -61,11 +60,8 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
       },
 
-      test("encodes WorkspaceExpired to same opaque 404 as not-found (A13)") {
-        val key = WorkspaceKeySecret.fromString("ABCDEFGHIJKLMNOPQRSTUV").toOption.get
-        val (status, response) = ErrorResponse.encode(
-          WorkspaceExpired(key, Instant.now(), JDuration.ofHours(1))
-        )
+      test("encodes WorkspaceExpired to same opaque 404 as not-found") {
+        val (status, response) = ErrorResponse.encode(WorkspaceExpired())
 
         assertTrue(
           status == StatusCode.NotFound,
@@ -388,13 +384,13 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       },
 
       test("roundtrip: workspace opaque 404 encodes to opaque 404 and decodes to workspace sentinel") {
-        val key = WorkspaceKeySecret.fromString("abcdefghijklmnopqrstuv").toOption.get
+        val wsId = com.risquanter.register.domain.data.iron.WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAW").toOption.get
         val treeId = com.risquanter.register.domain.data.iron.TreeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
         // All three workspace error types encode to the same opaque 404
         val errors = List(
-          WorkspaceNotFound(key),
-          WorkspaceExpired(key, java.time.Instant.now(), java.time.Duration.ofHours(1)),
-          TreeNotInWorkspace(key, treeId)
+          WorkspaceNotFound(),
+          WorkspaceExpired(),
+          TreeNotInWorkspace(wsId, treeId)
         )
         val results = errors.map(e => ErrorResponse.decode(ErrorResponse.encode(e)))
         assertTrue(

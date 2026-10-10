@@ -11,12 +11,13 @@ import com.risquanter.register.domain.errors.{AppError, TreeNotInWorkspace, Vali
   * Does NOT store or duplicate tree data. The raw workspace key is consumed
   * at the HTTP/controller layer and reduced to a hash for store lookup.
   *
-  * Security features baked into the trait contract:
-  * - A5:  `delete()` and `rotate()` — revocation and key rotation
-  * - A10: `resolve()` updates lastAccessedAt on success
-  * - A11: `resolve()` implements dual timeout (absolute + idle)
-  * - A13: All error variants map to opaque 404 at HTTP layer
-  * - A14: Implementations must use O(1) lookup (Map.get / indexed query)
+  * Security properties the trait contract carries:
+  * - `delete()` and `rotate()` give revocation and key rotation
+  * - `resolve()` updates lastAccessedAt on success
+  * - `resolve()` applies both timeouts, absolute and idle
+  * - every error variant encodes to one opaque 404, so a caller cannot tell
+  *   which of them it was
+  * - implementations look up in constant time (`Map.get`, or an indexed query)
   */
 trait WorkspaceStore:
   /** Create a new workspace with the configured TTL.
@@ -73,7 +74,7 @@ trait WorkspaceStore:
   def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, WorkspaceRecord] =
     for
       ws <- resolve(key)
-      _  <- ZIO.unless(ws.trees.contains(treeId))(ZIO.fail(TreeNotInWorkspace(key, treeId)))
+      _  <- ZIO.unless(ws.trees.contains(treeId))(ZIO.fail(TreeNotInWorkspace(ws.id, treeId)))
     yield ws
 
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
@@ -82,8 +83,8 @@ trait WorkspaceStore:
   /** Resolve workspace + verify tree ownership.
     *
     * Composed from `resolve` and `belongsTo` — fails with
-    * `TreeNotInWorkspace` (opaque 404 via A13) when the tree does
-    * not belong to the workspace.
+    * `TreeNotInWorkspace` when the tree does not belong to the workspace,
+    * which encodes to the same opaque 404 as a missing workspace.
     */
   def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
     resolveTreeWorkspace(key, treeId).unit
