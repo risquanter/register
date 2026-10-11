@@ -149,18 +149,23 @@ import com.risquanter.register.domain.errors.ValidationError
   * type and uses it, exactly as it does with a response type in
   * `http/responses` (ADR-035).
   */
+Every case carries `trace`, projected from `AppError.trace`, so a failure the
+user sees names the trace it came from. It is last in every parameter list, so
+the case's own content reads first.
+
+```scala
 @jsonDiscriminator("kind")
 enum WireError:
   /** A request body the decoders rejected. Carries one entry per independent
     * failure, so a form shows every problem at once. */
-  case ValidationRejected(errors: List[ValidationError])
+  case ValidationRejected(errors: List[ValidationError], trace: TraceId)
 
   /** A well-formed request whose query the engine refused. */
-  case QueryRejected(problem: QueryProblem)
+  case QueryRejected(problem: QueryProblem, trace: TraceId)
 
-  /** No such resource, or one the caller may not see. Carries nothing: the two
-    * are one response so that neither is an existence oracle. */
-  case NotFound()
+  /** No such resource, or one the caller may not see. The two are one response
+    * so that neither is an existence oracle. */
+  case NotFound(trace: TraceId)
 
   /** A workspace past its absolute or idle timeout.
     *
@@ -168,26 +173,26 @@ enum WireError:
     * how long a workspace lasts without holding a second copy of the figure. It
     * is the server's `WorkspaceConfig.ttl` and nothing else.
     */
-  case WorkspaceExpired(lifetime: Duration)
+  case WorkspaceExpired(lifetime: Duration, trace: TraceId)
 
-  /** Refused. Carries nothing, and every denial produces this one shape: an
-    * explicit deny and an unreachable authorization service must be
-    * indistinguishable, or an outage is observable from outside (ADR-035 §2). */
-  case AccessDenied()
+  /** Refused. Every denial produces this one shape: an explicit deny and an
+    * unreachable authorization service must be indistinguishable, or an outage
+    * is observable from outside (ADR-035 §2). */
+  case AccessDenied(trace: TraceId)
 
   /** The request conflicts with current state. */
-  case Conflict(conflict: ConflictKind)
+  case Conflict(conflict: ConflictKind, trace: TraceId)
 
   /** The deployment does not provide this capability. */
-  case NotSupported(capability: Capability)
+  case NotSupported(capability: Capability, trace: TraceId)
 
-  /** A dependency this request needed did not answer. Carries nothing: which
-    * dependency, and how it failed, are internal (ADR-035 §2). */
-  case DependencyUnavailable()
+  /** A dependency this request needed did not answer. Which dependency, and how
+    * it failed, stay internal (ADR-035 §2). */
+  case DependencyUnavailable(trace: TraceId)
 
-  /** An unexpected server-side fault. Carries nothing; the reason is in the
-    * server log against the request's correlation identifier. */
-  case InternalFault()
+  /** An unexpected server-side fault. The reason is in the server log, against
+    * this trace. */
+  case InternalFault(trace: TraceId)
 
 object WireError:
   given codec: JsonCodec[WireError] = DeriveJsonCodec.gen[WireError]
@@ -364,63 +369,68 @@ gives up — the current encoder's `case _: TreeNotInWorkspace` binds nothing an
 so discards the tree identifier along with the workspace identifier.
 
 ```scala
-def fromAppError(e: AppError): WireError = e match
-  // Request rejected
-  case ValidationFailed(errors)             => ValidationRejected(errors)
+def fromAppError(e: AppError): WireError =
+  // The trace is a field of every error and of every wire case, so it is bound
+  // once here rather than read in each arm.
+  val t = e.trace
 
-  // Query refused
-  case FolParseFailure(message, position)   => QueryRejected(QueryProblem.Unparseable(message, position))
-  case FolUnknownReference(messages)        => QueryRejected(QueryProblem.UnknownReferences(messages))
-  case FolBindFailure(errors)               => QueryRejected(QueryProblem.TypeCheckFailed(errors))
-  case FolDomainNotQuantifiable(message)    => QueryRejected(QueryProblem.NotQuantifiable(message))
+  e match
+    // Request rejected
+    case ValidationFailed(errors)             => ValidationRejected(errors, t)
 
-  // Absent, or not the caller's. One shape for both, so neither is an
-  // existence oracle. The workspace identifier may not cross (ADR-036); the
-  // tree identifier is dropped because it would distinguish the two cases.
-  case WorkspaceNotFound()                  => NotFound()
-  case TreeNotInWorkspace(_, _)             => NotFound()
+    // Query refused
+    case FolParseFailure(message, position)   => QueryRejected(QueryProblem.Unparseable(message, position), t)
+    case FolUnknownReference(messages)        => QueryRejected(QueryProblem.UnknownReferences(messages), t)
+    case FolBindFailure(errors)               => QueryRejected(QueryProblem.TypeCheckFailed(errors), t)
+    case FolDomainNotQuantifiable(message)    => QueryRejected(QueryProblem.NotQuantifiable(message), t)
 
-  // Expired. The lifetime crosses and the other two do not: the identifier may
-  // not (ADR-036), and the moment this workspace expired is a fact about one
-  // workspace that the browser has no use for. The lifetime is what lets it say
-  // how long a workspace lasts.
-  case WorkspaceExpired(_, ttl, _)          => WorkspaceExpired(ttl)
+    // Absent, or not the caller's. One shape for both, so neither is an
+    // existence oracle. The workspace identifier may not cross (ADR-036); the
+    // tree identifier is dropped because it would distinguish the two cases.
+    case WorkspaceNotFound()                  => NotFound(t)
+    case TreeNotInWorkspace(_, _)             => NotFound(t)
 
-  // Refused. The internal reason is dropped from all three: an explicit deny
-  // and an unreachable authorization service must look identical (ADR-035 §2).
-  case AccessDenied(_)                      => AccessDenied()
-  case AuthForbidden(_, _, _, _)            => AccessDenied()
-  case AuthServiceUnavailable(_, _)         => AccessDenied()
+    // Expired. The lifetime crosses; the workspace identifier may not
+    // (ADR-036), and the moment this one expired is a fact about one workspace
+    // the browser has no use for. The lifetime is what lets it say how long a
+    // workspace lasts.
+    case WorkspaceExpired(_, ttl, _)          => WorkspaceExpired(ttl, t)
 
-  // Conflicts
-  case DataConflict(_)                      => Conflict(ConflictKind.Rejected())
-  case VersionConflict(_, _, _)             => Conflict(ConflictKind.StaleVersion())
-  case MergeConflict(scenario, details)     => Conflict(ConflictKind.MergeRefused(scenario, details))
-  case MergeAlreadyRunning(scenario)        => Conflict(ConflictKind.MergeAlreadyRunning(scenario))
-  case MergeTargetMoved(scenario)           => Conflict(ConflictKind.MergeTargetMoved(scenario))
-  case ScenarioHeadStale(scenario, exp, _)  => Conflict(ConflictKind.ScenarioHeadStale(scenario, exp))
-  case SimulationNotCached(treeId)          => Conflict(ConflictKind.SimulationRequired(treeId))
+    // Refused. The internal reason is dropped from all three: an explicit deny
+    // and an unreachable authorization service must look identical (ADR-035 §2).
+    case AccessDenied(_)                      => AccessDenied(t)
+    case AuthForbidden(_, _, _, _)            => AccessDenied(t)
+    case AuthServiceUnavailable(_, _)         => AccessDenied(t)
 
-  // Capability absent
-  case ScenariosNotSupported(_)             => NotSupported(Capability.Scenarios)
+    // Conflicts
+    case DataConflict(_)                      => Conflict(ConflictKind.Rejected(), t)
+    case VersionConflict(_, _, _)             => Conflict(ConflictKind.StaleVersion(), t)
+    case MergeConflict(scenario, details)     => Conflict(ConflictKind.MergeRefused(scenario, details), t)
+    case MergeAlreadyRunning(scenario)        => Conflict(ConflictKind.MergeAlreadyRunning(scenario), t)
+    case MergeTargetMoved(scenario)           => Conflict(ConflictKind.MergeTargetMoved(scenario), t)
+    case ScenarioHeadStale(scenario, exp, _)  => Conflict(ConflictKind.ScenarioHeadStale(scenario, exp), t)
+    case SimulationNotCached(treeId)          => Conflict(ConflictKind.SimulationRequired(treeId), t)
 
-  // Dependency did not answer
-  case IrminUnavailable(_)                  => DependencyUnavailable()
-  case NetworkTimeout(_, _)                 => DependencyUnavailable()
-  case IrminHttpError(_, _)                 => DependencyUnavailable()
-  case IrminGraphQLError(_, _)              => DependencyUnavailable()
+    // Capability absent
+    case ScenariosNotSupported(_)             => NotSupported(Capability.Scenarios, t)
 
-  // Faults. The three compare-and-set outcomes are translated into domain
-  // errors by ScenarioService before they reach here; these arms are the net
-  // if that translation is ever skipped, and a client can act on none of them.
-  case BranchAlreadyExists(_)               => InternalFault()
-  case BranchHeadStale(_, _)                => InternalFault()
-  case IrminMergeConflict(_)                => InternalFault()
-  case RepositoryFailure(_)                 => InternalFault()
-  case TreeLoadFailure(_, _)                => InternalFault()
-  case SimulationFailure(_, _)              => InternalFault()
-  case FolModelValidationFailure(_)         => InternalFault()
-  case FolEvaluationFailure(_, _)           => InternalFault()
+    // Dependency did not answer
+    case IrminUnavailable(_)                  => DependencyUnavailable(t)
+    case NetworkTimeout(_, _)                 => DependencyUnavailable(t)
+    case IrminHttpError(_, _)                 => DependencyUnavailable(t)
+    case IrminGraphQLError(_, _)              => DependencyUnavailable(t)
+
+    // Faults. The three compare-and-set outcomes are translated into domain
+    // errors by ScenarioService before they reach here; these arms are the net
+    // if that translation is ever skipped, and a client can act on none of them.
+    case BranchAlreadyExists(_)               => InternalFault(t)
+    case BranchHeadStale(_, _)                => InternalFault(t)
+    case IrminMergeConflict(_)                => InternalFault(t)
+    case RepositoryFailure(_)                 => InternalFault(t)
+    case TreeLoadFailure(_, _)                => InternalFault(t)
+    case SimulationFailure(_, _)              => InternalFault(t)
+    case FolModelValidationFailure(_)         => InternalFault(t)
+    case FolEvaluationFailure(_, _)           => InternalFault(t)
 ```
 
 All 31 leaf types of `AppError` appear: 15 under `SimError`, 7 under
@@ -456,10 +466,21 @@ change. New file
 ```scala
 extension [R, A](effect: ZIO[R, AppError, A])
   /** Project the typed domain failure onto the wire type and move it into the
-    * `Either` that `serverLogic` expects. */
-  def wireEither: ZIO[R, Nothing, Either[WireError, A]] =
-    effect.mapError(WireError.fromAppError).either
+    * `Either` that `serverLogic` expects.
+    *
+    * Attaches the trace of the request before projecting: this is the one place
+    * the request context and the failure are both in scope.
+    */
+  def wireEither: ZIO[R & RequestContextRef, Nothing, Either[WireError, A]] =
+    effect
+      .mapError(e => e.attachTrace(currentTrace))
+      .mapError(WireError.fromAppError)
+      .either
 ```
+
+`currentTrace` reads the trace from the request context, falling back to the
+placeholder while nothing populates it. `PLAN-TELEMETRY-PLUMBING.md` replaces
+that fallback with a real value; the signature here does not change when it does.
 
 Each site then changes `.either` to `.wireEither`. `BaseController` is unchanged:
 its effect type stays `Task`, because `serverLogic` carries the typed error in the
@@ -616,7 +637,40 @@ rather than plausible, so a real value is never confused with a placeholder, and
 a search for either name is the complete list of sites the telemetry work must
 reach.
 
-**Every `WireError` case carries `trace: TraceId`**, with no default.
+**`AppError` carries the trace identifier, every `WireError` case projects it,
+and the browser displays it.** The chain is one projection with no extra
+parameter and no header: the identifier is a field of the error, so
+`fromAppError` reads it from its single argument like every other field.
+
+The trait carries it, so none of the 31 leaf types and none of their construction
+sites change:
+
+```scala
+sealed trait AppError extends Throwable:
+  /** The trace the failing work ran under.
+    *
+    * Assigned once at the boundary that projects the error, which is where the
+    * request context is in scope. An error that reaches the boundary without one
+    * reads as the placeholder, so an unattributed failure is findable rather
+    * than indistinguishable.
+    */
+  final def trace: TraceId = assignedTrace
+
+  private var assignedTrace: TraceId = TelemetryPlaceholders.UnlinkedTrace
+
+  private[register] def attachTrace(t: TraceId): this.type =
+    assignedTrace = t
+    this
+```
+
+A single assignment at one boundary, on a type that is already mutable —
+`Throwable` carries a stack trace and suppressed exceptions — and whose values
+are single-use. The alternative, a `trace` field on each of the 31 case classes,
+would put the identifier at every construction site in the services, which means
+threading the request context through every one of them.
+
+`§5.2`'s `wireEither` is that boundary: it is effectful, runs once per controller
+method, and has the context in scope.
 
 **Boundary.** This plan types the structure, removes the optionality, and marks
 what it cannot fill. Connecting the identifiers to real spans is
@@ -680,15 +734,33 @@ compiler checks every case rather than only the four sub-traits.
 
 ```scala
 def fromWireError(e: WireError): GlobalError = e match
-  case WireError.ValidationRejected(errors)  => ValidationFailed(errors)
-  case WireError.QueryRejected(problem)      => queryMessage(problem)
-  case WireError.NotFound()                  => NotFound
-  case WireError.WorkspaceExpired(lifetime)  => WorkspaceExpired(expiryMessage(lifetime))
-  case WireError.AccessDenied()              => ServerError("You do not have permission to do that.")
-  case WireError.Conflict(conflict)          => Conflict(conflictMessage(conflict))
-  case WireError.NotSupported(capability)    => ServerError(capabilityMessage(capability))
-  case WireError.DependencyUnavailable()     => DependencyError("A service this needs is not responding. Try again shortly.")
-  case WireError.InternalFault()             => ServerError("Something went wrong on the server.")
+  case WireError.ValidationRejected(errors, _)     => ValidationFailed(errors)
+  case WireError.QueryRejected(problem, _)         => queryMessage(problem)
+  case WireError.NotFound(_)                       => NotFound
+  case WireError.WorkspaceExpired(lifetime, _)     => WorkspaceExpired(expiryMessage(lifetime))
+  case WireError.AccessDenied(_)                   => ServerError(ErrorMessages.Forbidden)
+  case WireError.Conflict(conflict, _)             => Conflict(conflictMessage(conflict))
+  case WireError.NotSupported(capability, _)       => ServerError(capabilityMessage(capability))
+  case WireError.DependencyUnavailable(t)          => DependencyError(ErrorMessages.DependencyDown, Some(t))
+  case WireError.InternalFault(t)                  => ServerError(ErrorMessages.InternalFault, Some(t))
+```
+
+**The browser displays it, and which cases show it is a presentation choice
+rather than a data one.** The identifier is on every wire case, so every
+`GlobalError` case can carry it; the two that render it are the ones where the
+user has nothing else to act on and a reference is the only useful thing on
+screen — a dependency outage and an internal fault. The others carry an
+actionable message of their own, and a trace identifier beside it is noise.
+
+`GlobalError`'s cases therefore take `trace: Option[TraceId]` and `ErrorBanner`
+renders it in a muted line under the message, selectable so it can be copied:
+
+```scala
+case GlobalError.ServerError(msg, trace) =>
+  div(
+    span(cls := "error-banner-message", msg),
+    trace.map(t => div(cls := "error-banner-trace", t.value))
+  )
 ```
 
 `fromThrowable` stays, narrowed to its real job: a browser `fetch` failure is a
@@ -1054,10 +1126,14 @@ rediscovering it.
 
 ### EWB-D-8 — the correlation identifier — RULED 2026-10-11
 
-**Ruled: Option A, every case carries it, and it is a typed value rather than a
-`String`.** The shape is specified in §6.6: a nominal wrapper over an Iron
-refinement, and the value is the W3C Trace Context trace identifier rather than
-a second identifier invented beside it.
+**Ruled: the trace identifier is a field of `AppError`, is projected onto every
+`WireError` case, and the browser displays it.** The chain is one projection with
+no second parameter and no response header. The typed identifiers and the
+retyped `RequestContext` are in §6.6; the carrier on `AppError` and the
+projection are in §5.1 and §6.6.
+
+This ruling was given twice, because I reversed it in between on reasoning of my
+own. It is settled and is not reopened.
 
 **Goal.** Decide whether the request identifier reaches the browser, and therefore
 whether a user-reported failure can be traced to a server log line.
@@ -1363,7 +1439,7 @@ boundary between the two is part of this decision.
 | ADR | What this plan touches | Status |
 |---|---|---|
 | ADR-010 (error handling strategy) | the hierarchy, the HTTP mapping, the code smells | **Compliant, and it closes a violation.** The "String Matching on Errors" code smell instructs pattern matching on types; `isWorkspaceSentinel` matches a string prefix on the browser side, and this plan deletes it. **The ADR is amended in two places:** §5 "Pure HTTP Error Mapping" is rewritten to describe a one-way projection onto `WireError` instead of `encode` and `decode`, and §1's hierarchy listing gains `TreeLoadFailure` and the `SimError` to `DomainError` rename. |
-| ADR-035 (error leakage prevention) | the boundary, the encoders, `getMessage` | **Compliant, and strengthened.** §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. §3's `getMessage` discipline is unchanged and still binds. |
+| ADR-035 (error leakage prevention) | the boundary, the encoders, `getMessage` | **Compliant, and strengthened.** §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. |
 | ADR-036 (confidential internal identifiers) | `TreeNotInWorkspace`, `WorkspaceExpired`, the log line | Compliant. No wire case declares a `WorkspaceId`, so the output half holds structurally rather than by discipline. The input half is untouched. §6.2's log annotation is explicitly permitted: a confidential identifier may appear in a server log. |
 | ADR-022 (secret handling) | the three workspace errors | Compliant and unchanged. None carries a credential, so R1's `final class` rule has nothing to be violated at the container. |
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. |
@@ -1471,7 +1547,7 @@ Message templates and wire-string holders (`EWB-D-10`, §7.7):
 - `docs/dev/ARCHITECTURE.md`
 - `docs/dev/decision-records/ADR-010.md`
 - `docs/dev/decision-records/ADR-035-error-leakage-prevention.md`
-- `new: docs/dev/decision-records/ADR-037-in-code-constants.md`
+- `docs/dev/decision-records/ADR-037-in-code-constants.md` (written 2026-10-11; the phase amends the skills and the architecture document to match it)
 - `.github/skills/adr-constraints/SKILL.md`
 - `.claude/skills/adr-constraints/SKILL.md`
 - `.github/skills/code-quality-review/SKILL.md`

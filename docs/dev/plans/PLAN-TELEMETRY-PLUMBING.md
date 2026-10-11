@@ -74,37 +74,22 @@ would report identifiers through another.** Making them one thing is the work.
 
 ## 2. Open decisions
 
-### TP-D-1 — does `RequestContext` survive at all — OPEN
+### TP-D-1 — `RequestContext` survives, retyped — RULED 2026-10-11
 
-**Goal.** Decide whether the application keeps a second context structure beside
-the one the tracing library already propagates.
+**Not open.** Ruled in `PLAN-ERROR-WIRE-BOUNDARY.md` under `EWB-D-8`:
+`RequestContext` keeps all four fields, every one typed, with no `Option` and no
+default, and the values the application cannot yet supply come from named
+placeholder constants. Recorded here because this plan's remaining decisions
+build on it.
 
-**Option A — delete `RequestContext` and read the identifiers from the active
-span.** The library already tracks the current span through the fiber, so its
-trace and span identifiers are derivable wherever an error is projected. One
-mechanism, no synchronisation problem, and no structure that can hold a value
-disagreeing with the span actually open.
+What stays genuinely open is narrower, and it is `TP-D-2` below: the structure
+exists and nothing populates it.
 
-To confirm before ruling: which accessor zio-opentelemetry's `Tracing` exposes for
-the active span context, and whether it is reachable from the point where
-`WireError.fromAppError` runs. The API has not been read; the option is stated as
-a direction, not as a signature.
-
-**Option B — keep `RequestContext` and populate it from the span.** It stays as
-the application's own record, with its trace and span identifiers copied from the
-active span when it is established.
-
-Two facts can then disagree — the copied identifier and the span actually open —
-and nothing detects it. It also keeps `requestId`, which is the one value the
-library does not provide.
-
-**Option C — keep `RequestContext` for `requestId` only.** It holds the
-application's own per-request identifier and nothing else; trace and span
-identifiers come from the library at the point of use.
-
-The question under all three: is a separate per-request identifier worth having
-when a trace identifier already exists per request? That is a framing question
-and is part of what this plan revisits.
+One framing question this plan revisits rather than assumes: the tracing library
+already propagates its own span context through the fiber, so the application
+carries two context mechanisms. Whether `RequestContext` should eventually derive
+its trace and span identifiers from the active span, rather than hold copies that
+can disagree with it, is part of `TP-D-2`'s design and not a separate decision.
 
 ### TP-D-2 — what establishes the context per request — OPEN
 
@@ -118,32 +103,25 @@ The constraint that decides it: the identifier reported in an error must be the
 identifier under which that request's work was traced. A mechanism that
 establishes the context later than the first span is opened cannot satisfy that.
 
-### TP-D-3 — how the error projection obtains the identifier — OPEN
+### TP-D-3 — not a question; the route is settled elsewhere
 
-**Goal.** Decide how `WireError.fromAppError` gets a `TraceId`.
+`PLAN-ERROR-WIRE-BOUNDARY.md` settles it: `AppError` carries the trace
+identifier, every `WireError` case projects it, and the browser displays it. The
+projection reads it from its single argument, so there is nothing here about how
+it travels.
 
-It is a pure function today, which is why the error-boundary plan gives it a
-placeholder rather than a real value. Making it carry a real one means either
-threading the identifier in as a parameter, or making the projection an effect
-that reads the context.
-
-**Option A — pass it in.** `fromAppError(e, trace)`, called from `wireEither`,
-which is already effectful and already per-request. The projection stays pure.
-
-**Option B — make the projection effectful.** It reads the context itself.
-
-Option A keeps the single auditable projection function pure, which is the
-property that makes the dropped-field list reviewable in one screen. That is
-worth weighing against the extra parameter at one call site.
+What this plan supplies is the **value**. Until it does, `wireEither` attaches
+the placeholder, so an error the browser shows names an unlinked trace — which
+is what keeps the gap visible instead of silent.
 
 ### TP-D-4 — whether log lines carry the identifier — OPEN
 
 **Goal.** Decide whether every log line inside a request carries the identifiers
 automatically.
 
-ADR-002 governs observability. An identifier that reaches a client but appears on
-no log line correlates nothing within this application's own output, which is the
-only correlation this plan is responsible for.
+ADR-002 governs observability. This is where the identifiers earn their place:
+a failure in the log resolves to the spans of the work that failed, entirely
+server-side, with nothing crossing to a client.
 
 **Option A — `ZIO.logAnnotate` applied where the context is established**, so
 every line inside the request carries it without each call site naming it.
