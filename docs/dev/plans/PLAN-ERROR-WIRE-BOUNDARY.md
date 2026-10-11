@@ -2,10 +2,10 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All ten decisions, `EWB-D-1` to `EWB-D-10`, are ruled and recorded in
-§10. Nothing blocks implementation on a decision. What blocks it is approval: the
-token must name this document and a file inventory must exist beside it, and
-neither is in place.
+**Status.** All eleven decisions, `EWB-D-1` to `EWB-D-11`, are ruled and recorded
+in §10. Nothing blocks implementation on a decision. Approval is in place: the
+token names this document and the file inventory exists beside it. Phase 1 is
+under way.
 
 `EWB-D-10` produces a new accepted decision record and a standing cleanup rule
 whose text reaches beyond this plan; §10 states both and §12 lists the files.
@@ -154,7 +154,6 @@ user sees names the trace it came from. It is last in every parameter list, so
 the case's own content reads first.
 
 ```scala
-@jsonDiscriminator("kind")
 enum WireError:
   /** A request body the decoders rejected. Carries one entry per independent
     * failure, so a form shows every problem at once. */
@@ -167,13 +166,20 @@ enum WireError:
     * so that neither is an existence oracle. */
   case NotFound(trace: TraceId)
 
-  /** A workspace past its absolute or idle timeout.
+  /** A workspace past one of its two deadlines.
     *
-    * `lifetime` is the configured workspace lifetime, so the browser can say
-    * how long a workspace lasts without holding a second copy of the figure. It
-    * is the server's `WorkspaceConfig.ttl` and nothing else.
+    * Three values cross, and each has one job. `cause` is which deadline ended
+    * this workspace, and it decides the sentence the browser writes. `lifetime`
+    * is the absolute window, counted from creation, which use does not extend.
+    * `idleLimit` is the idle window, counted from last use, which every use
+    * pushes forward.
+    *
+    * Both windows cross on every expiry, not only the one that was hit, so the
+    * response has one shape whatever the cause and the browser can state the
+    * whole rule. They are deployment configuration, disclosed to a caller that
+    * already holds the workspace's key.
     */
-  case WorkspaceExpired(lifetime: Duration, trace: TraceId)
+  case WorkspaceExpired(cause: ExpiryCause, lifetime: Duration, idleLimit: Duration, trace: TraceId)
 
   /** Refused. Every denial produces this one shape: an explicit deny and an
     * unreachable authorization service must be indistinguishable, or an outage
@@ -195,8 +201,23 @@ enum WireError:
   case InternalFault(trace: TraceId)
 
 object WireError:
-  given codec: JsonCodec[WireError] = DeriveJsonCodec.gen[WireError]
+  given validationRejectedCodec:    JsonCodec[ValidationRejected]    = DeriveJsonCodec.gen[ValidationRejected]
+  given queryRejectedCodec:         JsonCodec[QueryRejected]         = DeriveJsonCodec.gen[QueryRejected]
+  given notFoundCodec:              JsonCodec[NotFound]              = DeriveJsonCodec.gen[NotFound]
+  given workspaceExpiredCodec:      JsonCodec[WorkspaceExpired]      = DeriveJsonCodec.gen[WorkspaceExpired]
+  given accessDeniedCodec:          JsonCodec[AccessDenied]          = DeriveJsonCodec.gen[AccessDenied]
+  given conflictCodec:              JsonCodec[Conflict]              = DeriveJsonCodec.gen[Conflict]
+  given notSupportedCodec:          JsonCodec[NotSupported]          = DeriveJsonCodec.gen[NotSupported]
+  given dependencyUnavailableCodec: JsonCodec[DependencyUnavailable] = DeriveJsonCodec.gen[DependencyUnavailable]
+  given internalFaultCodec:         JsonCodec[InternalFault]         = DeriveJsonCodec.gen[InternalFault]
 ```
+
+**One codec per case, and no discriminator on the enum itself.** §4 declares each
+case as its own response body at its own status, so Tapir never encodes or
+decodes the parent type and a `@jsonDiscriminator` on it would never appear in
+any body. The status names the case; the body carries that case's own fields. The
+inner payload enumerations below are the opposite situation — they are encoded as
+part of a body, so each keeps its `kind` discriminator.
 
 ### 3.1 `QueryProblem` — the payload of a refused query
 
@@ -229,9 +250,8 @@ problems with the query, so they project to `InternalFault()`.
 
 ### 3.2 `ConflictKind` — the payload of a conflict
 
-Granularity is `EWB-D-7`, open. The set below is what the current browser code
-demonstrably distinguishes, and the decision is whether the merge cases need
-more.
+Granularity is `EWB-D-7`, ruled: the seven cases below. They are what the browser
+can act on differently, and §7.5 states the treatment each one gets.
 
 ```scala
 @jsonDiscriminator("kind")
@@ -242,8 +262,9 @@ enum ConflictKind:
   /** The caller's expectation of a resource's version is stale. */
   case StaleVersion()
 
-  /** Two branches hold conflicting values, so no merge commit was created. */
-  case MergeRefused(scenario: ScenarioName.ScenarioName, details: String)
+  /** A merge the server refused, and why. `MergeRefusal` is the closed set of
+    * reasons, from `EWB-D-9`. */
+  case MergeRefused(scenario: ScenarioName.ScenarioName, refusal: MergeRefusal)
 
   /** A merge of this scenario is already running; retry once it finishes. */
   case MergeAlreadyRunning(scenario: ScenarioName.ScenarioName)
@@ -283,12 +304,15 @@ capability a deployment can lack.
 
 ### 3.4 The one codec to confirm
 
-`WorkspaceExpired` carries `java.time.Duration`. `Instant` already round-trips
-through a derived codec in `WorkspaceResponse`, and the browser has `java.time`
-via `scala-java-time`, declared in `build.sbt`. Whether zio-json derives a
-`Duration` codec on both platforms is a verification step in §13, not an
-assumption. If it does not, the field becomes `lifetimeSeconds: Long` and the
-browser builds the `Duration`.
+`WorkspaceExpired` carries two `java.time.Duration` values and an `ExpiryCause`.
+`Instant` already round-trips through a derived codec in `WorkspaceResponse`, and
+the browser has `java.time` via `scala-java-time`, declared in `build.sbt`.
+Whether zio-json derives a `Duration` codec on both platforms is a verification
+step in §13, not an assumption. The Java Virtual Machine side is confirmed —
+`commonJVM` compiles with the derived codec — and the Scala.js side is confirmed
+by `app/compile`. If a platform did not derive one, the two fields would become
+`lifetimeSeconds: Long` and `idleLimitSeconds: Long` and the browser would build
+the `Duration`.
 
 ---
 
@@ -327,7 +351,7 @@ val baseEndpoint = endpoint
       oneOfVariant(StatusCode.Conflict,            jsonBody[WireError.Conflict]),
       oneOfVariant(StatusCode.NotImplemented,      jsonBody[WireError.NotSupported]),
       oneOfVariant(StatusCode.ServiceUnavailable,  jsonBody[WireError.DependencyUnavailable]),
-      oneOfDefaultVariant(StatusCode.InternalServerError, jsonBody[WireError.InternalFault])
+      oneOfVariant(StatusCode.InternalServerError,  jsonBody[WireError.InternalFault])
     )
   )
 ```
@@ -341,7 +365,14 @@ value and tests it against each variant's body type, using the type tag the
 compiler records; the first match decides which status is written and which shape
 is serialised. In the browser Tapir reads the response's status code, selects the
 variant declared for that status, and deserialises the body as that variant's
-type. `oneOfDefaultVariant` handles a status the list does not name.
+type.
+
+**There is no default variant.** `oneOfDefaultVariant` must be typed as the
+parent enum, because it is the arm that accepts a status the list does not name,
+so its body would have to decode as `WireError` itself — and under the per-case
+bodies above no such body exists. `InternalFault` therefore takes an ordinary
+`oneOfVariant` at `500`, and a status outside the nine is a Tapir decode failure
+rather than a silently mistyped error.
 
 **Why one status per case is required, not merely neat.** The browser's selection
 is by status alone. Two variants sharing a status would make the first one listed
@@ -353,8 +384,8 @@ status they share a wire case, and the inner enumeration discriminates. The
 status-to-case relation is therefore one-to-one by construction, and §13 pins it
 with a test.
 
-Three statuses change what a caller observes. That set is `EWB-D-6`, open, in
-§10.
+Three statuses change what a caller observes. That set is `EWB-D-6`, ruled in
+§10: all three changes are accepted.
 
 ---
 
@@ -367,6 +398,12 @@ where a field stops crossing, so the full set of drops is readable in one screen
 Each arm **binds what it keeps** and writes `_` only for what it deliberately
 gives up — the current encoder's `case _: TreeNotInWorkspace` binds nothing and
 so discards the tree identifier along with the workspace identifier.
+
+Two internal names collide with the wire case that carries them, `WorkspaceExpired`
+and `AccessDenied`, and inside this file the wire case wins the name. The internal
+ones are therefore imported renamed, as `AppWorkspaceExpired` and `AppAccessDenied`,
+which is the one sanctioned use of a non-plain import (ADR-011 §2) and keeps each
+arm reading left to right: internal name in, wire name out.
 
 ```scala
 def fromAppError(e: AppError): WireError =
@@ -390,22 +427,22 @@ def fromAppError(e: AppError): WireError =
     case WorkspaceNotFound()                  => NotFound(t)
     case TreeNotInWorkspace(_, _)             => NotFound(t)
 
-    // Expired. The lifetime crosses; the workspace identifier may not
-    // (ADR-036), and the moment this one expired is a fact about one workspace
-    // the browser has no use for. The lifetime is what lets it say how long a
-    // workspace lasts.
-    case WorkspaceExpired(_, ttl, _)          => WorkspaceExpired(ttl, t)
+    // Expired. The cause and both windows cross; the workspace identifier may
+    // not (ADR-036), and the moment this one expired is a fact about one
+    // workspace the browser has no use for. The cause is what lets the browser
+    // name the deadline that actually ended this workspace.
+    case AppWorkspaceExpired(_, ttl, idle, cause, _) => WorkspaceExpired(cause, ttl, idle, t)
 
     // Refused. The internal reason is dropped from all three: an explicit deny
     // and an unreachable authorization service must look identical (ADR-035 §2).
-    case AccessDenied(_)                      => AccessDenied(t)
+    case AppAccessDenied(_)                   => AccessDenied(t)
     case AuthForbidden(_, _, _, _)            => AccessDenied(t)
     case AuthServiceUnavailable(_, _)         => AccessDenied(t)
 
     // Conflicts
     case DataConflict(_)                      => Conflict(ConflictKind.Rejected(), t)
     case VersionConflict(_, _, _)             => Conflict(ConflictKind.StaleVersion(), t)
-    case MergeConflict(scenario, details)     => Conflict(ConflictKind.MergeRefused(scenario, details), t)
+    case MergeConflict(scenario, refusal)     => Conflict(ConflictKind.MergeRefused(scenario, refusal), t)
     case MergeAlreadyRunning(scenario)        => Conflict(ConflictKind.MergeAlreadyRunning(scenario), t)
     case MergeTargetMoved(scenario)           => Conflict(ConflictKind.MergeTargetMoved(scenario), t)
     case ScenarioHeadStale(scenario, exp, _)  => Conflict(ConflictKind.ScenarioHeadStale(scenario, exp), t)
@@ -503,9 +540,11 @@ keeps ADR-036's output rule structural rather than a matter of discipline.
 
 ```scala
 case class WorkspaceExpired(
-  wsId:      WorkspaceId,
-  ttl:       java.time.Duration,
-  expiredAt: java.time.Instant
+  wsId:        WorkspaceId,
+  ttl:         java.time.Duration,
+  idleTimeout: java.time.Duration,
+  cause:       ExpiryCause,
+  expiredAt:   java.time.Instant
 ) extends DomainError:
   override def getMessage: String = "Workspace expired"
 
@@ -513,18 +552,33 @@ case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends DomainE
   override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
 ```
 
-`ttl` is the configured lifetime, which is the same for every workspace.
-`expiredAt` is when this one passed it, which is what makes a log line answer
-"how long ago" rather than only "how long were they given". The two are
-different facts and both are wanted for diagnosis.
+A workspace has two deadlines and either one ending it is enough, so the error
+names which one did. `ttl` and `idleTimeout` are the two configured windows,
+which are the same for every workspace in a deployment. `cause` is the deadline
+this workspace actually passed. `expiredAt` is the instant it passed, which is
+what makes a log line answer "how long ago" rather than only "how long were they
+given".
 
-All three are constructible because nothing reconstructs them: under EWB-P-1 the
-browser receives a `WireError`, never one of these. The expiry arm of
+All of them are constructible because nothing reconstructs them: under EWB-P-1
+the browser receives a `WireError`, never one of these. The expiry arm of
 `WorkspaceStoreLive.validateWorkspace` and of `WorkspaceStorePostgres` both hold
-the record and the `WorkspaceConfig`, so every value is in scope where the
-failure is built — `expiredAt` is `createdAt.plus(ttl)` for the absolute timeout
-and `lastAccessedAt.plus(idleTimeout)` for the idle one, whichever the record
-tripped.
+the record, so every value is in scope where the failure is built.
+`WorkspaceRecord.expiry(now)` returns the deadline that has passed — its cause
+and its instant together, the earlier one when both have passed — so the two
+stores read one value rather than each deciding which window tripped:
+
+```scala
+enum ExpiryCause:
+  case Lifetime     // createdAt + ttl; use does not postpone it
+  case Inactivity   // lastAccessedAt + idleTimeout; every access pushes it forward
+
+final case class Expiry(cause: ExpiryCause, at: java.time.Instant)
+
+def expiry(now: java.time.Instant): Option[Expiry]
+```
+
+`ExpiryCause` lives in `common` beside `WorkspaceRecord`, because it crosses to
+the client on the wire case above.
 
 `WorkspaceNotFound` takes no identifier, and that is structural rather than a
 choice: the lookup that failed is the thing that would have produced one. There
@@ -737,7 +791,7 @@ def fromWireError(e: WireError): GlobalError = e match
   case WireError.ValidationRejected(errors, _)     => ValidationFailed(errors)
   case WireError.QueryRejected(problem, _)         => queryMessage(problem)
   case WireError.NotFound(_)                       => NotFound
-  case WireError.WorkspaceExpired(lifetime, _)     => WorkspaceExpired(expiryMessage(lifetime))
+  case WireError.WorkspaceExpired(c, life, idle, _) => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
   case WireError.AccessDenied(_)                   => ServerError(ErrorMessages.Forbidden)
   case WireError.Conflict(conflict, _)             => Conflict(conflictMessage(conflict))
   case WireError.NotSupported(capability, _)       => ServerError(capabilityMessage(capability))
@@ -751,6 +805,28 @@ rather than a data one.** The identifier is on every wire case, so every
 user has nothing else to act on and a reference is the only useful thing on
 screen — a dependency outage and an internal fault. The others carry an
 actionable message of their own, and a trace identifier beside it is noise.
+
+**Every failure writes the identifier to the browser console, whichever case it
+is.** The display choice above governs the banner, not the diagnostic record. One
+line at the single point a wire error arrives, which is `ZJS` where
+`fromWireError` is called:
+
+```scala
+dom.console.warn(s"request failed: ${e.productPrefix} trace=${e.trace.value}")
+```
+
+`productPrefix` is the case name. There is no `kind` field in the body to match
+it against — §3 explains why the status names the case instead — so the console
+line is what connects a response the developer sees in the network tab to the
+case the browser classified it as. It goes in `ZJS` and not in a view, because a view
+re-renders and would log the same failure again on every render.
+
+Nothing is exposed that was not already visible: the response body carrying the
+identifier is in the network tab of the same developer tools, and a `WireError`
+holds no internal field by construction. It is the frontend's first log line —
+there is no `console` call, `println` or `ZIO.log` anywhere in `modules/app`
+today — and it adds no dependency, because scalajs-dom is already used for
+`window` and `MouseEvent`.
 
 `GlobalError`'s cases therefore take `trace: Option[TraceId]` and `ErrorBanner`
 renders it in a muted line under the message, selectable so it can be copied:
@@ -784,7 +860,7 @@ is gone discards the key:
 
 ```scala
 .tapError {
-  case WireError.WorkspaceExpired(_) | WireError.NotFound() =>
+  case WireError.WorkspaceExpired(_, _, _, _) | WireError.NotFound(_) =>
     zio.ZIO.succeed {
       workspaceKey.set(None)
       clearURL()
@@ -808,7 +884,8 @@ carrying a message, because `GlobalError` composes it from the lifetime.
 
 Lines 148, 201 and 220 test the sentinel. Each becomes a match on
 `WireError.WorkspaceExpired` and `WireError.NotFound`. The helpers' error
-parameter type changes from `Throwable` to `WireError`, and
+parameter type changes from `Throwable` to `RequestFailure` — the two-case type
+`EWB-D-12` rules, whose `Wire` case carries the `WireError` — and
 `app/core/ThrowableExtensions.scala`'s `safeMessage` is reviewed: with the browser
 composing its own text, reading a message off the error is no longer the normal
 path.
@@ -824,7 +901,7 @@ per-case treatment possible, and this is what each should be:
 | `MergeTargetMoved(scenario)` | main moved and nothing was written; the re-check button is the action, and it is already on screen |
 | `MergeRefused(Conflicts(paths))` | the paths that changed on both branches, listed; the remedy is to edit either side to agree |
 | `MergeRefused(DuplicateNames(perTree))` | the repeated names, per tree; the remedy is to rename one |
-| `MergeRefused(InvariantBroken(perTree))` | the merge was undone and the tree is as it was; this is a fault to report, not a conflict to resolve, and it is the one case that should carry the trace identifier prominently |
+| `MergeRefused(InvariantBroken(trees))` | the merge was undone and the tree is as it was; this is a fault to report, not a conflict to resolve, and it is the one case that should carry the trace identifier prominently |
 | `ScenarioHeadStale(scenario, expected)` | the scenario changed since it was read; reload is the action |
 | `StaleVersion()` / `Rejected()` | the existing generic line, which is correct for a conflict with no further structure |
 
@@ -933,10 +1010,15 @@ Each phase ends with the whole suite green: `commonJVM/test`, `server/test`,
 payload and the closed preview status, both from `EWB-D-9`; the three typed
 telemetry identifiers and the retyped `RequestContext` with its placeholder
 constants, from `EWB-D-8`; `fromAppError`; the `oneOf` declaration in
-`BaseEndpoint`; `wireEither` and the 22 call sites; `GlobalError.fromWireError`
-with its message functions; the three `ZJS` sites; the pre-validation match; the
-duplicated sentence; and every deletion in §8. Every string this phase writes is
+`BaseEndpoint`; `wireEither` and the 23 call sites; `GlobalError.fromWireError`
+with its message functions; the three `ZJS` sites with the console line of §7.1;
+the pre-validation match; the duplicated sentence; and every deletion in §8. Every string this phase writes is
 held as `EWB-D-10` rules.
+
+Two things moved into this phase from Phase 2, because the wire case cannot be
+populated without them: `WorkspaceExpired`'s five internal fields with
+`ExpiryCause` and `WorkspaceRecord.expiry` (§6.1), and both store construction
+sites. What stays in Phase 2 is the log line.
 
 **Phase 1a — the frontend treatment.** `MergeSubmitState.AlreadyRunning` and the
 separated handler arm; `MergeModal`'s exhaustive preview match with its wildcard
@@ -945,9 +1027,8 @@ presentation. Separate from Phase 1 only so that the boundary can be verified
 green before the interface changes on top of it; both land before the plan is
 done.
 
-**Phase 2 — the workspace errors and the log line.**
-`WorkspaceExpired(wsId, ttl, expiredAt)`, `TreeNotInWorkspace`'s identifier, both
-store construction sites, and the log annotation change:
+**Phase 2 — the log line.** `TreeNotInWorkspace`'s identifier and the log
+annotation change:
 
 ```scala
 private def logResolveFailure(outcome: Either[AppError, WorkspaceRecord]): UIO[Unit]
@@ -965,10 +1046,12 @@ taking the outcome rather than the key, so the expiry arm can annotate
 
 **Phase 5 — the constants rule and its foundations.** The `ValuationBasis` enum,
 `FolSymbols` deriving its two entries from it, and the deletion of
-`RiskTreeKnowledgeBase`'s duplicate pair. Then the rule itself: the new accepted
-decision record, the `adr-constraints` distillation and its mirror, the
-`code-quality-review` criterion and its mirror, and the proposed wording for the
-two global instruction lines. The scattered use sites are reached by the standing
+`RiskTreeKnowledgeBase`'s duplicate pair. Then what remains of the rule's own
+delivery: the `code-quality-review` criterion and its mirror. The decision
+record, its placement in the `adr-constraints` reference, the two global
+instruction lines, and the project's own named-constants and defaulted-`Option`
+rules in `.claude/rules/scala-style.md` all landed on 2026-10-11 and are no
+longer this phase's work. The scattered use sites are reached by the standing
 rule as later tasks open those files, not by this phase.
 
 There is no telemetry-plumbing phase. Connecting the identifiers to real spans is
@@ -1354,8 +1437,8 @@ skill and its mirror beside the existing primitive-typing passes.
 
 **What the ruling produces.** A new accepted decision record, because no existing
 one covers in-code constants and ADR-016 is the neighbour rather than the owner.
-The `adr-constraints` skill distillation updated in `.github/skills/` and its
-byte-identical `.claude/skills/` mirror. A line in the global instructions beside
+The `adr-constraints` skill updated in `.claude/skills/`, which is the only copy.
+A line in the global instructions beside
 the unused-import rule, making the cleanup a per-file obligation on any task that
 opens a file. And §3, §4, §5 and §7 of this plan written to hold their strings
 this way.
@@ -1432,6 +1515,49 @@ configuration — values in `application.conf`, overridable by environment
 variable — and says nothing about a constant compiled into the code. The
 boundary between the two is part of this decision.
 
+### EWB-D-12 — what carries a failed request in the browser — RULED 2026-10-11
+
+**Ruled: Option A.** A client-side failure type that is not a `Throwable`, in
+`app/core`:
+
+```scala
+enum RequestFailure:
+  /** The server answered with one of the nine statuses and a typed body. */
+  case Wire(error: WireError)
+
+  /** The request never completed: no network, DNS failure, connection refused,
+    * or a rejected cross-origin check. The browser's `fetch` rejects with a
+    * JavaScript `TypeError` here, so there is no status and no body. */
+  case Transport(cause: Throwable)
+```
+
+`BackendClient.endpointRequestZIO` returns `IO[RequestFailure, O]`, the five
+`ZJS` extensions lose their `E <: Throwable` bound, and the seven request buses
+declared `Either[Throwable, X]` become `Either[RequestFailure, X]`.
+`GlobalError` then has one match with two arms, which are exactly
+`fromWireError` and the narrowed `fromThrowable`.
+
+**Why a second type is needed at all.** Two different failures reach the
+browser and only one of them is a `WireError`. A `WireError` exists only when
+the server answered; a transport failure is the browser reporting that the call
+never happened. §7.4 settles the first half by typing the helpers on the wire
+error, and this decision names what carries the second half, which §7.4 left
+open while §7.1 kept `fromThrowable` alive for it.
+
+**What was rejected.** Making `WireError` extend `Throwable` would have cost
+the fewest files — `BackendClient` would not change, and `Either`'s covariance
+would keep every `Either[Throwable, X]` bus compiling. It was rejected because
+the `Throwable` bound is an artifact of this client's own plumbing rather than
+anything ZIO requires: ZIO's error channel is an unconstrained type parameter,
+so `IO[RequestFailure, O]` is ordinary. Putting exception machinery on a shared
+wire type would preserve that artifact permanently, in `common`, where every
+other wire type is plain data. A client-local `Throwable` wrapper was rejected
+for the same reason, having the same cost and also needing an unwrapping step at
+every match site.
+
+Both rejected options are written down because the cheapest one is the one a
+later reader will reach for again.
+
 ---
 
 ## 11. ADR alignment
@@ -1448,8 +1574,7 @@ boundary between the two is part of this decision.
 | ADR-002 (observability) | the correlation identifier, the resolve log line | **Currently violated and fixed here.** A correlation identifier that never reaches a client cannot correlate anything; `EWB-D-8` decides the fix. §6.2 fixes the resolve-failure line, which annotates a redacted constant today and so identifies no workspace. |
 
 `docs/dev/ARCHITECTURE.md`'s "DTO/Domain Model Separation" section gains the error
-path. The `adr-constraints` skill distillation is updated in the same pass, in
-`.github/skills/adr-constraints/SKILL.md` and its byte-identical mirror
+path. The `adr-constraints` skill is updated in the same pass, in
 `.claude/skills/adr-constraints/SKILL.md`.
 
 ---
@@ -1547,17 +1672,16 @@ Message templates and wire-string holders (`EWB-D-10`, §7.7):
 - `docs/dev/ARCHITECTURE.md`
 - `docs/dev/decision-records/ADR-010.md`
 - `docs/dev/decision-records/ADR-035-error-leakage-prevention.md`
-- `docs/dev/decision-records/ADR-037-in-code-constants.md` (written 2026-10-11; the phase amends the skills and the architecture document to match it)
-- `.github/skills/adr-constraints/SKILL.md`
-- `.claude/skills/adr-constraints/SKILL.md`
+- `docs/dev/decision-records/ADR-037-in-code-constants.md` (written 2026-10-11; the phase amends the architecture document to match it)
 - `.github/skills/code-quality-review/SKILL.md`
 - `.claude/skills/code-quality-review/SKILL.md`
 - `docs/dev/plans/PLAN-RISKTRANSFORM.md` (repoint its four references at lines 9677, 9844, 9942, 9955)
 - `docs/dev/plans/IMPLEMENTATION-PLAN.md` (repoint its three `TES-D-9` references)
 
-The global instruction line that `EWB-D-10` produces goes in
-`~/.claude/CLAUDE.md`, which is the user's own file and is written by the user,
-not by this plan. The wording is proposed when the phase lands.
+The two global instruction lines that `EWB-D-10` produces are written. The user's
+`~/.claude/CLAUDE.md` carries the boyscout section that names them, and the global
+`boyscout` skill states each one with its test and its reason, as obligations 3
+and 5. Neither is this plan's work any more.
 
 ---
 
