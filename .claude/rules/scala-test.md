@@ -1,5 +1,6 @@
 ---
-applyTo: "**/test/**/*.scala"
+paths:
+  - "**/test/**/*.scala"
 ---
 
 # Test Quality & Assertion Integrity

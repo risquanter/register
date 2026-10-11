@@ -1,5 +1,6 @@
 ---
-applyTo: "**/*.scala"
+paths:
+  - "**/*.scala"
 ---
 
 # Algebraic Design Vocabulary

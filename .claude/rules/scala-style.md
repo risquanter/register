@@ -1,5 +1,6 @@
 ---
-applyTo: "**/*.scala"
+paths:
+  - "**/*.scala"
 ---
 
 # Scala 3 / ZIO Code Style & Functional Composition

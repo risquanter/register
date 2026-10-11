@@ -1,5 +1,6 @@
 ---
-applyTo: "modules/app/**/*.scala"
+paths:
+  - "modules/app/**/*.scala"
 ---
 
 # Laminar Reactive UI Architecture (ADR-019)

@@ -1,5 +1,6 @@
 ---
-applyTo: "**/*.scala"
+paths:
+  - "**/*.scala"
 ---
 
 # Credential Handling & Authorization Boundaries (ADR-022, ADR-024, ADR-036)

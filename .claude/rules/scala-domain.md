@@ -1,5 +1,6 @@
 ---
-applyTo: "**/*.scala"
+paths:
+  - "**/*.scala"
 ---
 
 # Domain Modelling & Correct-by-Construction

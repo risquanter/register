@@ -16,8 +16,10 @@ For each criterion report one of:
 Severities: **MUST-FIX** (blocks commit) · **SHOULD-FIX** (quality debt) · **NOTE**
 
 Do not rubber-stamp. Report PASS when clean. Report FINDING when not. Do not propose
-options without flagging which decision the user must make — **all decisions are the
-user's to resolve**.
+options without flagging which decision the user must make. **The disposition of
+every finding is the user's** — severity is yours to assess, and you never decide on
+the user's behalf that a finding is acceptable. Which choices are the user's to
+resolve is defined in the working-protocol skill's Decision Protocol.
 
 **Convention vs. hygiene is a real finding, not a "just conform" auto-pass.** When
 an existing codebase convention conflicts with code hygiene, clean code, or a best
@@ -91,7 +93,7 @@ finding.
 ## Pass 0a — Domain primitive typing (Layer A₀, run first)
 
 For every **new field, parameter, case class member, or function parameter** in the
-diff, apply the Layer A₀ questions from `scala-algebraic-design.instructions.md`:
+diff, apply the Layer A₀ questions from `.claude/rules/scala-algebraic-design.md`:
 
 - Is the type `String`, `Int`, `Long`, or `Double` for a concept that has a natural
   valid-value subset? → Missing Iron refinement. **MUST-FIX.**
@@ -262,7 +264,7 @@ reused as-is, not re-derived per review — update it only when the architecture
 itself changes (e.g. a new auth mechanism, a new external API integration).
 
 **Hard rule — `WorkspaceId` never crosses the client boundary, either direction
-(2026-07-20).** Full reasoning in `security.instructions.md`'s "Internal
+(2026-07-20).** Full reasoning in `.claude/rules/security.md`'s "Internal
 identifiers" section; check both halves on every diff:
 - **Output:** no response field, header, error message, or log line returned
   to a client may contain a raw `WorkspaceId`. **MUST-FIX.**
@@ -297,7 +299,7 @@ a value:
 
 **API2:2023 Broken Authentication.** Register's Layer 0 already uses
 `SecureRandom` for capability tokens (ADR-021) and Layer 1 JWT validation is
-delegated to the mesh, never parsed in-app (see `security.instructions.md`).
+delegated to the mesh, never parsed in-app (see `.claude/rules/security.md`).
 Check: does new code introduce any other credential/session mechanism, or
 weaken `WorkspaceStore`'s dual-timeout (absolute + idle) expiry? **MUST-FIX**
 if so — this is a Decision Trigger (auth boundary), not a routine change.
