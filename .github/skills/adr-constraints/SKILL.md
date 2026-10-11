@@ -1,427 +1,207 @@
 ---
 name: adr-constraints
-description: "Agent-efficient distillation of all accepted ADRs for the register project. Load during any planning or implementation phase that introduces new types, endpoints, services, or infrastructure changes. Use for: ADR compliance review, pre-implementation planning, architecture alignment checks, boundary ownership questions."
+description: "Three-layer reference to the register project's architecture decision records: which records every kind of work must honour whether or not the task mentions them, which record governs which subject, and where two records meet. It routes; it holds none of their content. Read the records it names in full — they are the authority. Load before planning or implementing new types, endpoints, services, or infrastructure changes."
 user-invokable: true
 ---
 
-# ADR Constraints Reference — Register
+# ADR Reference — Register
 
-**This skill owns which design constraints bind.** It is the distillation of the accepted ADRs, so that upholding them does not require reading all of `docs/dev/decision-records/`. It is lossy by design: it keeps each rule and drops its reasoning, so it cannot carry an interaction between two rules. Before writing code, check **When this skill is not enough** below — that section lists what you must be touching to need the full ADRs, and **Known interactions** records the traps that live between them.
+**This document routes. It holds no rules, no reasons and no code.** Having found the records, read them in full from `docs/dev/decision-records/` and work from them. They are the authority; this document can be wrong only by pointing at the wrong file.
 
-It does not own the domain concepts (`docs/user/TERMINOLOGY.md`), how the system is built (`docs/dev/ARCHITECTURE.md`), or what is being built (`docs/dev/plans/`).
+It has three layers, and they answer three different questions:
 
-## Boundary ownership
+1. **By activity** — what must I honour because of the *kind* of work this is, whether or not the task mentions it. **Start here.**
+2. **By subject** — which record governs a named topic, and what each record is about.
+3. **Where records meet** — the pairs whose combination neither record states alone.
 
-| Concern | Owner | Never in |
+Every record present is in force regardless of its `Status:` field. Deletion is the only archival, and the status labels have not been verified against the code (`docs/dev/TODO.md` item 56).
+
+This document does not cover the domain concepts (`docs/user/TERMINOLOGY.md`), how the system is built (`docs/dev/ARCHITECTURE.md`), or what is being built (`docs/dev/plans/`).
+
+---
+
+## Layer 1 — By activity: what the kind of work demands
+
+**Identify the activity, read its *always* column in full, then add any *also* row that applies.** The always column is not a suggestion and does not depend on the task's wording: a task that says "add a field to `RiskLeaf`" mentions no validation, no identifier and no constant, and all three bear on it. Searching the task's words finds what it mentions; this layer finds what it implies, which is why it comes first.
+
+### Every edit to a source file, whatever the activity
+
+**Always:** ADR-011 · ADR-037
+Import placement and grouping (ADR-011) and named constants and closed sets (ADR-037) bear on a file because it is being edited at all, not because of what the edit is for. The `boyscout` skill is what makes them happen in the same pass rather than in a later sweep; these are the records behind two of its obligations.
+
+### Designing or changing a domain type, class or field
+
+**Always:** ADR-001 · ADR-018 · ADR-029 · ADR-037 · ADR-010
+Every type here is correct-by-construction or it is a defect, so the question is never *whether* these bear but *how*: how the value is constructed and where it is validated (ADR-001), whether it needs a nominal wrapper to be distinguishable from a type with the same encoding (ADR-018), what content domain a string-backed field may admit (ADR-029), whether any of its values is one of a fixed set (ADR-037), and what failure it can produce as a value (ADR-010).
+
+**Also:** ADR-022 if it wraps a secret · ADR-036 if it is, or embeds, a scoping identifier · ADR-003 if it carries seed identity · ADR-032 if it enters a hash projection · ADR-034 if it is a mitigation parameter.
+
+### Adding or changing an endpoint, a DTO, or anything else on the wire
+
+**Always:** ADR-017 · ADR-036 · ADR-035 · ADR-010 · ADR-001
+The wire is the one surface where a mistake is published: the request shape and its bounds (ADR-017), what may cross in either direction (ADR-036), what a failure may disclose (ADR-035), how a typed error becomes a status (ADR-010), and that validation happens in the codec rather than the handler (ADR-001).
+
+**Also:** ADR-021 if the route is workspace-scoped · ADR-030 and ADR-024 if it reads or mutates protected data · ADR-029 if any field carries user text · ADR-025 and ADR-027 if a browser navigates to the path · ADR-004a if the response carries a branch.
+
+### Adding or changing a service or repository method
+
+**Always:** ADR-001 · ADR-030 · ADR-010 · ADR-033
+A service signature is where the project's two structural guarantees live: already-validated types in, never raw primitives (ADR-001), and the authorization proof in the signature rather than in a comment (ADR-030). Its failures are typed values (ADR-010), and whether it may catch anything at all is decided by ADR-033.
+
+**Also:** ADR-024 if it would write authorization data · ADR-012 and ADR-031 if it retries, times out, or waits · ADR-004a if it writes storage · ADR-036 if it takes or returns an identifier.
+
+### Touching storage, branches, commits or a merge
+
+**Always:** ADR-004a · ADR-007 · ADR-032 · ADR-036
+The storage layout and the single-writer rule (ADR-004a), what a scenario is and how a branch is created, renamed and cleaned up (ADR-007), which of the two hash relations answers the question being asked (ADR-032), and the fact that both branch-name types embed the workspace identifier (ADR-036).
+
+**Also:** ADR-029 if a value is interpolated into a GraphQL document · ADR-017 if node identity is involved · ADR-014 if the change could affect cache keys.
+
+### Touching simulation, caching or aggregation
+
+**Always:** ADR-014 · ADR-015 · ADR-009 · ADR-003 · ADR-032
+What is cached and under what key (ADR-014), the single simulation entry point (ADR-015), where the algebra lives and what licenses parallel resolution (ADR-009), how a draw is derived and what provenance it must carry (ADR-003), and which projection the key hashes (ADR-032).
+
+**Also:** ADR-034 if mitigations are in play · ADR-016 if a simulation parameter would become configuration.
+
+### Changing mitigation valuation or adding a transform
+
+**Always:** ADR-034 · ADR-014 · ADR-009 · ADR-001
+The two folds and where a transform may be applied (ADR-034), why the cached value must not be transformed (ADR-014), the aggregate claim a transform must not break (ADR-009), and the boundary type half of the no-elimination rule (ADR-001) — whose other half is a runtime check, which is why a new transform cannot be assumed covered by a type.
+
+### Writing or changing a frontend component or its state
+
+**Always:** ADR-019 · ADR-001 · ADR-033
+Component shape, who owns state, when a value is a derived signal versus a state machine, and which tier renders a failure (ADR-019); the validation reused from the shared module (ADR-001); and the one sanctioned catch-all at the JavaScript boundary (ADR-033).
+
+**Also:** ADR-025 if the browser URL is read or written · ADR-029 if user text is rendered · ADR-018 if an identifier is unwrapped for display · ADR-010 if a server failure is classified.
+
+### Touching authorization or a capability boundary
+
+**Always:** ADR-024 · ADR-030 · ADR-021 · ADR-012 · ADR-036
+The application is a read-only enforcement point (ADR-024), checks happen at the orchestration boundary and prove it in a signature (ADR-030), the capability credential and its lifetime (ADR-021), what the mesh is assumed to have done first (ADR-012), and which identifiers may never be accepted from a client (ADR-036).
+
+**Also:** ADR-022 if a credential type is involved · ADR-035 if a denial is rendered.
+
+### Handling an error, or adding a catch
+
+**Always:** ADR-010 · ADR-035 · ADR-033 · ADR-002
+How failures are represented and mapped (ADR-010), what may reach a client (ADR-035), where an exception may be caught and how wide (ADR-033), and where the diagnosis is logged instead (ADR-002).
+
+**Also:** ADR-036 if the error names a resource · ADR-022 if a credential could appear in a message · ADR-019 if the browser must classify it.
+
+### Adding or changing a dependency, a base image, or a container
+
+**Always:** ADR-020 · ADR-026
+Pinning, verification, cooldown, publisher trust and the per-ecosystem verification status (ADR-020); the builder-and-production tiering and what a deployed image may contain (ADR-026).
+
+**Also:** ADR-027 if it is the frontend image · ADR-023 if local trust material or database roles are involved · ADR-INFRA-006 if credentials are delivered.
+
+### Adding or changing configuration
+
+**Always:** ADR-016 · ADR-031
+The single canonical source and how tests load it (ADR-016), and the rule that a backoff is a code constant while only a budget is configuration (ADR-031).
+
+**Also:** ADR-022 if the value is a secret · ADR-017 if it is a size or count bound, which belongs in a type rather than in configuration · ADR-003 if it is a simulation parameter.
+
+### Adding logging, metrics or spans
+
+**Always:** ADR-002 · ADR-035
+Which signal answers which question and at what level (ADR-002), and what a message may carry (ADR-035) — noting that a confidential identifier is permitted server-side and forbidden on the wire.
+
+**Also:** ADR-036 for which identifiers those are · ADR-028 if a query is instrumented.
+
+### Working on the query language path
+
+**Always:** ADR-028 · ADR-029
+Where evaluation runs, how the model is built, and what is validated before evaluation (ADR-028); and that query text is user input reaching a parser (ADR-029).
+
+**Also:** ADR-014 if simulation results are needed · ADR-034 if mitigation selections are referenced · ADR-017 if tree size bounds the work.
+
+---
+
+## Layer 2 — By subject: which record governs what
+
+Use this when you already know the topic or the record's name. It answers "where is X ruled", not "what must I honour".
+
+| Record | File | Governs |
 |---|---|---|
-| Input validation | Tapir codec / JSON decoder | Service, Repository |
-| Iron type construction | Smart constructor (`create`, `fromString`) | Direct `apply` with primitives |
-| Error accumulation | `Validation.validateWith` | `.flatMap` for independent fields |
-| Error mapping to HTTP | `ErrorResponse.encode` at the HTTP edge | Service or Repository |
-| Authorization check | `AuthorizationService.check()` | Domain model, Repository |
-| JWT validation | Istio waypoint (mesh) | Application code |
-| Credential lifecycle | Ops tooling (`zed` CLI, CI/CD) | Application code |
-| Capability URL entropy | `SecureRandom` | `scala.util.Random` |
+| ADR-001 | `ADR-001.md` | Validation strategy: Iron refinements, smart constructors, where validation happens, private aggregate constructors |
+| ADR-001 appendix | `ADR-001-appendix.md` | Constraints on values sent verbatim to an external system as a header or token |
+| ADR-002 | `ADR-002.md` | Logging and telemetry: which signal answers which question, log levels, the typed error hierarchy's origin |
+| ADR-003 | `ADR-003.md` | Seeding, reproducibility and provenance records |
+| ADR-004a | `ADR-004a-proposal.md` | Persistence architecture: Irmin storage layout, scenarios as branches, the single writer, server-sent events |
+| ADR-004a appendix | `ADR-004a-appendix.md` | The three meanings of "tree", and the domain-to-storage mapping |
+| ADR-007 | `ADR-007-proposal.md` | Scenario branching: what a scenario is, branch naming, create, rename, cleanup |
+| ADR-007 appendix | `ADR-007-appendix.md` | Branch reference type, commit granularity, and per-path merge mechanics |
+| ADR-009 | `ADR-009.md` | Risk aggregation: where the algebra lives, the portfolio constructor, what licenses parallel resolution |
+| ADR-010 | `ADR-010.md` | Error handling: the sealed hierarchy, validation errors, the channel per layer, mapping to HTTP |
+| ADR-011 | `ADR-011.md` | Import conventions |
+| ADR-012 | `ADR-012.md` | Service mesh: identity, policy layers, what resilience the application must not implement, mesh trust invariants |
+| ADR-014 | `ADR-014.md` | Simulation result caching: what is cached, the content-hash key, no invalidation, per-workspace instances |
+| ADR-015 | `ADR-015.md` | The cached-result resolver as the single simulation entry point. **Its storage layer is retired — read it with ADR-014** |
+| ADR-016 | `ADR-016-config-management.md` | Configuration loading and the single canonical source |
+| ADR-017 | `ADR-017-tree-api-design.md` | Tree API shape: create versus update DTOs, whole-tree submission, identity preservation, size limits |
+| ADR-017 notes | `ADR-017-NOTES.md` | Why per-operation batch types are not adopted |
+| ADR-018 | `ADR-018-nominal-wrappers.md` | Nominal wrappers over Iron types for identifiers that must not be interchangeable |
+| ADR-019 | `ADR-019-frontend-component-architecture.md` | Frontend architecture: component shape, state ownership, derived signals, state machines, error presentation |
+| ADR-020 | `ADR-020-supply-chain-security.md` | Supply chain: pinning, verification, install-time side effects, cooldown, publisher trust, per-ecosystem status |
+| ADR-021 | `ADR-021-capability-urls.md` | Capability URLs: the workspace credential, the store and its expiry, the endpoint surface, where rate limiting belongs |
+| ADR-022 | `ADR-022-secret-handling.md` | Credential types: the eight requirements, the boundary against configuration secrets, scoped wiping |
+| ADR-023 | `ADR-023-local-dev-tls-and-trust-material-policy.md` | Local development TLS, trust material, and per-service database roles |
+| ADR-024 | `ADR-024-externalized-authorization-pep-pattern.md` | Authorization: the application as a read-only enforcement point, where tuples are written, lifecycle writes |
+| ADR-025 | `ADR-025-spa-routing-strategy.md` | Browser URL handling: path routing, history management, the reverse-proxy requirement |
+| ADR-026 | `ADR-026-container-image-strategy.md` | Container images: builder and production tiers, naming, minimal runtimes, the frontend exception |
+| ADR-027 | `ADR-027-frontend-nginx-serving.md` | The frontend image's nginx: routing rules, cache headers, runtime substitution, the boundary against `register-infra` |
+| ADR-028 | `ADR-028-vague-quantifier-query-pane.md` | Query evaluation: where it runs, how the model is built, materialised relations, validation before evaluation |
+| ADR-028 appendix | `ADR-028-appendix-technical-design.md` | The knowledge-base schema, scalability analysis, API contract, example queries |
+| ADR-029 | `ADR-029-input-injection-defence.md` | Injection defence: content-domain restriction, the two sanctioned routes to an interpreter, the parser-boundary table |
+| ADR-030 | `ADR-030-authorization-enforcement-orchestration-boundary.md` | Where authorization checks are made: the orchestration boundary, the proof token, the schema's single home |
+| ADR-031 | `ADR-031-startup-readiness-vs-request-path-resilience.md` | Which retry loops are permitted in the application, and the shape a readiness gate must take |
+| ADR-032 | `ADR-032-content-equality-relations.md` | The two hash relations over a node, and which question each answers |
+| ADR-033 | `ADR-033-exception-boundaries.md` | Where a catch is permitted and how wide it may be |
+| ADR-034 | `ADR-034-mitigation-valuation-model.md` | Mitigation valuation: the two folds, transform composition, the layer outside the aggregate, the no-elimination rule |
+| ADR-035 | `ADR-035-error-leakage-prevention.md` | What may reach a client in an error: exhaustive encoding, the typed boundary, message discipline |
+| ADR-036 | `ADR-036-confidential-internal-identifiers.md` | Which identifiers may cross the client boundary, in which direction, and the substitutes for those that may not |
+| ADR-037 | `ADR-037-in-code-constants.md` | Constants and closed sets: enums in their owner's companion, declared versus derived spellings, forbidden defaults |
+| ADR-INFRA-006 | `ADR-INFRA-006.md` | Database credential delivery. Binds `register-infra`'s deployment, not this repository's code |
+| — | `ADR-00X.md` | The authoring template for a new record. Not a decision record |
 
 ---
 
-## Positive invariants — reach for these
+## Layer 3 — Where records meet
 
-| Pattern | ZIO Prelude / Iron type | When |
-|---|---|---|
-| Multi-field validation | `Validation.validateWith` | Any independent fields that can each fail |
-| Aggregation of same type | `Identity[A].combine` / `Semigroup[A]` | Combining child results, merging partial outputs |
-| Domain primitive with constraints | Iron refinement + smart constructor | Any new field with a valid-value subset |
-| Semantically distinct IDs | `case class` wrapper over Iron opaque type (ADR-018) | Two concepts, same encoding |
-| Credential type | `final class` + R1–R8 checklist (ADR-022) | Any type that wraps a secret |
-| Sealed error hierarchy | `sealed trait AppError` subtype | Any new error condition |
-| Effect sequencing | `for`-comprehension / `ZIO.foreach` | Sequential or parallel effects |
-| Reactive state | `Signal` derivation from `Var` (Laminar ADR-019) | Any UI state |
-| Combining trial data | `TrialOutcomes.combine` / its `Commutative` instance (ADR-009) | Aggregating a portfolio from its children |
-| Reproducible draw | `SeedDerivation.streams` coordinates (ADR-003) | Any sampling |
-| Startup dependency gate | `StartupReadiness.awaitReady` in `ZLayer` wiring (ADR-031) | Waiting on a dependency at boot |
-| User-input string type | Iron `Match[...]` whitelist, narrowest the domain permits (ADR-029) | Any `String`-backed input type |
+Each row is a trap that lives between two records: what a reader who knows both separately would still get wrong. It is the one layer that cannot be produced by summarising the corpus, because the information is in neither record's own account of itself.
 
----
+Read it as an index of collisions, not as a substitute for either record. Where a reconciliation has been written into the records themselves, the row says so; the row is how you learn the collision exists at all.
 
-## Negative constraints
-
-### Types & Validation
-
-❌ NEVER accept raw `String` / `Int` / `Double` as a parameter that carries a
-domain value — in ANY function, private helpers and internal plumbing
-included, not only service/repository interface methods.
-✅ INSTEAD: define or reuse an Iron-refined type; pass the already-validated
-value through instead of re-deriving it from a raw primitive.
-Exceptions (raw `String` is correct there): smart-constructor/parser inputs
-(`from(s: String)` — the boundary where the raw value arrives), genuinely
-free text (commit messages, descriptions, log/telemetry keys), and
-serialization/escaping helpers.
-*ADR-001; scope widened 2026-07-24 (user ruling after `readNodes(basePath: String)` passed earlier reviews)*
-
-❌ NEVER call `DomainObject(rawPrimitive, rawPrimitive)` directly.
-✅ INSTEAD: call the smart constructor `DomainObject.create(...)` which returns `Validation`.
-*ADR-001*
-
-❌ NEVER use `.flatMap` to accumulate independent validation errors.
-✅ INSTEAD: `Validation.validateWith(fieldAV, fieldBV, fieldCV)(...)`; all errors surface.
-*ADR-001, ADR-010*
-
-❌ NEVER use a transparent `type TreeId = SafeId` alias when two IDs must be compile-time distinct.
-✅ INSTEAD: `case class TreeId(toSafeId: SafeId)` — a nominal wrapper per ADR-018.
-*ADR-018*
-
-❌ NEVER write a `case class` credential type.
-✅ INSTEAD: `final class` satisfying R1–R8 in ADR-022; `WorkspaceKeySecret` is the reference.
-*ADR-022*
-
-❌ NEVER throw exceptions for domain validation failures.
-✅ INSTEAD: return `Validation[ValidationError, A]` or `ZIO` with a typed error channel.
-*ADR-010*
-
-### API & DTOs
-
-❌ NEVER reuse the same DTO for create and update operations.
-✅ INSTEAD: separate `*DefinitionRequest` (no `id` field, server-assigned) and `*UpdateRequest` (`id` required).
-*ADR-017*
-
-❌ NEVER validate input in a handler or service method.
-✅ INSTEAD: Tapir codec or JSON decoder validates; handler receives already-validated types.
-*ADR-001*
-
-❌ NEVER change a Tapir endpoint signature without a Decision Trigger (Decision Trigger #1).
-✅ INSTEAD: stop, present options, wait for explicit approval.
-*copilot-instructions.md*
-
-### Security & Authorization
-
-❌ NEVER add `grant()` or `revoke()` to `AuthorizationService`.
-✅ INSTEAD: tuple writes are ops-only (`zed` CLI, CI/CD provisioning job).
-*ADR-024*
-
-❌ NEVER validate JWTs in application code.
-✅ INSTEAD: Istio waypoint handles JWT validation; app reads decoded `x-jwt-claims` header.
-*ADR-012, ADR-024*
-
-❌ NEVER use `scala.util.Random` for capability URL or token generation.
-✅ INSTEAD: `SecureRandom` — cryptographically secure, required by ADR-021.
-*ADR-021*
-
-❌ NEVER implement a per-address rate limit in the application, and never derive
-any identity from a request header a caller can set. Only the component holding
-the connection knows who is calling; everything further in has to be told,
-through a forwarded-header convention kept in agreement with the topology by
-hand. A caller who varies the header, or a convention that drifts from the
-deployment, disables the limit silently — no error, no log, the limiter still
-appears to work.
-✅ INSTEAD: a per-address limit belongs at the ingress gateway. The application
-implements none, and `POST /workspaces` is anonymous in every authorization
-mode, so that gateway limit is required work and does not exist yet — a known
-gap, not a decision to revisit in application code. A per-**credential** limit
-is a different question and does belong here, because the workspace key is a
-value the application holds and the edge cannot see.
-*ADR-021 §4*
-
-❌ NEVER include secrets, PII, or internal paths in error messages.
-✅ INSTEAD: typed error codes (`ValidationErrorCode`) with safe human-readable messages.
-*ADR-010, ADR-035*
-
-❌ NEVER give a `String`-backed user-input type only `Not[Blank] & MaxLength[N]`.
-✅ INSTEAD: add a `Match[...]` whitelist as narrow as the business domain permits,
-excluding every character that carries special meaning in a downstream parser
-(`"`, `(`, `)`, `&`, `<`, `>` for a display name).
-*ADR-029*
-
-❌ NEVER concatenate a user string into text that will be parsed again.
-✅ INSTEAD, in this order of preference. **Preferred:** a parameterised, structured or
-AST-level interface — a per-sort literal validator (`riskNameToId.get`,
-`NodeId.fromString`), the typed Quill DSL, zio-json codecs, Laminar `textContent`, a
-GraphQL document's `variables` member. **Approved alternative, recorded as a row in
-ADR-029 §3:** interpolating a value whose Iron refinement admits no character
-carrying meaning in that interpreter — the guarantee is then the type's, at compile
-time. **Rejected:** everything else, and in particular escaping a raw value at the
-interpolation site as the primary guard; escaping is only ever a second layer over
-free text with no narrower type. `innerHTML` is never called.
-*ADR-029*
-
-❌ NEVER interpolate into an Irmin GraphQL document a value that is not derived from
-an Iron-refined type.
-✅ INSTEAD: that boundary is approved under ADR-029 §2's alternative precisely
-because every interpolated value is Iron-derived and nothing else — branch names,
-paths and commit hashes by their own refinements, and a stored node because every
-string-bearing field of `RiskLeaf` and `RiskPortfolio` is refined, so neither has a
-free-text field. A new raw `String` interpolated there removes the property the
-approval rests on. The branch selector holds the one interpolation that is structure
-rather than a value: a read of a named branch aliases it as `main` so every response
-decodes identically, and choosing between that and the bare `main` selector chooses
-between two document shapes. The branch name inside it is an ordinary argument value.
-*ADR-029 §3, ADR-004a*
-
-❌ NEVER call a `WorkspaceStore` or `RiskTreeService` method from another service for
-cross-cutting orchestration.
-✅ INSTEAD: orchestrate in the HTTP handler's `serverLogic` for-comprehension or a
-background orchestrator — those are the only valid call sites, because only there is
-the authorization check visible and compiler-enforced.
-*ADR-030*
-
-❌ NEVER call a service method that reads or mutates workspace or tree data without
-`authz.check()` bound as a `given` earlier in the same handler.
-✅ INSTEAD: bind the check first; a call site that genuinely cannot carries an
-`// exempt:` comment with an approved reason (`workspaceStore.resolve` is the Layer 0
-capability gate).
-*ADR-030*
-
-❌ NEVER let a confidential internal identifier cross the client boundary in either
-direction — not in a response body, header or error message, and not accepted as a
-path segment, query parameter, header or body field, even on an endpoint that also
-checks a capability.
-✅ INSTEAD: accept `WorkspaceKeySecret` and derive `WorkspaceId` server-side via
-`WorkspaceStore.resolve`. A value that embeds one is confined as if it were one
-(`BranchRef` embeds `WorkspaceId`), made safe by construction rather than scrubbed
-afterwards. The ADR-022 credential checklist does **not** apply: these may appear in
-server logs, internal storage paths and merge commit messages — what closes them at
-the boundary is enumeration-oracle / BOLA (Broken Object-Level Authorization) risk,
-not secret leakage. Masking the value in `toString` is not an alternative to
-removing it: it defends one rendering, where removal defends the boundary.
-`WorkspaceStore` has **no by-identifier lookup** — every method takes the
-capability key, so no entry point names a workspace without proving the caller
-holds its credential. Confinement is therefore design discipline rather than
-secrecy: an identifier a client never receives cannot become the ingredient of a
-future cross-tenant lookup. A new lookup that resolves a resource from an
-identifier takes `using Checked[Permission]`, so the authorization is in its
-signature rather than in a warning comment.
-*ADR-036*
-
-❌ NEVER pick the client-facing substitute for a `BranchRef` by habit. Two are
-accepted and one question chooses between them: **can the value be main?**
-✅ INSTEAD: No → a bare `ScenarioName` (`MergeConflict`, `ScenarioHeadStale`,
-`ScenarioSummary` — a merge always targets a scenario, a stale head is always a
-scenario's, a scenario listing can never list main). Yes → `BranchChoice`, the
-two-case client-facing branch type (`X-Branch`, the changed-nodes comparison
-parameters, the scenario-source body, the change-notification tag, the client's
-own branch state). Reaching for `BranchChoice` where main cannot occur adds an
-unreachable case; reaching for `ScenarioName` where it can forces a second field
-or an `Option` whose absence has to mean main.
-*ADR-036, ADR-018*
-
-### Frontend
-
-❌ NEVER let a child component create internal `Var`s for state that the parent coordinates.
-✅ INSTEAD: parent owns all `Var`s; child receives `Signal`s and emits callbacks.
-*ADR-019*
-
-❌ NEVER call `.now()` in a rendering pipeline.
-✅ INSTEAD: derive via `Signal`; `.now()` breaks reactivity and produces stale snapshots.
-*ADR-019*
-
-❌ NEVER write mutable cross-component state outside `FormState` or `BuilderState`.
-✅ INSTEAD: assign new state to exactly one layer (field-level vs assembly-level) before writing.
-*ADR-019*
-
-❌ NEVER put SPA routing logic anywhere but the baked-in `nginx.conf`.
-✅ INSTEAD: nginx serves the built assets and applies Accept-header discrimination on
-`/w/*`; content-hashed static assets carry `Cache-Control: public, immutable,
-max-age=31536000` and `X-Content-Type-Options: nosniff`.
-*ADR-027*
-
-### Exception catching
-
-❌ NEVER catch `scala.util.control.NonFatal` — on Scala.js it silently misses `UndefinedBehaviorError`; it is never the narrowest sound catch.
-✅ INSTEAD: catch the narrowest type guaranteed to cover every failure the call can raise — a named exception on the JVM; `Throwable` only at a Scala.js↔JS interop edge, via the shared `JsBoundary` helper.
-*ADR-033*
-
-❌ NEVER add a `catch` to code that calls no throwing API, and never wrap a total-fallback boundary in an error channel no caller reads.
-✅ INSTEAD: throw-free code stays catch-free (errors are values, ADR-010); a boundary with no recovery path returns `Option`/`Unit`; typed errors are reserved for failures a caller branches on.
-*ADR-033*
-
-### Container & Infrastructure
-
-❌ NEVER build container images manually outside the documented 5-step order.
-✅ INSTEAD: follow the build-order in the `register-dev` skill (base → builder → app layers).
-*ADR-026*
-
-❌ NEVER commit a CA private key, or reference one from the repository.
-✅ INSTEAD: only public certs and non-sensitive generated artifacts are referenced;
-private keys are generated locally and stay outside git.
-*ADR-023*
-
-❌ NEVER expose a local cluster entry point over plain HTTP.
-✅ INSTEAD: HTTPS first; HTTP is redirect-only or explicitly marked local-only.
-*ADR-023*
-
-### Supply chain (ADR-020)
-
-❌ NEVER add or update a dependency with a floating version (`^`, `latest`, unpinned install).
-✅ INSTEAD: pin exactly in every ecosystem (npm, sbt, opam, apk, Docker `FROM`, wget ARGs).
-*ADR-020 §1*
-
-❌ NEVER adopt a dependency version published less than 14 days ago.
-✅ INSTEAD: take the newest version older than 14 days. Exception: a fix for a disclosed vulnerability affecting this project is adopted immediately.
-*ADR-020 §10*
-
-❌ NEVER add a dependency from an individual or unestablished publisher without user approval.
-✅ INSTEAD: prefer well-known organisations; an approved exception gets a comment at the pin site (date, user-approved, reason).
-*ADR-020 §11*
-
-❌ NEVER run `npm install`/`npm update` without explicit prior user authorization.
-✅ INSTEAD: ask first; then resolve → audit → install → audit → `npm audit signatures`.
-*ADR-020 §8–§9; supply-chain + register-dev skills*
-
----
-
-### Simulation, caching and equality
-
-- The cache stores trial outcomes, never rendered curves. The value is
-  `LeafSimResult` — the `TrialOutcomes` carrier plus a content-only
-  `NodeProvenance` that carries no node identity (ADR-014).
-- There is no cache invalidation. The key is the content hash of the leaf's
-  `LeafSimContent` projection, recomputed on every read, so an edited leaf
-  hashes to a new key and misses; stale entries become unreachable orphans
-  (ADR-014, ADR-032).
-- The algebra lives on `TrialOutcomes`, never on a result type.
-  `LossDistribution` is the product `NodeId × TrialOutcomes`: the node id is a
-  label from tree context, only the trial data combines. `combine` is an
-  outer-join pointwise sum and enforces same-`nTrials` alignment (ADR-009).
-- Two equality relations, chosen by the question asked, never conflated
-  (ADR-032): the **domain content hash** (`ContentHashIndex`, the
-  `LeafSimContent` projection for a leaf, Merkle over sorted child hashes for a
-  portfolio) answers "does this change simulation results?"; the **storage
-  hash** (Irmin blob hash over the full persisted node JSON) answers "did the
-  stored artifact change, can a merge conflict here?". Semantic diff uses the
-  domain relation, so a renamed or moved node reports `Identical`.
-- Simulation writes the cache and reads query it. `CachedResultResolver` owns
-  the `ensureCached` primitive; the cache stays pure storage and never
-  simulates (ADR-015).
-- Every draw is a pure function of the trial number and four seed coordinates.
-  `SeedDerivation.streams` is the only place stream coordinates are computed.
-  A leaf's occurrence stream is `2 * seedVarId` and its loss stream
-  `2 * seedVarId + 1`, so the two are disjoint from each other and from every
-  other leaf's (ADR-003).
-
-### Mitigation valuation (ADR-034)
-
-- Two valuations, computed separately. `raw` is the mitigation-free commutative
-  fold: cached, and never altered by a mitigation. `mitigated` is a second fold
-  computed at the read edge and never stored.
-- Each node applies its own transforms to the combine of its children's
-  **mitigated** values. Never apply a transform to a cached raw total — it
-  cannot see a reduction already applied below it, and the result is wrong, not
-  merely approximate.
-- Transforms compose by position, never by authoring order. `mitigated` folds
-  leaves-upward so a child's transform acts before its parent aggregates;
-  within one mitigation `TransformPipeline` steps run in list order; across
-  mitigations on one node `MitigationPrecedence` orders them.
-- A mitigation may reduce a risk; none may eliminate it, and the rule has two
-  enforcement points. A type at the boundary where the parameter decides it:
-  the three scale operations take a `RetentionFactor` (above 0, at most 1),
-  `LikelihoodTransform.Override` a `ResidualProbability` (same interval), and
-  `CapLosses` a `PositiveLong`. A check in `LossDistribution.decorate` where the
-  outcomes decide it: a deductible at or above every loss, a threshold above
-  every loss, or a scale factor small enough that every loss rounds to zero,
-  annihilate only against particular outcomes, so `decorate` refuses a layer
-  that leaves no loss where there was one. A figure that
-  increases is stated absolutely through an `Override`. A risk that no longer
-  exists is removed from the tree, not scaled to nothing.
-
-### Persistence and scenarios (ADR-004a)
-
-- Irmin holds one whole-node JSON blob per path:
-  `workspaces/<wsId>/risk-trees/<treeId>/nodes/<nodeId>`.
-- Scenarios are Irmin **branches**, never paths: `scenarios.<wsId>.<name-slug>`
-  (Irmin rejects `/` in branch names). An absent branch selector means `main`.
-- Each user action produces exactly one commit; the Irmin log is the
-  user-visible history.
-- GraphQL is the only Irmin↔ZIO channel, with a single writer.
-
-### Startup readiness versus request-path resilience (ADR-031)
-
-- One question routes every retry loop: does it protect an individual in-flight
-  request, or gate the process's lifecycle on a dependency becoming reachable?
-  Request retries, circuit breaking and per-request timeouts belong to Istio;
-  startup readiness to application bootstrap; liveness and restart policy to
-  Kubernetes.
-- A startup readiness gate is permitted in Scala only if it is **bounded** by a
-  total budget, **fail-closed** (exits after the budget so the orchestrator
-  restarts), **boot-only**, and **confined to `ZLayer` wiring** — never inside
-  a request handler.
-- The bound is elapsed time, not attempt count. Backoff base and cap are code
-  constants; only the budget is configuration.
-- Not-ready is a typed failure on the error channel, never a Boolean. The probe
-  keeps its typed error so the failure after the budget carries the real cause.
-
-### Observability (ADR-002)
-
-- Telemetry answers *what happened*, logging answers *why it failed*. Request
-  flow tracing and business metrics go to OpenTelemetry spans and metrics, not
-  to log lines.
-- `ZIO.logError` for error diagnostics with stack traces, `ZIO.logDebug` for
-  development debugging, `ZIO.logInfo` for the audit trail.
-
-### Query evaluation (ADR-028)
-
-- `vql-engine` is a JVM dependency of `server`. Queries are evaluated
-  server-side with direct access to the simulation cache; client-side
-  (Scala.js) evaluation is ruled out.
-- `RiskTreeKnowledgeBase(tree, results)` builds the model: structural facts
-  into a `KnowledgeBase`, then `KnowledgeSourceModel.toModel()`, then
-  augmentation with simulation-backed functions (`p95`, `p99`, `lec`) and typed
-  comparison predicates (`gt_loss`, `gt_prob`).
-
-### Imports (ADR-011)
-
-- Imports go at file top after the package declaration, and short names are
-  used throughout. A local import is only for disambiguation.
-
----
-
-## When this skill is not enough — read the full ADRs
-
-A distillation keeps each rule and drops its reasoning, so it cannot carry an
-**interaction** between two rules: an interaction is written in neither rule's
-text and appears only when both are applied to the same code. Completeness of
-coverage does not fix that — the information was never in the parts.
-
-So do not wait to notice that a constraint here is insufficient. A cross-cutting
-concern announces itself by *what you are touching*, not by a felt gap. Touching
-any of these means reading the named ADRs in full before writing code:
-
-| Touching | Read in full |
+| Records | The trap |
 |---|---|
-| Authorization, an authorization boundary, or a capability check | ADR-024, ADR-030, ADR-021, ADR-012 |
-| Anything crossing the client boundary — a DTO, endpoint, header or error message | ADR-036, ADR-035, ADR-010, ADR-017 |
-| A parser, or any path where user text reaches an interpreter | ADR-029, ADR-028 |
-| A cached type, a hash projection, or a content-equality relation | ADR-014, ADR-032, ADR-009 |
-| The mitigation fold, or adding a transform | ADR-034, ADR-014 |
-| A retry, timeout, or readiness loop | ADR-031, ADR-012 |
-| Persistence paths, branch naming, or commit granularity | ADR-004a, ADR-036 |
-| Seeding or sampling | ADR-003, ADR-009 |
-
----
-
-## Known interactions — what no single ADR states
-
-Each row is a trap that exists only between ADRs. This table is the one part of
-this skill that is not derivable from the ADRs individually, so a plan that
-creates a new interaction adds a row here (Plan Quality Gate item 3).
-
-| ADRs | The trap |
-|---|---|
-| ADR-036 × ADR-022 | The credential checklist R1–R8 does **not** apply to a confidential internal identifier. Knowing ADR-022 well leads to over-applying it and reporting a server log line or a storage path as a leak. What closes a confidential identifier at the boundary is enumeration-oracle / BOLA risk, not secret leakage. |
-| ADR-034 × ADR-014 | `raw` is cached; `mitigated` is never stored. Applying a transform to a cached `raw` total is **wrong, not approximate** — it cannot see a reduction already applied below it. Only folding the mitigated children attributes each reduction to the layer it happened at. |
+| ADR-036 × ADR-022 | The credential checklist R1–R8 does **not** apply to a confidential internal identifier. Knowing ADR-022 well leads to over-applying it and reporting a server log line or a storage path as a leak. What closes a confidential identifier at the boundary is enumeration-oracle and BOLA risk, not secret leakage. *Stated in ADR-036 §3.* |
+| ADR-036 × ADR-021 | ADR-021 §1's phrase "`TreeId` remains internal" means `TreeId` is never the credential, not that it never appears on the wire — ADR-021 §3's own endpoint design puts `{treeId}` in the path beside the key. Reading it as confinement contradicts ADR-036 §4. *Stated in ADR-036's references.* |
+| ADR-035 × ADR-036 | The opaque-status rule and the expiry status look like a conflict and are not. The rule binds where the caller's entitlement is in question; an expired workspace answers `410 Gone` to the holder of its key because that discloses nothing the holder did not know. Applying the 404 rule there loses a correct status for no security gain. *Stated in ADR-035 §3.* |
+| ADR-034 × ADR-014 | `raw` is cached; `mitigated` is never stored. Applying a transform to a cached `raw` total is **wrong, not approximate** — it cannot see a reduction already applied below it. Only folding the mitigated children attributes each reduction to the layer it happened at. *Worked example in ADR-034 §1.* |
 | ADR-032 × ADR-014 | Two hashes exist over the same node. The cache key uses the **domain content** relation (`LeafSimContent` projection); the Irmin blob hash answers a different question. Picking the wrong one breaks caching silently — both are plausible and neither errors. |
+| ADR-015 × ADR-014 | ADR-015 specifies an `invalidate` method and an ancestor-path eviction walkthrough that ADR-014 §2 forbids outright. A reader who takes ADR-015 at face value reintroduces the stale-entry window content addressing was adopted to remove. *Each such passage in ADR-015 now carries a retirement marker in place.* |
+| ADR-017 × ADR-014 | ADR-017's endpoint table used to list a cache-invalidation route. No such endpoint exists and the concept is forbidden; the table now says so. |
 | ADR-030 × ADR-024 × ADR-021 | `workspaceStore.resolve` is the Layer 0 capability gate and is the one call that legitimately precedes `authz.check()`. Not knowing this produces either a false bypass report against correct code, or a missed real bypass behind an `// exempt:` that looks like it. |
-| ADR-029 × ADR-028 | The FOL query parser is a live boundary taking user-typed text. Node references resolve through per-sort literal validators (`riskNameToId.get`, `NodeId.fromString`) and are never interpolated — a query built by interpolation is re-parsed and is the injection path. |
-| ADR-031 × ADR-012 | A retry loop belongs to Istio or to application bootstrap, decided by one test: in-flight request, or process lifecycle. A readiness gate inside a request handler violates both ADRs at once. |
-| ADR-036 × ADR-004a | **Two** branch-name types embed the `WorkspaceId`, so neither may appear in a wire-facing type: `BranchRef` (main or a scenario) and `MergeStagingRef` (one merge's staging branch). They share the sealed `StoreBranch`, which the four branch primitives on `IrminClient` are declared over; everything that reads or writes tree data stays declared over `BranchRef`, so a staging branch cannot reach it. The two wire-facing scenario errors (`MergeConflict`, `ScenarioHeadStale`) are declared over `ScenarioName` and nothing is translated at the boundary on those paths. A branch-typed `IrminError` (`BranchAlreadyExists`, `BranchHeadStale`) carries a `StoreBranch`, stays internal, and is translated by its service-layer caller — and which situation it means depends on the kind, so each caller translates accordingly (a scenario branch means the name is taken, a staging branch means `MergeAlreadyRunning`). The two safety-net encoders for those errors discard the branch rather than render it. `BranchChoice.fromBranchRef` is the one place a `BranchRef` becomes its client-facing form; it takes `BranchRef` and not `StoreBranch`, so a staging branch is excluded by the type rather than by a check, and `MergeStagingRef` has no client-facing form at all. |
-| ADR-034 × ADR-001 | "No mitigation may eliminate a risk" has TWO enforcement points, and ADR-001's validate-at-the-boundary rule accounts for only one. A type closes the cases the parameter decides alone (`RetentionFactor`, `ResidualProbability`, a `PositiveLong` cap). The cases the outcomes decide — a deductible at or above every loss, a threshold above every loss, a scale factor small enough that every loss rounds to zero — cannot be typed at all, because the same parameter is ordinary for one node and annihilating for another; `LossDistribution.decorate` catches those by comparing the layer's result against its source. The scale factor is the proof that tightening a type cannot replace the check: its bound is already as tight as the methodology allows, and the precision is lost in the rounding, not the parameter. A new transform has to be checked against the layer check, not assumed covered by a type. `ResidualProbability` is also narrower than `OccurrenceProbability` on purpose: an author may declare a leaf that never occurs, a mitigation may not set its probability to zero. |
+| ADR-030 × ADR-024 | `BootstrapProvisioner.recordOwnership` writes a SpiceDB tuple from application code, which reads as a violation of the read-only enforcement point. It is not: the gate is whether a user request drives the write. A system recording the creator at creation time is a lifecycle write; a user delegating access is administration. *Stated in ADR-024 §4.* |
+| ADR-029 × ADR-028 | The query parser is a live boundary taking user-typed text. Node references resolve through per-sort literal validators and are never interpolated — a query built by interpolation is re-parsed and is the injection path. *Row in ADR-029 §3's table.* |
+| ADR-031 × ADR-012 | A retry loop belongs to Istio or to application bootstrap, decided by one test: in-flight request, or process lifecycle. A readiness gate inside a request handler violates both records at once. |
+| ADR-012 × ADR-021 | ADR-012 §4 forbids application-level rate limiting and ADR-021 §4 says workspace creation needs a limit. Both hold: the limit belongs at the gateway and does not exist yet. A per-**credential** limit is the one that would legitimately sit in the application. |
+| ADR-025 × ADR-027 | Both describe the `/w/*` Accept-header rule. ADR-025 decides path routing and states the requirement; ADR-027 owns the nginx implementation, and `ADR-INFRA-007` in `register-infra` governs where they diverge. Editing the rule in one place only leaves two descriptions of one behaviour. |
+| ADR-036 × ADR-004a | Two branch-name types embed the `WorkspaceId` — `BranchRef` and `MergeStagingRef` — so neither may appear in a wire-facing type. The containment is by type: the branch primitives take the sealed `StoreBranch`, everything that reads or writes tree data is declared over `BranchRef` alone, and `BranchChoice.fromBranchRef` takes `BranchRef` rather than `StoreBranch`, so a staging branch is excluded by a signature rather than by a check. *Stated in ADR-036 §2.* |
+| ADR-034 × ADR-001 | The no-elimination rule has two enforcement points and ADR-001's validate-at-the-boundary rule accounts for only one. A type closes the cases the parameter decides alone; the cases the outcomes decide cannot be typed at all, because the same parameter is ordinary for one node and annihilating for another. A new transform is checked against the layer check, never assumed covered by a type. *Stated in ADR-034 §6.* |
+| ADR-018 × ADR-022 | The two wrapper patterns are deliberately opposed. ADR-018 wants transparent serialisation and pattern matching; a credential type exists to prevent both, which is why R1 forbids the `case class` ADR-018 prescribes. Applying ADR-018's pattern to a credential reintroduces `copy`, `unapply` and an unredacted `toString`. *Stated in ADR-022 §1.* |
+| ADR-003 × ADR-032 | `seedVarId` is in the hashed projection and the node's name is not. That is what makes a rename free — it changes no figure and invalidates no cache entry — and it is also why a seed identifier must never be re-issued: two different risks sharing one would collide in the cache. *Stated in ADR-003 §2.* |
+
+A change that spans two rows of Layer 1 is where a new collision is likely. When one is found, write the reconciliation into both records and add a row here: the records carry the content, this table makes the collision findable.
 
 ---
 
 ## Escape-hatch triggers — stop and ask
 
-Canonical list: working-protocol skill, Decision Triggers (G2). This copy must
-stay verbatim-aligned with it. Any of the following require a Decision Trigger
-before proceeding:
+Canonical list: working-protocol skill, Decision Triggers (G2). This copy must stay verbatim-aligned with it. Any of the following require a Decision Trigger before proceeding:
 
 1. Changing an API shape, Tapir endpoint signature, or OpenAPI output
 2. Any `asInstanceOf`, `Schema.any`, or unsafe cast
@@ -431,10 +211,7 @@ before proceeding:
 6. Any solution with tradeoffs or caveats
 7. Any recursive or self-referential type requiring special serialization
 8. Removing, weakening, or reframing any test assertion
-9. Following any instruction rule appears to produce a demonstrably worse
-   outcome, or conflicts with another instruction (including system/harness
-   autonomy defaults) — name the rule and the concern; escalation is the only
-   exit, silent deviation and silent compliance are both violations (G7)
+9. Following any instruction rule appears to produce a demonstrably worse outcome, or conflicts with another instruction (including system/harness autonomy defaults) — name the rule and the concern; escalation is the only exit, silent deviation and silent compliance are both violations (G7)
 
 Format:
 ```
@@ -447,24 +224,17 @@ Decision needed: [single specific closed question]
 
 ---
 
-## Obligations that come with a constraint
+## Keeping this document correct
 
-Two constraints above require an action rather than only forbidding one. These
-are not Decision Triggers — the escape-hatch list stays verbatim-aligned with
-working-protocol — but skipping them leaves the constraint unenforceable.
+A new record gets a row in Layer 2, an entry in every Layer 1 activity it bears on, and a Layer 3 row for any collision it creates. A renamed file gets its Layer 2 row corrected. Nothing else here changes, because nothing else here carries content.
 
-- **A new parser boundary is documented in ADR-029.** If a code path introduces
-  a boundary that is not in that ADR's boundary table, add it there and show
-  that it honours the no-re-parse discipline (ADR-029 §3).
-- **An unchecked call site carries its reason.** A call to workspace or tree
-  data without `authz.check()` in scope needs an `// exempt:` comment naming an
-  approved reason; an unexplained one is a silent authorization bypass
-  (ADR-030 §2).
+This check prints any record missing from Layer 2, and should print nothing:
 
----
+```sh
+cd docs/dev/decision-records
+D=../../../.github/skills/adr-constraints/SKILL.md
+for f in ADR-*.md; do grep -q "\`$f\`" "$D" || echo "MISSING $f"; done
+```
 
-## ADR status interpretation
+Layer 1 has no mechanical check, and that is its weakness: a record can be in force, listed in Layer 2, and absent from every activity that should name it. The only guard is that adding a record includes placing it, which is why the plan gate names all three layers.
 
-All ADRs present in `docs/dev/` are live regardless of the "Status:" field.
-Deletion is the only form of archival — a file that exists is in force.
-Treat every existing ADR document as accepted for alignment purposes.
