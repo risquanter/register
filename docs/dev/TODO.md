@@ -2573,3 +2573,25 @@ the rest of the process. It works today only because `sttp`'s backend is built
 with `closeClient = false`, a third-party detail this code neither asserts nor
 tests. Investigation notes, the four affected call sites and three candidate
 shapes: `docs/scratch/LAYER-SCOPE-IMMEDIATE-RELEASE.md`.
+
+## 56. No ADR carries a verified implementation status — the "Status:" field is not evidence
+
+Forty ADR documents are in force. Their `Status:` fields read Accepted, Accepted
+(awaiting implementation), Accepted (implemented), Active, Amended and Proposed,
+and none of those labels has been checked against the code. So the field cannot
+be used to decide whether a constraint is already upheld, whether an ADR describes
+built behaviour or intended behaviour, or whether a "Proposed" document binds.
+
+The consequence that bites today: coverage rules cannot filter by status. The
+`adr-constraints` distillation must therefore carry every present ADR including
+the three marked Proposed, and its own status section says so.
+
+The work is a per-ADR pass asking one question — is each of this document's
+numbered decisions implemented, partly implemented, or not built — and recording
+the answer in the document. It is the user's to perform.
+
+The three documents marked Proposed are `ADR-007-proposal.md`,
+`ADR-016-config-management.md` and `ADR-025-spa-routing-strategy.md`. They are also
+the only three ADRs the distillation does not cite anywhere, which is not a
+coincidence: the distillation was filtered by status, so the label decided coverage
+even though the label is unverified.

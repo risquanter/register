@@ -80,6 +80,17 @@ plus a commit, and is deliberately its own enum rather than a reused
 `BranchChoice`, because "what does a new scenario fork from" is not "which
 branch does this request operate on" (ADR-018).
 
+**Two branch-name types embed the `WorkspaceId`, and the containment is by type
+rather than by discipline.** `BranchRef` names main or a scenario;
+`MergeStagingRef` names one merge's staging branch. Both extend the sealed
+`StoreBranch`, and the split in what is declared over which is load-bearing: the
+four branch primitives on `IrminClient` take `StoreBranch`, while everything that
+reads or writes tree data is declared over `BranchRef` alone, so a staging branch
+cannot reach a tree read at all. `BranchChoice.fromBranchRef` is the one place a
+branch becomes its client-facing form, and it takes `BranchRef` and not
+`StoreBranch` — so a staging branch is excluded by the signature rather than by a
+check, and `MergeStagingRef` has no client-facing form to misuse.
+
 ### 3. Lighter Than a Credential
 
 The credential checklist (ADR-022 R1–R8) does **not** apply. A confidential

@@ -74,9 +74,15 @@ and no confidential internal identifier (ADR-036):
 
 - `RepositoryFailure(reason)` — `reason` is an internal diagnostic; `encode`
   maps it to `"Internal server error"`, never the raw string
-- Resource-neutral errors collapse to an opaque status (a missing resource is a
-  plain 404 regardless of variant), so the message cannot distinguish "not
-  yours" from "does not exist"
+- An error whose variants would reveal whether a resource exists collapses to one
+  opaque status, so neither the status nor the message distinguishes "not yours"
+  from "does not exist". The rule closes an enumeration oracle: a caller who does
+  not hold a resource's capability must not learn from the response whether it is
+  there. It therefore binds exactly where the caller's entitlement is in question —
+  a missing or foreign workspace or tree is a plain 404 regardless of variant — and
+  does not bind where the caller demonstrably holds the capability and the
+  resource's own lifetime has ended. An expired workspace answers `410 Gone` to
+  the holder of its key, which discloses nothing that holder did not already know
 - A credential in a message prints its redacted `toString` (`WorkspaceKeySecret(***)`,
   ADR-022 R3), never the raw value
 

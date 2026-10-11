@@ -177,7 +177,10 @@ PUT /w/{key}/risk-trees/{treeId}   { ...complete node set... }
 | `GET /w/{key}/risk-trees/{treeId}/structure` | — | Full structure |
 | `PUT /w/{key}/risk-trees/{treeId}` | `RiskTreeUpdateRequest` | Full-replacement update |
 | `DELETE /w/{key}/risk-trees/{treeId}` | — | Delete tree |
-| `POST /w/{key}/risk-trees/{treeId}/invalidate/{nodeId}` | — | Cache invalidation (not a write) |
+
+No cache-invalidation endpoint exists. The simulation cache is content-addressed
+and has no invalidation operation, so there is nothing for such a route to call
+(ADR-014 §2).
 
 ---
 
