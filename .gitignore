@@ -101,18 +101,19 @@ node_modules/tmp/
 .cursor/
 .copilot/
 
-# Working-protocol approval token (user-owned, local-only)
+# The working-protocol approval state, and the only part of the enforcement
+# that stays local. It is per-session authorization rather than configuration:
+# `approved` names the plan currently authorized, `pending` is the block the
+# user is about to apply, and the two override files are one-shot by design and
+# deleted as they are consumed. Committing any of them would turn a decision
+# taken once into a standing permission, shared with every clone.
+#
+# The gate itself, its wiring, and the instruction files are tracked. They hold
+# logic and instructions, not secrets, and keeping them out of git cost more
+# than it bought: a change to the detector left no trace in any diff, a fresh
+# clone was ungoverned without saying so, and the obscurity only ever defended
+# against content that could guess the word "approved" anyway.
 .claude/protocol/
-
-# Agent enforcement configuration. Kept local: these files describe what the
-# working-protocol gate blocks, where its approval token lives, and which
-# phrases authorize an action — a map for anyone trying to talk the agent past
-# it. The non-sensitive skills and instruction files stay tracked.
-.claude/protocol/
-.claude/settings.json
-.claude/hooks/
-.github/copilot-instructions.md
-/CLAUDE.md
 docs/dev/WORKING-INSTRUCTIONS.md
 
 # Local-only ideation note; the rest of docs/scratch/ stays tracked
