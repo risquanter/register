@@ -71,7 +71,7 @@ milestone-2b completion is a pre-declared major).
 - Bump/sync/build/test commands: register-dev skill
   ("Versioning", "Container Image Builds", "BATS Smoke Tests").
 - `build.sbt` is hook-gated: edits require the user-refreshed approval
-  token (working-protocol skill).
+  token (`CLAUDE.md`, Mechanical enforcement).
 
 ## opam / Irmin — source compilation is mandatory
 

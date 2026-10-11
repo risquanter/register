@@ -38,9 +38,8 @@ sbt ~app/compile
 
 ### A warning category is enforced by the compiler or it is not a rule
 
-The project required zero warnings in two places — the working-protocol's phase
-completion criteria and the code-quality-review skill's compiler-hygiene
-section — and a measurement on 2026-10-07 found 197 unused imports across the
+The project required zero warnings in two places — a phase-completion list and
+the code-quality-review skill's compiler-hygiene section — and a measurement on 2026-10-07 found 197 unused imports across the
 four modules. A rule that depends on someone reading warning output does not
 hold. So:
 
@@ -77,6 +76,83 @@ already authorizes. The cleanup belongs to that edit rather than to a later
 pass, so the counts above fall as ordinary work proceeds and a module reaches
 zero without a dedicated sweep.
 
+### Verifying a language or library fact — one route works, four do not
+
+A question like "can a Scala 3 `enum` extend `Throwable`", "does zio-json derive
+a codec for this shape", or "does this widen" is a compile-level fact. Verifying
+it is correct and expected. Four plausible ways to verify it **cannot work in
+this project**, each for a fixed structural reason, so none of them is worth a
+second attempt.
+
+**1. The REPL cannot be driven from a pipe, and it fails silently.**
+`echo '…' | sbt commonJVM/console` consumes the input without evaluating it,
+prints the jline warning *"The Parser of class dotty.tools.repl.JLineTerminal
+does not support the CompletingParsedLine interface"*, and exits
+`[success]`. The absence of output is the only signal that nothing ran, so a
+piped REPL session reads as a pass. Never verify anything this way.
+
+**2. A hand-assembled `scalac` classpath cannot run the compiler.**
+`scala3-library_3-3.8.4.jar` in the coursier cache holds exactly one entry,
+`META-INF/MANIFEST.MF`, and no classes — the Scala 3.8 library is a shim
+artifact. So
+`java -cp …/scala3-compiler_3-3.8.4.jar dotty.tools.dotc.Main` dies during
+driver initialisation with `NoClassDefFoundError: scala.deriving.Mirror$Singleton`.
+sbt gets the real library from its `scalaInstance`, which is not a path that can
+be reconstructed with `find`.
+
+**3. `sbt export <proj>/Compile/dependencyClasspath` is not that classpath
+either.** It is the project's dependency classpath, and it begins with the same
+empty shim jar. It is correct as the `-classpath` for user code and useless as
+the `java -cp` for the compiler.
+
+**4. A scratch file under `modules/` is not scratch, because it cannot be
+removed.** A Bash heredoc or redirection into `modules/**` is refused by the
+protocol hook — including into a test directory the hook would otherwise
+auto-authorize — and the refusal names the Edit/Write tools as the route. But
+`rm` on that path is a Bash write into the same gated region and is refused too.
+So the agent can create such a file and cannot delete it, leaving the user to
+clean up. Do not create one.
+
+**What does work, in order of cost:**
+
+- **Search the corpus for precedent first.** It is free. If no file here uses the
+  construct, say that rather than assuming either answer — in this repository, as
+  of 2026-10-11, no `Throwable` subtype carries a derived JSON codec and no `enum`
+  extends a class, so neither question had an in-repo answer.
+- **Which artifact you are looking at decides whether you may open it at all.**
+  - **A first-party library — `metalog-distribution`, `vql-engine`, `hdr-rng` —
+    is read from its sibling source checkout, never from a jar.** Not the
+    compiled jar, not the `-sources.jar`, not to list it, not to extract it, not
+    to decompile it. The sources are right there:
+    `/home/danago/projects/metalog-distribution/src/`,
+    `/home/danago/projects/vague-quantifier-logic/core/src/main/scala/vql/`,
+    `/home/danago/projects/hdr-rng/core/`.
+    **This is where the trap is set:** these three arrive as ordinary jars in the
+    coursier cache and on every classpath this project exports, so a classpath
+    dump or a cache search puts them in front of you looking like any other
+    dependency. And the note in `CLAUDE.md` that they are "consumed as binary
+    artifacts from Maven Central" and that "sibling checkouts are not needed to
+    build" is about **building** — it is not licence to read their code out of a
+    jar.
+  - **A third-party artifact with no local checkout** (scala3-library, zio-json,
+    tapir) may have its packaging inspected with `unzip -l` — that is how the
+    empty-shim fact above was established. Reading its source from a jar is a
+    last resort reserved for a library that has no checkout and cannot be
+    cloned.
+- **Compile the real change in the real module.** `sbt commonJVM/compile`,
+  `sbt server/compile`, `sbt app/compile` are the authoritative answer and are
+  work the change needs anyway, so "write it and compile" usually costs less than
+  any probe.
+- **When the fact must be known *before* a gated edit is authorized**, hand the
+  user a pasteable probe — the Write, the compile command, and the `rm` — say in
+  one line what a clean compile proves, and stop. That is the only route to a
+  compile-level fact without an authorized edit.
+
+Two failed verification attempts for environmental reasons is the limit, under
+the red-build rule below — *"two attempts at the same fix is the limit"*. Then either answer analytically with the unverified
+premise labelled as such, or hand over the one command that settles it. A third
+mechanism is not tried.
+
 ---
 
 ## Unit Tests
@@ -103,6 +179,47 @@ sbt "app/testOnly *TreeBuilderStateSpec"
 sbt 'commonJVM/test; server/test' 2>&1 | \
   grep -E 'tests failed|FAILED|\[error\]|success'
 ```
+
+### A red build or a failing test is yours to fix
+
+The origin of a failure is irrelevant to the obligation to resolve it. This is
+the rule most often argued around, so it is stated without an exit.
+
+- **Never** dismiss, defer, downgrade or narrate around a failure on the grounds
+  that it is pre-existing, unrelated, already broken, or not caused by the
+  change in hand. Investigating blame is never a substitute for fixing.
+- **Never** spend a tool call proving a failure is pre-existing. Spend it fixing.
+- **Never** report work as done while any module that was touched is red. Green
+  is the only done, and compiling is not running.
+- The one exception is a fix that carries a genuine trade-off — weakening an
+  assertion, changing an API shape, a workaround. That is a Decision Required
+  (`CLAUDE.md`, G2). "It would take effort" and "it is unrelated" are not
+  trade-offs.
+
+**When a failure blocks progress**, in order: stop the current approach rather
+than trying it again — two attempts at the same fix is the limit; state what was
+attempted, what failed, and the exact error; say whether the failure is
+revealing a missing type, a wrong abstraction, or a conflict with a decision
+record; then present at least two concrete alternatives and wait. A third
+attempt at the same approach is the behaviour this rule exists to stop.
+
+### What "the build is finished" requires
+
+Before a phase, step or plan is reported done:
+
+- every module touched compiles, and its tests run green — no failure excused;
+- the new behaviour has tests: the happy path, every validation constraint that
+  can reject input, and every error branch;
+- no test assertion was weakened, disabled, renamed or deleted to get there;
+- the decision records that bear on the change were reviewed after the
+  implementation, not only before it (`adr-constraints`);
+- nothing in scope was deferred, parked or moved to a follow-up (`CLAUDE.md`, G8).
+
+Zero compiler warnings is deliberately **not** on that list. The warning rule
+above is the reason: a category this project cares about is escalated to a
+compile error, and a category that is not escalated is not a rule. Requiring
+"no warnings" in prose while 197 unused imports sat in the build is what made
+the earlier version of this list untrue.
 
 ### Reporting test results
 

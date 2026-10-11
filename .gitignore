@@ -111,8 +111,6 @@ node_modules/tmp/
 .claude/protocol/
 .claude/settings.json
 .claude/hooks/
-.claude/skills/working-protocol/
-.github/skills/working-protocol/
 .github/copilot-instructions.md
 /CLAUDE.md
 docs/dev/WORKING-INSTRUCTIONS.md

@@ -19,7 +19,8 @@ Do not rubber-stamp. Report PASS when clean. Report FINDING when not. Do not pro
 options without flagging which decision the user must make. **The disposition of
 every finding is the user's** — severity is yours to assess, and you never decide on
 the user's behalf that a finding is acceptable. Which choices are the user's to
-resolve is defined in the working-protocol skill's Decision Protocol.
+resolve is defined in the global instructions, under "What counts as a decision",
+and the project's mechanism for raising one is in `CLAUDE.md`.
 
 **Convention vs. hygiene is a real finding, not a "just conform" auto-pass.** When
 an existing codebase convention conflicts with code hygiene, clean code, or a best
@@ -28,15 +29,14 @@ option — fix the convention across all its occurrences now, or schedule it —
 inherited (bad) convention is never silently perpetuated. "Schedule it" here means
 routing the cleanup to a properly-scoped plan or TODO item by an explicit user
 decision — it is the G8 foreign-discovery exception, not license to defer work
-that belongs to the current plan's scope (working-protocol skill, "Plan = epic;
-ship whole"). But first VERIFY the
+that belongs to the current plan's scope (`CLAUDE.md`, G8). But first VERIFY the
 cleaner alternative actually builds and passes tests: an apparent bad convention
 often encodes a real constraint (e.g. bare `catch _: Throwable` at the Scala.js JS
 boundary is deliberate — `NonFatal` does not catch `UndefinedBehaviorError`). Never
-recommend a hygiene change you have not verified green. Full rule: working-protocol
-skill, noise-filter exception.
+recommend a hygiene change you have not verified green. Full rule: `CLAUDE.md`,
+the noise filter's convention exception.
 
-Three binding rules on the report itself (working-protocol G6):
+Three binding rules on the report itself (`CLAUDE.md`, G6):
 
 - Presenting the review report is a presentation — halt after it. No fixes,
   no commits, no further tool calls until the user rules on the findings.

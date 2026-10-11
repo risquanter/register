@@ -199,9 +199,57 @@ A change that spans two rows of Layer 1 is where a new collision is likely. When
 
 ---
 
+## The review this skill exists to serve
+
+Routing the records is step one of a two-step obligation, and both steps are
+presentations that halt (`CLAUDE.md`, G4 and G6).
+
+**Before any code.** Identify the activity in Layer 1, read every record its
+*always* column names, and read the *also* rows that apply. Then state, for each
+record, one of two things: the change complies with it, or it deviates and why.
+A deviation is presented in the Decision Required format below and waits. A
+record that bears on the change and is not mentioned in that statement has not
+been reviewed, whatever the task's wording said.
+
+**After the implementation.** Re-read the same set against what was actually
+written, because an implementation drifts from its own plan in small ways that
+each look harmless. Check specifically for a constraint satisfied in the plan and
+lost in the code. Report what you find and wait before calling the phase
+complete.
+
+The structural checks that used to sit in this second pass — an ADT with a
+data-carrying success case and no `map`, a public method with no call site, an
+inline lambda long enough to deserve a name, a hand-written match that `map`
+would collapse — are not repeated here. They live where they are applied:
+`.claude/rules/scala-style.md` and the `code-quality-review` skill.
+
+## Amending the corpus — what a change to a record owes
+
+A plan that adds, amends or retires a record carries these in the same plan, not
+as a follow-up. They are the reason this document can be trusted to route.
+
+**A new record is placed in all three layers.** A row in Layer 2 by subject, an
+entry in every Layer 1 activity it bears on, and a Layer 3 row for any collision
+it creates. Layer 1 is the one that matters most and the one with no mechanical
+check: it is what makes a record reach work whose wording never mentions it. A
+renamed file gets its Layer 2 row corrected.
+
+**An interaction is written into both records *and* indexed in Layer 3.** Where
+the change makes two records bear on the same code in a way neither states
+alone, the reconciliation goes into both records under a heading naming the
+other, and the Layer 3 row is what makes the collision findable at all. The
+records carry the content; the table carries only its existence.
+
+**A retired passage is marked where it sits.** A record stays in force while one
+of its sections is superseded, so the marker goes at that section — not only in
+a note at the top, which a reader arriving at the section has already walked
+past. Say what must not be implemented, and name what holds instead.
+
+Then run the Layer 2 check below and leave it printing nothing.
+
 ## Escape-hatch triggers — stop and ask
 
-Canonical list: working-protocol skill, Decision Triggers (G2). This copy must stay verbatim-aligned with it. Any of the following require a Decision Trigger before proceeding:
+Canonical list: `CLAUDE.md`, Decision Triggers (G2). This copy must stay verbatim-aligned with it. Any of the following require a Decision Trigger before proceeding:
 
 1. Changing an API shape, Tapir endpoint signature, or OpenAPI output
 2. Any `asInstanceOf`, `Schema.any`, or unsafe cast
@@ -232,7 +280,7 @@ This check prints any record missing from Layer 2, and should print nothing:
 
 ```sh
 cd docs/dev/decision-records
-D=../../../.github/skills/adr-constraints/SKILL.md
+D=../../../.claude/skills/adr-constraints/SKILL.md
 for f in ADR-*.md; do grep -q "\`$f\`" "$D" || echo "MISSING $f"; done
 ```
 

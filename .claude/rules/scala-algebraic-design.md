@@ -13,6 +13,49 @@ Consult this file at three points:
 
 ---
 
+## Before the signature — two things stated out loud
+
+Both are done before a signature is written, and both are written into the echo
+that precedes the edit. The echo itself, the halt, and what counts as a
+deviation from an approved plan are in `CLAUDE.md`; what follows is the design
+content that echo carries.
+
+### Name the structure the operation participates in
+
+Say which it is — aggregation, transformation, validation, sequencing or
+traversal — before writing the signature, because the structure decides the
+signature rather than the reverse:
+
+| If the operation is | then the signature is already constrained |
+|---|---|
+| aggregation | the type needs its `Identity` instance first (Layer A), and `empty` exists before any caller folds |
+| validation over independent fields | `Validation[E, A]`, accumulating — never `.flatMap`, which stops at the first error |
+| transformation of a wrapped value | `map` on the type, not a hand-written match threading the other cases |
+| an effect over a collection | `ZIO.foreach` or `foreachPar`, not a manual accumulator |
+| a step that needs the previous result | `flatMap`; if the steps are independent, the sequencing is an accidental constraint |
+
+Naming it is what stops a signature being written that the structure then has to
+be bent around. A function whose name says "combine" but whose type is not a
+Monoid's is the common failure, and it is visible at this point and cheap to
+correct.
+
+### Audit the types the signature names
+
+List every domain wrapper it references — opaque type, Iron refinement, nominal
+wrapper — and confirm two separate things for each.
+
+**That it exists.** The smart constructor and the refinement are where the
+validation lives, so a signature naming a type that does not have them yet is a
+signature that will take raw primitives in practice.
+
+**That it is reachable from the module being edited.** `commonJVM` and `commonJS`
+compile the same sources for two platforms, and `server` and `app` each see only
+their own side, so a type that exists is not necessarily a type in scope. State
+the import path for each one. A signature naming a type the module cannot see
+produces a compile error that reads like a design problem and is not one.
+
+---
+
 ## Layer A₀ — Domain primitive recognition
 
 *Asked when introducing any new field, parameter, or case class member.*
