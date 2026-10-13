@@ -13,6 +13,8 @@ import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisionerNoOp, Checked, Permission, TestChecked, UserContextExtractor}
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, TreeId}
+import com.risquanter.register.domain.errors.RepositoryFailure
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, ScenarioService, ScenarioSummary}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 import com.risquanter.register.util.IdGenerators
@@ -46,7 +48,9 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
     store:           WorkspaceStore,
     riskTreeService: RiskTreeService,
     scenarioService: ScenarioService
-  ): ZIO[Any, Nothing, SttpBackend[Task, Any]] =
+  // `Throwable` rather than `Nothing`: building the tracing layer reads
+  // configuration, so constructing the backend can fail.
+  ): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
     WorkspaceLifecycleController.makeZIO
       .provide(
         ZLayer.succeed(riskTreeService),
@@ -55,7 +59,8 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         ZLayer.succeed(UserContextExtractor.noOp),
         AuthorizationServiceNoOp.layer,
         ZLayer.succeed(BootstrapProvisionerNoOp),
-        ZLayer.succeed(scenarioService)
+        ZLayer.succeed(scenarioService),
+        TestConfigs.telemetryLayer >>> TelemetryLive.configured
       )
       .map { ctrl =>
         TapirStubInterpreter(SttpBackendStub[Task, Any](summon[MonadError[Task]]))
@@ -76,7 +81,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         name             = scenarioName("stress-2026")
         treeSvc          = CascadeTestStubs.riskTreeService((_, id) =>
                               treeDeleted.update(_ :+ id) *>
-                              ZIO.fail(new NoSuchElementException("gone")))
+                              ZIO.fail(RepositoryFailure("gone")))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
@@ -103,7 +108,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         name             = scenarioName("stress-2026")
         treeSvc          = CascadeTestStubs.riskTreeService((_, id) =>
                               treeDeleted.update(_ :+ id) *>
-                              ZIO.fail(new NoSuchElementException("gone")))
+                              ZIO.fail(RepositoryFailure("gone")))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)

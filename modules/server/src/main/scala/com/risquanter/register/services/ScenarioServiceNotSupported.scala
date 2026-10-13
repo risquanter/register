@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
-import com.risquanter.register.domain.errors.ScenariosNotSupported
+import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported}
 
 /** `ScenarioService` for the in-memory backend (milestone-2b Phase B item 6).
   *
@@ -18,14 +18,14 @@ object ScenarioServiceNotSupported extends ScenarioService:
   private val reason = "Scenarios require the Irmin backend (repository.type=irmin)"
 
   override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Permission]): Task[BranchRef] =
+    (using Checked[Permission]): IO[AppError, BranchRef] =
     ZIO.fail(ScenariosNotSupported(reason))
 
-  override def list(wsId: WorkspaceId)(using Checked[Permission]): Task[List[ScenarioSummary]] =
+  override def list(wsId: WorkspaceId)(using Checked[Permission]): IO[AppError, List[ScenarioSummary]] =
     ZIO.fail(ScenariosNotSupported(reason))
 
   override def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Permission]): Task[Unit] =
+    (using Checked[Permission]): IO[AppError, Unit] =
     ZIO.fail(ScenariosNotSupported(reason))
 
   val layer: ULayer[ScenarioService] = ZLayer.succeed(ScenarioServiceNotSupported)

@@ -151,11 +151,11 @@ final class AuthorizationServiceSpiceDB private (
               ))
             case Left(parseErr) =>
               ZIO.fail(AuthServiceUnavailable(
-                s"SpiceDB check response parse error: $parseErr"
+                s"SpiceDB check response parse error: $parseErr", None
               ))
         else
           ZIO.fail(AuthServiceUnavailable(
-            s"SpiceDB check returned HTTP ${response.code.code}"
+            s"SpiceDB check returned HTTP ${response.code.code}", None
           ))
       }
 
@@ -191,10 +191,10 @@ final class AuthorizationServiceSpiceDB private (
       .flatMap { response =>
         if response.code.isSuccess then
           ZIO.fromEither(parseLookupResponseLines(response.body))
-            .mapError(msg => AuthServiceUnavailable(s"SpiceDB lookup response error: $msg"))
+            .mapError(msg => AuthServiceUnavailable(s"SpiceDB lookup response error: $msg", None))
         else
           ZIO.fail(AuthServiceUnavailable(
-            s"SpiceDB lookup returned HTTP ${response.code.code}"
+            s"SpiceDB lookup returned HTTP ${response.code.code}", None
           ))
       }
 

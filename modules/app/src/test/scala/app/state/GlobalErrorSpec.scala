@@ -1,65 +1,112 @@
 package app.state
 
+import java.time.Duration
 import zio.test.*
 
+import app.core.RequestFailure
+import app.views.ErrorMessages
+import com.risquanter.register.domain.data.ExpiryCause
+import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId}
 import com.risquanter.register.domain.errors as E
+import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProblem, WireError}
 
-/** Tests for [[GlobalError.fromThrowable]] — the classification of the shared
-  * `AppError` hierarchy (reconstructed by `ErrorResponse.decode`) into the SPA's
-  * `GlobalError` banner variants.
+/** Which banner treatment each failure gets.
   *
-  * One case per direct `AppError` sub-trait (`SimError`, `IrminError`,
-  * `AuthError`, `FolQueryFailure`) plus a non-`AppError` throwable. The match on
-  * the sealed `AppError` in `fromAppError` is compiler-enforced exhaustive, so a
-  * new sub-trait without a branch is a compile error rather than a silent
-  * `NetworkError`.
+  * There is a case per wire case and one for a transport failure, because
+  * `fromWireError` matches the wire cases exhaustively and a new one is a
+  * compile error there until it has a treatment. These tests pin which
+  * treatment it got, which the compiler cannot check.
   */
 object GlobalErrorSpec extends ZIOSpecDefault:
 
+  private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
+
+  private def wire(error: WireError): GlobalError =
+    GlobalError.from(RequestFailure.Wire(error))
+
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
-    suite("GlobalError.fromThrowable")(
-      test("ValidationFailed (SimError) → GlobalError.ValidationFailed") {
-        val errs = List(E.ValidationError("name", E.ValidationErrorCode.INTERNAL_ERROR, "must not be empty"))
-        GlobalError.fromThrowable(E.ValidationFailed(errs)) match
-          case GlobalError.ValidationFailed(got) => assertTrue(got == errs)
+    suite("GlobalError.from")(
+      test("a rejected body keeps its validation entries") {
+        val errors = List(
+          E.ValidationError("name", E.ValidationErrorCode.INTERNAL_ERROR, "must not be empty")
+        )
+        wire(WireError.ValidationRejected(errors, trace)) match
+          case GlobalError.ValidationFailed(got) => assertTrue(got == errors)
           case other                             => throw MatchError(other)
       },
-      test("DataConflict (SimError) → GlobalError.Conflict") {
-        GlobalError.fromThrowable(E.DataConflict("duplicate")) match
-          case GlobalError.Conflict(m) => assertTrue(m.contains("duplicate"))
-          case other                   => throw MatchError(other)
+      test("a refused query is a rejected request, not a server fault") {
+        val problem = QueryProblem.Unparseable("unexpected token", Some(7))
+        wire(WireError.QueryRejected(problem, trace)) match
+          case GlobalError.RequestRejected(message) =>
+            assertTrue(message.contains("unexpected token")) && assertTrue(message.contains("7"))
+          case other => throw MatchError(other)
       },
-      test("sentinel RepositoryFailure → GlobalError.WorkspaceExpired") {
-        val sentinel = E.RepositoryFailure(s"${E.RepositoryFailure.WorkspaceSentinelPrefix}not-found")
-        GlobalError.fromThrowable(sentinel) match
-          case GlobalError.WorkspaceExpired(m) => assertTrue(m.contains("expired"))
-          case other                           => throw MatchError(other)
+      test("an absent resource is its own case and carries no message of its own") {
+        assertTrue(wire(WireError.NotFound(trace)) == GlobalError.NotFound)
       },
-      test("non-sentinel RepositoryFailure (SimError) → GlobalError.ServerError") {
-        GlobalError.fromThrowable(E.RepositoryFailure("disk error")) match
-          case GlobalError.ServerError(m) => assertTrue(m.contains("disk error"))
-          case other                      => throw MatchError(other)
+      test("an expired workspace states the idle limit when inactivity ended it") {
+        val expired = WireError.WorkspaceExpired(
+          ExpiryCause.Inactivity,
+          Duration.ofHours(72),
+          Duration.ofHours(24),
+          trace
+        )
+        wire(expired) match
+          case GlobalError.WorkspaceExpired(message) =>
+            assertTrue(message.contains("24 hours")) && assertTrue(!message.contains("72"))
+          case other => throw MatchError(other)
       },
-      test("IrminError → GlobalError.DependencyError") {
-        GlobalError.fromThrowable(E.IrminUnavailable("down")) match
-          case GlobalError.DependencyError(m) => assertTrue(m.contains("down"))
-          case other                          => throw MatchError(other)
+      test("an expired workspace states the absolute lifetime when the ceiling ended it") {
+        val expired = WireError.WorkspaceExpired(
+          ExpiryCause.Lifetime,
+          Duration.ofHours(72),
+          Duration.ofHours(24),
+          trace
+        )
+        wire(expired) match
+          case GlobalError.WorkspaceExpired(message) =>
+            assertTrue(message.contains("72 hours")) && assertTrue(!message.contains("24"))
+          case other => throw MatchError(other)
       },
-      test("AuthError → GlobalError.ServerError") {
-        val auth = E.AuthForbidden("user-1", "read", "risk-tree", "tree-1")
-        GlobalError.fromThrowable(auth) match
-          case GlobalError.ServerError(m) => assertTrue(m.contains("Access denied"))
-          case other                      => throw MatchError(other)
+      test("a denial shows no trace, because its message is what to act on") {
+        wire(WireError.AccessDenied(trace)) match
+          case GlobalError.ServerError(message, got) =>
+            assertTrue(message == ErrorMessages.Forbidden) && assertTrue(got.isEmpty)
+          case other => throw MatchError(other)
       },
-      test("FolQueryFailure → GlobalError.ServerError") {
-        GlobalError.fromThrowable(E.FolQueryFailure.FolParseFailure("bad syntax", None)) match
-          case GlobalError.ServerError(m) => assertTrue(m.contains("bad syntax"))
-          case other                      => throw MatchError(other)
+      test("a conflict names the scenario it is about") {
+        val conflict = ConflictKind.MergeAlreadyRunning(
+          com.risquanter.register.domain.data.iron.ScenarioName.fromString("draft-a").toOption.get
+        )
+        wire(WireError.Conflict(conflict, trace)) match
+          case GlobalError.Conflict(message) => assertTrue(message.contains("draft-a"))
+          case other                         => throw MatchError(other)
       },
-      test("non-AppError throwable → GlobalError.NetworkError") {
-        GlobalError.fromThrowable(new RuntimeException("connection refused")) match
-          case GlobalError.NetworkError(m) => assertTrue(m.contains("connection refused"))
-          case other                       => throw MatchError(other)
+      test("an absent capability shows no trace") {
+        wire(WireError.NotSupported(Capability.Scenarios, trace)) match
+          case GlobalError.ServerError(message, got) =>
+            assertTrue(message.contains("Scenarios")) && assertTrue(got.isEmpty)
+          case other => throw MatchError(other)
+      },
+      test("a dependency outage carries the trace, because nothing else is actionable") {
+        wire(WireError.DependencyUnavailable(trace)) match
+          case GlobalError.DependencyError(message, got) =>
+            assertTrue(message == ErrorMessages.DependencyDown) && assertTrue(got.contains(trace))
+          case other => throw MatchError(other)
+      },
+      test("an internal fault carries the trace") {
+        wire(WireError.InternalFault(trace)) match
+          case GlobalError.ServerError(message, got) =>
+            assertTrue(message == ErrorMessages.InternalFault) && assertTrue(got.contains(trace))
+          case other => throw MatchError(other)
+      },
+      test("a transport failure does not show the browser's own wording") {
+        val failure = RequestFailure.Transport(new RuntimeException("Failed to fetch"))
+        GlobalError.from(failure) match
+          case GlobalError.NetworkError(message) =>
+            assertTrue(message == ErrorMessages.TransportFailed) &&
+            assertTrue(!message.contains("Failed to fetch"))
+          case other => throw MatchError(other)
       }
     )
 

@@ -11,7 +11,7 @@ import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
 import io.github.iltotore.iron.*
@@ -78,8 +78,7 @@ object TreeRevertItSpec extends ZIOSpecDefault:
       com.risquanter.register.services.cache.ContentCacheRegistry.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured
     )
 
   override def spec =

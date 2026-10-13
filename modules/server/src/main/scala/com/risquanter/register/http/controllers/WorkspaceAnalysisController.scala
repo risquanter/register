@@ -1,6 +1,7 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
@@ -31,9 +32,13 @@ class WorkspaceAnalysisController private (
   riskTreeService: RiskTreeService,
   workspaceStore: WorkspaceStore,
   authzService: AuthorizationService,
-  userCtx: UserContextExtractor
+  userCtx: UserContextExtractor,
+  tracing: Tracing
 ) extends BaseController
     with WorkspaceAnalysisEndpoints:
+
+  // `wireEither` reads the active span to name the trace a failure ran under.
+  private given Tracing = tracing
 
   val probOfExceedance: ServerEndpoint[Any, Task] = getWorkspaceProbOfExceedanceEndpoint.serverLogic {
     case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance, activeBranch, at) =>
@@ -44,7 +49,7 @@ class WorkspaceAnalysisController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
         result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance, rev)
-      yield result).either
+      yield result).wireEither
   }
 
   val getLECCurvesMulti: ServerEndpoint[Any, Task] = getWorkspaceLECCurvesMultiEndpoint.serverLogic {
@@ -56,7 +61,7 @@ class WorkspaceAnalysisController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
         result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, rev, omitAbsent)
-      yield result).either
+      yield result).wireEither
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
@@ -66,10 +71,11 @@ class WorkspaceAnalysisController private (
     )
 
 object WorkspaceAnalysisController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, WorkspaceAnalysisController] =
+  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & AuthorizationService & UserContextExtractor & Tracing, Nothing, WorkspaceAnalysisController] =
     for
       riskTreeService <- ZIO.service[RiskTreeService]
       workspaceStore  <- ZIO.service[WorkspaceStore]
       authzService    <- ZIO.service[AuthorizationService]
       userCtx         <- ZIO.service[UserContextExtractor]
-    yield WorkspaceAnalysisController(riskTreeService, workspaceStore, authzService, userCtx)
+      tracing         <- ZIO.service[Tracing]
+    yield WorkspaceAnalysisController(riskTreeService, workspaceStore, authzService, userCtx, tracing)

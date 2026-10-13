@@ -1,7 +1,29 @@
 package com.risquanter.register.domain.data
 
 import java.time.{Duration, Instant}
+import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, SeedEntityId}
+
+/** Which of a workspace's two deadlines ended it.
+  *
+  * This crosses to the client. Without it a browser knows only that the
+  * workspace is gone, and a sentence naming the 72-hour limit is simply wrong
+  * for a workspace that was abandoned after ten minutes.
+  */
+enum ExpiryCause:
+  /** The absolute deadline: `createdAt + ttl`. Use does not postpone it. */
+  case Lifetime
+
+  /** The idle deadline: `lastAccessedAt + idleTimeout`. Every access to the
+    * workspace pushes it forward.
+    */
+  case Inactivity
+
+object ExpiryCause:
+  given codec: JsonCodec[ExpiryCause] = DeriveJsonCodec.gen[ExpiryCause]
+
+/** A deadline a workspace has passed: which one, and when. */
+final case class Expiry(cause: ExpiryCause, at: Instant)
 
 /** Workspace durable record — association/hash index.
   *
@@ -28,21 +50,28 @@ final case class WorkspaceRecord(
   idleTimeout: Duration,
   seedEntityId: SeedEntityId.SeedEntityId
 ):
-  /** Check if this workspace has expired via EITHER timeout mechanism (A11).
+  /** The deadline this workspace has passed, or `None` while it is live.
     *
-    * Returns true if:
-    * - absolute timeout exceeded: `now - createdAt >= ttl`, OR
-    * - idle timeout exceeded: `now - lastAccessedAt >= idleTimeout`
-    *
-    * When ttl is Duration.ZERO or negative, absolute timeout is disabled
+    * Two deadlines can end a workspace and either one is enough (A11): the
+    * absolute deadline at `createdAt + ttl`, which no amount of use postpones,
+    * and the idle deadline at `lastAccessedAt + idleTimeout`, which every
+    * recorded access pushes forward. A deadline set to zero or a negative
+    * duration is switched off, which is how an unlimited lifetime is expressed
     * (enterprise mode: infinite TTL).
+    *
+    * When both have passed, the earlier one is the answer: it is the moment the
+    * workspace stopped being usable, and the later deadline never applied to a
+    * workspace that was already gone.
     */
-  def isExpired(now: Instant): Boolean =
-    val absoluteExpired = !ttl.isZero && !ttl.isNegative &&
-      Duration.between(createdAt, now).compareTo(ttl) >= 0
-    val idleExpired = !idleTimeout.isZero && !idleTimeout.isNegative &&
-      Duration.between(lastAccessedAt, now).compareTo(idleTimeout) >= 0
-    absoluteExpired || idleExpired
+  def expiry(now: Instant): Option[Expiry] =
+    val absolute = Option.when(!ttl.isZero && !ttl.isNegative)(
+      Expiry(ExpiryCause.Lifetime, createdAt.plus(ttl)))
+    val idle = Option.when(!idleTimeout.isZero && !idleTimeout.isNegative)(
+      Expiry(ExpiryCause.Inactivity, lastAccessedAt.plus(idleTimeout)))
+    (absolute.toList ++ idle.toList).filterNot(_.at.isAfter(now)).minByOption(_.at)
+
+  /** Whether this workspace has expired via either deadline (A11). */
+  def isExpired(now: Instant): Boolean = expiry(now).isDefined
 
   /** Record access — returns a copy with updated lastAccessedAt (A10). */
   def touch(now: Instant): WorkspaceRecord = copy(lastAccessedAt = now)

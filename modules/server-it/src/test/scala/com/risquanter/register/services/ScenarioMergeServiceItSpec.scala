@@ -13,7 +13,7 @@ import com.risquanter.register.domain.data.{
   RiskLeafTransform, LikelihoodTransform, DistributionTransform
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, SafeName, TreeId, NodeId, MitigationId}
-import com.risquanter.register.domain.errors.{MergeConflict, ValidationFailed}
+import com.risquanter.register.domain.errors.{AppError, MergeConflict, RepositoryFailure, ValidationFailed}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
@@ -139,9 +139,9 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
   private def writeMit(wsId: WorkspaceId, mit: MitigationId, label: String, likelihood: Double, branch: BranchRef = BranchRef.Main) =
     IrminClient.set(mitPath(wsId, mit), mitigation(mit, label, likelihood).toJson, s"write mit ${mit.value}", branch)
 
-  private def mainHeadHash: ZIO[IrminClient, Throwable, String] =
+  private def mainHeadHash: ZIO[IrminClient, AppError, String] =
     IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
-      .someOrFail(new IllegalStateException("main has no head"))
+      .someOrFail(RepositoryFailure("main has no head"))
 
   /** Seed a workspace with one real stored tree on main, then fork a scenario
     * from main's head. Returns the workspace, the scenario branch, and the
@@ -286,8 +286,8 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       yield
         val failure = mergeExit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
         assertTrue(
-          failure.exists(_.getMessage.contains("duplicate node name(s)")),
-          failure.exists(_.getMessage.contains("Gamma")),
+          failure.exists(_.logMessage.contains("duplicate node name(s)")),
+          failure.exists(_.logMessage.contains("Gamma")),
           // refused before anything was written: main's head never moved
           after == before
         )
@@ -311,7 +311,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       yield
         val failure = mergeExit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
         assertTrue(
-          failure.exists(_.getMessage.contains("the merge was not applied")),
+          failure.exists(_.logMessage.contains("the merge was not applied")),
           // The merge is assembled on a staging branch and published only once
           // the guard passes, so main is never pointed at the invalid commit
           // and there is nothing to undo.

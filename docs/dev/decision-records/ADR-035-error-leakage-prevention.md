@@ -9,7 +9,7 @@
 ## Context
 
 - An error response is untrusted output: internal reasons, stack traces, and backend messages must never reach the client
-- `getMessage`, string interpolation, and JSON serialisation are the leakage vectors on the outbound path
+- `logMessage`, string interpolation, and JSON serialisation are the leakage vectors on the outbound path
 - Convention-enforced scrubbing at the HTTP boundary is not sound: a new error variant added without a matching sanitisation clause bypasses the defence, and no compiler or linter catches the omission
 - A structural guarantee — exhaustive matching on a sealed hierarchy, checked at compile time — turns "remembered to sanitise" into "cannot compile without sanitising"
 - OWASP Top Ten 2025 A10 (Mishandling of Exceptional Conditions) and CWE-209 (Information Exposure Through Error Messages) apply directly
@@ -66,11 +66,14 @@ The ZIO error channel in each `serverLogic` block passes through
 structurally inaccessible to the serialiser; an error type that bypasses
 `encode` is a type mismatch at compile time.
 
-### 3. `getMessage` Discipline — No Sensitive Detail in Messages
+### 3. `logMessage` Discipline — No Sensitive Detail in Messages
 
-An exception `getMessage` is logged server-side (ADR-002), never serialised to
-the client. It must carry no secret, no internal reason forwarded to the wire,
-and no confidential internal identifier (ADR-036):
+Every `AppError` carries a `logMessage`, which is logged server-side (ADR-002)
+and never serialised to the client. The name states the destination: an
+`AppError` is plain data rather than a `Throwable`, so there is no inherited
+`getMessage` and no exception apparatus behind the text. It must carry no
+secret, no internal reason forwarded to the wire, and no confidential internal
+identifier (ADR-036):
 
 - `RepositoryFailure(reason)` — `reason` is an internal diagnostic; `encode`
   maps it to `"Internal server error"`, never the raw string
@@ -145,6 +148,6 @@ ZIO.fail(ValidationFailed(List(ValidationError(
 
 - [ADR-010: Error Handling Strategy](./ADR-010.md) — owns the `AppError` hierarchy; this ADR strengthens sanitisation from convention to compiler-enforced
 - [ADR-029: Input Injection Defence](./ADR-029-input-injection-defence.md) — inbound counterpart; this ADR is the outbound counterpart
-- [ADR-036: Confidential Internal Identifiers](./ADR-036-confidential-internal-identifiers.md) — what `getMessage` and response bodies must not carry
+- [ADR-036: Confidential Internal Identifiers](./ADR-036-confidential-internal-identifiers.md) — what `logMessage` and response bodies must not carry
 - [CWE-209: Information Exposure Through Error Messages](https://cwe.mitre.org/data/definitions/209.html)
 - [OWASP Error Handling Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html)

@@ -1,119 +1,104 @@
 package app.state
 
-import com.risquanter.register.domain.errors.*
-import app.core.safeMessage
+import app.core.RequestFailure
+import app.views.ErrorMessages
+import com.risquanter.register.domain.data.iron.TraceId
+import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.http.errors.WireError
 
-/** Global error ADT for errors that are not handled by per-view
-  * error channels (LoadState.Failed, SubmitState.Failed, submitError).
+/** A failure the global banner shows, classified into the treatment it gets.
   *
-  * These are "nobody caught this" errors — network failures during fire-and-forget
-  * calls, unexpected server errors, or future cross-cutting concerns
-  * (workspace auth failures, SSE disconnection).
+  * These are the failures no per-view channel caught — a fire-and-forget call
+  * that failed, an unexpected server fault, a workspace that has expired.
+  * Per-view errors are not duplicated here, because the banner supplements the
+  * inline display rather than replacing it (ADR-019 Pattern 7).
   *
-  * Per-view errors are not duplicated here — the ErrorBanner supplements the
-  * inline error display, it does not replace it (ADR-019 Pattern 7).
+  * Named `GlobalError` rather than `AppError` so it does not collide with the
+  * shared `com.risquanter.register.domain.errors.AppError`.
   *
-  * Named `GlobalError` (not `AppError`) to avoid collision with the server-side
-  * `com.risquanter.register.domain.errors.AppError` sealed trait.
-  *
-  * All variants are pure values with no embedded side effects (ADR-010: errors
-  * are values). UI actions (e.g. a refresh button on Conflict) are determined
-  * at the rendering site, not stored in the error.
-  *
-  * @see ADR-019 Pattern 7 (two-tier error presentation)
-  * @see ADR-010 (error handling strategy)
+  * Every case is a pure value and none carries an action. What a case offers the
+  * user — a reload button, a dismiss — is decided where it is rendered, because
+  * only the rendering site knows what is on screen beside it (ADR-010).
   */
 enum GlobalError:
-  /** Server-side validation rejection (HTTP 400).
-    * Carries the structured `ValidationError` list from the shared domain.
+  /** The request body was rejected. Carries one entry per independent failure
+    * so the banner can show every problem at once.
     */
   case ValidationFailed(errors: List[ValidationError])
 
-  /** Network-level failure (connection refused, DNS, timeout) or
-    * unclassified non-HTTP error.
-    *
-    * Request-path retries are owned by Istio (ADR-012 §4 + ADR-031).
-    * The SPA fails fast; the mesh retries server→dependency traffic.
+  /** The request never reached the server. Request-path retries belong to the
+    * mesh, so this fails fast rather than retrying (ADR-012 §4, ADR-031).
     */
   case NetworkError(message: String)
 
-  /** Data or version conflict (HTTP 409).
-    * The banner rendering site decides which refresh action to offer
-    * based on context (e.g. reload tree list).
+  /** The request reached the server and its content was refused. A refused
+    * query is the case this exists for: the problem is in what the user typed,
+    * so it gets the user-input treatment rather than the server-fault one.
+    */
+  case RequestRejected(message: String)
+
+  /** The request conflicts with current state. The rendering site decides which
+    * refresh action to offer, because that depends on what the view holds.
     */
   case Conflict(message: String)
 
-  /** Server error (HTTP 5xx) — repository failure, simulation failure, etc. */
-  case ServerError(message: String)
-
-  /** Infrastructure dependency failure (Irmin unavailable, GraphQL error, timeout).
-    * Transient at the infrastructure level — the mesh (ADR-012 §4 + ADR-031)
-    * has already exhausted its retries on the register→Irmin path before
-    * this variant reaches the browser.
+  /** The resource is absent, or it is not the caller's. The two are one case
+    * because the server answers them identically (ADR-035 §3).
     */
-  case DependencyError(message: String)
+  case NotFound
 
-  /** Workspace pre-validation detected an expired or missing workspace.
-    * Informational — not an error. Rendered with blue info styling in ErrorBanner,
-    * not the red error treatment. The stale key has already been cleared;
-    * the user can create a new tree to start a fresh workspace.
+  /** The workspace is past one of its two deadlines. Informational rather than
+    * an error, and rendered with the information styling: the stale key has
+    * already been cleared, and creating a tree starts a fresh workspace.
     */
   case WorkspaceExpired(message: String)
 
+  /** A server-side fault. Carries the trace identifier, because the user has
+    * nothing else to act on and a reference is the only useful thing on screen.
+    */
+  case ServerError(message: String, trace: Option[TraceId])
+
+  /** A dependency the request needed did not answer. Carries the trace for the
+    * same reason as `ServerError`.
+    */
+  case DependencyError(message: String, trace: Option[TraceId])
+
 object GlobalError:
 
-  /** Classify a Throwable into a GlobalError.
+  /** Classify any failed request.
     *
-    * Domain errors reconstructed by `ErrorResponse.decode` are routed through
-    * `fromAppError`, whose match on the sealed `AppError` hierarchy is
-    * compiler-enforced across all four sub-traits — a new family added without a
-    * branch is a compile error rather than a silent `NetworkError`.
+    * The two arms are the two things that can go wrong, and they are disjoint:
+    * the server answered, or the call never happened.
+    */
+  def from(failure: RequestFailure): GlobalError = failure match
+    case RequestFailure.Wire(error)      => fromWireError(error)
+    case RequestFailure.Transport(cause) => fromThrowable(cause)
+
+  /** Classify what the server answered with.
     *
-    * Non-domain throwables (browser Fetch `TypeError`, IOExceptions) fall to the
-    * `NetworkError` catch-all.
+    * The match is on the nine wire cases, so a new case is a compile error here
+    * until it has a treatment. Only `ServerError` and `DependencyError` are
+    * given the trace, because they are the two the banner displays it on; the
+    * others carry an actionable message of their own, beside which a trace
+    * identifier is noise.
     */
-  def fromThrowable(e: Throwable): GlobalError = e match
-    case appErr: AppError => fromAppError(appErr)
-    // Browser Fetch failures (TypeError), IOExceptions, and any other non-domain
-    // throwable. Request-path retries are owned by Istio (ADR-012 §4 + ADR-031);
-    // the SPA fails fast.
-    case _ => NetworkError(msg(e))
+  def fromWireError(e: WireError): GlobalError = e match
+    case WireError.ValidationRejected(errors, _)       => ValidationFailed(errors)
+    case WireError.QueryRejected(problem, _)           => RequestRejected(ErrorMessages.query(problem))
+    case WireError.NotFound(_)                         => NotFound
+    case WireError.WorkspaceExpired(c, life, idle, _)  => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
+    case WireError.AccessDenied(_)                     => ServerError(ErrorMessages.Forbidden, None)
+    case WireError.Conflict(conflict, _)               => Conflict(ErrorMessages.conflict(conflict))
+    case WireError.NotSupported(capability, _)         => ServerError(ErrorMessages.capabilityUnavailable(capability), None)
+    case WireError.DependencyUnavailable(t)            => DependencyError(ErrorMessages.DependencyDown, Some(t))
+    case WireError.InternalFault(t)                    => ServerError(ErrorMessages.InternalFault, Some(t))
 
-  /** Exhaustive classification of the sealed `AppError` hierarchy. The compiler
-    * enforces a branch for every direct sub-trait (`SimError`, `IrminError`,
-    * `AuthError`, `FolQueryFailure`); a new sub-trait without a branch is a
-    * compile error, so no error family can silently be reported as a
-    * `NetworkError`.
-    */
-  private def fromAppError(e: AppError): GlobalError = e match
-    // ── Shared domain errors (reconstructed by ErrorResponse.decode) ──
-    case vf: com.risquanter.register.domain.errors.ValidationFailed =>
-      ValidationFailed(vf.errors)
-
-    case _: DataConflict    => Conflict(msg(e))
-    case _: VersionConflict => Conflict(msg(e))
-    case _: MergeConflict   => Conflict(msg(e))
-    case _: MergeAlreadyRunning => Conflict(msg(e))
-    case _: MergeTargetMoved    => Conflict(msg(e))
-
-    // Workspace A13 opaque 404 — decoded as RepositoryFailure("workspace:not-found").
-    // Route to informational blue banner, not red error.
-    case rf: RepositoryFailure if RepositoryFailure.isWorkspaceSentinel(rf) =>
-      WorkspaceExpired(
-        "Your previous workspace has expired and its data is no longer available. " +
-        "Creating a new tree will start a fresh workspace.")
-
-    case _: SimError        => ServerError(msg(e))
-    case _: IrminError      => DependencyError(msg(e))
-    case _: AuthError       => ServerError(msg(e))
-    case _: FolQueryFailure => ServerError(msg(e))
-
-  /** Extract a user-friendly message from a Throwable.
+  /** Classify a transport failure.
     *
-    * Strips browser-internal prefixes ("TypeError: ", "Error: ") that
-    * leak JS implementation details into the UI.
+    * The cause is deliberately not read. A browser `fetch` rejection carries
+    * developer wording such as "Failed to fetch", which is diagnostic rather
+    * than something to show a user, so the banner states what happened and the
+    * cause goes to the browser console instead.
     */
-  private def msg(e: Throwable): String =
-    e.safeMessage
-      .replaceFirst("^TypeError:\\s*", "")
-      .replaceFirst("^Error:\\s*", "")
+  def fromThrowable(cause: Throwable): GlobalError =
+    NetworkError(ErrorMessages.TransportFailed)

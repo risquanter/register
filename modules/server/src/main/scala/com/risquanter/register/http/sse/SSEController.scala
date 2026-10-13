@@ -2,12 +2,14 @@ package com.risquanter.register.http.sse
 
 import zio.*
 import zio.stream.*
+import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 import sttp.capabilities.zio.ZioStreams
 import zio.json.*
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.controllers.BaseController
+import com.risquanter.register.http.controllers.wireEither
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, UserId}
@@ -33,9 +35,12 @@ import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, Use
   *
   * ```
   */
-class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, authzService: AuthorizationService, userCtx: UserContextExtractor)
+class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, authzService: AuthorizationService, userCtx: UserContextExtractor, tracing: Tracing)
     extends BaseController
     with SSEEndpoints {
+
+  // `wireEither` reads the active span to name the trace a failure ran under.
+  private given Tracing = tracing
 
   private val HeartbeatInterval = 30.seconds
 
@@ -61,7 +66,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
         byteStream: Stream[Throwable, Byte] = withConnect
           .flatMap(s => ZStream.fromIterable(s.getBytes("UTF-8")))
           .mapError(_ => new RuntimeException("SSE stream error"))
-      yield byteStream).either
+      yield byteStream).wireEither
     }
 
   /**
@@ -103,19 +108,20 @@ object SSEController {
     * Create SSEController with SSEHub + WorkspaceStore dependencies.
     * A15: WorkspaceStore needed for workspace ownership validation.
     */
-  val layer: ZLayer[SSEHub & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, SSEController] =
+  val layer: ZLayer[SSEHub & WorkspaceStore & AuthorizationService & UserContextExtractor & Tracing, Nothing, SSEController] =
     ZLayer.fromZIO {
       for
         hub          <- ZIO.service[SSEHub]
         ws           <- ZIO.service[WorkspaceStore]
         authzService <- ZIO.service[AuthorizationService]
         userCtx      <- ZIO.service[UserContextExtractor]
-      yield new SSEController(hub, ws, authzService, userCtx)
+        tracing      <- ZIO.service[Tracing]
+      yield new SSEController(hub, ws, authzService, userCtx, tracing)
     }
 
   /**
     * Create SSEController directly (for tests).
     */
-  def make(hub: SSEHub, workspaceStore: WorkspaceStore, authzService: AuthorizationService, userCtx: UserContextExtractor): SSEController =
-    new SSEController(hub, workspaceStore, authzService, userCtx)
+  def make(hub: SSEHub, workspaceStore: WorkspaceStore, authzService: AuthorizationService, userCtx: UserContextExtractor, tracing: Tracing): SSEController =
+    new SSEController(hub, workspaceStore, authzService, userCtx, tracing)
 }

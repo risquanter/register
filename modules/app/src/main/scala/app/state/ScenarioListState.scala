@@ -3,6 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
+import app.core.RequestFailure
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
@@ -63,7 +64,7 @@ final class ScenarioListState(
   // `ChangedNodesState`: `Var.set` doesn't dedupe by value, and downstream
   // subscriptions (the branch fallbacks) react to `.changes`.
   private val refreshTrigger =
-    new EventBus[Option[() => EventStream[Either[Throwable, List[ScenarioSummaryResponse]]]]]
+    new EventBus[Option[() => EventStream[Either[RequestFailure, List[ScenarioSummaryResponse]]]]]
 
   loadStatePipeline(refreshTrigger.events).foreach { v =>
     if scenariosVar.now() != v then scenariosVar.set(v)

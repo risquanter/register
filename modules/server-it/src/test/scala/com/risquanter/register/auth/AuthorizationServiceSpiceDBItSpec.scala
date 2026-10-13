@@ -6,7 +6,7 @@ import zio.test.*
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl, TreeId, UserId, WorkspaceId}
 import com.risquanter.register.domain.errors.{AuthForbidden, AuthServiceUnavailable}
-import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.SpiceDbCompose
 import com.risquanter.register.auth.ResourceRef.asResource
 
@@ -46,8 +46,7 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
     ZLayer.make[AuthorizationService & BootstrapProvisioner & SpiceDbCompose.Resource](
       SpiceDbCompose.layer,
       SpiceDbCompose.configLayer,
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console,
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured,
       AuthorizationServiceSpiceDB.liveLayer,
       BootstrapProvisionerSpiceDB.liveLayer
     )
@@ -59,8 +58,7 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
   private def scopedAuthzWith(config: SpiceDbConfig): ZIO[Scope, Throwable, AuthorizationService] =
     ZLayer.make[AuthorizationService](
       ZLayer.succeed(config),
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console,
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured,
       AuthorizationServiceSpiceDB.liveLayer
     ).build.map(_.get[AuthorizationService])
 

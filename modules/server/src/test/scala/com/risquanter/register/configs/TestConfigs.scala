@@ -20,7 +20,7 @@ object TestConfigs {
   val telemetry: TelemetryConfig = TelemetryConfig(
     serviceName = "risk-register-test",
     instrumentationScope = "com.risquanter.register.test",
-    exporter = TelemetryExporter.Otlp,
+    exporter = TelemetryExporter.Console,
     otlpEndpoint = TestSafeUrls.localhostOtlpEndpoint,
     devExportIntervalSeconds = 1,
     prodExportIntervalSeconds = 10

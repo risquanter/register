@@ -9,7 +9,7 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, NodeId, PositiveInt, Revision, SafeName, StoreBranch, TreeId}
-import com.risquanter.register.domain.errors.{BranchAlreadyExists, BranchHeadStale, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -173,7 +173,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     loaded: List[Either[TreeLoadFailure, RiskTree]],
     revisions: Ref[List[Revision]]
   ) extends RiskTreeRepository:
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
       revisions.update(_ :+ rev).as(loaded)
 
     override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))
@@ -224,7 +224,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
               val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
               assertTrue(
                 failure.exists(_.scenario.value == "draft-v1"),
-                failure.exists(m => !m.getMessage.contains(wsId.value))
+                failure.exists(m => !m.logMessage.contains(wsId.value))
               )
             }
         }
@@ -253,9 +253,9 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           yield
             val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
             assertTrue(
-              failure.exists(_.getMessage.contains("duplicate node name(s)")),
-              failure.exists(_.getMessage.contains("Outage")),
-              failure.exists(_.getMessage.contains(treeId.value))
+              failure.exists(_.logMessage.contains("duplicate node name(s)")),
+              failure.exists(_.logMessage.contains("Outage")),
+              failure.exists(_.logMessage.contains(treeId.value))
             )
         },
         test("two nodes with the same name in different trees merge cleanly — uniqueness is per tree") {
@@ -329,8 +329,8 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           yield
             val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
             assertTrue(
-              failure.exists(_.getMessage.contains("conflicting path(s)")),
-              failure.exists(m => !m.getMessage.contains("duplicate node name(s)"))
+              failure.exists(_.logMessage.contains("conflicting path(s)")),
+              failure.exists(m => !m.logMessage.contains("duplicate node name(s)"))
             )
         }
       ),
@@ -354,8 +354,11 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                       )
             result <- svc.preview(ws("ws-preview-dup"), name("draft-v1"))
           yield result match
-            case MergePreviewResult.DuplicateNames(details) =>
-              assertTrue(details.contains("duplicate node name(s)"), details.contains("Outage"))
+            case MergePreviewResult.DuplicateNames(perTree) =>
+              assertTrue(
+                perTree.contains(treeId),
+                perTree.get(treeId).exists(_.exists(_.value.toString == "Outage"))
+              )
             case other => assertTrue(false).label(s"expected DuplicateNames, got $other")
         },
         test("a scan finding both reports Conflicts, matching merge's order") {
@@ -419,9 +422,9 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           yield
             val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
             assertTrue(
-              failure.exists(_.getMessage.contains("the merge was not applied")),
+              failure.exists(_.logMessage.contains("the merge was not applied")),
               // names the tree by its id, which is what a caller can act on
-              failure.exists(_.getMessage.contains(treeIdOf("guard-tree").value)),
+              failure.exists(_.logMessage.contains(treeIdOf("guard-tree").value)),
               // nothing was published: main is never pointed at the staged
               // commit, so there is no undo to perform
               calls.isEmpty
@@ -447,8 +450,8 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
             assertTrue(
               failure.isDefined,
-              failure.forall(f => !f.getMessage.contains("01ARZ3NDEKTSV4RRFFQ69G5FAV")),
-              failure.forall(f => !f.getMessage.toLowerCase.contains("workspaces/"))
+              failure.forall(f => !f.logMessage.contains("01ARZ3NDEKTSV4RRFFQ69G5FAV")),
+              failure.forall(f => !f.logMessage.toLowerCase.contains("workspaces/"))
             )
         },
         test("a commit landing on main during the merge fails MergeTargetMoved and publishes nothing") {

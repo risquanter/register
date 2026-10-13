@@ -1,15 +1,16 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, UserContextExtractor}
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.ScenarioSourceDto
-import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergeConflictEntry, MergeScenarioResponse}
+import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergePreviewStatus, MergeScenarioResponse}
 import com.risquanter.register.domain.data.iron.BranchChoice
-import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergePreviewResult}
+import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergeConflictPath, MergePreviewResult}
 import com.risquanter.register.services.workspace.WorkspaceStore
 
 /** Scenario lifecycle controller (milestone-2b Phase B, DD-5).
@@ -28,9 +29,13 @@ class ScenarioController private (
   scenarioMergeService: ScenarioMergeService,
   workspaceStore:       WorkspaceStore,
   authzService:         AuthorizationService,
-  userCtx:              UserContextExtractor
+  userCtx:              UserContextExtractor,
+  tracing:              Tracing
 ) extends BaseController
     with ScenarioEndpoints:
+
+  // `wireEither` reads the active span to name the trace a failure ran under.
+  private given Tracing = tracing
 
   val createScenario: ServerEndpoint[Any, Task] = createScenarioEndpoint.serverLogic {
     case (maybeUserId, key, req) =>
@@ -43,7 +48,7 @@ class ScenarioController private (
                     case ScenarioSourceDto.Branch(BranchChoice.Scenario(name)) => ScenarioSource.ForkOf(name)
                     case ScenarioSourceDto.Commit(hash)                        => ScenarioSource.AtCommit(hash)
         _      <- scenarioService.create(ws.id, req.name, source)
-      yield ScenarioResponse(req.name)).either
+      yield ScenarioResponse(req.name)).wireEither
   }
 
   val listScenarios: ServerEndpoint[Any, Task] = listScenariosEndpoint.serverLogic {
@@ -53,7 +58,7 @@ class ScenarioController private (
         ws      <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         summaries <- scenarioService.list(ws.id)
-      yield summaries.map(s => ScenarioSummaryResponse(s.name, s.head))).either
+      yield summaries.map(s => ScenarioSummaryResponse(s.name, s.head))).wireEither
   }
 
   val previewScenarioMerge: ServerEndpoint[Any, Task] = previewScenarioMergeEndpoint.serverLogic {
@@ -63,7 +68,7 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         result <- scenarioMergeService.preview(ws.id, name)
-      yield toPreviewResponse(result)).either
+      yield toPreviewResponse(result)).wireEither
   }
 
   val mergeScenario: ServerEndpoint[Any, Task] = mergeScenarioEndpoint.serverLogic {
@@ -73,22 +78,21 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
         head   <- scenarioMergeService.merge(ws.id, name)
-      yield MergeScenarioResponse(head)).either
+      yield MergeScenarioResponse(head)).wireEither
   }
 
   /** Wire mapping colocated with the routes (mirrors `NodeDiffStatus.toWire`'s
     * "cases and wire strings live together" rationale).
     */
   private def toPreviewResponse(result: MergePreviewResult): MergePreviewResponse = result match
-    case MergePreviewResult.Clean => MergePreviewResponse("clean", Nil)
+    case MergePreviewResult.Clean =>
+      MergePreviewResponse(MergePreviewStatus.Clean())
     case MergePreviewResult.Conflicts(paths) =>
-      MergePreviewResponse(
-        "conflicts",
-        paths.map(p => MergeConflictEntry(p.path, p.treeId.map(_.value), p.nodeId.map(_.value)))
-      )
-    case MergePreviewResult.DuplicateNames(details) =>
-      MergePreviewResponse("duplicate-names", Nil, Some(details))
-    case MergePreviewResult.ScenarioMissing => MergePreviewResponse("missing-scenario", Nil)
+      MergePreviewResponse(MergePreviewStatus.Conflicts(paths.map(MergeConflictPath.toWire)))
+    case MergePreviewResult.DuplicateNames(perTree) =>
+      MergePreviewResponse(MergePreviewStatus.DuplicateNames(perTree))
+    case MergePreviewResult.ScenarioMissing =>
+      MergePreviewResponse(MergePreviewStatus.ScenarioMissing())
 
   val deleteScenario: ServerEndpoint[Any, Task] = deleteScenarioEndpoint.serverLogic {
     case (maybeUserId, key, name, expectedHead) =>
@@ -97,18 +101,19 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
         _      <- scenarioService.delete(ws.id, name, expectedHead)
-      yield ()).either
+      yield ()).wireEither
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
     List(createScenario, listScenarios, previewScenarioMerge, mergeScenario, deleteScenario)
 
 object ScenarioController:
-  val makeZIO: ZIO[ScenarioService & ScenarioMergeService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, ScenarioController] =
+  val makeZIO: ZIO[ScenarioService & ScenarioMergeService & WorkspaceStore & AuthorizationService & UserContextExtractor & Tracing, Nothing, ScenarioController] =
     for
       scenarioService      <- ZIO.service[ScenarioService]
       scenarioMergeService <- ZIO.service[ScenarioMergeService]
       workspaceStore       <- ZIO.service[WorkspaceStore]
       authzService         <- ZIO.service[AuthorizationService]
       userCtx              <- ZIO.service[UserContextExtractor]
-    yield ScenarioController(scenarioService, scenarioMergeService, workspaceStore, authzService, userCtx)
+      tracing              <- ZIO.service[Tracing]
+    yield ScenarioController(scenarioService, scenarioMergeService, workspaceStore, authzService, userCtx, tracing)

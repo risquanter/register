@@ -41,9 +41,13 @@ final class WorkspaceStoreLive private (
 
   /** Pure workspace validation: O(1) lookup + dual timeout check.
     *
-    * `Map.get` is constant-time, and not-found and expired do identical work —
-    * one lookup plus one instant comparison — so neither is distinguishable by
-    * how long the call took.
+    * `Map.get` is constant-time, and not-found and expired do the same bounded
+    * work — one lookup plus at most two instant comparisons — so neither is
+    * distinguishable by how long the call took.
+    *
+    * The expired branch reports which deadline was passed, because the failure
+    * carries that moment for the server's own log line. The record answers it,
+    * so the two-deadline rule is not restated here.
     */
   private def validateWorkspace(
     map: Map[WorkspaceKeyHash, WorkspaceRecord],
@@ -51,9 +55,9 @@ final class WorkspaceStoreLive private (
     now: Instant
   ): Either[AppError, WorkspaceRecord] =
     map.get(keyHash) match
-      case None                          => Left(WorkspaceNotFound())
-      case Some(ws) if ws.isExpired(now) => Left(WorkspaceExpired())
-      case Some(ws)                      => Right(ws)
+      case None     => Left(WorkspaceNotFound())
+      case Some(ws) => ws.expiry(now).toLeft(ws).left.map(e =>
+                         WorkspaceExpired(ws.id, ws.ttl, ws.idleTimeout, e.cause, e.at))
 
   // ── Public API ────────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.UserContextExtractor
@@ -33,9 +34,13 @@ import com.risquanter.register.services.DistributionPreviewService
   */
 class DistributionPreviewController private (
   previewService: DistributionPreviewService,
-  userCtx:        UserContextExtractor
+  userCtx:        UserContextExtractor,
+  tracing:        Tracing
 ) extends BaseController
     with DistributionPreviewEndpoints:
+
+  // `wireEither` reads the active span to name the trace a failure ran under.
+  private given Tracing = tracing
 
   val distributionPreview: ServerEndpoint[Any, Task] =
     distributionPreviewEndpoint.serverLogic {
@@ -44,14 +49,15 @@ class DistributionPreviewController private (
           _      <- userCtx.extract(maybeUserId)
           result <- DistributionShapeRequest.validate(req).toZIOValidation
                       .flatMap(previewService.preview)
-        yield result).either
+        yield result).wireEither
     }
 
   override val routes: List[ServerEndpoint[Any, Task]] = List(distributionPreview)
 
 object DistributionPreviewController:
-  val makeZIO: ZIO[DistributionPreviewService & UserContextExtractor, Nothing, DistributionPreviewController] =
+  val makeZIO: ZIO[DistributionPreviewService & UserContextExtractor & Tracing, Nothing, DistributionPreviewController] =
     for
       previewService <- ZIO.service[DistributionPreviewService]
       userCtx        <- ZIO.service[UserContextExtractor]
-    yield DistributionPreviewController(previewService, userCtx)
+      tracing        <- ZIO.service[Tracing]
+    yield DistributionPreviewController(previewService, userCtx, tracing)

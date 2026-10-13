@@ -176,34 +176,36 @@ object AuthTypesSpec extends ZIOSpecDefault:
       )
     ),
     suite("AuthError hierarchy")(
-      test("AuthForbidden getMessage formats structured message") {
+      test("AuthForbidden logMessage formats structured message") {
         val err = AuthForbidden(
           userId       = validUuid,
           permission   = "design_write",
           resourceType = "risk_tree",
           resourceId   = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
         )
-        assertTrue(err.getMessage == s"Access denied: user=$validUuid permission=design_write resource=risk_tree:01ARZ3NDEKTSV4RRFFQ69G5FAV")
+        assertTrue(err.logMessage == s"Access denied: user=$validUuid permission=design_write resource=risk_tree:01ARZ3NDEKTSV4RRFFQ69G5FAV")
       },
-      test("AuthServiceUnavailable getMessage includes reason") {
-        val err = AuthServiceUnavailable("connection refused")
-        assertTrue(err.getMessage == "Authorization service unavailable: connection refused")
+      test("AuthServiceUnavailable logMessage includes reason") {
+        val err = AuthServiceUnavailable("connection refused", None)
+        assertTrue(err.logMessage == "Authorization service unavailable: connection refused")
       },
-      test("AuthServiceUnavailable getCause returns provided cause") {
+      test("AuthServiceUnavailable holds the cause it was given") {
         val cause = RuntimeException("timeout")
         val err   = AuthServiceUnavailable("timeout", Some(cause))
-        assertTrue(err.getCause eq cause)
+        // Reference identity, not equality: RuntimeException does not override
+        // equals, and the assertion is that the same instance is carried.
+        assertTrue(err.cause.exists(_.eq(cause)))
       },
-      test("AuthServiceUnavailable getCause returns null when no cause") {
-        val err = AuthServiceUnavailable("network error")
-        assertTrue(err.getCause == null)
+      test("AuthServiceUnavailable carries no cause when none is given") {
+        val err = AuthServiceUnavailable("network error", None)
+        assertTrue(err.cause.isEmpty)
       },
       test("AuthForbidden is an AppError") {
         val err: AppError = AuthForbidden("u", "p", "r", "i")
         assertTrue(err.isInstanceOf[AuthError])
       },
       test("AuthServiceUnavailable is an AppError") {
-        val err: AppError = AuthServiceUnavailable("reason")
+        val err: AppError = AuthServiceUnavailable("reason", None)
         assertTrue(err.isInstanceOf[AuthError])
       }
     )

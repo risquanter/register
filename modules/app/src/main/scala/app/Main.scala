@@ -5,8 +5,9 @@ import org.scalajs.dom
 
 import app.components.{AppShell, BranchBar}
 import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, CompareState, CompareSlot, ChangedNodesState, TreeHistoryState}
-import app.views.{DesignView, AnalyzeView}
+import app.views.{DesignView, AnalyzeView, ErrorMessages}
 import app.core.ZJS
+import app.core.RequestFailure
 
 object Main:
 
@@ -98,8 +99,8 @@ object Main:
     //  - surface network/server errors in the error banner
     //  - auto-dismiss stale banners on the next successful call
     ZJS.registerErrorObserver(new ZJS.ErrorObserver:
-      def onError(error: Throwable): Unit =
-        globalError.set(Some(GlobalError.fromThrowable(error)))
+      def onError(error: RequestFailure): Unit =
+        globalError.set(Some(GlobalError.from(error)))
       def onSuccess(): Unit =
         globalError.set(None)
     )
@@ -113,10 +114,7 @@ object Main:
         // startup call just returned.
         treeListState.seedMain(trees),
       onExpired = () =>
-        globalError.set(Some(GlobalError.WorkspaceExpired(
-          "Your previous workspace has expired and its data is no longer available. " +
-          "Creating a new tree will start a fresh workspace."
-        )))
+        globalError.set(Some(GlobalError.WorkspaceExpired(ErrorMessages.WorkspaceExpiredOnStartup)))
     )
 
     // ── Navigation state ────────────────────────────────────────

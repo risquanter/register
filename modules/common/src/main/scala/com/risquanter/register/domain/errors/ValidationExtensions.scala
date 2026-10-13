@@ -33,14 +33,4 @@ object ValidationExtensions {
       ZIO.fromEither(
         v.toEither.left.map(errors => ValidationFailed(errors.toList))
       )
-    
-    /**
-     * Convert a Validation to a Task by mapping ValidationFailed to Throwable.
-     * 
-     * Useful when integrating with service methods that use Task error channel.
-     * 
-     * @return Task that succeeds with A or fails with ValidationFailed (as Throwable)
-     */
-    def toZIOTask: Task[A] =
-      toZIOValidation.mapError(identity)
 }

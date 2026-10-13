@@ -93,5 +93,5 @@ object UserContextExtractor:
         case Some(userId) => ZIO.succeed(userId)
         case None =>
           ZIO.fail(AuthServiceUnavailable(
-            "Missing x-user-id header — unauthenticated request or mesh bypass detected"
+            "Missing x-user-id header — unauthenticated request or mesh bypass detected", None
           ))

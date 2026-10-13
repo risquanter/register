@@ -11,7 +11,7 @@ import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, R
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
 
@@ -60,7 +60,7 @@ final case class CachedResultResolverLive(
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): Task[LossDistribution] =
+  ): IO[AppError, LossDistribution] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("tree_id", tree.id.value)
@@ -83,7 +83,7 @@ final case class CachedResultResolverLive(
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): Task[Map[NodeId, LossDistribution]] =
+  ): IO[AppError, Map[NodeId, LossDistribution]] =
     for {
       effective <- effectiveTreeOf(tree, selection, resolvedScopes)
       scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
@@ -105,7 +105,7 @@ final case class CachedResultResolverLive(
     tree: RiskTree,
     selection: MitigationSelection,
     resolvedScopes: Map[MitigationId, Set[NodeId]]
-  ): Task[RiskTree] =
+  ): IO[AppError, RiskTree] =
     fromValidation(MitigationApplication.effectiveTree(tree, selection, resolvedScopes))
 
   private def distributionForId(
@@ -115,7 +115,7 @@ final case class CachedResultResolverLive(
     nodeId: NodeId,
     seedEntityId: SeedEntityId.SeedEntityId,
     records: Map[NodeId, List[MitigationApplicationRecord]]
-  ): Task[LossDistribution] =
+  ): IO[AppError, LossDistribution] =
     ZIO.fromOption(tree.index.nodes.get(nodeId))
       .orElseFail(ValidationFailed(List(ValidationError(
         field = "nodeId",
@@ -131,7 +131,7 @@ final case class CachedResultResolverLive(
     node: RiskNode,
     seedEntityId: SeedEntityId.SeedEntityId,
     records: Map[NodeId, List[MitigationApplicationRecord]]
-  ): Task[LossDistribution] =
+  ): IO[AppError, LossDistribution] =
     node match {
       case leaf: RiskLeaf =>
         for {
@@ -177,7 +177,7 @@ final case class CachedResultResolverLive(
     }
 
   /** A `Validation` failure becomes a typed `ValidationFailed` (ADR-010). */
-  private def fromValidation[A](v: Validation[ValidationError, A]): Task[A] =
+  private def fromValidation[A](v: Validation[ValidationError, A]): IO[AppError, A] =
     ZIO.fromEither(v.toEither).mapError(errs => ValidationFailed(errs.toList))
 
   /** Identity-free cached content for one effective leaf. Node identity is
@@ -188,7 +188,7 @@ final case class CachedResultResolverLive(
     cache: ContentCache,
     leaf: RiskLeaf,
     seedEntityId: SeedEntityId.SeedEntityId
-  ): Task[LeafSimResult] =
+  ): IO[AppError, LeafSimResult] =
     for {
       key <- ZIO.fromOption(hashes.get(leaf.id))
         .orElseFail(ValidationFailed(List(ValidationError(
@@ -208,7 +208,7 @@ final case class CachedResultResolverLive(
     key: ContentHash,
     leaf: RiskLeaf,
     seedEntityId: SeedEntityId.SeedEntityId
-  ): Task[LeafSimResult] =
+  ): IO[AppError, LeafSimResult] =
     tracing.span("simulateLeaf", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("node_id", leaf.id.value)

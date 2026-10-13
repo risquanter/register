@@ -10,6 +10,7 @@ import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, LECPoint, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, NodeId, BranchRef, Revision}
+import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
@@ -21,7 +22,7 @@ import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.safeId
 
@@ -63,12 +64,11 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       ContentCacheRegistry.layer,
       InvalidationHandler.live,
       SSEHub.live,
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured
     )
 
   /** Every leaf's and the root's outcomes, keyed by leaf name / RootKey. */
-  private def figures(resolver: CachedResultResolver)(tree: RiskTree, entity: SeedEntityId.SeedEntityId): Task[Map[String, Map[TrialId, Loss]]] =
+  private def figures(resolver: CachedResultResolver)(tree: RiskTree, entity: SeedEntityId.SeedEntityId): IO[AppError, Map[String, Map[TrialId, Loss]]] =
     val leaves = tree.nodes.collect { case l: RiskLeaf => l }
     for
       leafFigs <- ZIO.foreach(leaves)(l => resolver.ensureCached(tree, l.id, entity).map(r => l.name.value -> r.outcomes))

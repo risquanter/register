@@ -5,7 +5,10 @@ import zio.test.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
 
-import com.risquanter.register.domain.errors.{ErrorResponse, ValidationErrorCode}
+import zio.json.*
+
+import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{
   RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest,
@@ -82,11 +85,19 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
       .send(client.backend)
       .map(resp => (resp.code.code, resp.body))
 
+  /** The validation codes a rejected request's body carries.
+    *
+    * The body is decoded as `WireError.ValidationRejected` rather than as the
+    * enclosing type: each status maps to exactly one wire case, so a 400 from
+    * the decoder is that case and nothing else. A body that does not decode as
+    * it is a failure of this helper, which is what makes the status-to-case
+    * relation part of what these tests check.
+    */
   private def rangeErrorCodes(rawBody: String): Task[List[ValidationErrorCode]] =
     ZIO.fromEither(
-      ErrorResponse.codec.decoder.decodeJson(rawBody)
-        .map(_.error.errors.map(_.code).toList)
-        .left.map(err => s"Failed to decode error response: $err\nBody was: $rawBody")
+      rawBody.fromJson[WireError.ValidationRejected]
+        .map(_.errors.map(_.code))
+        .left.map(err => s"Failed to decode a validation rejection: $err\nBody was: $rawBody")
     ).mapError(new RuntimeException(_))
 
   override def spec =

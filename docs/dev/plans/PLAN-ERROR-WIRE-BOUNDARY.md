@@ -406,10 +406,12 @@ which is the one sanctioned use of a non-plain import (ADR-011 §2) and keeps ea
 arm reading left to right: internal name in, wire name out.
 
 ```scala
-def fromAppError(e: AppError): WireError =
-  // The trace is a field of every error and of every wire case, so it is bound
-  // once here rather than read in each arm.
-  val t = e.trace
+def fromAppError(e: AppError, trace: TraceId): WireError =
+  // Bound once so each arm reads `t` rather than repeating the parameter. The
+  // trace is not a field of the error: it is read from the active span at the
+  // boundary that calls this, which is the only place an effect exists to
+  // read it.
+  val t = trace
 
   e match
     // Request rejected
@@ -505,28 +507,61 @@ extension [R, A](effect: ZIO[R, AppError, A])
   /** Project the typed domain failure onto the wire type and move it into the
     * `Either` that `serverLogic` expects.
     *
-    * Attaches the trace of the request before projecting: this is the one place
-    * the request context and the failure are both in scope.
+    * Reads the trace from the active span, so the identifier a failure carries
+    * is the identifier of the span the failing work ran under.
     */
-  def wireEither: ZIO[R & RequestContextRef, Nothing, Either[WireError, A]] =
-    effect
-      .mapError(e => e.attachTrace(currentTrace))
-      .mapError(WireError.fromAppError)
-      .either
+  def wireEither(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
+    effect.either.flatMap {
+      case Right(value) => ZIO.succeed(Right(value))
+      case Left(error)  => currentTraceId.map(trace => Left(WireError.fromAppError(error, trace)))
+    }
+
+private def currentTraceId(using tracing: Tracing): UIO[TraceId] =
+  tracing.getCurrentSpanContextUnsafe.map { ctx =>
+    TraceId.fromString(ctx.getTraceId).toOption.getOrElse(TelemetryPlaceholders.UnlinkedTrace)
+  }
 ```
 
-`currentTrace` reads the trace from the request context, falling back to the
-placeholder while nothing populates it. `PLAN-TELEMETRY-PLUMBING.md` replaces
-that fallback with a real value; the signature here does not change when it does.
+**Why `Tracing` arrives as a context parameter rather than in the environment.**
+`serverLogic` fixes the environment. A controller builds
+`ServerEndpoint[Any, Task]`, so the environment type is `Any` at every call site,
+and an effect that requires anything in its environment cannot be handed to
+`serverLogic` at all. A signature reading `ZIO[R & RequestContextRef, …]` is
+therefore unimplementable here, whatever its intent. `Tracing` instead reaches
+`wireEither` as a `using` parameter, supplied by one line in each controller —
+`private given Tracing = tracing` — over a constructor field that the
+controller's `makeZIO` reads from the environment once. That is the pattern every
+other service in these controllers already follows. Seven controllers carry the
+line: the six listed above and `SSEController`.
+
+**Why the trace cannot be read when the error is constructed.**
+`Tracing.getCurrentSpanContextUnsafe` returns `UIO[SpanContext]` — an effect —
+because the OpenTelemetry context is held in a ZIO `FiberRef` rather than a
+thread-local. That is what `OpenTelemetry.contextZIO` arranges in the telemetry
+layer, and it is what makes the context survive the async boundaries of a
+work-stealing executor. A failure value built deep inside a service is pure and
+cannot perform an effect, so it cannot read the span. `wireEither` is effectful,
+runs once per controller method, and is the first point after the failure where
+an effect exists. That is why the trace is a parameter of the projection and not
+a field of the error (`EWB-D-16`).
+
+**What is read when no span is open.** OpenTelemetry returns its invalid span
+context, whose trace identifier is 32 zero characters. That is exactly the value
+`TelemetryPlaceholders.UnlinkedTrace` holds, so the placeholder is what the
+mechanism yields rather than a fallback branch written to yield it. The
+consequence for `§13` is stated there: inside a request there is a real
+identifier, and the placeholder marks a failure that ran under no span.
 
 Each site then changes `.either` to `.wireEither`. `BaseController` is unchanged:
 its effect type stays `Task`, because `serverLogic` carries the typed error in the
 `Either` and not in the effect's error channel.
 
-One thing to check rather than assume: this extension requires each
-for-comprehension's inferred error type to be `AppError`, not `Throwable`. A site
-that infers `Throwable` will not compile against it and needs its own narrowing.
-§13 covers that as a compile step, and the compiler names any such site.
+The extension is declared on `ZIO[R, AppError, A]`, so every chain feeding it
+must infer `AppError`. A single step returning `Task[A]` sets the whole
+for-comprehension's error type to `Throwable`, because `Throwable` is the least
+common supertype of the two, and the site then does not compile. `EWB-D-14` is
+the narrowing that answers this, and `EWB-D-15` is what makes each widening
+visible rather than silent.
 
 ---
 
@@ -546,11 +581,18 @@ case class WorkspaceExpired(
   cause:       ExpiryCause,
   expiredAt:   java.time.Instant
 ) extends DomainError:
-  override def getMessage: String = "Workspace expired"
+  override def logMessage: String = "Workspace expired"
 
 case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends DomainError:
-  override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
+  override def logMessage: String = s"Tree ${treeId.value} not found in workspace"
 ```
+
+The member is named `logMessage` rather than `message` or `getMessage`, and the
+name is load-bearing twice. It is not `getMessage`, because `AppError` is no
+longer a `Throwable` and there is nothing to override (`EWB-D-15`). It is not
+`message`, because three query-failure cases already carry a constructor
+parameter of that name and the two would collide. `logMessage` also states where
+the text goes: into the server's log, never to a client.
 
 A workspace has two deadlines and either one ending it is enough, so the error
 names which one did. `ttl` and `idleTimeout` are the two configured windows,
@@ -586,10 +628,10 @@ is no workspace to name, because no workspace was found.
 
 ```scala
 case class WorkspaceNotFound() extends DomainError:
-  override def getMessage: String = "Workspace not found"
+  override def logMessage: String = "Workspace not found"
 ```
 
-`getMessage` carries neither identifier, which ADR-035 §3 requires of a message
+`logMessage` carries neither identifier, which ADR-035 §3 requires of a message
 and which costs nothing: a log line reads these as annotations, where they are
 queryable, rather than as text inside a sentence.
 
@@ -620,117 +662,98 @@ would. The W3C Trace Context trace identifier is the value that joins a
 user-visible failure to a span in the collector, and it is what the OpenTelemetry
 exporters already configured in `build.sbt` emit.
 
-**The shape.** Three nominal wrappers over Iron refinements, built the way
-`WorkspaceId` and `TreeId` are built — a `case class` over a refined string, a
-smart constructor, and codecs in the companion (ADR-018).
+**The shape — one nominal wrapper, not three.** `EWB-D-20` deletes
+`RequestContext` entirely, and with it the two identifiers only that record held.
+What survives is the one identifier that has readers:
 
 ```scala
 /** The W3C Trace Context trace identifier: 32 lowercase hexadecimal characters,
   * a length and alphabet fixed by that specification rather than chosen here.
   */
-type TraceIdStr = String :| Match["^[0-9a-f]{32}$"]
-
-/** The W3C Trace Context span identifier: 16 lowercase hexadecimal characters,
-  * fixed by the same specification. Compiler-distinct from `TraceId`, so one
-  * cannot be passed where the other is wanted (ADR-018).
-  */
-type SpanIdStr = String :| Match["^[0-9a-f]{16}$"]
-
-/** Register's own per-request identifier: a UUID, as `RequestContext.generate`
-  * produces today. Compiler-distinct from both trace identifiers.
-  */
-type RequestIdStr = String :| Match["^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"]
+type TraceIdConstraint = Match["^[0-9a-f]{32}$"]
+type TraceIdStr = String :| TraceIdConstraint
 
 case class TraceId(toTraceIdStr: TraceIdStr):
   def value: String = toTraceIdStr
-
-case class SpanId(toSpanIdStr: SpanIdStr):
-  def value: String = toSpanIdStr
-
-case class RequestId(toRequestIdStr: RequestIdStr):
-  def value: String = toRequestIdStr
 ```
 
-Each gets a `fromString` returning `Either[List[ValidationError], _]` and a
-`JsonCodec`, matching the existing identifier types exactly.
+It is a nominal wrapper rather than a bare refined string so that it cannot be
+passed where another identifier of the same encoding is wanted (ADR-018), and it
+gets a `fromString` returning `Either[List[ValidationError], TraceId]` plus JSON
+codecs in its companion, matching every existing identifier type. It lives in
+`OpaqueTypes.scala` beside the others rather than in a file of its own, because
+that is where every other nominal wrapper lives.
 
-**`RequestContext` loses every raw string and every `Option`.**
+`SpanId` and `RequestId` are **not** built. Each would have had exactly one
+reader, the deleted record, so each would have been a type with no consumer —
+which is the defect `EWB-D-8` was raised to remove, in a different shape.
+`EWB-D-20` derives why the record goes.
+
+**`RequestContext` is deleted rather than retyped**, together with
+`RequestContextRef`, its layer, its five helper methods and `RequestContextSpec`.
+Retyping it was this section's original answer, and `EWB-D-20` reverses it: the
+record would have had no reader. Its four fields are accounted for without it.
+
+The trace and the span were already held by ZIO on the request's own fibre.
+`TelemetryLive` composes the tracing layer with `OpenTelemetry.contextZIO`, which
+puts the OpenTelemetry context in a fibre reference, so
+`tracing.getCurrentSpanContextUnsafe` returns both anywhere inside a request.
+Copying them into a second fibre reference so that code could read the copy is
+what the deletion avoids.
+
+The trace reaches the log through `ZIO.logAnnotate`, which is ZIO's own fibre
+reference for exactly this and which every logger already consults. The caller
+reaches authorization through an ordinary parameter: `UserContextExtractor`
+extracts the `UserId` per request and each controller passes it to
+`authzService.check`, so it is in scope where it is used. Register's own request
+identifier had no consumer at all and is not replaced.
+
+**One placeholder stays, and what it means changes.** It was written to say "the
+tracing layer is not connected". It now says "this work ran under no span", a
+condition that still exists and always will: a startup task, the workspace
+reaper's sweep, and any other effect outside a request belong to no trace.
 
 ```scala
-final case class RequestContext(
-  requestId: RequestId,
-  traceId:   TraceId,
-  spanId:    SpanId,
-  userId:    UserId
-)
+object TelemetryPlaceholders:
+  val UnlinkedTrace: TraceId = TraceId("00000000000000000000000000000000")
 ```
 
-No default on any field, so a site that cannot supply one is a compile error
-rather than a silent `None`. `userId` needs no `Option`: `UserId` is already a
-sealed trait with an `Anonymous` case object, so the absent user is a value. That
-is the existing workspace practice applied here rather than a new type invented
-for it.
+`UnlinkedSpan` goes with `SpanId`. Nothing reads a span identifier, so there is
+no site that would need a placeholder for one.
 
-**What cannot be filled yet is filled from a named dummy.** No part of the system
-can supply a real trace identifier until the tracing layer is connected, so
-`RequestContext.generate` passes placeholders that say so:
+The placeholder is held in the constants structure `EWB-D-10` rules. It is
+deliberately recognisable rather than plausible — 32 zero characters — so a real
+value is never mistaken for one. The zeros are not chosen here: they are what
+OpenTelemetry's own invalid span context carries, which is why the value a
+span-less read produces is already the placeholder, with no branch written to
+produce it.
+
+**`AppError` does not carry the trace.** The identifier is a parameter of the
+projection, read from the active span at the boundary that projects. The reason
+is mechanical and is derived in `§5.2`: reading the span context requires an
+effect, because the OpenTelemetry context is held in a ZIO `FiberRef`, and a
+failure value built inside a service is pure. There are 159 construction sites
+across 19 files; making each one effectful, or threading a `TraceId` parameter
+into all of them, is the cost that a parameter on one function avoids.
+
+The value is identical either way, and that is what makes the cheaper option the
+correct one rather than merely cheaper. A trace identifier is constant across a
+request's whole span tree — only the span identifier differs between a parent
+and its child — so a read at the boundary returns bit-for-bit what a read at
+construction would have returned. Attaching it earlier buys no fidelity.
+`EWB-D-16` records this and supersedes `EWB-D-8`'s carrier choice.
+
+The trait therefore declares what every failure does carry, and nothing else:
 
 ```scala
-def generate: UIO[RequestContext] =
-  ZIO.succeed(RequestContext(
-    requestId = RequestId(UUID.randomUUID().toString.refineUnsafe),
-    traceId   = TelemetryPlaceholders.UnlinkedTrace,
-    spanId    = TelemetryPlaceholders.UnlinkedSpan,
-    userId    = UserId.Anonymous
-  ))
+sealed trait AppError:
+  def logMessage: String
 ```
 
-The placeholders are held in the constants structure `EWB-D-10` rules, each with
-scaladoc naming the plan that replaces it. They are deliberately recognisable
-rather than plausible, so a real value is never confused with a placeholder, and
-a search for either name is the complete list of sites the telemetry work must
-reach.
-
-**`AppError` carries the trace identifier, every `WireError` case projects it,
-and the browser displays it.** The chain is one projection with no extra
-parameter and no header: the identifier is a field of the error, so
-`fromAppError` reads it from its single argument like every other field.
-
-The trait carries it, so none of the 31 leaf types and none of their construction
-sites change:
-
-```scala
-sealed trait AppError extends Throwable:
-  /** The trace the failing work ran under.
-    *
-    * Assigned once at the boundary that projects the error, which is where the
-    * request context is in scope. An error that reaches the boundary without one
-    * reads as the placeholder, so an unattributed failure is findable rather
-    * than indistinguishable.
-    */
-  final def trace: TraceId = assignedTrace
-
-  private var assignedTrace: TraceId = TelemetryPlaceholders.UnlinkedTrace
-
-  private[register] def attachTrace(t: TraceId): this.type =
-    assignedTrace = t
-    this
-```
-
-A single assignment at one boundary, on a type that is already mutable —
-`Throwable` carries a stack trace and suppressed exceptions — and whose values
-are single-use. The alternative, a `trace` field on each of the 31 case classes,
-would put the identifier at every construction site in the services, which means
-threading the request context through every one of them.
-
-`§5.2`'s `wireEither` is that boundary: it is effectful, runs once per controller
-method, and has the context in scope.
-
-**Boundary.** This plan types the structure, removes the optionality, and marks
-what it cannot fill. Connecting the identifiers to real spans is
-`docs/dev/plans/PLAN-TELEMETRY-PLUMBING.md`, which holds the four open questions
-that work depends on. The two files touched here are `RequestContext.scala` and
-the identifier definitions; no other telemetry file is opened.
+**Boundary.** None. Connecting the identifiers to real spans is this plan's work,
+not a later plan's. `EWB-D-19` folds in what the retired
+`PLAN-TELEMETRY-PLUMBING.md` would have done, and `§9`'s Phase 1b is where it
+lands.
 
 ### 6.2 The resolve-failure log line gains the record
 
@@ -788,16 +811,36 @@ compiler checks every case rather than only the four sub-traits.
 
 ```scala
 def fromWireError(e: WireError): GlobalError = e match
-  case WireError.ValidationRejected(errors, _)     => ValidationFailed(errors)
-  case WireError.QueryRejected(problem, _)         => queryMessage(problem)
-  case WireError.NotFound(_)                       => NotFound
-  case WireError.WorkspaceExpired(c, life, idle, _) => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
-  case WireError.AccessDenied(_)                   => ServerError(ErrorMessages.Forbidden)
-  case WireError.Conflict(conflict, _)             => Conflict(conflictMessage(conflict))
-  case WireError.NotSupported(capability, _)       => ServerError(capabilityMessage(capability))
-  case WireError.DependencyUnavailable(t)          => DependencyError(ErrorMessages.DependencyDown, Some(t))
-  case WireError.InternalFault(t)                  => ServerError(ErrorMessages.InternalFault, Some(t))
+  case WireError.ValidationRejected(errors, _)      => ValidationFailed(errors)
+  case WireError.QueryRejected(problem, _)           => RequestRejected(ErrorMessages.query(problem))
+  case WireError.NotFound(_)                         => NotFound
+  case WireError.WorkspaceExpired(c, life, idle, _)  => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
+  case WireError.AccessDenied(_)                     => ServerError(ErrorMessages.Forbidden, None)
+  case WireError.Conflict(conflict, _)               => Conflict(ErrorMessages.conflict(conflict))
+  case WireError.NotSupported(capability, _)         => ServerError(ErrorMessages.capabilityUnavailable(capability), None)
+  case WireError.DependencyUnavailable(t)            => DependencyError(ErrorMessages.DependencyDown, Some(t))
+  case WireError.InternalFault(t)                    => ServerError(ErrorMessages.InternalFault, Some(t))
 ```
+
+A `RequestRejected` display case is added, and it is the arm a refused query
+takes. The existing code maps every query failure to `ServerError`, and that is
+wrong rather than merely blunt: a refused query is a problem with text the user
+typed, it answers `422`, and `ErrorBanner` renders `ServerError` with the
+server-fault icon while reserving the warning icon for the user-input case. So
+someone with a syntax error in a query would read a server-fault presentation
+for their own typo. The case carries no trace, because the message names what to
+correct.
+
+That arm is reached more often than its inline handling suggests.
+`toOutcomeEventStream` forks through `forkProvided` with the observer enabled,
+so a query failure notifies the global observer **as well as** reaching
+`AnalyzeQueryState`'s own slot. The banner shows it either way.
+
+Two arms pass `None` for the trace explicitly, because `EWB-D-11` forbids a
+defaulted `Option`. That is the rule working rather than a cost it imposes. A
+denial and an absent capability both carry a trace on the wire, so `None` at the
+call site is where the browser's decision not to show it becomes visible instead
+of being hidden in a default.
 
 **The browser displays it, and which cases show it is a presentation choice
 rather than a data one.** The identifier is on every wire case, so every
@@ -828,8 +871,10 @@ there is no `console` call, `println` or `ZIO.log` anywhere in `modules/app`
 today — and it adds no dependency, because scalajs-dom is already used for
 `window` and `MouseEvent`.
 
-`GlobalError`'s cases therefore take `trace: Option[TraceId]` and `ErrorBanner`
-renders it in a muted line under the message, selectable so it can be copied:
+`GlobalError.ServerError` and `GlobalError.DependencyError` therefore take
+`trace: Option[TraceId]`, and they are the only two that do, because they are
+the two that render it. `ErrorBanner` renders it in a muted line under the
+message, selectable so it can be copied:
 
 ```scala
 case GlobalError.ServerError(msg, trace) =>
@@ -842,10 +887,11 @@ case GlobalError.ServerError(msg, trace) =>
 `fromThrowable` stays, narrowed to its real job: a browser `fetch` failure is a
 `TypeError` and is not a `WireError`, so it still becomes `NetworkError`.
 
-The four private message-composing functions are the whole of EWB-P-2 on this
-side. `expiryMessage` is the one that pays immediately — it states the configured
-lifetime from the `Duration`, which no sentence written on the server could do
-without the server owning the wording.
+Every sentence those arms name comes from `app/views/ErrorMessages.scala`, which
+is where `EWB-D-10` and §7.7 put them, and together they are the whole of
+`EWB-P-2` on this side. `ErrorMessages.workspaceExpired` is the one that pays
+immediately — it states the configured lifetime from the `Duration`, which no
+sentence written on the server could do without the server owning the wording.
 
 A `NotFound` display case is added. Today a workspace 404 and an expiry both
 produce `WorkspaceExpired`, because the sentinel cannot tell them apart; with the
@@ -874,11 +920,22 @@ A dropped connection or a server fault then leaves the key where it is, and the
 startup listing simply fails. This is the defect named fourth in §1, and it is
 fixed by the boundary change rather than by a patch to the handler.
 
-### 7.3 The duplicated sentence goes
+### 7.3 The duplicated sentence goes, and so does the callback
 
-The expiry text is written twice, identically: `app/Main.scala:117-118` and
-`app/state/GlobalError.scala:103-104`. `Main.scala`'s `onExpired` callback stops
-carrying a message, because `GlobalError` composes it from the lifetime.
+Two named templates describe one condition. `ErrorMessages.WorkspaceExpiredOnStartup`
+is used by `Main.scala`'s `onExpired` callback and
+`ErrorMessages.workspaceExpired(lifetime)` by `GlobalError`. Neither is a bare
+literal, so the defect is not a hardcoded string: it is that one condition has
+two sentences, which is the overlap the single-source rule exists to prevent
+(`EWB-D-10`).
+
+`onExpired` is deleted rather than retyped (`EWB-D-18`). It exists only so that a
+pre-validation failure at startup can be reported quietly, and
+`WorkspaceState.preValidate` moves from `runJsQuiet` to `runJs` so the ordinary
+path reports it. `ErrorMessages.WorkspaceExpiredOnStartup` is then unreferenced
+and is deleted with it, leaving `workspaceExpired(lifetime)` as the one sentence
+for the condition — and the better one, because it states the lifetime the
+workspace was given.
 
 ### 7.4 `ZJS`
 
@@ -981,6 +1038,92 @@ duplicate expiry sentence written at both `Main.scala:117` and
 
 ---
 
+### 7.8 Why a view has nothing to show
+
+`GlobalError` is the banner's input. The four inline display states are the
+other half of ADR-019's two-tier presentation, and they are what a single view
+reads to decide between a spinner, data and an error line. Each one carries its
+failure as a composed `String` today: `LoadState.Failed`, `SubmitState.Failed`,
+`ScenarioSubmitState.Failed` and `MergeSubmitState.Failed`.
+
+That `String` is not a flattened `RequestFailure`, and this is the fact that
+decides the shape. Five sites construct one of those states from a condition
+that never involved a request: the local form's own validation errors at
+`TreeBuilderView.scala:60` and `BranchBar.scala:261`, an absent workspace at
+`TreeBuilderView.scala:80` and `ScenarioState.scala:88`, and an empty successful
+response at `ZJS.scala:219`. So the state answers a wider question than
+`RequestFailure` does. It answers "why does this view have nothing to show".
+
+`EWB-D-13` rules one supertype and one new enumeration beside the
+`RequestFailure` that already exists. All three live in one file,
+`modules/app/src/main/scala/app/core/ViewFailure.scala`, because the supertype is
+sealed and its cases must be declared where the compiler can see them all:
+
+```scala
+/** Why a view has nothing to show.
+  *
+  * Sealed, and extended directly by the two kinds of answer rather than
+  * wrapping them in cases of its own. A `RequestFailure` is therefore already a
+  * `ViewFailure`, so a request result becomes a display state with no
+  * conversion and a pattern reaches a wire case without unwrapping a level.
+  */
+sealed trait ViewFailure
+
+/** Why a request to the backend did not produce a result. */
+enum RequestFailure extends ViewFailure:
+  /** The server answered with one of its statuses and a typed body. */
+  case Wire(error: WireError)
+
+  /** The request never completed: no network, a DNS failure, a refused
+    * connection, or a rejected cross-origin check.
+    */
+  case Transport(cause: Throwable)
+
+/** A failure that never left the browser, so no request was made. */
+enum LocalProblem extends ViewFailure:
+  /** The form's own validation rejected the input before it was sent. */
+  case FormInvalid(errors: List[ValidationError])
+
+  /** The action needs a workspace and no key is held. */
+  case NoActiveWorkspace
+```
+
+`RequestFailure` is restated here because it gains a supertype; its two cases are
+unchanged from `EWB-D-12`, and `BackendClient.endpointRequestZIO` keeps declaring
+`IO[RequestFailure, O]`, so the narrower type still names exactly what a request
+can produce. Moving it into this file is what lets the trait be sealed.
+
+The four display states then carry `ViewFailure` in place of their `String`, and
+each view composes its sentence where it renders. That is what unblocks §7.5:
+a sentence frozen into the state at the moment a request failed cannot be
+presented two ways, so the per-case conflict treatment and the trace line on
+`InvariantBroken` have nowhere to read from until the state carries the case.
+
+**One of those five sites is not a failure at all.** `ZJS.scala:219` maps a
+`Right(None)` to `LoadState.Failed("Tree not found")`, which is a request that
+succeeded and found nothing. The three views that read it confirm the reading:
+`TreeDetailView.scala:153` renders a placeholder rather than an error, and
+`DesignView.scala:145` and `AnalyzeView.scala:294` do the same. `LoadState`
+gains an `Absent` case for it:
+
+```scala
+enum LoadState[+A]:
+  case Idle
+  case Loading
+  case Absent                      // new — the request succeeded and found nothing
+  case Loaded(value: A)
+  case Failed(failure: ViewFailure)
+```
+
+That case also removes a live defect. Those three views detect the condition by
+matching the message text as a literal, against a sentence written once at
+`TreeViewState.scala:126` and nowhere declared. Renaming it breaks three views
+with no compile error. It is the same code smell as
+`RepositoryFailure.isWorkspaceSentinel`, which §8 deletes, and ADR-010 names it
+as "String Matching on Errors".
+
+---
+
 ## 8. What is deleted
 
 | Deleted | Why it existed |
@@ -994,6 +1137,16 @@ duplicate expiry sentence written at both `Main.scala:117` and
 | `RepositoryFailure.isWorkspaceSentinel` and its 4 call sites | string matching on errors, which ADR-010 names a code smell |
 | `mapErrorOut` in `BaseEndpoint` | nothing left to map |
 | `ErrorResponse.encode` and its 5 dispatch functions | replaced by one exhaustive `fromAppError` |
+| `RequestContext`, `RequestContextRef`, its layer and its 5 helpers | a second fibre reference holding a copy of what ZIO already carries (`EWB-D-20`) |
+| `SpanId` and `RequestId`, with their two Tapir schemas | each had one reader, and that reader was the deleted record |
+| `TelemetryPlaceholders.UnlinkedSpan` | nothing reads a span identifier, so nothing needs a placeholder for one |
+| `ValidationExtensions.toZIOTask` | existed only to widen an `AppError` into a `Task`, which `EWB-D-15` forbids |
+| `RiskTreeServiceLive.logIfUnexpected` | its non-`AppError` branch became unreachable, so it never logged |
+
+`RequestContextSpec.scala` is deleted with the type it tests. Its assertions are
+about fibre-reference mechanics — that a value set is read back, that a child
+fibre inherits it, that the scope ends — and ZIO's own tests cover those. No
+assertion about this application's behaviour is lost.
 
 `ErrorResponseSpec.scala` is 576 lines and most of it asserts `decode(encode(x))`
 round-trips. It is replaced rather than edited; §13 states what the new tests pin.
@@ -1012,8 +1165,16 @@ telemetry identifiers and the retyped `RequestContext` with its placeholder
 constants, from `EWB-D-8`; `fromAppError`; the `oneOf` declaration in
 `BaseEndpoint`; `wireEither` and the 23 call sites; `GlobalError.fromWireError`
 with its message functions; the three `ZJS` sites with the console line of §7.1;
-the pre-validation match; the duplicated sentence; and every deletion in §8. Every string this phase writes is
+the pre-validation match; the duplicated sentence and the `onExpired` deletion of
+§7.3; and every deletion in §8. Every string this phase writes is
 held as `EWB-D-10` rules.
+
+Two changes to the error channel itself are in this phase, because `wireEither`
+does not compile without them. `AppError` stops extending `Throwable`
+(`EWB-D-15`), and the service and repository signatures narrow from `Task[A]` to
+`IO[AppError, A]` (`EWB-D-14`). The narrowing reaches eight trait contracts and
+their implementations; the compiler names every site, and `§13` states how that
+list is produced rather than assembled by hand.
 
 Two things moved into this phase from Phase 2, because the wire case cannot be
 populated without them: `WorkspaceExpired`'s five internal fields with
@@ -1027,7 +1188,57 @@ presentation. Separate from Phase 1 only so that the boundary can be verified
 green before the interface changes on top of it; both land before the plan is
 done.
 
-**Phase 2 — the log line.** `TreeNotInWorkspace`'s identifier and the log
+**Phase 1b — the span the boundary reads.** Phase 1 gives `wireEither` somewhere
+to read a trace from; this phase makes a trace exist to be read. Four items, from
+`EWB-D-19`:
+
+1. `RequestSpanInterceptor`, a new Tapir request interceptor that opens one
+   `SERVER` span per request and annotates the request's log lines with its
+   trace identifier. It builds no request-context record — `EWB-D-20` deletes
+   that type — so the span itself is the only thing it establishes.
+   Its span name is the HTTP method plus the first path segment, with a
+   workspace-scoped path's key segment replaced by a fixed placeholder: a span
+   name is exported to the collector, and the capability key must never reach it
+   (ADR-021).
+2. Its connection in `Application.startServer`, beside
+   `SecurityHeadersInterceptor.interceptor`.
+3. The eighteen test files that name `TracingLive.console` or
+   `MetricsLive.console` move to `TelemetryLive.configured`, so tests and
+   production build the same single SDK instance. Three of them take tracing
+   alone with no metrics layer, because they were given one during Phase 1's own
+   work. `TracingLive.scala` and `MetricsLive.scala` are then unreferenced and
+   are deleted, and `TelemetryLive`'s duplicated `console` and `otlp`
+   construction collapses to one private builder parameterized by the exporter.
+   `configured` becomes the object's only public member: once every test reads
+   the exporter from configuration, nothing names a layer to pin one, so
+   `console`, `otlp`, `tracingConsole` and `metricsConsole` have no callers and
+   go with the duplication. `TestConfigs.telemetry.exporter` changes from `Otlp`
+   to `Console`, because `configured` reads that field and the suites would
+   otherwise start sending spans over gRPC to a collector that is not running
+   during a test.
+4. A test that the identifier a `WireError` carries equals the identifier of the
+   span the failing work ran under, which is `§13`'s new property.
+
+Item 3 comes before item 4 and that order is not arbitrary: while a test suite
+builds its own tracing SDK separately from the metrics SDK, a test of the span
+read is measuring a wiring that production does not use.
+
+**Phase 2 — the display states, then the log line.** Two items, in this order.
+
+*First, the inline display states*, from `EWB-D-13` and §7.8. `ViewFailure`,
+`LocalProblem` and `LoadState.Absent`; the four display states retyped from
+`String` to `ViewFailure`; the five local construction sites converted to a
+`LocalProblem` case; the three literal `"Tree not found"` matches converted to
+`LoadState.Absent`; and each view composing its sentence where it renders. This
+is Phase 2's first step rather than Phase 1's work because Phase 1 lands the
+boundary and proves it green, and retyping the display states reaches roughly
+eleven view files that the boundary change does not touch.
+
+It also settles what Phase 1a needs. §7.5's per-case conflict treatment and the
+trace line on `InvariantBroken` both read the failure's case at render time, so
+they cannot be written while the state holds a composed sentence.
+
+*Then the log line.* `TreeNotInWorkspace`'s identifier and the log
 annotation change:
 
 ```scala
@@ -1054,10 +1265,10 @@ rules in `.claude/rules/scala-style.md` all landed on 2026-10-11 and are no
 longer this phase's work. The scattered use sites are reached by the standing
 rule as later tasks open those files, not by this phase.
 
-There is no telemetry-plumbing phase. Connecting the identifiers to real spans is
-`docs/dev/plans/PLAN-TELEMETRY-PLUMBING.md`, which holds the four open questions
-that work depends on. This plan types the structure and marks what it cannot
-fill.
+Phase 1b is the telemetry phase, and there is no separate telemetry plan.
+`PLAN-TELEMETRY-PLUMBING.md` is retired: its four open questions are ruled in
+`EWB-D-19` and its work is Phase 1b above. This plan types the structure and
+connects it, so no part of it is left marked as unfillable.
 
 ---
 
@@ -1207,16 +1418,28 @@ a merge refusal differently from a version conflict. Carrying a case the interfa
 renders generically today is cheaper than discarding a distinction and
 rediscovering it.
 
-### EWB-D-8 — the correlation identifier — RULED 2026-10-11
+### EWB-D-8 — the correlation identifier — RULED 2026-10-11, carrier superseded by `EWB-D-16`
 
-**Ruled: the trace identifier is a field of `AppError`, is projected onto every
-`WireError` case, and the browser displays it.** The chain is one projection with
-no second parameter and no response header. The typed identifiers and the
-retyped `RequestContext` are in §6.6; the carrier on `AppError` and the
-projection are in §5.1 and §6.6.
+**Ruled: every `WireError` case carries a trace identifier, and the browser
+displays it.** That is Option A below and it stands. The typed identifiers and
+the retyped `RequestContext` are in §6.6.
 
-This ruling was given twice, because I reversed it in between on reasoning of my
-own. It is settled and is not reopened.
+**Two parts of this ruling no longer hold, and both are marked here rather than
+only at the top of the document.**
+
+The sentence "the identifier is a field of the error, so `fromAppError` reads it
+from its single argument" described how the identifier reaches the projection.
+`EWB-D-16` reverses that: the identifier is a parameter of `fromAppError`, read
+from the active span by `wireEither`. What reaches the browser is unchanged — the
+same value, on the same wire cases — so the ruling's goal and its answer are
+intact, and only the carrier is different. `§5.2` derives why.
+
+The three typed identifiers this ruling introduced are now one. `EWB-D-20`
+deletes `RequestContext`, which was the only reader `SpanId` and `RequestId`
+would ever have had, so both go with it. `TraceId` keeps seven readers and
+stays. The goal stated below — that a person seeing a failure has something to
+quote which resolves to a log line — is still met in full, because the trace is
+on the screen and on every log line the request wrote.
 
 **Goal.** Decide whether the request identifier reaches the browser, and therefore
 whether a user-reported failure can be traced to a server log line.
@@ -1544,19 +1767,475 @@ never happened. §7.4 settles the first half by typing the helpers on the wire
 error, and this decision names what carries the second half, which §7.4 left
 open while §7.1 kept `fromThrowable` alive for it.
 
-**What was rejected.** Making `WireError` extend `Throwable` would have cost
-the fewest files — `BackendClient` would not change, and `Either`'s covariance
-would keep every `Either[Throwable, X]` bus compiling. It was rejected because
-the `Throwable` bound is an artifact of this client's own plumbing rather than
-anything ZIO requires: ZIO's error channel is an unconstrained type parameter,
-so `IO[RequestFailure, O]` is ordinary. Putting exception machinery on a shared
-wire type would preserve that artifact permanently, in `common`, where every
-other wire type is plain data. A client-local `Throwable` wrapper was rejected
-for the same reason, having the same cost and also needing an unwrapping step at
-every match site.
+**What was rejected.** Three alternatives were weighed. They are written down
+because the cheapest one is what a later reader reaches for again.
 
-Both rejected options are written down because the cheapest one is the one a
-later reader will reach for again.
+**Making `WireError` extend `Throwable`.** This costs the fewest files.
+`BackendClient` would not change, and `Either`'s covariance would keep every
+`Either[Throwable, X]` bus compiling. It was rejected because the `Throwable`
+bound exists only to satisfy this client's own call chain rather than anything
+ZIO requires: ZIO's error channel is an unconstrained type parameter, so
+`IO[RequestFailure, O]` is ordinary.
+
+The objection is not about where the type lives. `WireError` belongs in
+`common` by definition, because both sides use it. The objection is about what
+kind of thing it would become. Every other type that crosses the wire is plain
+data. `Throwable` adds exception apparatus — `getMessage`, stack-trace capture,
+suppression — to a value whose only job is to be decoded and matched on. A
+constraint that exists only because of how this one client calls the backend
+would then be attached permanently to a type the server also compiles.
+
+**A client-local wrapper extending `Throwable`.** This has the same cost as the
+option above. It additionally needs an unwrapping step at every match site: a
+`final class` extending `Throwable` is not a `case class`, so it has no
+generated `unapply`, and every site must read
+`case f: WireFailure => f.error match { … }`.
+
+**A sealed supertype in `common`, with `WireError` extending it directly.**
+This is the closest alternative. It was raised and retracted on 2026-10-12. Its
+benefit is real: it removes one construction call and one level of pattern
+nesting, because a `WireError` would flow into `IO[RequestFailure, O]` as
+itself.
+
+Its structure is forced by one language rule. `sealed` requires every direct
+subtype to be declared in the same source file, which is what lets the compiler
+promise that a match is exhaustive. Exhaustivity is the mechanism this plan
+exists to buy, so the supertype has to be `sealed`. A `sealed` supertype then
+pulls both of its subtypes into one file. That file has to sit in `common`,
+because `WireError` is there and `common` cannot see `app`. So the transport
+case would be declared in `common` as well.
+
+That placement is not the objection. A case that only one side of a shared
+hierarchy produces is unremarkable. The objection is what the arrangement does
+to `WireError`'s meaning. Today `WireError` means one thing: what the server
+sent. `fromAppError` is total onto it, §4's `oneOf` enumerates it, and every
+case carries an HTTP status. As a subtype it would also mean one half of a
+browser-side union. The server's own error declaration would then be listing
+the variants of a type that has a browser-transport sibling. The type stops
+meaning one thing, and §4 is where that is read.
+
+**What the chosen enum does not cost.** It adds no unwrapping step. An enum
+case has a generated `unapply`, so a pattern nests in one expression:
+
+```scala
+case RequestFailure.Wire(WireError.WorkspaceExpired(cause, lifetime, idleLimit, _)) => …
+```
+
+The unwrapping cost named above belongs to the `Throwable` wrapper alone.
+
+---
+
+### EWB-D-13 — what carries a failure in an inline display state — RULED 2026-10-12, shape revised 2026-10-13
+
+**Ruled: a sealed supertype, `ViewFailure`, that `RequestFailure` and
+`LocalProblem` each extend directly.** The types are written out in §7.8. The
+four inline display states carry `ViewFailure` in place of a composed `String`,
+and each view composes its sentence where it renders. `LoadState` additionally
+gains an `Absent` case, because one of the states reached today is a successful
+request that found nothing rather than a failure.
+
+Phase 1 keeps the `String` and fills it from one pure function, so the boundary
+can land green before eleven view files are touched. Phase 2's first step is
+this change. Both are in this plan, which is what `G8` requires of one epic.
+
+**What was revised, and why it is not a reopening.** The ruling of 2026-10-12
+chose a wrapping enumeration: `ViewFailure` with a `Request(failure:
+RequestFailure)` case and a `Local(problem: LocalProblem)` case. The revision
+keeps both constituent types exactly as they were and changes only how they
+join: instead of each being wrapped in a case of a third enumeration, each
+extends a sealed trait. The set of states representable is identical. What
+changes is the depth a pattern reads at, and the cost paragraph below is what
+the revision removes.
+
+**Why the rejection below does not apply to the revised shape.** The argument
+against a flat shape was that `RequestFailure` must not gain a `Local` case,
+because `BackendClient.endpointRequestZIO` returns `IO[RequestFailure, O]` and
+can never construct one. That argument is untouched: `RequestFailure` keeps its
+two cases and nothing is added to it. `ViewFailure` is a supertype of it rather
+than a case list containing it, so the type that names what a request can do
+still names exactly that, and the display states name something wider by
+referring to the supertype.
+
+**Why not a third arm on `RequestFailure`.** This was the original proposal: a
+`Local` case beside `Wire` and `Transport`, with the four display states typed
+directly on `RequestFailure` and no second type at all.
+
+It was rejected for the reason that decided `EWB-D-12` against a sealed
+supertype in `common`. `BackendClient.endpointRequestZIO` returns
+`IO[RequestFailure, O]`. It can produce `Wire` and it can produce `Transport`.
+It can never produce `Local`, because a local precondition means no request was
+issued. The function's error type would therefore declare a case the function
+cannot construct, and every match on its result would carry an arm that is dead
+by construction. The name goes false at the same moment: `RequestFailure` would
+stop meaning "how a request failed" and start meaning "that, and also things
+that are not requests". One type meaning one thing is the property both
+decisions protect.
+
+**Why not two parallel enumerations.** A display type repeating `Wire` and
+`Transport` as its own cases, with a widening function from `RequestFailure`,
+keeps every match one level deep. It duplicates both cases in two types, so a
+tenth wire-failure mode would have to be added twice, and it needs a conversion
+call at every site where a request result becomes a display state.
+
+**The cost the revision removes.** Under the wrapping shape, a site that cares
+about one specific wire case read three levels deep:
+
+```scala
+case ViewFailure.Request(RequestFailure.Wire(WireError.WorkspaceExpired(cause, lifetime, idleLimit, _))) => …
+```
+
+Under the sealed supertype the same site reads two:
+
+```scala
+case RequestFailure.Wire(WireError.WorkspaceExpired(cause, lifetime, idleLimit, _)) => …
+```
+
+The outer level is gone because `RequestFailure.Wire` is already a `ViewFailure`,
+so no wrapper has to be unwrapped to reach it. Converting a request result into a
+display state also stops needing a call: a `RequestFailure` is a `ViewFailure`
+already.
+
+### EWB-D-14 — service and repository signatures name their failures — RULED 2026-10-13
+
+**Ruled: narrow them. Every service and repository signature returning `Task[A]`
+becomes `IO[AppError, A]`.**
+
+**Goal.** Decide whether the eight service and repository traits keep declaring
+`Task[A]`, or declare the closed set of failures they can actually produce.
+
+The two are different claims about the same method. `Task[A]` is an alias for
+`ZIO[Any, Throwable, A]`, so it says "this can fail with anything a Java
+exception can be". `IO[AppError, A]` is `ZIO[Any, AppError, A]`, and because
+`AppError` is sealed it says "this fails with one of 31 named outcomes, and the
+compiler knows which".
+
+It is not a cosmetic choice, because `wireEither` is declared on
+`ZIO[R, AppError, A]`. Scala infers a for-comprehension's error type as the least
+common supertype of its steps, so one step returning `Task[A]` sets the whole
+chain's error type to `Throwable` and the chain then cannot be passed to
+`wireEither`. The widening is not local to the step that caused it.
+
+**Option A — narrow the service and repository traits.** Eight trait contracts
+change, and their implementations with them.
+
+*Pros:* a signature states what can go wrong, which is the guarantee the whole
+plan rests on. Every site that currently loses the type is named by the compiler
+once, rather than discovered one failure at a time. A genuine defect — something
+that is a bug rather than an expected outcome — has to be routed to ZIO's defect
+channel explicitly, which is where it belonged already.
+*Cons:* it reaches well beyond the files the boundary itself needs. Each raw
+exception currently absorbed by `Task` must be classified: either it is an
+expected outcome and gets an `AppError` case, or it is a bug and becomes a
+defect. That classification is judgement, not mechanics.
+
+*Concretely:* `queryService.evaluate` returns `Task[QueryResponse]` today. In
+`QueryController` that one step makes the whole for-comprehension `Throwable`,
+so `.wireEither` does not compile on it, and the error says the extension is not
+a member of `ZIO[Any, Throwable, QueryResponse]` — which names the symptom and
+not the cause.
+
+**Option B — convert at each boundary instead.** Leave the traits as `Task` and
+write `.refineToOrDie[AppError]` at each of the 23 controller sites.
+
+*Pros:* the change stays inside the controllers.
+*Cons:* it converts a type error into a runtime one. `refineToOrDie` turns an
+unmatched failure into a defect at run time, so a widening that the compiler
+could have named becomes a crash in production instead. It also repeats the
+conversion 23 times, and a 24th site added later that forgets it compiles.
+
+**Trade-off.** Correctness of the signatures against the size of the change.
+Option A is larger now and is the only one of the two that makes the guarantee
+hold at compile time.
+
+### EWB-D-15 — `AppError` stops extending `Throwable` — RULED 2026-10-13
+
+**Ruled: remove `extends Throwable`. It is done inside this plan, not deferred.**
+
+**Goal.** Decide whether the sealed failure hierarchy continues to extend
+`Throwable`.
+
+**Why it is the root cause rather than a tidiness matter.** `Task[A]` fails with
+`Throwable`. While `AppError` is a `Throwable`, a `Task`-returning step accepts
+an `AppError` without complaint, so the widening of `EWB-D-14` is invisible at
+the point it happens and surfaces only much later, as an error about a type that
+no longer mentions `AppError`. Removing the supertype is what makes each widening
+site name itself.
+
+The two concepts are also distinct on their own terms. ZIO's error channel `E`
+names expected failures a caller is meant to handle; a bug goes to the defect
+channel, which is where `Throwable` belongs. An `AppError` is an expected outcome
+by construction — that is why it is enumerated — so it is data, not an exception.
+
+**Option A — remove it now, inside this plan.**
+
+*Pros:* `EWB-D-14`'s work becomes compiler-enumerated instead of
+search-enumerated. The hierarchy stops carrying exception apparatus it never
+uses: stack-trace capture, `getCause`, suppressed exceptions.
+*Cons:* every site that relied on the supertype must change in the same pass.
+`orDie` is the main one: it requires `E <: Throwable`, so each use becomes
+`orDieWith(f: E => Throwable)`. `getMessage` overrides on 31 leaves override
+nothing any more and are renamed.
+
+*Concretely:* `WorkspaceStorePostgres` calls `.orDie` on an effect whose error is
+an `AppError`. After the removal that no longer compiles, and the file gains one
+private function, `asDefect(e: AppError): Throwable`, used at its three such
+sites. The conversion is now written down where it happens instead of being
+implicit in a supertype.
+
+**Option B — defer it to a follow-up plan.**
+
+*Pros:* this plan stays closer to the wire boundary it is named for.
+*Cons:* `EWB-D-14` then has no mechanical way to find its own sites, so the
+narrowing would be done by searching. And the two changes have to land together
+regardless: narrowing a signature to `IO[AppError, A]` while `AppError` is still
+a `Throwable` leaves every `Task` call site compiling and silently widening, so
+the deferral would ship the cost of the narrowing without its guarantee.
+
+**Trade-off.** Plan scope against whether the narrowing can be verified at all.
+`G8` also bears on it: the two are one change in two halves, and splitting them
+would park the half that makes the other sound.
+
+### EWB-D-16 — where the trace identifier is read — RULED 2026-10-13
+
+**Ruled: it is a parameter of `fromAppError`, read from the active span by
+`wireEither`.** This supersedes `EWB-D-8`'s carrier choice and nothing else about
+that ruling. The derivation is in §5.2 and §6.6.
+
+**Goal.** Decide whether the trace identifier enters a failure when the failure
+is constructed, or is read at the boundary that projects it onto the wire.
+
+The intent behind the question was that the identifier should be an ordinary
+immutable field of `AppError`, set once at construction like any other — which is
+the shape a reader would expect and the one that needs no explanation.
+
+**Option A — a parameter at the boundary.** `fromAppError(e: AppError, trace:
+TraceId)`, with `wireEither` reading the span.
+
+*Pros:* one function gains one parameter, at one call site. No construction site
+changes. `AppError` stays pure data with no field that only one consumer reads.
+*Cons:* the identifier is not visible in the failure value itself, so a reader of
+`AppError` cannot see that a trace is associated with it at all. The association
+lives in the projection.
+
+*Concretely:* a service fails with `RepositoryFailure("…")` deep inside a tree
+read. The value carries no identifier. When it reaches the controller,
+`wireEither` reads the active span, and the `WireError` the browser receives
+carries that span's trace. The user sees the same string either way.
+
+**Option B — an immutable field set at construction.** Every `AppError` leaf
+takes a `TraceId`.
+
+*Pros:* the identifier is part of the failure, which is the clearer model, and
+`fromAppError` needs no second argument.
+*Cons:* it cannot be built. Reading the span context requires an effect —
+`Tracing.getCurrentSpanContextUnsafe` returns `UIO[SpanContext]`, because
+`OpenTelemetry.contextZIO` holds the context in a ZIO `FiberRef` rather than a
+thread-local. Construction sites are pure. So each of the 159 sites across 19
+files would have to either become effectful or receive a `TraceId` threaded down
+from the controller through every intervening signature.
+
+**Option C — a mutable field assigned at the boundary.** What this plan
+originally specified: a `private var` on the trait, with `attachTrace`.
+
+*Pros:* keeps the identifier on the error, as Option B wants, without threading
+it through construction.
+*Cons:* it makes the hierarchy mutable, and it only worked at all because
+`AppError extends Throwable` made mutability unremarkable. `EWB-D-15` removes
+that supertype, so the justification goes with it. The existing `var` is in fact
+evidence for this ruling rather than against it: the field had to be mutable
+precisely because the value cannot be known at construction.
+
+**Trade-off.** The model a reader would expect against what the mechanism allows.
+What settles it is that **the value is identical either way.** A trace identifier
+is constant across a request's entire span tree — only the span identifier
+differs between a parent and its child — so reading it at the boundary returns
+bit-for-bit what reading it at construction would have. Option B therefore costs
+159 sites and buys no fidelity, which is what makes Option A correct rather than
+merely cheaper.
+
+### EWB-D-17 — how every `WireError` case exposes its trace — RULED 2026-10-13
+
+**Ruled: an abstract member declared on the enum itself, not a `Traced`
+supertype.**
+
+**Goal.** Every `WireError` case carries a `TraceId` (`EWB-D-8`). Decide how code
+reads it from a value whose case is not known.
+
+**Option A — an abstract member on the enum.**
+
+```scala
+enum WireError:
+  def trace: TraceId
+```
+
+Each case declares `trace` as a field, which implements the member.
+
+*Pros:* one line, inside the type that already exists. Scala 3 permits an
+abstract member on an `enum` and each case's field satisfies it — verified by
+compiling it rather than assumed.
+*Cons:* none identified.
+
+**Option B — a `sealed trait Traced` that `WireError` extends.**
+
+*Pros:* the capability is nameable and reusable if another type later needs it.
+*Cons:* a second type with one implementor and one member, introduced for a
+reuse that nothing requires. Every match site gains nothing and the file gains a
+declaration.
+
+**Trade-off.** There is effectively none, which is why this is recorded as a
+ruling rather than presented as an open choice. It is written down because the
+plan's earlier text named the `Traced` supertype, and a reader of that text would
+otherwise implement it.
+
+### EWB-D-18 — the startup expiry callback — RULED 2026-10-13
+
+**Ruled: delete `onExpired`. `WorkspaceState.preValidate` moves from
+`runJsQuiet` to `runJs`, and `ErrorMessages.WorkspaceExpiredOnStartup` is deleted
+with it.** §7.3 states the change.
+
+**Goal.** One condition — the held workspace key has expired — has two sentences
+written for it. Decide whether the startup path keeps its own.
+
+**Option A — delete the callback and its sentence.** Pre-validation at startup
+reports through the ordinary error path.
+
+*Pros:* one condition, one sentence, and it is the better sentence: it states the
+lifetime the workspace was given. The duplicate cannot drift from the original,
+because there is no duplicate. `runJsQuiet` exists to suppress reporting, and
+suppressing the report is what required a separate sentence in the first place.
+*Cons:* the failure is now reported through the banner at startup, where
+previously it was silent. That is a visible behaviour change, and it is the
+intended one.
+
+*Concretely:* a user returns to a bookmarked workspace URL whose key expired
+overnight. Today the startup check fails silently and the user sees an empty
+view. After the change the banner states that the workspace expired and how long
+it was given.
+
+**Option B — keep the callback and point it at the shared sentence.**
+
+*Pros:* startup stays silent, so nothing about the first paint changes.
+*Cons:* it keeps a code path whose only purpose is to not report a failure the
+user needs to know about. The second sentence goes, but the reason it existed
+stays.
+
+**Trade-off.** Whether a failed startup pre-validation is something the user
+should be told about. Option A says yes.
+
+### EWB-D-19 — the telemetry plumbing folds into this plan — RULED 2026-10-13
+
+**Ruled: `PLAN-TELEMETRY-PLUMBING.md` is retired. All of its work is Phase 1b of
+this plan, and no task-list item is left behind.** The user deletes that
+document.
+
+**Goal.** This plan reads a trace from the active span. Decide whether opening
+that span is this plan's work or a separate plan's.
+
+**What is already built, verified rather than assumed.** The telemetry stack is
+present and live: `zio-opentelemetry` 3.1.13 is on the classpath, and
+`Application` composes `TelemetryLive.configured`, so `Tracing` is a service the
+controllers can already take. Five spans exist and are conventional — an
+`INTERNAL` span per service method in `QueryServiceLive`, `RiskTreeServiceLive`
+and twice in `CachedResultResolverLive`, and a `CLIENT` span for the outbound
+SpiceDB call. What is missing is one `SERVER` span per request.
+
+**The four questions the retired plan held, and their answers.** Its request
+interceptor, its log annotation, the meaning of its placeholders, and how many
+spans to add are all decided here: Phase 1b opens one `SERVER` span in a request
+interceptor, annotates the request's log lines with the trace at the point the
+context is established, keeps both placeholders with the changed meaning §6.6
+states, and adds exactly that one span because the five existing ones already sit
+at the right boundaries.
+
+**Option A — fold it in.**
+
+*Pros:* this plan's central claim becomes testable. Without a request span,
+`wireEither` reads the invalid context on every request, so every wire failure
+carries the placeholder and `§13`'s span property cannot be written. The
+reasoning that produced these answers — why the context needs an effect to read,
+why the environment cannot carry `Tracing` through `serverLogic`, why the
+invalid context *is* the placeholder — is also in hand now, and a separate plan
+would have to re-derive it from nothing.
+*Cons:* the plan grows by a phase, and that phase includes moving fourteen test
+suites onto the combined telemetry layer, which is unrelated to the wire boundary
+except that a test of the span read is meaningless without it.
+
+**Option B — keep the separate plan and leave this one reading placeholders.**
+
+*Pros:* this plan's scope stays on the wire boundary.
+*Cons:* it ships a correlation identifier that is structurally present and always
+the placeholder — which is the exact defect `EWB-D-8` was raised to fix, in a new
+form. `EWB-D-8`'s own recommendation names it: "A correlation identifier that is
+structurally present and never populated is worse than none, because it reads as
+working."
+
+**Trade-off.** Plan size against shipping a feature in a state its own decision
+record calls worse than absent. The hard-won reasoning is also a cost of
+deferring that is easy to under-count: a later plan inherits the mechanical work
+but not the derivation.
+
+### EWB-D-20 — `RequestContext` is deleted, not populated — RULED 2026-10-13
+
+**Ruled: the request interceptor applies a log annotation only.
+`RequestContext`, `RequestContextRef`, its layer, its five helper methods and
+`RequestContextSpec` are deleted, and `SpanId`, `RequestId`, their two Tapir
+schemas and `TelemetryPlaceholders.UnlinkedSpan` go with them.** This supersedes
+the retyping that `EWB-D-8` and §6.6 originally specified.
+
+**Goal.** The interceptor of `EWB-D-19` opens a span and must make its trace
+identifier reachable. Two mechanisms could carry it, and keeping both leaves one
+of them with no reader. Deciding which the interceptor uses decides whether a
+type survives.
+
+**What the two mechanisms are.** A *fibre reference* is ZIO's state scoped to one
+unit of work and inherited by anything it forks — its replacement for a
+thread-local, and the reason a request's values survive the async boundaries a
+work-stealing executor introduces. A *log annotation* is a particular fibre
+reference that ZIO ships: `ZIO.logAnnotate(key, value)(effect)` sets
+`FiberRef.currentLogAnnotations` for the duration of `effect`, and every logger
+reads it without being asked.
+
+**Both are idiomatic ZIO, so idiom does not decide this.** `RequestContext` is a
+correct use of the pattern. The question is which has a reader.
+
+**Option A — the log annotation only, and the record is deleted.**
+
+*Pros:* one mechanism for one job, with a reader already wired up. It removes a
+type that has **no production caller**: `RequestContext`'s only references
+outside its own file are in its own test suite, and that suite tests
+fibre-reference mechanics rather than any behaviour of this application. It also
+stops a duplication that is worse than ordinary repetition — `TelemetryLive`
+composes the tracing layer with `OpenTelemetry.contextZIO`, so the trace and the
+span are *already* in a fibre reference, and populating the record would copy
+them into a second one so that code could read the copy.
+*Cons:* two of the three identifiers `EWB-D-8` typed lose their only reader and
+are deleted, so part of that ruling's work is undone inside the same plan.
+Register's own per-request identifier ceases to exist as a concept.
+
+*Concretely:* a user quotes the trace from the banner. One log query returns
+every line that request wrote, because the annotation was on all of them. No
+`RequestContext` is consulted, because none exists.
+
+**Option B — populate the record as well, passing the fibre reference in the way
+`Tracing` is passed.**
+
+*Pros:* all three typed identifiers keep a live reader, so `EWB-D-8` lands whole.
+A later need for the request identifier — echoing it in a response header, say —
+would have somewhere to read it from.
+*Cons:* it populates a record nothing reads. That is the defect `EWB-D-8` exists
+to remove, in a new shape, and that decision's own words rule on it: "A
+correlation identifier that is structurally present and never populated is worse
+than none, because it reads as working." It also cannot use the environment —
+an interceptor's effect type is `Task`, so the reference would be a constructor
+parameter, which is more wiring for the unread copy.
+
+*Concretely:* the interceptor sets the record and annotates the log. The record
+is correct throughout the request, and no line of application code consults it.
+
+**Trade-off.** Whether `EWB-D-8` landing whole is worth keeping a populated
+record with no reader. What settles it is that the record would hold a copy of
+state ZIO already carries on the same fibre, so it is not merely unread but
+redundant with a live source.
 
 ---
 
@@ -1565,7 +2244,7 @@ later reader will reach for again.
 | ADR | What this plan touches | Status |
 |---|---|---|
 | ADR-010 (error handling strategy) | the hierarchy, the HTTP mapping, the code smells | **Compliant, and it closes a violation.** The "String Matching on Errors" code smell instructs pattern matching on types; `isWorkspaceSentinel` matches a string prefix on the browser side, and this plan deletes it. **The ADR is amended in two places:** §5 "Pure HTTP Error Mapping" is rewritten to describe a one-way projection onto `WireError` instead of `encode` and `decode`, and §1's hierarchy listing gains `TreeLoadFailure` and the `SimError` to `DomainError` rename. |
-| ADR-035 (error leakage prevention) | the boundary, the encoders, `getMessage` | **Compliant, and strengthened.** §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. |
+| ADR-035 (error leakage prevention) | the boundary, the encoders, the failure's own message member | **Compliant, and strengthened.** **Its naming amendment is made.** ADR-035 named the member as `getMessage` in its leakage-vector list, in its §3 heading, in §3's first sentence and in its ADR-036 cross-reference. `EWB-D-15` removes `extends Throwable`, so `AppError` has no `getMessage` and the member is `logMessage` (§6.1). All four now read `logMessage`, and §3's opening states why: the name carries the destination, and an `AppError` is plain data with no exception apparatus behind its text. The discipline the section states is unchanged and still binds. §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. |
 | ADR-036 (confidential internal identifiers) | `TreeNotInWorkspace`, `WorkspaceExpired`, the log line | Compliant. No wire case declares a `WorkspaceId`, so the output half holds structurally rather than by discipline. The input half is untouched. §6.2's log annotation is explicitly permitted: a confidential identifier may appear in a server log. |
 | ADR-022 (secret handling) | the three workspace errors | Compliant and unchanged. None carries a credential, so R1's `final class` rule has nothing to be violated at the container. |
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. |
@@ -1597,16 +2276,23 @@ below are what the phases need. Paths marked `new:` do not exist yet.
 - `new: modules/server/src/main/scala/com/risquanter/register/http/controllers/WireEither.scala`
 - `new: modules/common/src/test/scala/com/risquanter/register/http/errors/WireErrorSpec.scala`
 
-Telemetry identifiers and their placeholder constants (`EWB-D-8`). The
-identifiers go beside the existing nominal wrappers rather than into a new file,
-because `OpaqueTypes.scala` is where every other one lives:
-
-- `new: modules/server/src/main/scala/com/risquanter/register/telemetry/TelemetryPlaceholders.scala`
+`TraceId` and the `TelemetryPlaceholders` holder go into
+`OpaqueTypes.scala` beside the existing nominal wrappers rather than into a file
+of their own, because that is where every other one lives (`EWB-D-8`, narrowed
+to one identifier by `EWB-D-20`). That file is listed under the shared module
+above, so this phase creates no file for them.
 
 Message templates and wire-string holders (`EWB-D-10`, §7.7):
 
 - `new: modules/app/src/main/scala/app/views/ErrorMessages.scala`
 - `new: modules/app/src/main/scala/app/components/MergeMessages.scala`
+
+The inline display-state types (`EWB-D-13`, §7.8). One file, because the
+supertype is sealed and its cases must be visible to the compiler together;
+`RequestFailure` moves into it from `RequestFailure.scala`, which is then
+deleted:
+
+- `new: modules/app/src/main/scala/app/core/ViewFailure.scala`
 
 **Edited — shared module**
 
@@ -1636,12 +2322,25 @@ Message templates and wire-string holders (`EWB-D-10`, §7.7):
 - `modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala`
-- `modules/server/src/main/scala/com/risquanter/register/telemetry/RequestContext.scala`
-- `modules/server/src/test/scala/com/risquanter/register/telemetry/RequestContextSpec.scala`
 - `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
+- `modules/server/src/main/scala/com/risquanter/register/http/sse/SSEController.scala`
 - `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/http/controllers/ScenarioControllerSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/domain/errors/FolQueryFailureFromQueryErrorSpec.scala`
+
+The request span and the telemetry consolidation (`EWB-D-19`, Phase 1b). Four of
+these are deleted rather than edited — `RequestContext.scala` and its spec by
+`EWB-D-20`, `TracingLive.scala` and `MetricsLive.scala` once the suites move off
+them — and the fourteen suites that compose them are reached by the standing
+authorization for a module's own tests:
+
+- `new: modules/server/src/main/scala/com/risquanter/register/http/RequestSpanInterceptor.scala`
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala`
+- `modules/server/src/main/scala/com/risquanter/register/telemetry/TelemetryLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/telemetry/TracingLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/telemetry/MetricsLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/telemetry/RequestContext.scala`
+- `modules/server/src/test/scala/com/risquanter/register/telemetry/RequestContextSpec.scala`
 
 **Edited — browser**
 
@@ -1693,6 +2392,13 @@ then names every site that still fails with `AppError`, and that is the complete
 list of `.either` sites to convert. The compiler produces the migration list; it
 is not assembled by hand.
 
+The same mechanism produces the narrowing list, and it is the reason `EWB-D-15`
+is in this plan rather than deferred. While `AppError extends Throwable`, a step
+returning `Task[A]` absorbs an `AppError` silently and the widening leaves no
+trace at the point it happens. Once the supertype is gone, each widening is a
+type error naming its own site. Removing `extends Throwable` first and compiling
+is therefore the step that enumerates `EWB-D-14`'s work.
+
 **New tests in `WireErrorSpec`:**
 
 1. **The status-to-case relation is one-to-one.** For every `WireError` case,
@@ -1718,6 +2424,23 @@ is not assembled by hand.
    from outside (ADR-035 §2).
 6. **A workspace absence and a tree-not-in-workspace produce identical bytes.**
    The same property, for the existence oracle.
+
+**The span property, carried in from the retired telemetry plan.** One test, in
+Phase 1b: *the identifier a `WireError` carries equals the identifier of the span
+under which the failing work ran.* It is written by opening a span, failing an
+effect inside it, passing the failure through `wireEither`, and asserting the
+projected identifier against the span context's own. This is the property that
+makes the identifier worth showing a user — without it the value is well-typed
+and means nothing.
+
+The retired plan also proposed asserting that *no site passes a placeholder
+identifier*. That assertion is **not** carried in, because this design makes it
+false on purpose: an effect outside any request reads the invalid span context
+and so reads the placeholder, which is the correct answer for work that belongs
+to no trace. The property that replaces it is narrower and true: **no site
+inside a request yields a placeholder.** A request always has the Phase 1b
+interceptor's span open around it, so a placeholder observed on a request path
+is a defect in the interceptor's reach rather than an expected value.
 
 **Replacing `ErrorResponseSpec`.** Its round-trip assertions have no subject once
 `decode` is gone. What survives in substance moves into `WireErrorSpec`: every

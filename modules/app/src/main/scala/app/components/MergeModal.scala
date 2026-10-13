@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{LoadState, MergeSubmitState, ScenarioMergeState}
 import com.risquanter.register.domain.data.iron.ScenarioName
-import com.risquanter.register.http.responses.MergePreviewResponse
+import com.risquanter.register.http.responses.{MergePreviewResponse, MergePreviewStatus}
 
 /** "Merge into main…" modal (Design view): shows the server's byte-level
   * conflict preview and offers Merge only when it is clean. Conflicting
@@ -30,7 +30,10 @@ object MergeModal:
     val mergeEnabled: Signal[Boolean] =
       state.preview.signal.combineWith(state.submit.signal).map {
         case (LoadState.Loaded(preview), submit) =>
-          preview.status == "clean" && submit != MergeSubmitState.Submitting
+          (preview.status, submit) match
+            case (MergePreviewStatus.Clean(), MergeSubmitState.Submitting) => false
+            case (MergePreviewStatus.Clean(), _)                          => true
+            case _                                                        => false
         case _ => false
       }
     div(
@@ -62,45 +65,39 @@ object MergeModal:
   private def renderPreview(state: ScenarioMergeState, preview: LoadState[MergePreviewResponse]): HtmlElement =
     preview match
       case LoadState.Idle | LoadState.Loading =>
-        div(cls := "merge-modal-status", "Checking for conflicts…")
+        div(cls := "merge-modal-status", MergeMessages.Checking)
       case LoadState.Failed(msg) =>
         div(
-          div(cls := "merge-modal-error", s"Conflict check failed: $msg"),
+          div(cls := "merge-modal-error", MergeMessages.previewFailed(msg)),
           recheckButton(state)
         )
+      // The preview status is a closed set, so every outcome has its own arm
+      // and there is no wildcard rendering an unrecognised status as an empty
+      // conflict list.
       case LoadState.Loaded(result) =>
         result.status match
-          case "clean" =>
-            div(cls := "merge-modal-status", "No conflicts — merging applies this scenario's changes to main.")
-          case "missing-scenario" =>
-            div(cls := "merge-modal-error", "This scenario no longer exists.")
-          case "duplicate-names" =>
+          case MergePreviewStatus.Clean() =>
+            div(cls := "merge-modal-status", MergeMessages.Clean)
+
+          case MergePreviewStatus.ScenarioMissing() =>
+            div(cls := "merge-modal-error", MergeMessages.ScenarioMissing)
+
+          case MergePreviewStatus.DuplicateNames(perTree) =>
             div(
-              div(
-                cls := "merge-modal-error",
-                "Merging would give two risks in one tree the same name:"
-              ),
-              div(cls := "merge-modal-conflicts", result.duplicateNames.getOrElse("")),
-              div(
-                cls := "merge-modal-hint",
-                "Rename one of them on either branch, then re-check."
-              ),
+              div(cls := "merge-modal-error", MergeMessages.DuplicateNamesHeading),
+              div(cls := "merge-modal-conflicts", MergeMessages.duplicateNames(perTree)),
+              div(cls := "merge-modal-hint", MergeMessages.DuplicateNamesHint),
               recheckButton(state)
             )
-          case _ =>
+
+          case MergePreviewStatus.Conflicts(paths) =>
             div(
-              div(
-                cls := "merge-modal-error",
-                s"${result.conflicts.size} path(s) changed on both branches since the fork:"
-              ),
+              div(cls := "merge-modal-error", MergeMessages.conflictsHeading(paths)),
               ul(
                 cls := "merge-modal-conflicts",
-                result.conflicts.map(c => li(code(c.path)))
+                paths.map(entry => li(code(entry.path)))
               ),
-              div(
-                cls := "merge-modal-hint",
-                "Merging is blocked until both branches agree on these paths — edit the node on either branch to match the other, then re-check."
-              ),
+              div(cls := "merge-modal-hint", MergeMessages.ConflictsHint),
               recheckButton(state)
             )
 

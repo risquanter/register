@@ -263,13 +263,19 @@ final class IrminClientLive private (
       case DeserializationException(_, jsonError) =>
         IrminHttpError(StatusCode.InternalServerError, s"Invalid response: $jsonError")
 
-  private def mapNetworkError(error: Throwable): IrminError = error match
+  /** Two kinds of failure reach this one channel and both become an
+    * `IrminError`: a typed failure this client already produced, and a raw
+    * exception thrown by the HTTP backend. The parameter is the union of the
+    * two because a domain error is not a `Throwable`, so neither can stand for
+    * the other.
+    */
+  private def mapNetworkError(error: Throwable | IrminError): IrminError = error match
     case e: IrminError        => e
     case _: ConnectException  => IrminUnavailable("Connection refused")
     case _: JTimeoutException => NetworkTimeout("GraphQL request", ScalaDuration.fromNanos(config.timeout.toNanos))
     case e: java.io.IOException if e.getMessage != null && e.getMessage.contains("timeout") =>
       NetworkTimeout("GraphQL request", ScalaDuration.fromNanos(config.timeout.toNanos))
-    case e => IrminUnavailable(s"Network error: ${e.getMessage}")
+    case e: Throwable         => IrminUnavailable(s"Network error: ${e.getMessage}")
 
   private def extractCommit(response: SetValueResponse): IO[IrminError, IrminCommit] =
     response.data.flatMap(_.set) match

@@ -18,7 +18,7 @@ object TelemetryConfigSpec extends ZIOSpecDefault {
       } yield assertTrue(
         config.serviceName == "risk-register-test",
         config.instrumentationScope == "com.risquanter.register.test",
-        config.exporter == TelemetryExporter.Otlp,
+        config.exporter == TelemetryExporter.Console,
         config.otlpEndpoint.value == "http://localhost:4317",
         config.devExportIntervalSeconds == 1,
         config.prodExportIntervalSeconds == 10

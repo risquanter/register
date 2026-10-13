@@ -27,7 +27,7 @@ final class ChangedNodesState(
   // Same mechanism as `AnalyzeQueryState`'s outcome pipeline.
   val diffResult: Var[LoadState[ChangedNodesResponse]] = Var(LoadState.Idle)
 
-  private val diffTrigger = new EventBus[Option[() => EventStream[Either[Throwable, ChangedNodesResponse]]]]
+  private val diffTrigger = new EventBus[Option[() => EventStream[Either[RequestFailure, ChangedNodesResponse]]]]
 
   // Idempotency guard: callers fire on every tick of a combined signal, not
   // just on a real transition, and `Var.set` doesn't dedupe by value — an

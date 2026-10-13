@@ -4,7 +4,7 @@ import zio.ZIO
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
-import app.core.safeMessage
+import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
@@ -99,7 +99,7 @@ final class ScenarioState(
             listState.refresh()
             switchTo(BranchChoice.Scenario(response.name))
           })
-          .tapError(e => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(e.safeMessage))))
+          .tapError(f => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(ErrorMessages.requestFailed(f)))))
           .runJs
 
   /** Delete a scenario via its CAS precondition (DD-5 Option A). Fetches the

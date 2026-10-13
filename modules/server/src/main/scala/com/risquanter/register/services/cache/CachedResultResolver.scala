@@ -5,6 +5,7 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.mitigation.MitigationSelection
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{NodeId, SeedEntityId, MitigationId}
+import com.risquanter.register.domain.errors.AppError
 
 /**
   * Service for resolving a node's LossDistribution with the cache-aside
@@ -67,7 +68,7 @@ trait CachedResultResolver {
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): Task[LossDistribution]
+  ): IO[AppError, LossDistribution]
 
   /**
     * Batch version of ensureCached for multiple nodes.
@@ -92,7 +93,7 @@ trait CachedResultResolver {
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): Task[Map[NodeId, LossDistribution]]
+  ): IO[AppError, Map[NodeId, LossDistribution]]
 }
 
 object CachedResultResolver {
@@ -105,7 +106,7 @@ object CachedResultResolver {
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): ZIO[CachedResultResolver, Throwable, LossDistribution] =
+  ): ZIO[CachedResultResolver, AppError, LossDistribution] =
     ZIO.serviceWithZIO[CachedResultResolver](_.ensureCached(tree, nodeId, seedEntityId, includeProvenance, selection, resolvedScopes))
 
   def ensureCachedAll(
@@ -115,6 +116,6 @@ object CachedResultResolver {
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): ZIO[CachedResultResolver, Throwable, Map[NodeId, LossDistribution]] =
+  ): ZIO[CachedResultResolver, AppError, Map[NodeId, LossDistribution]] =
     ZIO.serviceWithZIO[CachedResultResolver](_.ensureCachedAll(tree, nodeIds, seedEntityId, includeProvenance, selection, resolvedScopes))
 }

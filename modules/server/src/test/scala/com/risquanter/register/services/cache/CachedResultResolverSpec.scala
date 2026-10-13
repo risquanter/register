@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, TransformPipeline, ResultTransformSpec, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.LossDistribution
@@ -118,8 +118,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     ZLayer.make[CachedResultResolver & ContentCacheRegistry](
       ContentCacheRegistry.layer,
       ZLayer.succeed(TestConfigs.simulation),
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console,
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured,
       CachedResultResolverLive.layer
     )
 
@@ -382,8 +381,9 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           // This should trigger simulation and record metrics
           _ <- resolver.ensureCached(testTree, risk1Id, testEntity)
 
-          // Telemetry is recorded via TracingLive.console
-          // In a full implementation, we would assert on captured spans/metrics
+          // Telemetry is recorded through the layer this suite provides, which
+          // exports to the process's own output rather than to a collector this
+          // test can read back, so nothing asserts on the spans or metrics.
         } yield assertCompletes
       }
     ),

@@ -9,7 +9,9 @@ import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 
 import app.core.ZJS.*
-import app.core.safeMessage
+import app.core.RequestFailure
+import app.views.ErrorMessages
+import com.risquanter.register.http.errors.WireError
 
 /** Central workspace lifecycle state — deferred bootstrap pattern.
   *
@@ -93,12 +95,20 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
       case Some(key) =>
         listWorkspaceTreesEndpoint((currentUserId, key, BranchChoice.Main))
           .tap(trees => zio.ZIO.succeed(onTreesLoaded(trees)))
-          .tapError { _ =>
-            zio.ZIO.succeed {
-              workspaceKey.set(None)
-              clearURL()
-              onExpired()
-            }
+          // Only an answer that actually means the workspace is gone discards
+          // the key. A dropped connection or a server fault leaves it in place
+          // and the startup listing simply fails, because throwing the key away
+          // on any failure loses a workspace that was still valid.
+          .tapError {
+            case RequestFailure.Wire(
+                   WireError.WorkspaceExpired(_, _, _, _) | WireError.NotFound(_)
+                 ) =>
+              zio.ZIO.succeed {
+                workspaceKey.set(None)
+                clearURL()
+                onExpired()
+              }
+            case _ => zio.ZIO.unit
           }
           .runJsQuiet  // Quiet: onExpired() handles the error → avoid duplicate global banner
 
@@ -127,5 +137,5 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
           onSuccess(response.tree)
         }
       }
-      .tapError(e => zio.ZIO.succeed(onError(e.safeMessage)))
+      .tapError(f => zio.ZIO.succeed(onError(ErrorMessages.requestFailed(f))))
       .runJs

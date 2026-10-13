@@ -1,45 +1,59 @@
 package com.risquanter.register.domain.errors
 
-import scala.concurrent.duration.Duration
+import java.time.{Duration, Instant}
+import scala.concurrent.duration.Duration as ScalaDuration
 import sttp.model.StatusCode
+import zio.json.{DeriveJsonCodec, JsonCodec}
+import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, TreeId, WorkspaceId}
 
-sealed trait AppError extends Throwable
+/** Every failure the application produces as a value.
+  *
+  * Plain data, and deliberately not a `Throwable`. An exception is how the
+  * platform reports a defect; these are expected outcomes a caller is meant to
+  * handle. Keeping the two apart is what lets a signature name what can go
+  * wrong: `IO[AppError, A]` states the closed set, where `Task[A]` would admit
+  * anything and a widening would be invisible.
+  *
+  * `logMessage` is the server's own text and belongs in the log. The name says
+  * where it goes: it never crosses to a client, because the browser composes
+  * what a user reads from the wire case and its typed values, so no internal
+  * reason can leak through a free-text field (ADR-035).
+  *
+  * The trace a failure ran under is not held here. It is read from the active
+  * span at the boundary that projects onto the wire, which is the only place an
+  * effect exists to read it.
+  */
+sealed trait AppError:
+  def logMessage: String
+
 sealed trait SimError extends AppError
 sealed trait IrminError extends AppError
 
-/** Validation error with structured information */
+/** Validation error with structured information.
+  *
+  * The one internal error type that is also a wire type: it crosses inside
+  * `WireError.ValidationRejected`, because a form needs to know which field
+  * failed and why, and that is the whole content of this type.
+  */
 case class ValidationError(
   field: String,
   code: ValidationErrorCode,
   message: String
 )
 
+object ValidationError:
+  // JSON codec (companion object placement ensures implicit scope)
+  given codec: JsonCodec[ValidationError] = DeriveJsonCodec.gen[ValidationError]
+
 /** Validation failure with accumulated structured errors */
 case class ValidationFailed(errors: List[ValidationError]) extends SimError {
-  override def getMessage: String = errors.map(e => s"[${e.field}] ${e.message}").mkString("; ")
+  override def logMessage: String = errors.map(e => s"[${e.field}] ${e.message}").mkString("; ")
 }
 
 /** Repository operation failure */
 case class RepositoryFailure(reason: String) extends SimError:
-  override def getMessage: String = reason
-
-object RepositoryFailure:
-  /** Sentinel prefix for workspace-level errors reconstructed by `ErrorResponse.decode`.
-    *
-    * The workspace errors collapse to one 404 whose body carries no field
-    * naming which of them it was, so `decode` cannot rebuild the error it
-    * received and returns `RepositoryFailure("workspace:…")` instead.
-    * `GlobalError.fromThrowable` and `ZJS.loadInto` test this prefix to route
-    * a workspace error to the informational banner rather than an inline error
-    * display.
-    */
-  val WorkspaceSentinelPrefix: String = "workspace:"
-
-  /** Check whether a `Throwable` is a workspace-level sentinel error. */
-  def isWorkspaceSentinel(e: Throwable): Boolean = e match
-    case rf: RepositoryFailure => rf.reason.startsWith(WorkspaceSentinelPrefix)
-    case _                     => false
+  override def logMessage: String = reason
 
 /** One tree in a workspace listing could not be loaded.
   *
@@ -50,21 +64,20 @@ object RepositoryFailure:
   * every caller can read it without parsing prose.
   */
 case class TreeLoadFailure(treeId: TreeId, reason: String) extends SimError:
-  override def getMessage: String = s"Tree ${treeId.value} could not be loaded: $reason"
+  override def logMessage: String = s"Tree ${treeId.value} could not be loaded: $reason"
 
 /** Simulation execution failure - wraps underlying cause with context */
 case class SimulationFailure(simulationId: String, cause: Throwable) extends SimError {
-  override def getMessage: String = s"Simulation $simulationId failed: ${cause.getMessage}"
-  override def getCause: Throwable = cause
+  override def logMessage: String = s"Simulation $simulationId failed: ${cause.getMessage}"
 }
 
 /** Data conflict (e.g., duplicate key) */
 case class DataConflict(reason: String) extends SimError:
-  override def getMessage: String = reason
+  override def logMessage: String = reason
 
 /** Authorization failure for disabled/forbidden operations */
 case class AccessDenied(reason: String) extends SimError:
-  override def getMessage: String = reason
+  override def logMessage: String = reason
 
 // ============================================================================
 // Workspace Errors — all three encode to one opaque 404, so a caller cannot
@@ -84,20 +97,33 @@ case class AccessDenied(reason: String) extends SimError:
   * instead of one per failure.
   */
 case class WorkspaceNotFound() extends SimError {
-  override def getMessage: String = "Workspace not found"
+  override def logMessage: String = "Workspace not found"
 }
 
 /** A workspace past its absolute or idle timeout.
   *
-  * Carries nothing, for the same credential reason as `WorkspaceNotFound`, and
-  * because this is the one workspace error the client reconstructs from a
-  * response: every field it held would have to be a field the wire carries,
-  * and the workspace identifier must not cross that boundary (ADR-036). The
-  * identifier, the creation time and the expiry time are annotated on the
-  * resolve-failure log line instead, where the record is in scope.
+  * Carries what a diagnosis needs, because nothing reconstructs this type: the
+  * browser receives a `WireError`, never one of these, and that wire case
+  * declares no workspace identifier (ADR-036).
+  *
+  * `cause`, `ttl` and `idleTimeout` are what cross: a workspace has two
+  * deadlines, so a browser told only a figure would state the wrong one half the
+  * time. `expiredAt` stays internal — it is a fact about a single workspace, and
+  * it is what makes a log line answer "how long ago" rather than only "how long
+  * were they given".
+  *
+  * `getMessage` names none of them, which ADR-035 §3 requires: a log line reads
+  * them as annotations, where they are queryable, rather than as text in a
+  * sentence.
   */
-case class WorkspaceExpired() extends SimError {
-  override def getMessage: String = "Workspace expired"
+case class WorkspaceExpired(
+  wsId:        WorkspaceId,
+  ttl:         Duration,
+  idleTimeout: Duration,
+  cause:       ExpiryCause,
+  expiredAt:   Instant
+) extends SimError {
+  override def logMessage: String = "Workspace expired"
 }
 
 /** A tree the resolved workspace does not hold.
@@ -108,7 +134,7 @@ case class WorkspaceExpired() extends SimError {
   * not confidential and is the useful part of the message.
   */
 case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends SimError {
-  override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
+  override def logMessage: String = s"Tree ${treeId.value} not found in workspace"
 }
 
 // ============================================================================
@@ -117,23 +143,23 @@ case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends SimErro
 
 /** External service (Irmin) is unavailable - transient, retriable */
 case class IrminUnavailable(reason: String) extends IrminError {
-  override def getMessage: String = s"Irmin service unavailable: $reason"
+  override def logMessage: String = s"Irmin service unavailable: $reason"
 }
 
 /** Irmin HTTP-layer error (non-503) */
 case class IrminHttpError(status: StatusCode, body: String) extends IrminError {
-  override def getMessage: String = s"HTTP ${status.code}: $body"
+  override def logMessage: String = s"HTTP ${status.code}: $body"
 }
 
 /** GraphQL error surface from Irmin */
 case class IrminGraphQLError(messages: List[String], path: Option[List[String]]) extends IrminError {
-  override def getMessage: String = messages.mkString("; ")
+  override def logMessage: String = messages.mkString("; ")
   def fieldPath: String = path.filter(_.nonEmpty).map(_.mkString(".")).getOrElse("graphql")
 }
 
 /** Network operation timed out - transient, retriable */
-case class NetworkTimeout(operation: String, duration: Duration) extends IrminError {
-  override def getMessage: String = s"Network timeout after ${duration.toMillis}ms during: $operation"
+case class NetworkTimeout(operation: String, duration: ScalaDuration) extends IrminError {
+  override def logMessage: String = s"Network timeout after ${duration.toMillis}ms during: $operation"
 }
 
 /** CAS branch-create rejected (Phase B, DD-5 / A9 fact 2): `test_and_set_branch`
@@ -151,7 +177,7 @@ case class NetworkTimeout(operation: String, duration: Duration) extends IrminEr
   * taken (`DataConflict`), a staging branch means a merge of that scenario is
   * already running (`MergeAlreadyRunning`). */
 case class BranchAlreadyExists(branch: StoreBranch) extends IrminError {
-  override def getMessage: String = s"Branch already exists: ${branch.name}"
+  override def logMessage: String = s"Branch already exists: ${branch.name}"
 }
 
 /** CAS branch-delete rejected (Phase B, DD-5 / A9 fact 2): `test_and_set_branch`
@@ -160,7 +186,7 @@ case class BranchAlreadyExists(branch: StoreBranch) extends IrminError {
   * without re-reading the branch's current state first. Carries either branch
   * kind, for the reason given on `BranchAlreadyExists`. */
 case class BranchHeadStale(branch: StoreBranch, expectedHead: CommitHash) extends IrminError {
-  override def getMessage: String = s"Branch ${branch.name} head is not ${expectedHead.value}"
+  override def logMessage: String = s"Branch ${branch.name} head is not ${expectedHead.value}"
 }
 
 /** A merge refused by the (patched) Irmin backend: the two branches hold
@@ -171,21 +197,27 @@ case class BranchHeadStale(branch: StoreBranch, expectedHead: CommitHash) extend
   * description with that prefix stripped. Not retriable as-is — the
   * branches must first be brought into byte agreement (ADR-032). */
 case class IrminMergeConflict(reason: String) extends IrminError {
-  override def getMessage: String = s"Irmin merge conflict: $reason"
+  override def logMessage: String = s"Irmin merge conflict: $reason"
 }
 
 /** Optimistic locking conflict - client should refresh and retry */
 case class VersionConflict(nodeId: String, expected: String, actual: String) extends SimError {
-  override def getMessage: String = s"Version conflict on node $nodeId: expected $expected, found $actual"
+  override def logMessage: String = s"Version conflict on node $nodeId: expected $expected, found $actual"
 }
 
 /** Branch merge conflict — requires user intervention. Names the scenario,
   * never the Irmin `BranchRef`, which embeds the `WorkspaceId` (ADR-036). A
   * merge always targets a scenario, so main is not a reachable value here and
   * the scenario's own name is the precise type.
+  *
+  * `refusal` is a closed set rather than composed prose, so the remedy the
+  * browser offers is chosen from the case and not parsed out of a sentence, and
+  * no repository text can reach a client through it. The log line renders the
+  * same value through `MergeRefusal.describe`.
   */
-case class MergeConflict(scenario: ScenarioName.ScenarioName, details: String) extends SimError {
-  override def getMessage: String = s"Merge conflict on scenario ${scenario.value}: $details"
+case class MergeConflict(scenario: ScenarioName.ScenarioName, refusal: MergeRefusal) extends SimError {
+  override def logMessage: String =
+    s"Merge conflict on scenario ${scenario.value}: ${MergeRefusal.describe(refusal)}"
 }
 
 /** A merge of this scenario is already running.
@@ -196,7 +228,7 @@ case class MergeConflict(scenario: ScenarioName.ScenarioName, details: String) e
   * once the first merge finishes.
   */
 case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends SimError {
-  override def getMessage: String =
+  override def logMessage: String =
     s"A merge of scenario ${scenario.value} is already running"
 }
 
@@ -210,7 +242,7 @@ case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends SimE
   * preview and retry.
   */
 case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends SimError {
-  override def getMessage: String =
+  override def logMessage: String =
     s"Main changed while merging scenario ${scenario.value}; re-run the preview and retry"
 }
 
@@ -222,7 +254,7 @@ case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends SimErro
   * exists at all.
   */
 case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash, actual: Option[CommitHash]) extends SimError {
-  override def getMessage: String =
+  override def logMessage: String =
     s"Scenario ${scenario.value} head is not ${expected.value}" +
     actual.fold(" (scenario no longer exists)")(a => s" (currently ${a.value})")
 }
@@ -235,7 +267,7 @@ case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: Comm
   * (milestone-2b Phase B item 6) fails every method with this.
   */
 case class ScenariosNotSupported(reason: String) extends SimError {
-  override def getMessage: String = s"Scenarios not supported: $reason"
+  override def logMessage: String = s"Scenarios not supported: $reason"
 }
 
 // ============================================================================
@@ -256,7 +288,7 @@ case class AuthForbidden(
   resourceType: String,
   resourceId:   String
 ) extends AuthError:
-  override def getMessage: String =
+  override def logMessage: String =
     s"Access denied: user=$userId permission=$permission resource=$resourceType:$resourceId"
 
 /** SpiceDB unreachable, timed out, or returned an unexpected response — fail-closed.
@@ -264,9 +296,8 @@ case class AuthForbidden(
   *
   * @see ADR-024: Fail-Closed by Default
   */
-case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = None) extends AuthError:
-  override def getMessage: String = s"Authorization service unavailable: $reason"
-  override def getCause: Throwable = cause.orNull
+case class AuthServiceUnavailable(reason: String, cause: Option[Throwable]) extends AuthError:
+  override def logMessage: String = s"Authorization service unavailable: $reason"
 
 // ============================================================================
 // FOL Query Errors (ADR-028: Vague Quantifier Query Evaluation)
@@ -320,7 +351,7 @@ object FolQueryFailure:
     */
   final case class FolParseFailure(message: String, position: Option[Int])
     extends FolQueryFailure:
-    override def getMessage: String =
+    override def logMessage: String =
       position.fold(message)(p => s"$message (at position $p)")
 
   /** Maps from a bind-phase failure whose every error is an unresolved node
@@ -340,7 +371,7 @@ object FolQueryFailure:
     */
   final case class FolUnknownReference(messages: List[String])
     extends FolQueryFailure:
-    override def getMessage: String =
+    override def logMessage: String =
       s"Unknown reference(s): ${messages.mkString("; ")}"
 
   /** Maps from `vql.error.QueryError.BindError`.
@@ -359,7 +390,7 @@ object FolQueryFailure:
     */
   final case class FolBindFailure(errors: List[String])
     extends FolQueryFailure:
-    override def getMessage: String =
+    override def logMessage: String =
       s"Query type-checking failed: ${errors.mkString("; ")}"
 
   /** Maps from `vql.error.QueryError.ModelValidationError`.
@@ -379,7 +410,7 @@ object FolQueryFailure:
     */
   final case class FolModelValidationFailure(errors: List[String])
     extends FolQueryFailure:
-    override def getMessage: String =
+    override def logMessage: String =
       s"Runtime model validation failed: ${errors.mkString("; ")}"
 
   /** Maps from `vql.error.QueryError.DomainNotFoundError` (D14).
@@ -398,7 +429,7 @@ object FolQueryFailure:
     */
   final case class FolDomainNotQuantifiable(message: String)
     extends FolQueryFailure:
-    override def getMessage: String = message
+    override def logMessage: String = message
 
   /** Maps from `vql.error.QueryError.EvaluationError` / `ValidationError` /
     * `UnboundVariableError`.
@@ -415,7 +446,7 @@ object FolQueryFailure:
     */
   final case class FolEvaluationFailure(message: String, phase: String)
     extends FolQueryFailure:
-    override def getMessage: String = s"Evaluation failed in $phase: $message"
+    override def logMessage: String = s"Evaluation failed in $phase: $message"
 
   /** Register precondition — no `Fol` prefix because no fol-engine involvement.
     *
@@ -429,7 +460,7 @@ object FolQueryFailure:
     */
   final case class SimulationNotCached(treeId: TreeId)
     extends FolQueryFailure:
-    override def getMessage: String =
+    override def logMessage: String =
       s"Simulation not cached for tree ${treeId.value}"
 
   /** Centralised mapping from library `vql.error.QueryError` to register's

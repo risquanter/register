@@ -4,7 +4,7 @@ import zio.*
 import java.time.{DateTimeException, Instant}
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt, CommitHash}
-import com.risquanter.register.domain.errors.{RepositoryFailure, IrminError}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, IrminError}
 import com.risquanter.register.http.responses.{TreeHistoryEntry, HistoryOperation}
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminCommit}
@@ -16,12 +16,12 @@ import com.risquanter.register.infra.irmin.model.{IrminPath, IrminCommit}
   */
 trait TreeHistoryService:
   def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-    (using Checked[Permission]): Task[List[TreeHistoryEntry]]
+    (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]]
 
 final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryService:
 
   override def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-    (using Checked[Permission]): Task[List[TreeHistoryEntry]] =
+    (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]] =
     // History is read from the tree's meta blob: every mutation (create, update,
     // revert) rewrites meta with a fresh updatedAt, so its last_modified log is
     // the tree's full commit history. The tree root holds no contents value —
@@ -29,18 +29,15 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
     val path = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMeta(wsId, treeId))
     handleIrmin(irmin.getHistory(path, limit, branch)).flatMap(commits => ZIO.foreach(commits)(toEntry))
 
-  private def toEntry(commit: IrminCommit): Task[TreeHistoryEntry] =
+  private def toEntry(commit: IrminCommit): IO[AppError, TreeHistoryEntry] =
     ZIO.fromEither(CommitHash.fromString(commit.hash))
       .mapBoth(
         errs => RepositoryFailure(s"Invalid commit hash in history: ${errs.map(_.message).mkString("; ")}"),
         hash => TreeHistoryEntry(hash, TreeHistoryServiceLive.parseOperation(commit.info.message), TreeHistoryServiceLive.toIso(commit.info.date))
       )
 
-  private def handleIrmin[A](effect: IO[IrminError, A]): Task[A] =
-    effect.mapError { err =>
-      val reason = Option(err.getMessage).filter(_.nonEmpty).getOrElse(err.toString)
-      RepositoryFailure(reason)
-    }
+  private def handleIrmin[A](effect: IO[IrminError, A]): IO[AppError, A] =
+    effect.mapError(err => RepositoryFailure(err.logMessage))
 
 object TreeHistoryService:
   /** In-memory backend variant: there is no persistent commit log, so history
@@ -48,7 +45,7 @@ object TreeHistoryService:
     * anyway). A read with no data, not an error, unlike scenario operations. */
   val empty: TreeHistoryService = new TreeHistoryService:
     def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-      (using Checked[Permission]): Task[List[TreeHistoryEntry]] =
+      (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]] =
       ZIO.succeed(Nil)
 
 object TreeHistoryServiceLive:

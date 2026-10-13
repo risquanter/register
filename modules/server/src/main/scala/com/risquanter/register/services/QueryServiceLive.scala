@@ -7,7 +7,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.http.responses.QueryResponse
@@ -36,7 +36,7 @@ class QueryServiceLive private (
 ) extends QueryService:
 
   /** Wrap body in an OTel span. */
-  private def traced[A](name: String)(body: Task[A]): Task[A] =
+  private def traced[A](name: String)(body: IO[AppError, A]): IO[AppError, A] =
     tracing.span(s"QueryService.$name", SpanKind.INTERNAL)(body)
 
   /** Alarm-on-bypass: log node and mitigation names that collided with reserved
@@ -68,7 +68,7 @@ class QueryServiceLive private (
       )
     ).unit
 
-  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): Task[QueryResponse] =
+  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): IO[AppError, QueryResponse] =
     traced("evaluate") {
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)
@@ -112,8 +112,8 @@ class QueryServiceLive private (
         resultsBySelection <- ZIO.foreach(selections.toList) { sel =>
                                 resolver.ensureCachedAll(tree, allNodeIds, seedEntityId,
                                     selection = sel, resolvedScopes = resolved.appliedScopes)
-                                  .tapError(e => ZIO.logWarning(s"Simulation cache unavailable for tree ${treeId.value}: ${e.getMessage}"))
-                                  .mapError(_ => FolQueryFailure.SimulationNotCached(treeId): Throwable)
+                                  .tapError(e => ZIO.logWarning(s"Simulation cache unavailable for tree ${treeId.value}: ${e.logMessage}"))
+                                  .mapError(_ => FolQueryFailure.SimulationNotCached(treeId))
                                   .map(sel -> _)
                               }.map(_.toMap)
         _ <- tracing.setAttribute("query.selections", selections.size.toLong)

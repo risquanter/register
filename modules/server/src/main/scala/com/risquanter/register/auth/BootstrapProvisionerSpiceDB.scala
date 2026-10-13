@@ -103,7 +103,7 @@ final class BootstrapProvisionerSpiceDB private (
         if response.code.isSuccess then ZIO.unit
         else
           ZIO.fail(AuthServiceUnavailable(
-            s"SpiceDB ownership write returned HTTP ${response.code.code}"
+            s"SpiceDB ownership write returned HTTP ${response.code.code}", None
           ))
       }
 

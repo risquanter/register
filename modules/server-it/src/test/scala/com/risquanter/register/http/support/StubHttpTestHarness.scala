@@ -20,7 +20,7 @@ import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisionerNoOp, UserContextExtractor}
 import io.github.iltotore.iron.*
@@ -56,8 +56,7 @@ object StubHttpTestHarness {
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
         ZLayer.succeed(WorkspaceConfig()),
-        TracingLive.console,
-        MetricsLive.console,
+        TelemetryLive.configured,
         repoLayer,
         ContentCacheRegistry.layer,
         CachedResultResolverLive.layer,

@@ -4,6 +4,7 @@ import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, NodeId, ScenarioName, SeedEntityId, TreeId, WorkspaceId, Revision}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskTree}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 
 /** Minimal `RiskTreeService`/`ScenarioService` test doubles shared by every spec
@@ -23,25 +24,30 @@ object CascadeTestStubs:
   val stubCommit: CommitHash = CommitHash.fromString("0" * 40).toOption.get
 
   def riskTreeService(
-    onDelete: (WorkspaceId, TreeId) => Task[RiskTree],
-    onGetById: (WorkspaceId, TreeId, Revision) => Task[Option[RiskTree]] = (_, _, _) => ZIO.die(new UnsupportedOperationException)
+    onDelete: (WorkspaceId, TreeId) => IO[AppError, RiskTree],
+    onGetById: (WorkspaceId, TreeId, Revision) => IO[AppError, Option[RiskTree]] = (_, _, _) => ZIO.die(new UnsupportedOperationException)
   ): RiskTreeService = new RiskTreeService:
-    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Permission]): Task[RiskTree] = ZIO.die(new UnsupportedOperationException)
-    def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Permission]): Task[RiskTree] = ZIO.die(new UnsupportedOperationException)
-    def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Permission]): Task[RiskTree] = onDelete(wsId, id)
-    def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Permission]): Task[RiskTree] = ZIO.die(new UnsupportedOperationException)
-    def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Permission]): Task[Option[(RiskTree, CommitHash)]] = onGetById(wsId, id, rev).map(_.map((_, stubCommit)))
-    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): Task[Double] = ZIO.die(new UnsupportedOperationException)
-    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
+    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Permission]): IO[AppError, RiskTree] = ZIO.die(new UnsupportedOperationException)
+    def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Permission]): IO[AppError, RiskTree] = ZIO.die(new UnsupportedOperationException)
+    def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Permission]): IO[AppError, RiskTree] = onDelete(wsId, id)
+    def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Permission]): IO[AppError, RiskTree] = ZIO.die(new UnsupportedOperationException)
+    def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Permission]): IO[AppError, Option[(RiskTree, CommitHash)]] = onGetById(wsId, id, rev).map(_.map((_, stubCommit)))
+    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): IO[AppError, Double] = ZIO.die(new UnsupportedOperationException)
+    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): IO[AppError, Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 
-  /** `delete` always fails — simulates a tree that was already manually deleted. */
+  /** `delete` always fails — simulates a tree that was already manually deleted.
+    *
+    * The failure is `RepositoryFailure`, which is what both repository backends
+    * report for a tree that is not there, so the cascade sees the same value it
+    * would see in production.
+    */
   def noOpRiskTreeService: RiskTreeService =
-    riskTreeService((_, _) => ZIO.fail(new NoSuchElementException("Tree not found")))
+    riskTreeService((_, id) => ZIO.fail(RepositoryFailure(s"RiskTree ${id.toSafeId} not found")))
 
   def scenarioService(
-    onList: WorkspaceId => Task[List[ScenarioSummary]],
-    onDelete: (WorkspaceId, ScenarioName.ScenarioName, CommitHash) => Task[Unit]
+    onList: WorkspaceId => IO[AppError, List[ScenarioSummary]],
+    onDelete: (WorkspaceId, ScenarioName.ScenarioName, CommitHash) => IO[AppError, Unit]
   ): ScenarioService = new ScenarioService:
-    def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)(using Checked[Permission]): Task[BranchRef] = ZIO.die(new UnsupportedOperationException)
-    def list(wsId: WorkspaceId)(using Checked[Permission]): Task[List[ScenarioSummary]] = onList(wsId)
-    def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)(using Checked[Permission]): Task[Unit] = onDelete(wsId, name, expectedHead)
+    def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)(using Checked[Permission]): IO[AppError, BranchRef] = ZIO.die(new UnsupportedOperationException)
+    def list(wsId: WorkspaceId)(using Checked[Permission]): IO[AppError, List[ScenarioSummary]] = onList(wsId)
+    def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)(using Checked[Permission]): IO[AppError, Unit] = onDelete(wsId, name, expectedHead)

@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -113,7 +113,11 @@ object IronTapirCodecs {
 
   given Schema[NodeId] = Schema.string
 
-  given [V: Schema]: Schema[Map[NodeId, V]] = Schema.schemaForMap[NodeId, V](_.value)
+  given nodeIdKeyedMapSchema[V: Schema]: Schema[Map[NodeId, V]] = Schema.schemaForMap[NodeId, V](_.value)
+
+  given treeIdKeyedMapSchema[V: Schema]: Schema[Map[TreeId, V]] = Schema.schemaForMap[TreeId, V](_.value)
+
+  given Schema[TraceId] = Schema.string
 
   /** Codec for WorkspaceKeySecret (base64url, 22 chars).
     * Used as path segment for workspace-scoped capability URLs.

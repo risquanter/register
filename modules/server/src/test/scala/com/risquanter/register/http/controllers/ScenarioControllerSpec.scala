@@ -11,10 +11,11 @@ import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, Checked, Permission, UserContextExtractor}
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, ScenarioName, StoreBranch, WorkspaceId, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.IrminError
+import com.risquanter.register.telemetry.TelemetryLive
+import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, SafeName, ScenarioName, StoreBranch, TreeId, WorkspaceId, WorkspaceKeySecret}
+import com.risquanter.register.domain.errors.{AppError, IrminError}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
-import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, ScenarioResponse, ScenarioSummaryResponse}
+import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioResponse, ScenarioSummaryResponse}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.domain.data.iron.PositiveInt
@@ -91,14 +92,18 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
     initial:      Map[String, CommitHash]       = Map("main" -> hash('a')),
     extractor:    UserContextExtractor          = UserContextExtractor.noOp,
     mergeService: Option[ScenarioMergeService]  = None
-  ): ZIO[Any, Nothing, (SttpBackend[Task, Any], WorkspaceKeySecret)] =
+  // `Throwable` rather than `Nothing`: building the tracing layer reads
+  // configuration, so constructing the backend can fail.
+  ): ZIO[Any, Throwable, (SttpBackend[Task, Any], WorkspaceKeySecret)] =
     for
       state          <- Ref.make(initial)
       // Built once, then reused as a fixed instance below — a second
       // `WorkspaceStoreLive.layer` build would be a distinct, empty store
       // that never learns about the workspace key `create` returns here.
       workspaceStore <- ZIO.service[WorkspaceStore].provide(TestConfigs.workspaceLayer >>> WorkspaceStoreLive.layer)
-      wsKey          <- workspaceStore.create(None).orDie
+      // `create` fails with an `AppError`, which is not a `Throwable`, so the
+      // conversion to a defect is explicit. A failure here is a broken fixture.
+      wsKey          <- workspaceStore.create(None).orDieWith(e => RuntimeException(e.logMessage))
       // The post-merge guard reads trees back through a repository. This spec
       // injects its own merge service in every case that exercises a merge, so
       // the fallback only has to be a real repository, not a configured one.
@@ -110,7 +115,8 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
           ZLayer.succeed[ScenarioMergeService](mergeSvc),
           ZLayer.succeed(workspaceStore),
           AuthorizationServiceNoOp.layer,
-          ZLayer.succeed(extractor)
+          ZLayer.succeed(extractor),
+          TestConfigs.telemetryLayer >>> TelemetryLive.configured
         )
     yield
       val backend = TapirStubInterpreter(SttpBackendStub[Task, Any](summon[MonadError[Task]]))
@@ -172,9 +178,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       val nodeUlid = "01BX5ZZKBKACTAV9WEVGEMMVRZ"
       val rel      = s"risk-trees/$treeUlid/nodes/$nodeUlid"
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[MergePreviewResult] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewResult] =
           ZIO.succeed(MergePreviewResult.Conflicts(List(MergeConflictPath.fromRelativePath(rel))))
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(mergeService = Some(stub))
@@ -183,16 +189,21 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
       yield assertTrue(
         resp.code.code == 200,
-        decoded.status == "conflicts",
-        decoded.conflicts == List(MergeConflictEntry(rel, Some(treeUlid), Some(nodeUlid)))
+        // One assertion rather than two: the status case and its payload now
+        // travel together, so matching the whole value pins both.
+        decoded.status == MergePreviewStatus.Conflicts(List(MergeConflictEntry(rel, Some(treeUlid), Some(nodeUlid))))
       )
     },
 
-    test("merge-preview duplicate-names wire mapping: status discriminator + duplicateNames populated, conflicts empty") {
+    test("merge-preview duplicate-names wire mapping: status carries the per-tree duplicate names") {
+      val dupMap = Map(
+        TreeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get ->
+          List(SafeName.fromString("Alpha").toOption.get)
+      )
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[MergePreviewResult] =
-          ZIO.succeed(MergePreviewResult.DuplicateNames("merging would duplicate node name(s) — tree 01ARZ3NDEKTSV4RRFFQ69G5FAV: Alpha"))
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[CommitHash] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewResult] =
+          ZIO.succeed(MergePreviewResult.DuplicateNames(dupMap))
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(mergeService = Some(stub))
@@ -201,17 +212,15 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
       yield assertTrue(
         resp.code.code == 200,
-        decoded.status == "duplicate-names",
-        decoded.conflicts == Nil,
-        decoded.duplicateNames.contains("merging would duplicate node name(s) — tree 01ARZ3NDEKTSV4RRFFQ69G5FAV: Alpha")
+        decoded.status == MergePreviewStatus.DuplicateNames(dupMap)
       )
     },
 
     test("merge-preview clean wire mapping: duplicateNames absent/None when the preview is clean") {
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[MergePreviewResult] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewResult] =
           ZIO.succeed(MergePreviewResult.Clean)
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(mergeService = Some(stub))
@@ -220,8 +229,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
       yield assertTrue(
         resp.code.code == 200,
-        decoded.status == "clean",
-        decoded.duplicateNames == None
+        decoded.status == MergePreviewStatus.Clean()
       )
     },
 

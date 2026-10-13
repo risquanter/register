@@ -4,7 +4,7 @@ import zio.ZIO
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
-import app.core.safeMessage
+import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.responses.MergePreviewResponse
@@ -72,6 +72,6 @@ final class ScenarioMergeState(
             submit.set(MergeSubmitState.Merged)
             onMerged()
           })
-          .tapError(e => ZIO.succeed(submit.set(MergeSubmitState.Failed(e.safeMessage))))
+          .tapError(f => ZIO.succeed(submit.set(MergeSubmitState.Failed(ErrorMessages.requestFailed(f)))))
           .runJs
       case _ => ()

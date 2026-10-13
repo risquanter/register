@@ -2595,3 +2595,50 @@ The three documents marked Proposed are `ADR-007-proposal.md`,
 the only three ADRs the distillation does not cite anywhere, which is not a
 coincidence: the distillation was filtered by status, so the label decided coverage
 even though the label is unverified.
+
+## 57. The integration harness builds its server with no interceptors, so no integration test has ever checked a security header
+
+`HttpTestHarness.startServer` interpreted its endpoints with a bare
+`ZioHttpInterpreter()` and no `ZioHttpServerOptions` at all. Production builds
+its options in `Application.startServer` and prepends
+`SecurityHeadersInterceptor.interceptor` there. The harness never did, so the
+integration tier has run every request through a server that omits the whole
+interceptor stack.
+
+**What this means concretely.** `SecurityHeadersInterceptor` adds
+`X-Frame-Options`, `X-XSS-Protection` and `Content-Security-Policy` to every
+response, and adds `Referrer-Policy`, `Cache-Control: no-store`,
+`X-Content-Type-Options` and `Strict-Transport-Security` to `/w/…` and
+`/workspaces` paths specifically to stop workspace-key leakage. Its own unit
+spec, `SecurityHeadersInterceptorSpec`, tests the header sets and the path
+predicate directly. Nothing tests that the headers actually reach a response
+from a running server, because the only tier with a running server does not
+install the interceptor.
+
+So the gap is not that the interceptor is wrong. It is that the wiring between
+the interceptor and the server is unverified, and a future change to
+`Application.startServer`'s options could drop it without any test failing.
+
+**What was already fixed, and why it is not the same thing.** The request-span
+interceptor is now installed in the harness, because the span is what a wire
+error's trace identifier is read from and an absent span made that identifier
+the unlinked placeholder in every integration response. That change added
+`Tracing` to `applicationLayer`'s output set. The security-headers interceptor
+was deliberately left out of that change: adding it alters the response headers
+every existing integration assertion observes, which is a wider blast radius
+than the span fix and belongs in its own pass.
+
+**The work.** Install `SecurityHeadersInterceptor.interceptor` in the harness's
+`serverOptions` beside the span interceptor, matching production's prepend order
+— the security-headers one is prepended first in `Application.startServer` so it
+processes the response last. Then run the integration tier and resolve whatever
+breaks: any test asserting an exact header list, and any test asserting a
+`Cache-Control` value, will see new headers. Then add one integration test that a
+`/w/{key}/…` response carries the workspace header set and a non-workspace
+response does not, which is the assertion that currently exists nowhere.
+
+**Where the production order is stated.** `Application.startServer` carries a
+comment explaining that each `prependInterceptor` goes to the front, so the span
+interceptor ends up outermost and the security-headers interceptor stays the last
+one to modify headers. The harness must reproduce that relationship, not just the
+presence of both.

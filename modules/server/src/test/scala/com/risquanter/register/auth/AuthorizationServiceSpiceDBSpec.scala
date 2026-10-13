@@ -11,7 +11,7 @@ import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId, IronConstants, MeshServiceUrl}
 import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, AuthServiceUnavailable}
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 
 /** Unit tests for AuthorizationServiceSpiceDB HTTP adapter (T-U1 through T-U7).
   *
@@ -60,8 +60,7 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
       AuthorizationServiceSpiceDB.layer,
       ZLayer.succeed(testConfig),
       ZLayer.succeed(stub),
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured
     )
 
   // ─── Test suite ──────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ package com.risquanter.register.repositories
 
 import zio.*
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.errors.TreeLoadFailure
+import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
 
 /** Repository for RiskTree persistence operations.
@@ -18,24 +18,24 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef,
   * failure rather than silently serving main-branch/head data.
   */
 trait RiskTreeRepository {
-  def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree]
-  def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree]
-  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree]
+  def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError, RiskTree]
+  def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree]
+  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree]
 
   /** Revert a tree to `toCommit` as one forward `set_tree` commit.
     * Reads the tree state at `toCommit` and writes it forward with a `:revert`
     * message; no precondition. Absent target (commit or path) → NotFound. */
-  def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree]
+  def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree]
 
   /** Loads a tree and reports the concrete commit it was read at. The
     * `CommitHash` is the Irmin commit the read resolved to — a whole-tree,
     * byte-level revision, never a domain content hash — and is what scope
     * resolution memoizes on. One read names the head it resolved, so there is
     * no second call and no resolve-then-reload race. */
-  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]]
+  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]]
   /** Every tree in the workspace at `rev`, one entry per stored tree: the tree,
     * or a failure naming that tree. A failure about the listing itself — the
     * branch, the enumeration — fails the effect instead of appearing as an
     * entry, so an entry always identifies the tree it is about. */
-  def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]]
+  def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]]
 }

@@ -6,6 +6,7 @@ import scala.scalajs.js
 
 import app.chart.{ColorAssigner, LECSpecBuilder, PaletteData}
 import app.core.ZJS.*
+import app.core.RequestFailure
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -72,7 +73,7 @@ final class LECChartState(
     */
   val curveCache: Var[LoadState[Map[NodeId, LECNodeCurve]]] = Var(LoadState.Idle)
 
-  private val curvesTrigger = new EventBus[Option[() => EventStream[Either[Throwable, Map[NodeId, LECNodeCurve]]]]]
+  private val curvesTrigger = new EventBus[Option[() => EventStream[Either[RequestFailure, Map[NodeId, LECNodeCurve]]]]]
 
   // Write-guarded: callers fire on signal ticks, not only on real
   // transitions, and Var.set emits even when the value is unchanged — an

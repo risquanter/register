@@ -3,6 +3,7 @@ package com.risquanter.register.services
 import zio.*
 
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef}
+import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.http.responses.QueryResponse
 
 import vql.logic.ParsedQuery
@@ -34,9 +35,9 @@ trait QueryService:
     *   see `ActiveBranch.resolve`; this method trusts it.
     * @return Query response with satisfaction result and matching node IDs
     */
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): Task[QueryResponse]
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): IO[AppError, QueryResponse]
 
 object QueryService:
 
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): ZIO[QueryService, Throwable, QueryResponse] =
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): ZIO[QueryService, AppError, QueryResponse] =
     ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed, seedEntityId, branch))

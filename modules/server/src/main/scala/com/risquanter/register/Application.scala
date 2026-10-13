@@ -9,7 +9,7 @@ import io.getquill.SnakeCase
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
-import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
+import com.risquanter.register.http.{HealthProbeServer, HttpApi, RequestSpanInterceptor, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.StartupReadiness
@@ -46,7 +46,10 @@ object Application extends ZIOAppDefault {
         client <- ZIO.service[IrminClient]
         _      <- StartupReadiness.awaitReady(
                     name           = s"irmin (${cfg.url})",
-                    probe          = client.healthCheck,
+                    // The gate reports readiness of the process, not of a
+                    // request, so its channel is `Throwable`. A domain error
+                    // leaving the domain is converted here, where it crosses.
+                    probe          = client.healthCheck.mapError(e => RuntimeException(e.logMessage)),
                     attemptTimeout = cfg.healthCheckAttemptTimeout,
                     budget         = cfg.healthCheckBudget
                   )
@@ -254,9 +257,13 @@ object Application extends ZIOAppDefault {
       TypesafeConfigProvider.fromResourcePath()
     )
 
-  // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig] =
-    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig](
+  // Application layers (with config dependencies).
+  //
+  // `Tracing` is an output and not only an internal dependency: `startServer`
+  // reads it to build the request-span interceptor, so it has to leave this
+  // layer rather than just satisfy the services composed inside it.
+  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig & Tracing] =
+    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig & Tracing](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -311,6 +318,7 @@ object Application extends ZIOAppDefault {
     corsConfig <- ZIO.service[CorsConfig]
     authConfig <- ZIO.service[AuthConfig]
     userCtx    <- ZIO.service[UserContextExtractor]
+    tracing    <- ZIO.service[Tracing]
     _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
     _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.normalised.mkString(", ")}")
     // Auth mode startup log — operators should alert on capability-only in production namespaces.
@@ -328,9 +336,17 @@ object Application extends ZIOAppDefault {
       .allowHeaders("Content-Type", "Accept", "Authorization")
       .exposeHeaders("Content-Type")
       .maxAge(scala.concurrent.duration.Duration(3600, "s"))
+    // Each prepend goes to the front, so the span interceptor ends up first in
+    // the stack and is therefore the outermost: it is entered first on the
+    // request and leaves last on the response. That is what makes its span and
+    // its log annotation cover all downstream work, the header decoration and
+    // the CORS handling included. The security-headers interceptor stays the
+    // last one that modifies headers, which is what it requires — the span
+    // interceptor adds none.
     serverOptions = ZioHttpServerOptions
       .customiseInterceptors[Any]
       .prependInterceptor(SecurityHeadersInterceptor.interceptor)
+      .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
       .corsInterceptor(CORSInterceptor.customOrThrow[Task](tapirCorsConfig))
       .options
     httpApp = ZioHttpInterpreter(serverOptions).toHttp(endpoints)

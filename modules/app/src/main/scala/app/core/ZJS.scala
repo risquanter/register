@@ -3,7 +3,13 @@ package app.core
 import zio.*
 
 import com.raquo.laminar.api.L.*
+import org.scalajs.dom
 import sttp.tapir.Endpoint
+
+import app.state.LoadState
+import app.state.SubmitState
+import app.views.ErrorMessages
+import com.risquanter.register.http.errors.WireError
 
 /** ZIO-JS bridge: extension methods for running ZIO effects in the Laminar/browser environment.
   *
@@ -28,9 +34,11 @@ object ZJS:
     * universal banner coverage with zero per-call-site wiring.
     */
   trait ErrorObserver:
-    /** Called when any forked ZIO fails (network error, server error, etc.). */
-    def onError(error: Throwable): Unit
-    /** Called when any forked ZIO succeeds — used to auto-dismiss stale banners. */
+    /** Called when any forked effect fails. Consumes the failure to update the
+      * banner, and returns nothing because setting that state is its whole job.
+      */
+    def onError(error: RequestFailure): Unit
+    /** Called when any forked effect succeeds — used to auto-dismiss stale banners. */
     def onSuccess(): Unit
 
   private var errorObserver: Option[ErrorObserver] = None
@@ -50,14 +58,16 @@ object ZJS:
     *  - reports errors via `onError` (surfaces in global banner)
     *  - clears stale errors via `onSuccess` (auto-dismiss on recovery)
     */
-  private def forkProvided[E <: Throwable, A](zio: ZIO[BackendClient, E, A], notifyObserver: Boolean = true): Unit =
+  private def forkProvided[A](zio: ZIO[BackendClient, RequestFailure, A], notifyObserver: Boolean = true): Unit =
     Unsafe.unsafe { implicit unsafe =>
+      val recorded = zio.tapError(f => ZIO.succeed(recordToConsole(f)))
+
       val withObserver =
         if notifyObserver then
-          zio
-            .tapError(e => ZIO.succeed(errorObserver.foreach(_.onError(e))))
+          recorded
+            .tapError(f => ZIO.succeed(errorObserver.foreach(_.onError(f))))
             .tap(_ => ZIO.succeed(errorObserver.foreach(_.onSuccess())))
-        else zio
+        else recorded
 
       Runtime.default.unsafe.fork(
         withObserver
@@ -65,21 +75,58 @@ object ZJS:
       )
     }
 
+  /** Write every failure to the browser console, whichever kind it is and
+    * whether or not the banner shows it.
+    *
+    * A response body carries no field naming its own case — the status names it
+    * — so this line is what connects a response seen in the network tab to the
+    * case the browser classified it as. It is written here rather than in a
+    * view because a view re-renders and would log the same failure again on
+    * every render.
+    *
+    * Nothing is exposed that was not already visible: the body carrying the
+    * trace is in the network tab of the same developer tools, and a `WireError`
+    * holds no internal field by construction (ADR-036).
+    */
+  private def recordToConsole(failure: RequestFailure): Unit = failure match
+    case RequestFailure.Wire(error) =>
+      dom.console.warn(s"request failed: ${error.productPrefix} trace=${error.trace.value}")
+    case RequestFailure.Transport(cause) =>
+      dom.console.warn(s"request failed: Transport ${cause.safeMessage}")
+
+  /** What a view shows when its request fails.
+    *
+    * An expired workspace answers `410` and a workspace whose key no longer
+    * resolves answers `404`. Both leave the inline view with nothing to say:
+    * the global banner owns that message, so the view resets to idle rather
+    * than showing a second error line beside it (ADR-019 Pattern 7). Anything
+    * else becomes the view's own error line.
+    *
+    * A `404` is not narrowed to the workspace, because absent and not-yours
+    * answer identically so that neither is an existence oracle (ADR-035 §3).
+    *
+    * Pure and total, so it is testable without running the effect that calls
+    * it.
+    */
+  def settleLoad[A](failure: RequestFailure): LoadState[A] = failure match
+    case RequestFailure.Wire(WireError.WorkspaceExpired(_, _, _, _)) => LoadState.Idle
+    case RequestFailure.Wire(WireError.NotFound(_))                  => LoadState.Idle
+    case other                                                       => LoadState.Failed(ErrorMessages.requestFailed(other))
+
   // ---------------------------------------------------------------------------
   // Extensions on ZIO[BackendClient, E, A]
   // ---------------------------------------------------------------------------
 
-  extension [E <: Throwable, A](zio: ZIO[BackendClient, E, A])
+  extension [A](zio: ZIO[BackendClient, RequestFailure, A])
 
-    /** Fork the ZIO and emit its successful result into an EventBus.
+    /** Fork the effect and emit its successful result into an EventBus.
       *
-      * Errors are logged to the browser console via `Console.printLineError`.
+      * A failure is written to the browser console by `forkProvided`, so it is
+      * not logged again here.
       */
     def emitTo(bus: EventBus[A]): Unit =
       forkProvided {
-        zio
-          .tapError(e => Console.printLineError(e.safeMessage))
-          .tap(a => ZIO.attempt(bus.emit(a)))
+        zio.tap(a => ZIO.succeed(bus.emit(a)))
       }
 
     /** Fork the ZIO for its side-effects only (fire-and-forget). */
@@ -115,12 +162,12 @@ object ZJS:
       * `toEventStream` itself is unchanged, and every existing caller keeps
       * today's silent-on-failure behavior.
       */
-    def toOutcomeEventStream: EventStream[Either[E, A]] =
-      val eventBus = EventBus[Either[E, A]]()
+    def toOutcomeEventStream: EventStream[Either[RequestFailure, A]] =
+      val eventBus = EventBus[Either[RequestFailure, A]]()
       forkProvided {
         zio
-          .tapError(e => Console.printLineError(e.safeMessage) *> ZIO.attempt(eventBus.emit(Left(e))))
-          .tap(a => ZIO.attempt(eventBus.emit(Right(a))))
+          .tapError(f => ZIO.succeed(eventBus.emit(Left(f))))
+          .tap(a => ZIO.succeed(eventBus.emit(Right(a))))
       }
       eventBus.events
 
@@ -128,26 +175,20 @@ object ZJS:
   // Extensions on ZIO + LoadState — DRY the tap/tapError/runJs lifecycle
   // ---------------------------------------------------------------------------
 
-  import app.state.LoadState
-  import com.risquanter.register.domain.errors.RepositoryFailure
+  extension [A](zio: ZIO[BackendClient, RequestFailure, A])
 
-  extension [E <: Throwable, A](zio: ZIO[BackendClient, E, A])
-
-    /** Fork the ZIO and push its lifecycle into a `Var[LoadState[A]]`.
+    /** Fork the effect and push its lifecycle into a `Var[LoadState[A]]`.
       *
-      * Sets Loading → Loaded(a) on success, Loading → Failed(msg) on error.
-      * Workspace-level errors (A13 sentinel) reset to Idle — the global
-      * ErrorBanner handles those exclusively.
+      * Sets Loading → Loaded on success and Loading → Failed on a failure. A
+      * failure meaning the workspace is gone resets to Idle instead, because
+      * the global banner is what reports that one.
       */
     def loadInto(target: Var[LoadState[A]]): Unit =
       target.set(LoadState.Loading)
       forkProvided {
         zio
           .tap(a => ZIO.succeed(target.set(LoadState.Loaded(a))))
-          .tapError(e => ZIO.succeed {
-            if RepositoryFailure.isWorkspaceSentinel(e) then target.set(LoadState.Idle)
-            else target.set(LoadState.Failed(e.safeMessage))
-          })
+          .tapError(f => ZIO.succeed(target.set(settleLoad(f))))
       }
 
   // ---------------------------------------------------------------------------
@@ -190,16 +231,15 @@ object ZJS:
     * `ErrorObserver` — this pipeline only decides what the target displays.
     */
   def loadStatePipeline[A](
-    triggers: EventStream[Option[() => EventStream[Either[Throwable, A]]]]
+    triggers: EventStream[Option[() => EventStream[Either[RequestFailure, A]]]]
   ): EventStream[LoadState[A]] =
-    requestPipeline[Either[Throwable, A], LoadState[A]](
+    requestPipeline[Either[RequestFailure, A], LoadState[A]](
       triggers,
       idle    = LoadState.Idle,
       loading = LoadState.Loading,
       settle  = {
-        case Right(a)                                            => LoadState.Loaded(a)
-        case Left(e) if RepositoryFailure.isWorkspaceSentinel(e) => LoadState.Idle
-        case Left(e)                                             => LoadState.Failed(e.safeMessage)
+        case Right(a) => LoadState.Loaded(a)
+        case Left(f)  => settleLoad(f)
       }
     )
 
@@ -207,18 +247,17 @@ object ZJS:
     * `None` fails with `noneMessage`, error routing as `loadStatePipeline`.
     */
   def loadOptionStatePipeline[A](
-    triggers: EventStream[Option[() => EventStream[Either[Throwable, Option[A]]]]],
+    triggers: EventStream[Option[() => EventStream[Either[RequestFailure, Option[A]]]]],
     noneMessage: String
   ): EventStream[LoadState[A]] =
-    requestPipeline[Either[Throwable, Option[A]], LoadState[A]](
+    requestPipeline[Either[RequestFailure, Option[A]], LoadState[A]](
       triggers,
       idle    = LoadState.Idle,
       loading = LoadState.Loading,
       settle  = {
-        case Right(Some(a))                                      => LoadState.Loaded(a)
-        case Right(None)                                         => LoadState.Failed(noneMessage)
-        case Left(e) if RepositoryFailure.isWorkspaceSentinel(e) => LoadState.Idle
-        case Left(e)                                             => LoadState.Failed(e.safeMessage)
+        case Right(Some(a)) => LoadState.Loaded(a)
+        case Right(None)    => LoadState.Failed(noneMessage)
+        case Left(f)        => settleLoad(f)
       }
     )
 
@@ -226,9 +265,7 @@ object ZJS:
   // Extensions on ZIO + SubmitState — DRY the submit lifecycle
   // ---------------------------------------------------------------------------
 
-  import app.state.SubmitState
-
-  extension [E <: Throwable, A](zio: ZIO[BackendClient, E, A])
+  extension [A](zio: ZIO[BackendClient, RequestFailure, A])
 
     /** Fork the ZIO and drive a `Var[SubmitState]` through its lifecycle.
       *
@@ -242,7 +279,7 @@ object ZJS:
       forkProvided {
         zio
           .tap(a => ZIO.succeed(onSuccess(a)))
-          .tapError(e => ZIO.succeed(target.set(SubmitState.Failed(e.safeMessage))))
+          .tapError(f => ZIO.succeed(target.set(SubmitState.Failed(ErrorMessages.requestFailed(f)))))
       }
 
   // ---------------------------------------------------------------------------
@@ -262,6 +299,6 @@ object ZJS:
     *     .emitTo(responseBus)
     * }}}
     */
-  extension [I, E <: Throwable, O](endpoint: Endpoint[Unit, I, E, O, Any])
-    def apply(payload: I): RIO[BackendClient, O] =
+  extension [I, O](endpoint: Endpoint[Unit, I, WireError, O, Any])
+    def apply(payload: I): ZIO[BackendClient, RequestFailure, O] =
       ZIO.service[BackendClient].flatMap(_.endpointRequestZIO(endpoint)(payload))

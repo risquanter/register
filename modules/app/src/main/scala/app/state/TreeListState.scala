@@ -3,6 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
+import app.core.RequestFailure
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{ScenarioSummaryResponse, SimulationResponse}
@@ -51,12 +52,12 @@ final class TreeListState(
   // Single-threaded JS — a plain mutable map is safe here.
   private val triggers = collection.mutable.Map.empty[
     BranchChoice,
-    EventBus[Option[() => EventStream[Either[Throwable, List[SimulationResponse]]]]]
+    EventBus[Option[() => EventStream[Either[RequestFailure, List[SimulationResponse]]]]]
   ]
 
   private def busFor(branch: BranchChoice) =
     triggers.getOrElseUpdate(branch, {
-      val bus = new EventBus[Option[() => EventStream[Either[Throwable, List[SimulationResponse]]]]]
+      val bus = new EventBus[Option[() => EventStream[Either[RequestFailure, List[SimulationResponse]]]]]
       loadStatePipeline(bus.events).foreach(storeResult(branch))(using unsafeWindowOwner)
       bus
     })

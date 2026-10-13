@@ -6,6 +6,7 @@ import scala.scalajs.js
 
 import app.chart.PaletteData
 import app.core.ZJS.*
+import app.core.RequestFailure
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -119,7 +120,7 @@ final class TreeViewState(
   // still doing, so a stale response can never land after a newer request
   // has started, regardless of which round trip finishes first.
   private val treeTrigger =
-    new EventBus[Option[() => EventStream[Either[Throwable, Option[RiskTree]]]]]
+    new EventBus[Option[() => EventStream[Either[RequestFailure, Option[RiskTree]]]]]
 
   // Idempotency guard: `Var.set` doesn't dedupe by value, and consumers of
   // `selectedTree` recompute on every set; only write on a real change.

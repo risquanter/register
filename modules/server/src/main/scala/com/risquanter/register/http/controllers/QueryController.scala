@@ -1,6 +1,7 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
@@ -35,9 +36,13 @@ class QueryController private (
   queryService: QueryService,
   workspaceStore: WorkspaceStore,
   authzService: AuthorizationService,
-  userCtx: UserContextExtractor
+  userCtx: UserContextExtractor,
+  tracing: Tracing
 ) extends BaseController
   with WorkspaceQueryEndpoints:
+
+  // `wireEither` reads the active span to name the trace a failure ran under.
+  private given Tracing = tracing
 
   val queryTree: ServerEndpoint[Any, Task] = queryWorkspaceTreeEndpoint.serverLogic {
     case (maybeUserId, key, treeId, req, activeBranch) =>
@@ -49,16 +54,17 @@ class QueryController private (
         parsed <- ZIO.fromEither(QueryRequest.resolve(req))
                     .mapError(e => FolQueryFailure.fromQueryError(e))
         result <- queryService.evaluate(ws.id, treeId, parsed, ws.seedEntityId, branch)
-      yield result).either
+      yield result).wireEither
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] = List(queryTree)
 
 object QueryController:
-  val makeZIO: ZIO[QueryService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, QueryController] =
+  val makeZIO: ZIO[QueryService & WorkspaceStore & AuthorizationService & UserContextExtractor & Tracing, Nothing, QueryController] =
     for
       queryService <- ZIO.service[QueryService]
       workspaceStore <- ZIO.service[WorkspaceStore]
       authzService <- ZIO.service[AuthorizationService]
       userCtx <- ZIO.service[UserContextExtractor]
-    yield QueryController(queryService, workspaceStore, authzService, userCtx)
+      tracing <- ZIO.service[Tracing]
+    yield QueryController(queryService, workspaceStore, authzService, userCtx, tracing)

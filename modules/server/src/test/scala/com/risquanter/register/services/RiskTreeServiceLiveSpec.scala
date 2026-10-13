@@ -9,8 +9,8 @@ import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPo
 import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure, TreeLoadFailure}
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationErrorCode, RepositoryFailure, TreeLoadFailure}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, unsafeGet}
 import com.risquanter.register.util.IdGenerators
@@ -22,8 +22,10 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   // TestChecked provides the Checked[Permission] proof required by protected service methods.
   private given Checked[Permission] = TestChecked.value
 
-  // Concise service accessor pattern
-  private def service[A](f: RiskTreeService => ZIO[Any, Throwable, A]): ZIO[RiskTreeService, Throwable, A] =
+  // Concise service accessor pattern. The error type is `AppError` because that
+  // is what the service declares; widening it to `Throwable` here would hide
+  // which failures a call can produce.
+  private def service[A](f: RiskTreeService => IO[AppError, A]): ZIO[RiskTreeService, AppError, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   // Stub repository factory - creates fresh instance per test.
@@ -35,33 +37,35 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private def makeStubRepo = new RiskTreeRepository {
     private val db = collection.mutable.Map[(WorkspaceId, BranchRef, TreeId), RiskTree]()
 
-    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.succeed {
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.succeed {
       db += ((wsId, branch, riskTree.id) -> riskTree)
       riskTree
     }
 
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
+    // A missing key here is a test that did not seed what it reads, which is a
+    // defect in the test rather than a failure the service should handle.
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, branch, id))
       val updated = op(riskTree)
       db += ((wsId, branch, id) -> updated)
       updated
-    }
+    }.orDie
 
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, branch, id))
       db -= ((wsId, branch, id))
       riskTree
-    }
+    }.orDie
 
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
       rev match
         case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CascadeTestStubs.stubCommit)))
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
       rev match
         case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => Right(tree) }.toList)
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
@@ -177,7 +181,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   /** Attach mitigations to an already-stored tree. No request can do this — the
     * request DTOs carry no mitigation field — so writing through the repository
     * is the only way to reach the state an update has to preserve. */
-  private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): Task[RiskTree] =
+  private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): IO[AppError, RiskTree] =
     repo.update(
       stubWsId,
       tree.id,
@@ -225,10 +229,10 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     * target commit that `revert` performs internally still succeeds.
     */
   private def revertRepo(headReadFails: Boolean) = new RiskTreeRepository {
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
       ZIO.succeed(revertedTree)
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
       if headReadFails then ZIO.fail(RepositoryFailure("duplicate node name(s): Restored Leaf"))
       else ZIO.succeed(Some((revertedTree, CascadeTestStubs.stubCommit)))
 
@@ -270,8 +274,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
                      com.risquanter.register.configs.TestConfigs.simulationLayer,
                      com.risquanter.register.services.cache.CachedResultResolverLive.layer,
                      com.risquanter.register.services.cache.ContentCacheRegistry.layer,
-                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
-                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
                    )
         result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
         recorded <- calls.get
@@ -291,8 +294,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
                      com.risquanter.register.configs.TestConfigs.simulationLayer,
                      com.risquanter.register.services.cache.CachedResultResolverLive.layer,
                      com.risquanter.register.services.cache.ContentCacheRegistry.layer,
-                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
-                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
                    )
         result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
         recorded <- calls.get
@@ -305,7 +307,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     }
   )
 
-  private def isDuplicateName(exit: Exit[Throwable, Any]): Boolean =
+  private def isDuplicateName(exit: Exit[AppError, Any]): Boolean =
     exit match
       case Exit.Failure(cause) =>
         cause.failureOption.exists {
@@ -864,7 +866,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       com.risquanter.register.services.sse.SSEHub.live,
       // Concurrency control (uses SimulationConfig)
       // Telemetry layers require TelemetryConfig
-      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
-      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
     ) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom
 }

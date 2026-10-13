@@ -40,7 +40,7 @@ class RiskTreeServiceLive private (
   
   /** Fetch tree by id, with the commit it resolved to, or fail with
     * ValidationFailed. */
-  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): Task[(RiskTree, CommitHash)] =
+  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[AppError,(RiskTree, CommitHash)] =
     repo.getById(wsId, treeId, rev).flatMap {
       case Some(loaded) => ZIO.succeed(loaded)
       case None =>
@@ -53,7 +53,7 @@ class RiskTreeServiceLive private (
 
   /** Fetch tree, its resolved commit, and the node together, or fail with
     * ValidationFailed. */
-  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): Task[(RiskTree, CommitHash, RiskNode)] =
+  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): IO[AppError,(RiskTree, CommitHash, RiskNode)] =
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
@@ -67,7 +67,7 @@ class RiskTreeServiceLive private (
     * default), fail with aggregated validation errors when any node is missing;
     * with `omitAbsent = true`, absent nodes are simply not in the returned map
     * (the point-in-time read path — a node may not exist at an earlier commit). */
-  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): Task[(RiskTree, CommitHash, Map[NodeId, RiskNode])] =
+  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): IO[AppError,(RiskTree, CommitHash, Map[NodeId, RiskNode])] =
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
@@ -79,7 +79,7 @@ class RiskTreeServiceLive private (
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, commit, nodes)
 
-  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId] = None): Task[Unit] =
+  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId] = None): IO[AppError,Unit] =
     collectAllTrees(wsId, branch).flatMap { trees =>
       val candidates = trees.filterNot(t => excludeId.contains(t.id))
 
@@ -105,14 +105,14 @@ class RiskTreeServiceLive private (
 
   // Trees at the head of the branch being written; uniqueness (tree ID and
   // name) is checked against exactly this set.
-  private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): Task[List[RiskTree]] =
+  private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): IO[AppError,List[RiskTree]] =
     repo.getAllForWorkspace(wsId, Revision.Head(branch)).flatMap { results =>
       val (errs, trees) = results.foldLeft((List.empty[TreeLoadFailure], List.empty[RiskTree])) {
         case ((es, ts), Left(err))  => (err :: es, ts)
         case ((es, ts), Right(t))   => (es, t :: ts)
       }
       if errs.nonEmpty then
-        ZIO.fail(RepositoryFailure(errs.reverse.map(_.getMessage).mkString("; ")))
+        ZIO.fail(RepositoryFailure(errs.reverse.map(_.logMessage).mkString("; ")))
       else
         ZIO.succeed(trees.reverse)
     }
@@ -156,18 +156,15 @@ class RiskTreeServiceLive private (
     operationsCounter.add(1, attrs)
   }
   
-  /** Extract structured error context from Throwable
-    * 
-    * Maps domain errors to metric-friendly error context:
-    * - ValidationFailed → error_type, error_code (from first validation error), error_field
+  /** Structured error context for metrics, from the failure that occurred.
+    *
+    * Maps each failure to a metric-friendly triple:
+    * - ValidationFailed → error_type, error_code (from the first entry), error_field
     * - RepositoryFailure → error_type, REPOSITORY_ERROR code
     * - SimulationFailure → error_type, SIMULATION_ERROR code
-    * - Other → error_type (class name), UNKNOWN_ERROR code
-    * 
-    * @param throwable Error to extract context from
-    * @return Structured error context for metrics
+    * - any other → error_type (case name), UNKNOWN_ERROR code
     */
-  private def extractErrorContext(throwable: Throwable): ErrorContext = throwable match {
+  private def extractErrorContext(error: AppError): ErrorContext = error match {
     case ValidationFailed(errors) =>
       // Use first error for primary context (could extend to aggregate all)
       val primaryError = errors.headOption.getOrElse(
@@ -195,27 +192,17 @@ class RiskTreeServiceLive private (
     
     case _ =>
       ErrorContext(
-        errorType = throwable.getClass.getSimpleName,
+        errorType = error.getClass.getSimpleName,
         errorCode = "UNKNOWN_ERROR",
         errorField = None
       )
-  }
-  
-  /** Log unexpected errors (ADR-002 Decision 5).
-    * 
-    * Domain errors (AppError hierarchy) are expected - each has its own logging point.
-    * Other errors are truly unexpected and logged with full stack trace.
-    */
-  private def logIfUnexpected(operation: String)(error: Throwable): UIO[Unit] = error match {
-    case _: AppError => ZIO.unit  // Domain errors: logged at origin or expected
-    case _ => ZIO.logErrorCause(s"Unexpected error in $operation", Cause.fail(error))
   }
 
   /** Wrap a traced LEC query operation with span + metrics + error logging.
     *
     * Eliminates the repeated ceremony of:
     *  1. `tracing.span(name, SpanKind.INTERNAL) { ... }`
-    *  2. `.tapBoth(logIfUnexpected ∘ recordOperation, recordOperation)`
+    *  2. `.tapBoth(recordOperation, recordOperation)`
     *
     * The body receives the `Tracing` instance for `setAttribute` calls.
     * Span names, metric labels, and log context are derived from `name`.
@@ -223,15 +210,19 @@ class RiskTreeServiceLive private (
     * @param name Operation name — used as span name, metric label, and log context
     * @param body Effect to execute within the span (may call `tracing.setAttribute`)
     */
-  private def traced[A](name: String)(body: Task[A]): Task[A] =
+  private def traced[A](name: String)(body: IO[AppError,A]): IO[AppError,A] =
     tracing.span(name, SpanKind.INTERNAL)(body).tapBoth(
-      error => logIfUnexpected(name)(error) *> recordOperation(name, success = false, Some(extractErrorContext(error))),
+      error => recordOperation(name, success = false, Some(extractErrorContext(error))),
       _ => recordOperation(name, success = true)
     )
   
-  /** Allocate a fixed pool of SafeIds for request resolution. */
-  private def allocateIds(count: Int): Task[List[SafeId.SafeId]] =
-    IdGenerators.batch(count)
+  /** Allocate a fixed pool of SafeIds for request resolution.
+    *
+    * Identifier generation failing is a broken invariant, not a request
+    * outcome, so it dies rather than entering the error channel.
+    */
+  private def allocateIds(count: Int): IO[AppError, List[SafeId.SafeId]] =
+    IdGenerators.batch(count).orDie
 
   /** Deterministic generator for RiskTreeRequests based on a pre-allocated pool. */
   private def idGeneratorFrom(ids: List[SafeId.SafeId]): RiskTreeRequests.IdGenerator = {
@@ -264,7 +255,7 @@ class RiskTreeServiceLive private (
     leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
     rootName: SafeName.SafeName,
     seedVarIdByLeafName: Map[SafeName.SafeName, SeedVarId.SeedVarId]
-  ): Task[(Seq[RiskNode], NodeId)] = ZIO.attempt {
+  ): IO[AppError,(Seq[RiskNode], NodeId)] = ZIO.attempt {
     val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap
     val childrenByParent: Map[Option[SafeName.SafeName], List[SafeName.SafeName]] =
       nodesByName.values.groupBy(_.parentName).view.mapValues(_.toList.map(_.name)).toMap
@@ -303,7 +294,11 @@ class RiskTreeServiceLive private (
 
     val rootId = nameToId.getOrElse(rootName, throw new IllegalArgumentException(s"Root name '${rootName.value}' not found in resolved nodes"))
     (domainNodes, rootId)
-  }
+  // The request was already resolved and validated before this point, so an
+  // absent root name or an exhausted identifier pool is a broken invariant
+  // rather than an outcome a caller can act on. It dies instead of entering the
+  // error channel, which carries only failures that have a wire case.
+  }.orDie
   
   /** Client-facing branch identity for the change-notification tag: `Main` or
     * the scenario name. Never the internal `BranchRef.toBranchRef` — that
@@ -322,9 +317,10 @@ class RiskTreeServiceLive private (
         errors.map(_.message).mkString("; ")))
 
   // Config CRUD - only persist, no execution
-  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
     val operation = for {
-      treeId <- IdGenerators.nextTreeId
+      // Identifier generation failing is a broken invariant, as in `allocateIds`.
+      treeId <- IdGenerators.nextTreeId.orDie
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
       resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch)
@@ -346,12 +342,12 @@ class RiskTreeServiceLive private (
     } yield persisted
 
     operation.tapBoth(
-      error => logIfUnexpected("create")(error) *> recordOperation("create", success = false, Some(extractErrorContext(error))),
+      error => recordOperation("create", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("create", success = true)
     )
   }
 
-  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
     val operation = for {
       (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
@@ -391,20 +387,20 @@ class RiskTreeServiceLive private (
     } yield updated
     
     operation.tapBoth(
-      error => logIfUnexpected("update")(error) *> recordOperation("update", success = false, Some(extractErrorContext(error))),
+      error => recordOperation("update", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("update", success = true)
     )
   }
   
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] =
     repo.delete(wsId, id, branch)
       .tap(tree => clientBranch(wsId, branch).flatMap(invalidationHandler.handleTreeDeletion(tree, _)))
       .tapBoth(
-      error => logIfUnexpected("delete")(error) *> recordOperation("delete", success = false, Some(extractErrorContext(error))),
+      error => recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
     )
 
-  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
     val operation = for {
       // The head state feeds the change notification and nothing else, so a
       // failure to read it must not stop the revert. A stored tree that breaks
@@ -417,7 +413,7 @@ class RiskTreeServiceLive private (
                     .catchAll(error =>
                       ZIO.logWarning(
                         s"revert of tree ${id.value}: head read failed, notifying the whole tree instead: " +
-                        s"${error.getMessage}"
+                        s"${error.logMessage}"
                       ).as(None))
       reverted <- repo.revert(wsId, id, toCommit, branch)
       tag      <- clientBranch(wsId, branch)
@@ -429,14 +425,14 @@ class RiskTreeServiceLive private (
     } yield reverted
 
     operation.tapBoth(
-      error => logIfUnexpected("revert")(error) *> recordOperation("revert", success = false, Some(extractErrorContext(error))),
+      error => recordOperation("revert", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("revert", success = true)
     )
   }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[(RiskTree, CommitHash)]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,Option[(RiskTree, CommitHash)]] =
     repo.getById(wsId, id, rev).tapBoth(
-      error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
+      error => recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )
   
@@ -444,7 +440,7 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): Task[Double] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): IO[AppError,Double] =
     traced("probOfExceedance") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -465,7 +461,7 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): Task[Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): IO[AppError,Map[NodeId, LECNodeCurve]] =
     traced("getLECCurvesMulti") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)

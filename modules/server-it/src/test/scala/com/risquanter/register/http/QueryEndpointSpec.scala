@@ -7,7 +7,8 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
-import com.risquanter.register.domain.errors.{JsonHttpError, ValidationErrorCode, ErrorResponse}
+import com.risquanter.register.http.errors.{QueryProblem, WireError}
+import zio.json.*
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
 import io.github.iltotore.iron.*
@@ -18,9 +19,14 @@ import io.github.iltotore.iron.*
   * with Irmin-backed persistence (IrminCompose spins up only the irmin container).
   *
   * H1 — valid quoted-name query returns 200 with correct satisfyingCount
-  * H2 — malformed (unterminated) quoted string returns 400 PARSE_ERROR; response
-  *      body must not contain workspace key or internal identifiers (ADR-035, ADR-036)
-  * H3 — unknown quoted node name returns 400 UNKNOWN_REFERENCE
+  * H2 — malformed (unterminated) quoted string returns 422 with an Unparseable
+  *      problem; response body must not contain the workspace key or any
+  *      internal identifier (ADR-035, ADR-036)
+  * H3 — unknown quoted node name returns 422 with an UnknownReferences problem
+  *      naming the reference that did not resolve
+  *
+  * A refused query answers 422 rather than 400 because a well-formed request
+  * body is being rejected on its content, not on its shape.
   */
 object QueryEndpointSpec extends ZIOSpecDefault:
 
@@ -107,7 +113,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
           // rangeSize is deterministic (2 leaf descendants of "IT Risk" always exist)
           assertTrue(result.rangeSize == 2)
       },
-      test("H2: malformed quoted string returns 400 PARSE_ERROR without leaking internals") {
+      test("H2: malformed quoted string returns 422 Unparseable without leaking internals") {
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
@@ -126,17 +132,21 @@ object QueryEndpointSpec extends ZIOSpecDefault:
             .response(asStringAlways)
             .send(client.backend)
           rawBody    = queryResp.body
-          errorBody <- ZIO.fromEither(
-            ErrorResponse.codec.decoder.decodeJson(rawBody)
-              .map(_.error)
-              .left.map(err => s"Failed to decode error response: $err\nBody was: $rawBody")
+          // A refused query is a `QueryRejected`, not a field-validation
+          // failure: the problem carries a parse position, which a validation
+          // error has nowhere to put.
+          refusal   <- ZIO.fromEither(
+            rawBody.fromJson[WireError.QueryRejected]
+              .left.map(err => s"Failed to decode a query rejection: $err\nBody was: $rawBody")
           )
-        yield assertTrue(queryResp.code.code == 400) &&
-          assertTrue(errorBody.errors.exists(_.code == ValidationErrorCode.PARSE_ERROR)) &&
+        yield assertTrue(queryResp.code.code == 422) &&
+          assertTrue(refusal.problem match
+            case QueryProblem.Unparseable(_, _) => true
+            case _                              => false) &&
           // ADR-022 §4/§6: error body must not contain the workspace key
           assertTrue(!rawBody.contains(key))
       },
-      test("H3: unknown quoted node name returns 400 UNKNOWN_REFERENCE") {
+      test("H3: unknown quoted node name returns 422 UnknownReferences") {
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
@@ -155,13 +165,16 @@ object QueryEndpointSpec extends ZIOSpecDefault:
             .response(asStringAlways)
             .send(client.backend)
           rawBody    = queryResp.body
-          errorBody <- ZIO.fromEither(
-            ErrorResponse.codec.decoder.decodeJson(rawBody)
-              .map(_.error)
-              .left.map(err => s"Failed to decode error response: $err\nBody was: $rawBody")
+          refusal   <- ZIO.fromEither(
+            rawBody.fromJson[WireError.QueryRejected]
+              .left.map(err => s"Failed to decode a query rejection: $err\nBody was: $rawBody")
           )
-        yield assertTrue(queryResp.code.code == 400) &&
-          assertTrue(errorBody.errors.exists(_.code == ValidationErrorCode.UNKNOWN_REFERENCE))
+        yield assertTrue(queryResp.code.code == 422) &&
+          // The unresolved name is listed, so the client can say which one.
+          assertTrue(refusal.problem match
+            case QueryProblem.UnknownReferences(messages) =>
+              messages.exists(_.contains("NonExistentNode"))
+            case _ => false)
       }
     ).provideLayerShared(harnessLayer) @@
       TestAspect.withLiveClock @@

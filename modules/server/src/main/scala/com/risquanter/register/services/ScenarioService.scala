@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
-import com.risquanter.register.domain.errors.{ScenariosNotSupported, ScenarioHeadStale}
+import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported, ScenarioHeadStale}
 
 /** What a new scenario forks from (DD-5, amended 2026-07-20). A create always
   * forks from exactly one source — main, or another scenario's current head —
@@ -58,12 +58,12 @@ trait ScenarioService:
     *      is by commit hash, immune to the source changing mid-fork (A9).
     */
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Permission]): Task[BranchRef]
+    (using Checked[Permission]): IO[AppError, BranchRef]
 
   /** List a workspace's scenarios (DD-11: ownership = branch-name prefix filter).
     * Never includes `main` — main is not a scenario (DD-5/DD-9 §0).
     */
-  def list(wsId: WorkspaceId)(using Checked[Permission]): Task[List[ScenarioSummary]]
+  def list(wsId: WorkspaceId)(using Checked[Permission]): IO[AppError, List[ScenarioSummary]]
 
   /** Delete a scenario via CAS (DD-5, A9 fact 2). Only removes the branch
     * pointer — commits remain reachable by hash (A9 fact 5); forks survive.
@@ -75,18 +75,18 @@ trait ScenarioService:
     * @see BranchHeadStale translated to `ScenarioHeadStale` — concurrent modification
     */
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Permission]): Task[Unit]
+    (using Checked[Permission]): IO[AppError, Unit]
 
 object ScenarioService:
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Permission]): ZIO[ScenarioService, Throwable, BranchRef] =
+    (using Checked[Permission]): ZIO[ScenarioService, AppError, BranchRef] =
     ZIO.serviceWithZIO[ScenarioService](_.create(wsId, name, source))
 
-  def list(wsId: WorkspaceId)(using Checked[Permission]): ZIO[ScenarioService, Throwable, List[ScenarioSummary]] =
+  def list(wsId: WorkspaceId)(using Checked[Permission]): ZIO[ScenarioService, AppError, List[ScenarioSummary]] =
     ZIO.serviceWithZIO[ScenarioService](_.list(wsId))
 
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Permission]): ZIO[ScenarioService, Throwable, Unit] =
+    (using Checked[Permission]): ZIO[ScenarioService, AppError, Unit] =
     ZIO.serviceWithZIO[ScenarioService](_.delete(wsId, name, expectedHead))
 
   /** Best-effort cascade deletion — lists a workspace's scenarios, then deletes
@@ -115,7 +115,7 @@ object ScenarioService:
     */
   extension (self: ScenarioService)
     def cascadeDeleteScenarios(wsId: WorkspaceId)(using Checked[Permission]): UIO[Unit] =
-      def deleteWithFreshHeadRetry(s: ScenarioSummary): Task[Unit] =
+      def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[AppError, Unit] =
         self.delete(wsId, s.name, s.head).catchSome { case _: ScenarioHeadStale =>
           self.list(wsId).flatMap { fresh =>
             fresh.find(_.name == s.name) match
@@ -126,12 +126,12 @@ object ScenarioService:
       self.list(wsId)
         .tapError {
           case _: ScenariosNotSupported => ZIO.unit
-          case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.getMessage}")
+          case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.logMessage}")
         }
         .flatMap(scenarios => ZIO.withParallelism(8) {
           ZIO.foreachParDiscard(scenarios)(s =>
             deleteWithFreshHeadRetry(s)
-              .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.getMessage}"))
+              .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.logMessage}"))
               .ignore)
         })
         .ignore

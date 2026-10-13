@@ -1,6 +1,7 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Checked, Permission, UserContextExtractor }
@@ -37,9 +38,13 @@ class WorkspaceLifecycleController private (
   userCtx:              UserContextExtractor,
   authzService:         AuthorizationService,
   bootstrapProvisioner: BootstrapProvisioner,
-  scenarioService:      ScenarioService
+  scenarioService:      ScenarioService,
+  tracing:              Tracing
 ) extends BaseController
     with WorkspaceLifecycleEndpoints:
+
+  // `wireEither` reads the active span to name the trace a failure ran under.
+  private given Tracing = tracing
 
   val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
     case (maybeUserId, seedEntityId, req) =>
@@ -57,7 +62,7 @@ class WorkspaceLifecycleController private (
         tree = SimulationResponse.fromRiskTree(tree),
         expiresAt = ws.expiresAt,
         seedEntityId = ws.seedEntityId
-      )).either
+      )).wireEither
   }
 
   val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.serverLogic {
@@ -70,7 +75,7 @@ class WorkspaceLifecycleController private (
         ids      <- workspaceStore.listTrees(key)
         trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, Revision.Head(branch)))
         existing  = trees.collect { case Some((tree, _)) => SimulationResponse.fromRiskTree(tree) }
-      yield existing).either
+      yield existing).wireEither
   }
 
   val createWorkspaceTree: ServerEndpoint[Any, Task] = createWorkspaceTreeEndpoint.serverLogic {
@@ -110,7 +115,7 @@ class WorkspaceLifecycleController private (
         // which is correct no matter which branch it lives on. Unlike deleteTree's
         // removeTree (main-only), there is no asymmetric bookkeeping risk here.
         _      <- workspaceStore.addTree(key, tree.id)
-      yield SimulationResponse.fromRiskTree(tree)).either
+      yield SimulationResponse.fromRiskTree(tree)).wireEither
   }
 
   val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeySecretEndpoint.serverLogic { case (maybeUserId, key) =>
@@ -120,7 +125,7 @@ class WorkspaceLifecycleController private (
       given Checked[Permission] <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       newKey <- workspaceStore.rotate(key)
       newWs  <- workspaceStore.resolve(newKey)
-    yield WorkspaceRotateResponse(newKey, newWs.expiresAt)).either
+    yield WorkspaceRotateResponse(newKey, newWs.expiresAt)).wireEither
   }
 
   val deleteWorkspace: ServerEndpoint[Any, Task] = deleteWorkspaceEndpoint.serverLogic { case (maybeUserId, key) =>
@@ -131,7 +136,7 @@ class WorkspaceLifecycleController private (
       ids    <- workspaceStore.listTrees(key)
       _      <- CascadeDelete.workspace(ws.id, ids, riskTreeService, scenarioService)
       _      <- workspaceStore.delete(key)
-    yield ()).either
+    yield ()).wireEither
   }
 
   val evictExpired: ServerEndpoint[Any, Task] = evictExpiredEndpoint.serverLogic { _ =>
@@ -145,7 +150,7 @@ class WorkspaceLifecycleController private (
                    ZIO.foreachParDiscard(evicted)(ws =>
                      CascadeDelete.workspace(ws.id, ws.trees, riskTreeService, scenarioService))
                  }
-    yield Map("evicted" -> evicted.size)).either
+    yield Map("evicted" -> evicted.size)).wireEither
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
@@ -159,7 +164,7 @@ class WorkspaceLifecycleController private (
     )
 
 object WorkspaceLifecycleController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & UserContextExtractor & AuthorizationService & BootstrapProvisioner & ScenarioService, Nothing, WorkspaceLifecycleController] =
+  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & UserContextExtractor & AuthorizationService & BootstrapProvisioner & ScenarioService & Tracing, Nothing, WorkspaceLifecycleController] =
     for
       riskTreeService      <- ZIO.service[RiskTreeService]
       workspaceStore       <- ZIO.service[WorkspaceStore]
@@ -167,4 +172,5 @@ object WorkspaceLifecycleController:
       authzService         <- ZIO.service[AuthorizationService]
       bootstrapProvisioner <- ZIO.service[BootstrapProvisioner]
       scenarioService      <- ZIO.service[ScenarioService]
-    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, userCtx, authzService, bootstrapProvisioner, scenarioService)
+      tracing              <- ZIO.service[Tracing]
+    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, userCtx, authzService, bootstrapProvisioner, scenarioService, tracing)

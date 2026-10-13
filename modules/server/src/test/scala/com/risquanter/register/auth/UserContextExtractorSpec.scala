@@ -59,8 +59,8 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
         yield result match
           case Left(err: AuthServiceUnavailable) =>
             assertTrue(
-              err.getMessage.contains("Missing x-user-id header"),
-              err.getMessage.contains("mesh bypass")
+              err.logMessage.contains("Missing x-user-id header"),
+              err.logMessage.contains("mesh bypass")
             )
           case other =>
             assertTrue(false)
@@ -105,8 +105,8 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
         yield result match
           case Left(err: AuthServiceUnavailable) =>
             assertTrue(
-              err.getMessage.contains("Missing x-user-id header"),
-              err.getMessage.contains("mesh bypass")
+              err.logMessage.contains("Missing x-user-id header"),
+              err.logMessage.contains("mesh bypass")
             )
           case other =>
             assertTrue(false)

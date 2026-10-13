@@ -7,7 +7,8 @@ import java.time.Duration
 
 import zio.*
 import zio.http.*
-import sttp.tapir.server.ziohttp.ZioHttpInterpreter
+import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
+import zio.telemetry.opentelemetry.tracing.Tracing
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.configs.*
@@ -24,7 +25,8 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, Content
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
+import com.risquanter.register.telemetry.TelemetryLive
+import com.risquanter.register.http.RequestSpanInterceptor
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisionerNoOp, UserContextExtractor}
 
 /** Test-only harness to start the HTTP server on a random port with selectable repo wiring. */
@@ -101,7 +103,14 @@ object HttpTestHarness:
           allowedHeaders = Header.AccessControlAllowHeaders.All,
           exposedHeaders = Header.AccessControlExposeHeaders.All
         ))
-        httpApp = corsMiddleware(ZioHttpInterpreter().toHttp(endpoints))
+        // The span interceptor is wired here as well as in `Application`, so a
+        // request served by this harness runs under a SERVER span and the trace
+        // a failure carries is a real one rather than the unlinked placeholder.
+        serverOptions = ZioHttpServerOptions
+          .customiseInterceptors[Any]
+          .prependInterceptor(RequestSpanInterceptor.interceptor(env.get[Tracing]))
+          .options
+        httpApp = corsMiddleware(ZioHttpInterpreter(serverOptions).toHttp(endpoints))
 
         serverFiber <- Server.serve(httpApp).provideEnvironment(env).forkScoped
         _           <- ZIO.addFinalizer(serverFiber.interrupt)
@@ -121,9 +130,12 @@ object HttpTestHarness:
       port: Int,
       backendLayer: BackendLayer,
       cfg: HarnessConfig
-  ): ZLayer[Any, Throwable, Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController] =
+  ): ZLayer[Any, Throwable, Server & CorsConfig & Tracing & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController] =
+    // `Tracing` is an output and not only an internal dependency: the server
+    // below reads it to build the request-span interceptor, so the integration
+    // tier exercises the same span the production path opens.
     ZLayer.make[
-      Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController
+      Server & CorsConfig & Tracing & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController
     ](
       ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port, healthPort = port + 1, maxRequestBytes = cfg.maxRequestBytes)),
       ZLayer.succeed(cfg.simulation),
@@ -137,8 +149,7 @@ object HttpTestHarness:
             .requestStreaming(Server.RequestStreaming.Disabled(sc.maxRequestBytes))
         )
       ) >>> Server.live,
-      TracingLive.console,
-      MetricsLive.console,
+      TelemetryLive.configured,
       backendLayer,
       RiskTreeServiceLive.layer,
       ChangedNodesServiceLive.layer,
@@ -207,7 +218,10 @@ object HttpTestHarness:
         _      <- ZIO.withClock(Clock.ClockLive) {
                     StartupReadiness.awaitReady(
                       name           = s"irmin (${cfg.url})",
-                      probe          = client.healthCheck,
+                      // The gate reports readiness of the process, not of a
+                      // request, so its channel is `Throwable`. A domain error
+                      // leaving the domain is converted here, where it crosses.
+                      probe          = client.healthCheck.mapError(e => RuntimeException(e.logMessage)),
                       attemptTimeout = cfg.healthCheckAttemptTimeout,
                       budget         = cfg.healthCheckBudget
                     )

@@ -27,7 +27,7 @@ final class BootstrapProvisionerStub private (
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
   ): IO[AuthError, Unit] =
-    if shouldFail then ZIO.fail(AuthServiceUnavailable("SpiceDB unavailable (stub)"))
+    if shouldFail then ZIO.fail(AuthServiceUnavailable("SpiceDB unavailable (stub)", None))
     else callsRef.update(_ :+ (userId, workspaceId))
 
   def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]] =

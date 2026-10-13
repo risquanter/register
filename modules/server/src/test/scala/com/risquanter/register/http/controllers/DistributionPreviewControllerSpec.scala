@@ -11,8 +11,10 @@ import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.auth.UserContextExtractor
+import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.http.requests.DistributionShapeRequest
 import com.risquanter.register.services.DistributionPreviewService
+import com.risquanter.register.telemetry.TelemetryLive
 
 /** Unit tests for [[DistributionPreviewController]] L1 enforcement.
   *
@@ -55,7 +57,8 @@ object DistributionPreviewControllerSpec extends ZIOSpecDefault:
   private def backendWith(extractor: UserContextExtractor): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
     for controller <- DistributionPreviewController.makeZIO.provide(
           DistributionPreviewService.layer,
-          ZLayer.succeed(extractor)
+          ZLayer.succeed(extractor),
+          TestConfigs.telemetryLayer >>> TelemetryLive.configured
         )
     yield TapirStubInterpreter(SttpBackendStub[Task, Any](summon[MonadError[Task]]))
       .whenServerEndpointsRunLogic(controller.routes)

@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash}
-import com.risquanter.register.domain.errors.{DataConflict, ScenarioHeadStale, ValidationFailed, ValidationError, ValidationErrorCode, BranchAlreadyExists, BranchHeadStale}
+import com.risquanter.register.domain.errors.{AppError, DataConflict, ScenarioHeadStale, ValidationFailed, ValidationError, ValidationErrorCode, BranchAlreadyExists, BranchHeadStale}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminBranch
 
@@ -23,7 +23,7 @@ import com.risquanter.register.infra.irmin.model.IrminBranch
 final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
   override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Permission]): Task[BranchRef] =
+    (using Checked[Permission]): IO[AppError, BranchRef] =
     for
       branch     <- scenarioBranch(wsId, name)
       sourceHead <- resolveSourceHead(wsId, source)
@@ -32,7 +32,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                     }
     yield branch
 
-  override def list(wsId: WorkspaceId)(using Checked[Permission]): Task[List[ScenarioSummary]] =
+  override def list(wsId: WorkspaceId)(using Checked[Permission]): IO[AppError, List[ScenarioSummary]] =
     for
       all       <- irmin.branches
       names      = all.flatMap(scenarioNameOf(wsId, _))
@@ -40,7 +40,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     yield summaries
 
   override def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Permission]): Task[Unit] =
+    (using Checked[Permission]): IO[AppError, Unit] =
     for
       branch <- scenarioBranch(wsId, name)
       _      <- irmin.deleteBranch(branch, expectedHead).catchSome { case BranchHeadStale(_, expected) =>
@@ -55,7 +55,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
   // ── source resolution ────────────────────────────────────────────────────
 
-  private def resolveSourceHead(wsId: WorkspaceId, source: ScenarioSource): Task[CommitHash] =
+  private def resolveSourceHead(wsId: WorkspaceId, source: ScenarioSource): IO[AppError, CommitHash] =
     source match
       case ScenarioSource.Main =>
         irmin.mainBranch.flatMap {
@@ -93,7 +93,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
             ))))
         }
 
-  private def summaryFor(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Task[ScenarioSummary] =
+  private def summaryFor(wsId: WorkspaceId, name: ScenarioName.ScenarioName): IO[AppError, ScenarioSummary] =
     for
       branch      <- scenarioBranch(wsId, name)
       maybeBranch <- irmin.getBranch(branch)
@@ -129,10 +129,10 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
       .flatMap(BranchChoice.fromBranchRef(wsId, _).toOption)
       .collect { case BranchChoice.Scenario(name) => name }
 
-  private def scenarioBranch(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Task[BranchRef] =
+  private def scenarioBranch(wsId: WorkspaceId, name: ScenarioName.ScenarioName): IO[AppError, BranchRef] =
     ScenarioBranchOps.scenarioBranch(wsId, name)
 
-  private def refineCommitHash(raw: String): Task[CommitHash] =
+  private def refineCommitHash(raw: String): IO[AppError, CommitHash] =
     ScenarioBranchOps.refineCommitHash(raw)
 
 object ScenarioServiceLive:

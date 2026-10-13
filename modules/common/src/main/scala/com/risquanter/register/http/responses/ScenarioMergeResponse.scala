@@ -1,7 +1,8 @@
 package com.risquanter.register.http.responses
 
-import zio.json.{DeriveJsonCodec, JsonCodec}
-import com.risquanter.register.domain.data.iron.CommitHash
+import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
+import com.risquanter.register.domain.data.RiskTree.{safeNameEncoder, safeNameDecoder}
+import com.risquanter.register.domain.data.iron.{CommitHash, SafeName, TreeId}
 
 /** One conflicting storage path found by the merge preview, wire form of the
   * server-side `MergeConflictPath`. `path` is workspace-relative (e.g.
@@ -14,20 +15,34 @@ final case class MergeConflictEntry(path: String, treeId: Option[String], nodeId
 object MergeConflictEntry:
   given codec: JsonCodec[MergeConflictEntry] = DeriveJsonCodec.gen[MergeConflictEntry]
 
-/** Response DTO for `GET /w/{key}/scenarios/{name}/merge-preview`.
+/** The outcome of a merge preview, as a closed set.
   *
-  * `status` is `"clean"` (the merge would apply), `"conflicts"` (`conflicts`
-  * populated — paths changed on both branches), `"duplicate-names"`
-  * (`duplicateNames` populated — the merged node set would repeat a name
-  * within a tree), or `"missing-scenario"` (the scenario does not exist — a
-  * non-error outcome of a read-only preview, mirroring `ScenarioDiffResponse`'s
-  * missing-tree statuses).
+  * Each case carries the values that belong to it, so there is no case whose
+  * payload lives in a sibling field that may or may not be populated. A match on
+  * this type is exhaustive, which is what lets the browser drop the wildcard arm
+  * that renders an unrecognised status as an empty conflict list.
   */
-final case class MergePreviewResponse(
-  status: String,
-  conflicts: List[MergeConflictEntry],
-  duplicateNames: Option[String] = None
-)
+@jsonDiscriminator("kind")
+enum MergePreviewStatus:
+  /** The merge would apply with no intervention. */
+  case Clean()
+
+  /** Paths changed on both branches. */
+  case Conflicts(paths: List[MergeConflictEntry])
+
+  /** The merged node set would repeat a name within a tree, listed per tree. */
+  case DuplicateNames(perTree: Map[TreeId, List[SafeName.SafeName]])
+
+  /** The scenario does not exist — a non-error outcome of a read-only preview,
+    * mirroring `ScenarioDiffResponse`'s missing-tree statuses.
+    */
+  case ScenarioMissing()
+
+object MergePreviewStatus:
+  given codec: JsonCodec[MergePreviewStatus] = DeriveJsonCodec.gen[MergePreviewStatus]
+
+/** Response DTO for `GET /w/{key}/scenarios/{name}/merge-preview`. */
+final case class MergePreviewResponse(status: MergePreviewStatus)
 
 object MergePreviewResponse:
   given codec: JsonCodec[MergePreviewResponse] = DeriveJsonCodec.gen[MergePreviewResponse]

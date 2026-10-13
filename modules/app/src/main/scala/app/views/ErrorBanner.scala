@@ -2,20 +2,14 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import app.state.GlobalError
+import com.risquanter.register.domain.data.iron.TraceId
 
-/** Dismissible global error banner for unhandled / cross-cutting errors.
+/** Dismissible banner for failures no per-view channel caught.
   *
-  * Renders at the top of the layout (between Header and main content).
-  * Only visible when the `globalError` signal contains `Some(error)`.
-  *
-  * It handles errors that have no per-view handler — a failed health check,
-  * an expired workspace, a dropped SSE connection.
-  *
-  * Per-view errors (LoadState.Failed, SubmitState.Failed) are NOT
-  * routed here — they continue to render inline in their owning views.
-  *
-  * @see GlobalError for the error ADT
-  * @see ADR-019 Pattern 7 / ADR-010 for error handling strategy
+  * Renders between the header and the main content, and is visible only while
+  * the signal holds a failure. A per-view error continues to render inline in
+  * its own view and is not routed here, because the banner supplements that
+  * display rather than replacing it (ADR-019 Pattern 7).
   */
 object ErrorBanner:
 
@@ -28,43 +22,64 @@ object ErrorBanner:
       child.maybe <-- globalError.map(_.map(renderBanner(_, onDismiss)))
     )
 
+  /** How one failure is presented: its icon, its sentence, the trace to offer
+    * for copying, and which styling it takes.
+    *
+    * The four values are derived from the same case, so they are produced
+    * together in one match rather than by several matches on the same value.
+    */
+  private case class Presentation(
+    icon: String,
+    message: String,
+    trace: Option[TraceId],
+    styling: String
+  )
+
+  private val ErrorStyling: String = "error-banner"
+  private val InfoStyling: String  = "error-banner info-banner"
+
+  private def present(error: GlobalError): Presentation = error match
+    case GlobalError.ValidationFailed(errors) =>
+      Presentation("⚠", errors.map(_.message).mkString("; "), None, ErrorStyling)
+
+    case GlobalError.NetworkError(message) =>
+      Presentation("⚡", message, None, ErrorStyling)
+
+    case GlobalError.RequestRejected(message) =>
+      Presentation("⚠", message, None, ErrorStyling)
+
+    case GlobalError.Conflict(message) =>
+      Presentation("🔄", message, None, ErrorStyling)
+
+    case GlobalError.NotFound =>
+      Presentation("⚠", ErrorMessages.NotFound, None, ErrorStyling)
+
+    case GlobalError.WorkspaceExpired(message) =>
+      Presentation("ℹ", message, None, InfoStyling)
+
+    case GlobalError.ServerError(message, trace) =>
+      Presentation("🔥", message, trace, ErrorStyling)
+
+    case GlobalError.DependencyError(message, trace) =>
+      Presentation("⚡", message, trace, ErrorStyling)
+
+  /** The trace is rendered as a muted line under the message and is selectable,
+    * so someone reporting a fault can copy the identifier the server logged the
+    * failure against.
+    */
   private def renderBanner(error: GlobalError, onDismiss: () => Unit): HtmlElement =
-    val (icon, message) = error match
-      case GlobalError.ValidationFailed(errors) =>
-        ("⚠", errors.map(_.message).mkString("; "))
-
-      case GlobalError.NetworkError(msg) =>
-        ("⚡", safe(msg))
-
-      case GlobalError.Conflict(msg) =>
-        ("🔄", safe(msg))
-
-      case GlobalError.ServerError(msg) =>
-        ("🔥", safe(msg))
-
-      case GlobalError.DependencyError(msg) =>
-        ("⚡", s"Service issue: ${safe(msg)}")
-
-      case GlobalError.WorkspaceExpired(msg) =>
-        ("ℹ", safe(msg))
-
-    val bannerClass = error match
-      case _: GlobalError.WorkspaceExpired => "error-banner info-banner"
-      case _                               => "error-banner"
-
+    val presentation = present(error)
     div(
-      cls := bannerClass,
-      span(cls := "error-banner-icon", icon),
-      span(cls := "error-banner-message", message),
+      cls := presentation.styling,
+      span(cls := "error-banner-icon", presentation.icon),
+      div(
+        cls := "error-banner-body",
+        span(cls := "error-banner-message", presentation.message),
+        presentation.trace.map(t => div(cls := "error-banner-trace", t.value))
+      ),
       button(
         cls := "error-banner-dismiss",
         "✕",
         onClick --> (_ => onDismiss())
       )
     )
-
-  /** Null-safe message accessor — last-resort defense against null messages
-    * leaking from JS exceptions through Scala.js interop.
-    */
-  private def safe(msg: String): String =
-    if msg == null || msg.isEmpty then "An unexpected error occurred" else msg

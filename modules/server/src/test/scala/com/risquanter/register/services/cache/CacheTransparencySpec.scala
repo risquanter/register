@@ -4,9 +4,10 @@ import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, SeedEntityId, ContentHash}
+import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.testutil.TestHelpers.*
 
 /**
@@ -106,13 +107,12 @@ object CacheTransparencySpec extends ZIOSpecDefault {
     ZLayer.make[CachedResultResolver & ContentCacheRegistry](
       scope,
       ZLayer.succeed(TestConfigs.simulation),
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console,
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured,
       CachedResultResolverLive.layer
     )
 
   /** Run the full edit sequence, collecting every node's figures at every step. */
-  private val runSequence: ZIO[CachedResultResolver & ContentCacheRegistry, Throwable, List[Map[NodeId, Map[TrialId, Loss]]]] =
+  private val runSequence: ZIO[CachedResultResolver & ContentCacheRegistry, AppError, List[Map[NodeId, Map[TrialId, Loss]]]] =
     ZIO.serviceWithZIO[CachedResultResolver] { resolver =>
       ZIO.foreach(editSequence) { t =>
         ZIO.foreach(t.index.nodes.keys.toList.sortBy(_.value)) { nid =>

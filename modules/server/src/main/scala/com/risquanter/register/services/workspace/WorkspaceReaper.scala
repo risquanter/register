@@ -102,6 +102,6 @@ object WorkspaceReaper:
     // A failed cycle costs one interval, so it is logged and the loop carries
     // on. Ending the fiber would stop every later eviction with no symptom.
     val survivingCycle = cycle.catchAll(error =>
-      ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: ${error.getMessage}")
+      ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: ${error.logMessage}")
     )
     (ZIO.sleep(zio.Duration.fromJava(interval)) *> survivingCycle).forever

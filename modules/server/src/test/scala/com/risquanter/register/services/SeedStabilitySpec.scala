@@ -6,9 +6,10 @@ import zio.test.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
+import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.services.cache.CachedResultResolver
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
@@ -40,11 +41,11 @@ object SeedStabilitySpec extends ZIOSpecDefault {
     */
   private val RootKey = "<root>"
 
-  private def service[A](f: RiskTreeService => Task[A]): ZIO[Env, Throwable, A] =
+  private def service[A](f: RiskTreeService => IO[AppError, A]): ZIO[Env, AppError, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   /** Resolve every leaf's and the root's outcomes, keyed by leaf name / RootKey. */
-  private def figures(tree: RiskTree, entity: SeedEntityId.SeedEntityId): ZIO[Env, Throwable, Map[String, Map[TrialId, Loss]]] =
+  private def figures(tree: RiskTree, entity: SeedEntityId.SeedEntityId): ZIO[Env, AppError, Map[String, Map[TrialId, Loss]]] =
     ZIO.serviceWithZIO[CachedResultResolver] { resolver =>
       val leaves = tree.nodes.collect { case l: RiskLeaf => l }
       for
@@ -223,7 +224,6 @@ object SeedStabilitySpec extends ZIOSpecDefault {
       com.risquanter.register.services.cache.ContentCacheRegistry.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
-      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
-      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
     ) @@ TestAspect.sequential @@ TestAspect.withLiveClock
 }

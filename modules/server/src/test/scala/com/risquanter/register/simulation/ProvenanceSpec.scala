@@ -7,7 +7,7 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{SafeName, SeedEntityId}
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
 import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
 import zio.*
@@ -26,8 +26,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     ZLayer.make[CachedResultResolver & ContentCacheRegistry](
       ContentCacheRegistry.layer,
       ZLayer.succeed(TestConfigs.simulation),
-      TestConfigs.telemetryLayer >>> TracingLive.console,
-      TestConfigs.telemetryLayer >>> MetricsLive.console,
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured,
       CachedResultResolverLive.layer
     )
 

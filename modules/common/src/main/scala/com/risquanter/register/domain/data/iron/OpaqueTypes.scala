@@ -708,6 +708,11 @@ object TreeId:
   given JsonDecoder[TreeId] = JsonDecoder[String].mapOrFail(s =>
     TreeId.fromString(s).left.map(_.mkString(", ")))
 
+  // JSON map-key codecs — required for Map[TreeId, V] serialization, as for NodeId
+  given JsonFieldEncoder[TreeId] = JsonFieldEncoder.string.contramap(_.value)
+  given JsonFieldDecoder[TreeId] = JsonFieldDecoder.string.mapOrFail(s =>
+    TreeId.fromString(s).left.map(_.mkString(", ")))
+
 // NodeId: Nominal case class wrapper over SafeId for node identity (ADR-018).
 // Compiler-distinct from TreeId and raw SafeId. All validation delegates to SafeId.
 case class NodeId(toSafeId: SafeId.SafeId):
@@ -888,6 +893,58 @@ object WorkspaceId:
   given JsonEncoder[WorkspaceId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[WorkspaceId] = JsonDecoder[String].mapOrFail(s =>
     WorkspaceId.fromString(s).left.map(_.mkString(", ")))
+
+// ============================================================================
+// Telemetry Correlation Identifiers (ADR-002, ADR-018)
+// ============================================================================
+
+// The W3C Trace Context trace identifier: 32 lowercase hexadecimal characters.
+// The length and the alphabet are fixed by that specification, not chosen here,
+// and they are what an OpenTelemetry exporter emits.
+type TraceIdConstraint = Match["^[0-9a-f]{32}$"]
+type TraceIdStr = String :| TraceIdConstraint
+
+// TraceId: the trace a request's work ran under. A nominal wrapper rather than a
+// bare refined string, so it cannot be passed where another identifier of the
+// same encoding is wanted (ADR-018).
+case class TraceId(toTraceIdStr: TraceIdStr):
+  def value: String = toTraceIdStr
+
+object TraceId:
+  def fromString(s: String, fieldPath: String = "traceId"): Either[List[ValidationError], TraceId] =
+    s.refineEither[TraceIdConstraint]
+      .left
+      .map(err =>
+        List(
+          ValidationError(
+            field = fieldPath,
+            code = ValidationErrorCode.INVALID_FORMAT,
+            message = s"Trace id is invalid: $err"
+          )
+        )
+      )
+      .map(TraceId(_))
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[TraceId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[TraceId] = JsonDecoder[String].mapOrFail(s =>
+    TraceId.fromString(s).left.map(_.mkString(", ")))
+
+/** The trace identifier of work that ran under no span.
+  *
+  * Lives here rather than in the server module because `WireError` carries a
+  * trace and is in the shared module.
+  */
+object TelemetryPlaceholders:
+  /** All zeros is the W3C Trace Context "invalid" trace identifier, so it is the
+    * one value a collector will never issue.
+    *
+    * It is also what OpenTelemetry's own invalid span context reports, so
+    * reading the trace outside any span yields this value without a branch
+    * written to produce it. A request always has a span, so this marks work that
+    * belongs to no request: a startup task, the workspace reaper's sweep.
+    */
+  val UnlinkedTrace: TraceId = TraceId("00000000000000000000000000000000")
 
 // CSS hex colour (#RRGGBB). Used by PaletteData and ColorAssigner in the app
 // module for Vega-Lite chart curve colour assignment. Never serialized to the

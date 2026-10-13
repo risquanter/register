@@ -1,7 +1,11 @@
 package app.core
 
+import zio.IO
 import zio.Task
+import zio.ZIO
 import zio.ZLayer
+
+import com.risquanter.register.http.errors.WireError
 
 import sttp.capabilities.zio.ZioStreams
 import sttp.capabilities.WebSockets
@@ -24,18 +28,20 @@ trait BackendClient:
 
   /** Call an endpoint with a payload.
     *
-    * Turns an endpoint description into a Task that:
-    *   - builds a request from the payload
-    *   - sends it to the backend via the Fetch API
-    *   - returns the decoded response
+    * Turns an endpoint description into an effect that builds a request from
+    * the payload, sends it to the backend via the Fetch API, and returns the
+    * decoded response.
     *
-    * @param endpoint the Tapir endpoint definition (from the shared common module)
+    * The two ways this can fail are the two cases of [[RequestFailure]]: the
+    * server answered with a typed error body, or the call never completed.
+    *
+    * @param endpoint the Tapir endpoint definition, from the shared common module
     * @param payload the input to the endpoint
-    * @return the decoded output wrapped in a Task
+    * @return the decoded output, or the failure that replaced it
     */
-  def endpointRequestZIO[I, E <: Throwable, O](
-      endpoint: Endpoint[Unit, I, E, O, Any]
-  )(payload: I): Task[O]
+  def endpointRequestZIO[I, O](
+      endpoint: Endpoint[Unit, I, WireError, O, Any]
+  )(payload: I): IO[RequestFailure, O]
 
 /** Live implementation backed by FetchZioBackend.
   *
@@ -64,13 +70,18 @@ private class BackendClientLive(
     val toRequest = interpreter.toRequestThrowDecodeFailures(endpoint, baseUrl)
     input => toRequest(input).header("Accept", "application/json")
 
-  def endpointRequestZIO[I, E <: Throwable, O](
-      endpoint: Endpoint[Unit, I, E, O, Any]
-  )(payload: I): Task[O] =
+  /** The two failure cases are separated here, and this is the only place they
+    * can be told apart. A failure of `send` is the Fetch call itself not
+    * completing, so it becomes `Transport`. A `Left` body is the server's own
+    * typed answer, so it becomes `Wire`.
+    */
+  def endpointRequestZIO[I, O](
+      endpoint: Endpoint[Unit, I, WireError, O, Any]
+  )(payload: I): IO[RequestFailure, O] =
     backend
       .send(endpointRequest(endpoint)(payload))
-      .map(_.body)
-      .absolve
+      .mapError(RequestFailure.Transport(_))
+      .flatMap(response => ZIO.fromEither(response.body).mapError(RequestFailure.Wire(_)))
 
 object BackendClientLive:
 

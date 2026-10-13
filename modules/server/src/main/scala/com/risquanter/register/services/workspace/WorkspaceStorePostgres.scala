@@ -64,7 +64,7 @@ final class WorkspaceStorePostgres private (
                      """.as[Action[Long]]
                    }
                  )
-               ).unit.orDie
+               ).unit.orDieWith(asDefect)
              case Some(entityId) =>
                db(
                  run(
@@ -82,8 +82,8 @@ final class WorkspaceStorePostgres private (
                      code = ValidationErrorCode.DUPLICATE_VALUE,
                      message = ValidationMessages.seedEntityIdInUse(entityId.value)
                    ))))
-                 case other => ZIO.die(other)
-               } *> bumpSeedEntitySequence(entityId.value).orDie
+                 case other => ZIO.die(asDefect(other))
+               } *> bumpSeedEntitySequence(entityId.value).orDieWith(asDefect)
       _ <- logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created")
     yield key
 
@@ -226,7 +226,10 @@ final class WorkspaceStorePostgres private (
       row <- loadWorkspaceRowByHash(key)
       ws  <- toRecord(row)
       now <- Clock.instant
-      _   <- ZIO.fail(WorkspaceExpired()).when(ws.isExpired(now))
+      // The record answers which deadline was passed, so the failure can carry
+      // that moment for the log line without restating the two-deadline rule.
+      _   <- ZIO.foreachDiscard(ws.expiry(now))(e =>
+               ZIO.fail(WorkspaceExpired(ws.id, ws.ttl, ws.idleTimeout, e.cause, e.at)))
     yield ws
 
   private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError, WorkspaceRow] =
@@ -264,6 +267,14 @@ final class WorkspaceStorePostgres private (
 
   private def db[A](effect: Task[A]): IO[AppError, A] =
     effect.mapError(err => RepositoryFailure(Option(err.getMessage).getOrElse(err.toString)))
+
+  /** Convert a failure this store treats as unrecoverable into a defect.
+    *
+    * A domain error is not a `Throwable`, so it cannot itself become one. The
+    * text survives and the type does not, which is what dying means: nothing
+    * downstream is meant to match on it.
+    */
+  private def asDefect(e: AppError): Throwable = RuntimeException(e.logMessage)
 
   /** Structured security event log with arbitrary key-value annotations. Event
     * and field names match the in-memory store's.

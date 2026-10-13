@@ -115,13 +115,13 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
           assertTrue(errors.size == 1, errors.head.contains("notaloss"))
         case other => throw MatchError(other)
     },
-    test("BindError getMessage joins rendered messages with semicolons") {
+    test("BindError logMessage joins rendered messages with semicolons") {
       val err = QE.BindError(List(
         BindErrorDetail.UnknownPredicate("A", rendered = "error A"),
         BindErrorDetail.UnknownFunction("B", rendered = "error B")
       ))
       val mapped = FolQueryFailure.fromQueryError(err)
-      assertTrue(mapped.getMessage.contains("error A; error B"))
+      assertTrue(mapped.logMessage.contains("error A; error B"))
     }
   )
 
@@ -135,12 +135,12 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
           assertTrue(message.contains("Loss"), message.contains("Asset"))
         case other => throw MatchError(other)
     },
-    test("DomainNotFoundError getMessage mentions type and Asset") {
+    test("DomainNotFoundError logMessage mentions type and Asset") {
       val err = QE.DomainNotFoundError("Probability", Set("Asset"))
       val mapped = FolQueryFailure.fromQueryError(err)
       assertTrue(
-        mapped.getMessage.contains("Probability"),
-        mapped.getMessage.contains("Asset")
+        mapped.logMessage.contains("Probability"),
+        mapped.logMessage.contains("Asset")
       )
     }
   )
@@ -158,10 +158,10 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
           assertTrue(errors.size == 2, errors.head == "Missing function implementation: lec")
         case other => throw MatchError(other)
     },
-    test("ModelValidationError getMessage joins errors") {
+    test("ModelValidationError logMessage joins errors") {
       val err = QE.ModelValidationError(List("error X"))
       val mapped = FolQueryFailure.fromQueryError(err)
-      assertTrue(mapped.getMessage.contains("error X"))
+      assertTrue(mapped.logMessage.contains("error X"))
     }
   )
 

@@ -3,13 +3,13 @@ package com.risquanter.register.services.helper
 import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution, SeedDerivation}
 import com.risquanter.register.domain.data.{TrialId, Loss, RiskLeaf, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
 import io.github.iltotore.iron.constraint.numeric.{Greater, given}
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
-import zio.{ZIO, Task}
+import zio.{IO, ZIO}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron._
 
@@ -41,19 +41,23 @@ object Simulator {
     sampler: RiskSampler,
     nTrials: PositiveInt,
     parallelism: PositiveInt = DefaultTrialParallelism
-  ): Task[Map[TrialId, Loss]] = {
+  ): IO[AppError, Map[TrialId, Loss]] = {
+    // Sampling is pure arithmetic over an already-validated distribution, so an
+    // exception here is a broken invariant rather than an outcome a caller can
+    // act on. Each attempt therefore dies instead of entering the error
+    // channel, which is reserved for failures that have a wire case.
     ZIO.attempt {
       // Filter phase: identify successful trials (pure, sequential is fine)
       val n: Int = nTrials
       (0 until n).filter(trial => sampler.sampleOccurrence(trial.toLong)).toVector
-    }.flatMap { successfulTrials =>
+    }.orDie.flatMap { successfulTrials =>
       if (successfulTrials.isEmpty) {
         ZIO.succeed(Map.empty[TrialId, Loss])
       } else if (successfulTrials.size < 100 || parallelism <= 1) {
         // Small workload: sequential is more efficient (avoid fiber overhead)
         ZIO.attempt {
           successfulTrials.map(trial => (trial, sampler.sampleLoss(trial.toLong))).toMap
-        }
+        }.orDie
       } else {
         // Large workload: parallel computation across batches
         val batchSize = math.max(1, successfulTrials.size / parallelism)
@@ -62,7 +66,7 @@ object Simulator {
         ZIO.foreachPar(batches) { batch =>
           ZIO.attempt {
             batch.map(trial => (trial, sampler.sampleLoss(trial.toLong)))
-          }
+          }.orDie
         }.map(_.flatten.toMap)
          .withParallelism(parallelism)
       }
@@ -81,7 +85,7 @@ object Simulator {
     seedEntityId: SeedEntityId.SeedEntityId,
     seed3: Long = 0L,
     seed4: Long = 0L
-  ): Task[(RiskSampler, NodeProvenance)] = {
+  ): IO[AppError, (RiskSampler, NodeProvenance)] = {
     for {
       // Create distribution based on mode
       distAndParams <- createDistributionWithParams(leaf)
@@ -119,7 +123,7 @@ object Simulator {
    * Create MetalogDistribution from RiskLeaf parameters.
    * Returns both distribution and parameters for provenance.
    */
-  private def createDistributionWithParams(leaf: RiskLeaf): Task[(Distribution, com.risquanter.register.domain.data.DistributionParams)] = {
+  private def createDistributionWithParams(leaf: RiskLeaf): IO[AppError, (Distribution, com.risquanter.register.domain.data.DistributionParams)] = {
     import io.github.iltotore.iron.*
     import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
     

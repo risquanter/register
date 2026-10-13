@@ -1,6 +1,7 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
@@ -31,9 +32,13 @@ class WorkspaceTreeController private (
   treeHistoryService: TreeHistoryService,
   workspaceStore: WorkspaceStore,
   authzService: AuthorizationService,
-  userCtx: UserContextExtractor
+  userCtx: UserContextExtractor,
+  tracing: Tracing
 ) extends BaseController
     with WorkspaceTreeEndpoints:
+
+  // `wireEither` reads the active span to name the trace a failure ran under.
+  private given Tracing = tracing
 
   val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.serverLogic {
     case (maybeUserId, key, treeId, activeBranch) =>
@@ -44,7 +49,7 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.getById(ws.id, treeId, Revision.Head(branch))
                     .map(_.map { case (tree, _) => SimulationResponse.fromRiskTree(tree) })
-      yield result).either
+      yield result).wireEither
   }
 
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
@@ -56,7 +61,7 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
         result <- riskTreeService.getById(ws.id, treeId, rev).map(_.map { case (tree, _) => tree })
-      yield result).either
+      yield result).wireEither
   }
 
   val getChangedNodes: ServerEndpoint[Any, Task] = getChangedNodesEndpoint.serverLogic {
@@ -76,7 +81,7 @@ class WorkspaceTreeController private (
         case ChangedNodesResult.MissingOnA    => ChangedNodesResponse("missing-on-a", Nil)
         case ChangedNodesResult.MissingOnB    => ChangedNodesResponse("missing-on-b", Nil)
         case ChangedNodesResult.MissingOnBoth => ChangedNodesResponse("missing-on-both", Nil)
-      ).either
+      ).wireEither
   }
 
   val getTreeHistory: ServerEndpoint[Any, Task] = getTreeHistoryEndpoint.serverLogic {
@@ -88,7 +93,7 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         limit  <- ZIO.fromEither(ValidationUtil.refinePositiveInt(n, "n")).mapError(ValidationFailed(_))
         entries <- treeHistoryService.history(ws.id, treeId, branch, limit)
-      yield TreeHistoryResponse(entries)).either
+      yield TreeHistoryResponse(entries)).wireEither
   }
 
   val updateTree: ServerEndpoint[Any, Task] = updateWorkspaceTreeEndpoint.serverLogic {
@@ -99,7 +104,7 @@ class WorkspaceTreeController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.update(ws.id, treeId, req, branch).map(SimulationResponse.fromRiskTree)
-      yield result).either
+      yield result).wireEither
   }
 
   val revertTree: ServerEndpoint[Any, Task] = revertTreeEndpoint.serverLogic {
@@ -110,7 +115,7 @@ class WorkspaceTreeController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.revertTree(ws.id, treeId, req.toCommit, branch).map(SimulationResponse.fromRiskTree)
-      yield result).either
+      yield result).wireEither
   }
 
   val deleteTree: ServerEndpoint[Any, Task] = deleteWorkspaceTreeEndpoint.serverLogic {
@@ -129,7 +134,7 @@ class WorkspaceTreeController private (
         result <- riskTreeService.delete(ws.id, treeId, branch)
                       .tap(_ => ZIO.when(branch == BranchRef.Main)(workspaceStore.removeTree(key, treeId)))
                       .map(SimulationResponse.fromRiskTree)
-      yield result).either
+      yield result).wireEither
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
@@ -144,7 +149,7 @@ class WorkspaceTreeController private (
     )
 
 object WorkspaceTreeController:
-  val makeZIO: ZIO[RiskTreeService & ChangedNodesService & TreeHistoryService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, WorkspaceTreeController] =
+  val makeZIO: ZIO[RiskTreeService & ChangedNodesService & TreeHistoryService & WorkspaceStore & AuthorizationService & UserContextExtractor & Tracing, Nothing, WorkspaceTreeController] =
     for
       riskTreeService      <- ZIO.service[RiskTreeService]
       changedNodesService  <- ZIO.service[ChangedNodesService]
@@ -152,4 +157,5 @@ object WorkspaceTreeController:
       workspaceStore       <- ZIO.service[WorkspaceStore]
       authzService         <- ZIO.service[AuthorizationService]
       userCtx              <- ZIO.service[UserContextExtractor]
-    yield WorkspaceTreeController(riskTreeService, changedNodesService, treeHistoryService, workspaceStore, authzService, userCtx)
+      tracing              <- ZIO.service[Tracing]
+    yield WorkspaceTreeController(riskTreeService, changedNodesService, treeHistoryService, workspaceStore, authzService, userCtx, tracing)

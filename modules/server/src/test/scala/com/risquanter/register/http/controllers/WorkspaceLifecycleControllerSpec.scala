@@ -16,7 +16,7 @@ import com.risquanter.register.auth.{
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash, Revision}
-import com.risquanter.register.domain.errors.TreeLoadFailure
+import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -25,7 +25,7 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, Content
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
-import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
+import com.risquanter.register.telemetry.TelemetryLive
 
 /** Unit tests for [[WorkspaceLifecycleController]] bootstrap endpoint (Wave 6).
   *
@@ -58,19 +58,20 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
     private def branchOf(rev: Revision): Option[BranchRef] = rev match
       case Revision.Head(b) => Some(b)
       case Revision.At(_)   => None
-    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): Task[RiskTree] =
-      com.risquanter.register.util.IdGenerators.nextTreeId.map { id =>
+    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
+      com.risquanter.register.util.IdGenerators.nextTreeId.orDie.map { id =>
         val tree = RiskTree.fromNodesUnsafe(id, t.name, t.nodes, t.rootId, Some(t.seedVarHighWater), t.mitigations); db += ((wsId, branch, id) -> tree); tree
       }
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] =
-      ZIO.attempt { val t = db((wsId, branch, id)); val u = op(t); db += ((wsId, branch, id) -> u); u }
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] =
-      ZIO.attempt { val t = db((wsId, branch, id)); db -= ((wsId, branch, id)); t }
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+    // A missing key is a test that did not seed what it reads, so it dies.
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
+      ZIO.attempt { val t = db((wsId, branch, id)); val u = op(t); db += ((wsId, branch, id) -> u); u }.orDie
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] =
+      ZIO.attempt { val t = db((wsId, branch, id)); db -= ((wsId, branch, id)); t }.orDie
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(branchOf(rev).flatMap(b => db.get((wsId, b, id))).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
       ZIO.succeed(branchOf(rev) match
         case Some(b) => db.collect { case ((wid, bb, _), t) if wid == wsId && bb == b => Right(t) }.toList
         case None    => Nil)
@@ -90,8 +91,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         ZLayer.succeed(stubRepo),
         TestConfigs.simulationLayer,
         TestConfigs.workspaceLayer,
-        TestConfigs.telemetryLayer >>> TracingLive.console,
-        TestConfigs.telemetryLayer >>> MetricsLive.console,
+        TestConfigs.telemetryLayer >>> TelemetryLive.configured,
         RiskTreeServiceLive.layer,
         ContentCacheRegistry.layer,
         CachedResultResolverLive.layer,

@@ -5,9 +5,9 @@ import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.errors.TreeLoadFailure
+import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.* // For .assert extension method
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeId, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
 import io.github.iltotore.iron.*
@@ -20,8 +20,10 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 object RiskTreeControllerSpec extends ZIOSpecDefault {
   private given Checked[Permission] = TestChecked.value
 
-  // Service accessor pattern
-  private def service[A](f: RiskTreeService => ZIO[Any, Throwable, A]): ZIO[RiskTreeService, Throwable, A] =
+  // Service accessor pattern. The error type is `AppError` rather than
+  // `Throwable` because that is what the service declares; a helper widened to
+  // `Throwable` would hide which failures a call can actually produce.
+  private def service[A](f: RiskTreeService => IO[AppError, A]): ZIO[RiskTreeService, AppError, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   // Stub repository factory - creates fresh instance per test
@@ -30,33 +32,38 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   private def makeStubRepo() = new RiskTreeRepository {
     private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
     
-    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] =
-      IdGenerators.nextTreeId.map { nextId =>
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
+      // Identifier generation fails only on a broken platform, which is a
+      // defect rather than an outcome a caller can act on — the same treatment
+      // the service gives it.
+      IdGenerators.nextTreeId.orDie.map { nextId =>
         val newRiskTree = RiskTree.fromNodesUnsafe(nextId, riskTree.name, riskTree.nodes, riskTree.rootId, Some(riskTree.seedVarHighWater), riskTree.mitigations)
         db += ((wsId, nextId) -> newRiskTree)
         newRiskTree
       }
 
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
+    // A missing key here is a test that did not seed what it reads, which is a
+    // defect in the test rather than a failure the service should handle.
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       val updated = op(riskTree)
       db += ((wsId, id) -> updated)
       updated
-    }
+    }.orDie
 
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       db -= ((wsId, id))
       riskTree
-    }
+    }.orDie
 
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(db.get((wsId, id)).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
 
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
       ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
   }
 
@@ -70,8 +77,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
-      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
-      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
     )
   }
 

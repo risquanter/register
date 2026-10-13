@@ -26,7 +26,7 @@ final class TreeHistoryState(
   val history: Var[LoadState[TreeHistoryResponse]] = Var(LoadState.Idle)
 
   private val historyTrigger =
-    new EventBus[Option[() => EventStream[Either[Throwable, TreeHistoryResponse]]]]
+    new EventBus[Option[() => EventStream[Either[RequestFailure, TreeHistoryResponse]]]]
 
   // Idempotency guard: callers fire on every tick of a combined signal, and
   // `Var.set` doesn't dedupe by value — an unguarded write would rebuild the
