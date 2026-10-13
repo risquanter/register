@@ -90,7 +90,7 @@ All configuration is driven by environment variables. The key variables with the
 | `REGISTER_AUTH_MODE` | `capability-only` | Authorization layer: `capability-only`, `identity`, or `fine-grained` |
 | `REGISTER_DEFAULT_NTRIALS` | `10000` | Monte Carlo trial count |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace absolute expiry (`.env.irmin` sets `120h`; `0` disables) |
-| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry (`.env.irmin` sets `120h`; `0` disables) |
+| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `24h` | Workspace idle expiry (`.env.irmin` sets `120h`; `0` disables) |
 | `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated allowed origins |
 
 For a full listing of all supported variables see [DOCKER-DEVELOPMENT.md](DOCKER-DEVELOPMENT.md).

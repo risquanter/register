@@ -12,6 +12,29 @@ paths:
   reference or reduce scroll distance.
 - No unused imports. No wildcard imports that widen implicit scope unexpectedly.
 
+## Named constants and closed sets (ADR-037)
+
+- A value that is one of a fixed set is a case of an `enum`, declared in the
+  companion of the type that owns it. Its JSON codec is derived; `@jsonHint`
+  carries the external spelling only where it differs from the case name, and
+  `@jsonDiscriminator` names the tag field.
+- A hand-written string mapping survives only where the string is a contract with
+  something other than the JSON encoder — a query-language keyword, an external
+  protocol, a value another system matches exactly. Where it exists only to be
+  the serialised spelling of a case, the derived codec replaces it.
+- A single constant is a named value in the companion of the type that owns it,
+  carrying a note that says where the value came from. A user-facing sentence is
+  a named template, and a template taking a parameter is a function of it, so the
+  sentence cannot drift from the values it interpolates.
+- `Option[T] = None` as a default parameter is forbidden. The `Option` stays and
+  the default goes, so a caller with nothing to pass writes `None` at the call
+  site, where it is visible. A derived decoder still reads an absent JSON key as
+  `None`, so this does not make a serialised field required.
+
+Cleaning up existing violations is the `boyscout` skill's obligation on a file
+already being edited for another reason, and is never itself a reason to open a
+file.
+
 ## Functor / ADT discipline
 
 If you are writing a match that threads non-success cases unchanged:

@@ -249,7 +249,7 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_SEED4` | `0` | HDR histogram seed 4 (0 = random, ADR-003) |
 | `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated). `localhost:18080` (nginx) is intentionally absent — in that mode the browser only talks to nginx; API calls are proxied server-side so the browser never issues a cross-origin request to port 8090. |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace time-to-live |
-| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
+| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `24h` | Workspace idle expiry |
 | `REGISTER_WORKSPACE_REAPER_INTERVAL` | `5m` | How often the reaper runs |
 | `REGISTER_WORKSPACE_MAX_TREES` | `10` | Max risk trees per workspace. A create beyond it is refused with a 400 before the tree is written |
 | `OTEL_SERVICE_NAME` | `risk-register` | OpenTelemetry service name |
