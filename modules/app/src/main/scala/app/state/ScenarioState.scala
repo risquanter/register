@@ -3,8 +3,8 @@ package app.state
 import zio.ZIO
 import com.raquo.laminar.api.L.{*, given}
 
+import app.core.LocalProblem
 import app.core.ZJS.*
-import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
@@ -85,7 +85,7 @@ final class ScenarioState(
   ): Unit =
     keySignal.now() match
       case None =>
-        submitState.set(ScenarioSubmitState.Failed("Cannot create a scenario — no active workspace"))
+        submitState.set(ScenarioSubmitState.Failed(LocalProblem.NoActiveWorkspace))
       case Some(key) =>
         submitState.set(ScenarioSubmitState.Submitting)
         // forkOf None = fork from main's head; Some(n) = fork from scenario n's
@@ -99,7 +99,7 @@ final class ScenarioState(
             listState.refresh()
             switchTo(BranchChoice.Scenario(response.name))
           })
-          .tapError(f => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(ErrorMessages.requestFailed(f)))))
+          .tapError(f => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(f))))
           .runJs
 
   /** Delete a scenario via its CAS precondition (DD-5 Option A). Fetches the

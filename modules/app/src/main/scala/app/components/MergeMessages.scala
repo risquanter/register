@@ -1,5 +1,7 @@
 package app.components
 
+import app.core.ViewFailure
+import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId}
 import com.risquanter.register.http.responses.MergeConflictEntry
 
@@ -30,8 +32,12 @@ object MergeMessages:
     "Merging is blocked until both branches agree on these paths — edit the node " +
     "on either branch to match the other, then re-check."
 
-  def previewFailed(message: String): String =
-    s"Conflict check failed: $message"
+  /** The conflict check did not produce an answer. The reason is composed from
+    * the failure itself, so this sentence names what the modal was doing and
+    * borrows the wording for why it stopped.
+    */
+  def previewFailed(failure: ViewFailure): String =
+    s"Conflict check failed: ${ErrorMessages.viewFailed(failure)}"
 
   def conflictsHeading(paths: List[MergeConflictEntry]): String =
     val noun = if paths.size == 1 then "path" else "paths"

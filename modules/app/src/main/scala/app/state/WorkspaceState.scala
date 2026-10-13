@@ -9,8 +9,7 @@ import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 
 import app.core.ZJS.*
-import app.core.RequestFailure
-import app.views.ErrorMessages
+import app.core.{RequestFailure, ViewFailure}
 import com.risquanter.register.http.errors.WireError
 
 /** Central workspace lifecycle state — deferred bootstrap pattern.
@@ -122,12 +121,14 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     *
     * @param request    The tree definition from the builder form
     * @param onSuccess  Callback with the created tree (drives TreeViewState)
-    * @param onError    Callback with error message (drives SubmitState.Failed)
+    * @param onError    Callback with why the request failed (drives
+    *                   `SubmitState.Failed`), so the caller's view composes
+    *                   the sentence where it renders it
     */
   def bootstrap(
     request: RiskTreeDefinitionRequest,
     onSuccess: SimulationResponse => Unit,
-    onError: String => Unit
+    onError: ViewFailure => Unit
   ): Unit =
     bootstrapWorkspaceEndpoint((currentUserId, None, request))
       .tap { response =>
@@ -137,5 +138,5 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
           onSuccess(response.tree)
         }
       }
-      .tapError(f => zio.ZIO.succeed(onError(ErrorMessages.requestFailed(f))))
+      .tapError(f => zio.ZIO.succeed(onError(f)))
       .runJs

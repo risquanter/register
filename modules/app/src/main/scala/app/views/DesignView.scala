@@ -142,7 +142,7 @@ object DesignView:
                 // whatever is still safely reflected in the builder.
                 treeViewState.selectedTreeId.set(previousId)
                 revertBranch()
-        case LoadState.Failed("Tree not found") =>
+        case LoadState.Absent =>
           handleTreeUnavailableOnBranch()
         case _ => ()
       },

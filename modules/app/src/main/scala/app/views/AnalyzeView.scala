@@ -196,8 +196,8 @@ object AnalyzeView:
                 val comparandSides = visibleComparands.map(pi => (pi, slotInputs(pi)))
                 val curvesToCheck =
                   (if baselineHidden then Vector.empty else Vector(thisCurves)) ++ comparandSides.map(_._2.curves)
-                curvesToCheck.collectFirst { case LoadState.Failed(msg) => msg } match
-                  case Some(msg) => LoadState.Failed(msg)
+                curvesToCheck.collectFirst { case LoadState.Failed(failure) => failure } match
+                  case Some(failure) => LoadState.Failed(failure)
                   case None =>
                     val sides = baselineSide.toVector ++ comparandSides.map { (pi, input) =>
                       val branchName = input.target.toCoordinate.map(c => BranchBar.branchDisplayName(c.branch)).getOrElse("")
@@ -291,7 +291,7 @@ object AnalyzeView:
       // DesignView's handling of the same event, this never needs to confirm
       // first — Analyze has no in-progress draft that this could discard.
       treeViewState.selectedTree.signal.changes
-        .collect { case LoadState.Failed("Tree not found") => () } --> { _ =>
+        .collect { case LoadState.Absent => () } --> { _ =>
           treeViewState.selectedTreeId.set(None)
         },
       // Auto-LEC: fire curve fetch on any change to either node set

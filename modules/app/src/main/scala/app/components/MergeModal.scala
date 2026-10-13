@@ -3,6 +3,7 @@ package app.components
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{LoadState, MergeSubmitState, ScenarioMergeState}
+import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.ScenarioName
 import com.risquanter.register.http.responses.{MergePreviewResponse, MergePreviewStatus}
 
@@ -45,8 +46,9 @@ object MergeModal:
         div(cls := "merge-modal-title", s"Merge '⎇ ${name.value}' into main"),
         div(cls := "merge-modal-body", child <-- state.preview.signal.map(renderPreview(state, _))),
         child.maybe <-- state.submit.signal.map {
-          case MergeSubmitState.Failed(msg) => Some(div(cls := "merge-modal-error", msg))
-          case _                            => None
+          case MergeSubmitState.Failed(failure) =>
+            Some(div(cls := "merge-modal-error", ErrorMessages.viewFailed(failure)))
+          case _ => None
         },
         div(
           cls := "merge-modal-actions",
@@ -66,11 +68,18 @@ object MergeModal:
     preview match
       case LoadState.Idle | LoadState.Loading =>
         div(cls := "merge-modal-status", MergeMessages.Checking)
-      case LoadState.Failed(msg) =>
+      case LoadState.Failed(failure) =>
         div(
-          div(cls := "merge-modal-error", MergeMessages.previewFailed(msg)),
+          div(cls := "merge-modal-error", MergeMessages.previewFailed(failure)),
           recheckButton(state)
         )
+      // The preview endpoint either answers with a response or fails, and
+      // `loadInto` has no arm that produces `Absent`, so this state cannot be
+      // reached from here. It offers the re-check rather than a status line,
+      // because a state that is unreachable today must not strand the modal if
+      // that ever changes.
+      case LoadState.Absent =>
+        div(recheckButton(state))
       // The preview status is a closed set, so every outcome has its own arm
       // and there is no wildcard rendering an unrecognised status as an empty
       // conflict list.

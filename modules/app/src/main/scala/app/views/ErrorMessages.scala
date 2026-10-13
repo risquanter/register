@@ -1,7 +1,7 @@
 package app.views
 
 import java.time.Duration
-import app.core.RequestFailure
+import app.core.{LocalProblem, RequestFailure, ViewFailure}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.ScenarioName
 import com.risquanter.register.domain.errors.MergeRefusal
@@ -57,16 +57,33 @@ object ErrorMessages:
     "The request did not reach the server. Nothing was changed. " +
     "Check your connection and try again."
 
+  /** Shown when an action needs a workspace and the browser holds no key.
+    *
+    * One sentence covers every such action, because the condition and the
+    * remedy are the same whichever action hit it: there is no workspace, and
+    * creating a tree starts one.
+    */
+  val NoActiveWorkspace: String =
+    "There is no active workspace, so this cannot be saved. " +
+    "Creating a tree will start one."
+
   // ── The sentence for a whole failure, whatever kind it is ──
 
-  /** The sentence for any failed request.
+  /** The sentence for anything that leaves a view with nothing to show.
     *
-    * This is what an inline view error displays, and it is the same text the
-    * banner shows for the same failure, because both read the functions below.
+    * This is what an inline view error displays. For a failure the server
+    * answered with, it is the same text the banner shows, because both read
+    * the functions below.
+    *
+    * The match is on the two kinds of answer rather than on a status or a
+    * message, so a view renders a failure it never had to compose, and a new
+    * case is a compile error here until it has a sentence.
     */
-  def requestFailed(failure: RequestFailure): String = failure match
-    case RequestFailure.Wire(error)      => wire(error)
-    case RequestFailure.Transport(_)     => TransportFailed
+  def viewFailed(failure: ViewFailure): String = failure match
+    case RequestFailure.Wire(error)       => wire(error)
+    case RequestFailure.Transport(_)      => TransportFailed
+    case LocalProblem.FormInvalid(errors) => errors.map(_.message).mkString("; ")
+    case LocalProblem.NoActiveWorkspace   => NoActiveWorkspace
 
   /** The sentence for each case the server can answer with.
     *

@@ -3,8 +3,8 @@ package app.state
 import zio.ZIO
 import com.raquo.laminar.api.L.{*, given}
 
+import app.core.ViewFailure
 import app.core.ZJS.*
-import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.responses.MergePreviewResponse
@@ -17,7 +17,7 @@ enum MergeSubmitState:
   case Idle
   case Submitting
   case Merged
-  case Failed(message: String)
+  case Failed(failure: ViewFailure)
 
 /** State for the "Merge into main…" modal (Design view).
   *
@@ -72,6 +72,6 @@ final class ScenarioMergeState(
             submit.set(MergeSubmitState.Merged)
             onMerged()
           })
-          .tapError(f => ZIO.succeed(submit.set(MergeSubmitState.Failed(ErrorMessages.requestFailed(f)))))
+          .tapError(f => ZIO.succeed(submit.set(MergeSubmitState.Failed(f))))
           .runJs
       case _ => ()

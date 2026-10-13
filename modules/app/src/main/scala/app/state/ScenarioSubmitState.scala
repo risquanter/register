@@ -1,5 +1,6 @@
 package app.state
 
+import app.core.ViewFailure
 import com.risquanter.register.http.responses.ScenarioResponse
 
 /** Submission lifecycle ADT for scenario creation (BranchBar, milestone-2b
@@ -13,4 +14,4 @@ enum ScenarioSubmitState:
   case Idle
   case Submitting
   case Success(response: ScenarioResponse)
-  case Failed(message: String)
+  case Failed(failure: ViewFailure)

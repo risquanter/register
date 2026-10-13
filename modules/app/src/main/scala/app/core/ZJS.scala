@@ -8,7 +8,6 @@ import sttp.tapir.Endpoint
 
 import app.state.LoadState
 import app.state.SubmitState
-import app.views.ErrorMessages
 import com.risquanter.register.http.errors.WireError
 
 /** ZIO-JS bridge: extension methods for running ZIO effects in the Laminar/browser environment.
@@ -111,7 +110,7 @@ object ZJS:
   def settleLoad[A](failure: RequestFailure): LoadState[A] = failure match
     case RequestFailure.Wire(WireError.WorkspaceExpired(_, _, _, _)) => LoadState.Idle
     case RequestFailure.Wire(WireError.NotFound(_))                  => LoadState.Idle
-    case other                                                       => LoadState.Failed(ErrorMessages.requestFailed(other))
+    case other                                                       => LoadState.Failed(other)
 
   // ---------------------------------------------------------------------------
   // Extensions on ZIO[BackendClient, E, A]
@@ -244,11 +243,14 @@ object ZJS:
     )
 
   /** `loadStatePipeline` for requests returning `Option[A]`: `Some` loads,
-    * `None` fails with `noneMessage`, error routing as `loadStatePipeline`.
+    * `None` is `Absent`, error routing as `loadStatePipeline`.
+    *
+    * A `None` here is a request that succeeded and found nothing, which is not
+    * a failure and carries no reason, so it needs no sentence and the target
+    * renders a placeholder for it.
     */
   def loadOptionStatePipeline[A](
-    triggers: EventStream[Option[() => EventStream[Either[RequestFailure, Option[A]]]]],
-    noneMessage: String
+    triggers: EventStream[Option[() => EventStream[Either[RequestFailure, Option[A]]]]]
   ): EventStream[LoadState[A]] =
     requestPipeline[Either[RequestFailure, Option[A]], LoadState[A]](
       triggers,
@@ -256,7 +258,7 @@ object ZJS:
       loading = LoadState.Loading,
       settle  = {
         case Right(Some(a)) => LoadState.Loaded(a)
-        case Right(None)    => LoadState.Failed(noneMessage)
+        case Right(None)    => LoadState.Absent
         case Left(f)        => settleLoad(f)
       }
     )
@@ -279,7 +281,7 @@ object ZJS:
       forkProvided {
         zio
           .tap(a => ZIO.succeed(onSuccess(a)))
-          .tapError(f => ZIO.succeed(target.set(SubmitState.Failed(ErrorMessages.requestFailed(f)))))
+          .tapError(f => ZIO.succeed(target.set(SubmitState.Failed(f))))
       }
 
   // ---------------------------------------------------------------------------

@@ -148,10 +148,9 @@ object TreeDetailView:
         // The previously selected tree doesn't exist on the newly chosen branch
         // (e.g. it only exists on a sibling scenario) — not a real error, just
         // nothing valid to show. Same placeholder as "nothing selected yet"
-        // rather than an error banner (mirrors DesignView's own pattern-match
-        // on this literal message for the same event).
-        case LoadState.Failed("Tree not found") => renderPlaceholder("Select a tree to view its structure.")
-        case LoadState.Failed(msg) => renderError(msg)
+        // rather than an error banner.
+        case LoadState.Absent      => renderPlaceholder("Select a tree to view its structure.")
+        case LoadState.Failed(failure) => renderError(ErrorMessages.viewFailed(failure))
         case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, lockedNow.signal, lockedNoticeVisible)
       }
     )

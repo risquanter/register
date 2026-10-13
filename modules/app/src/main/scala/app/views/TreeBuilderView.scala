@@ -6,6 +6,7 @@ import zio.prelude.Validation
 import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState, DistributionChartState, ScenarioState}
 import app.components.FormInputs
 import app.components.ConfirmGuard.proceedOrConfirm
+import app.core.LocalProblem
 import app.core.ZJS.*
 import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
 import com.risquanter.register.http.responses.SimulationResponse
@@ -16,7 +17,8 @@ import com.risquanter.register.http.responses.SimulationResponse
  *
  * Submission uses the `submitInto` ZJS extension (see `ZJS.scala`),
  * which drives a `Var[SubmitState]` through its lifecycle:
- * Submitting → Success (via callback) or Failed(msg).
+ * Submitting → Success (via callback) or Failed, carrying why it failed.
+ * The sentence for a failure is composed here, where it is rendered.
  */
 object TreeBuilderView extends WorkspaceLifecycleEndpoints
   with WorkspaceTreeEndpoints:
@@ -57,7 +59,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
         treeViewState.selectTree(response.id)
 
     def validationFailed(errors: zio.NonEmptyChunk[com.risquanter.register.domain.errors.ValidationError]): Unit =
-      submitState.set(SubmitState.Failed(errors.map(_.message).toList.mkString("; ")))
+      submitState.set(SubmitState.Failed(LocalProblem.FormInvalid(errors.toList)))
 
     // `toRequest`/`toUpdateRequest` only ever read `portfoliosVar`/`leavesVar` —
     // a leaf or portfolio currently open mid-add/mid-edit (isEditDirtyVar) was
@@ -77,7 +79,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
           case Some(treeId) =>
             wsState.currentKey match
               case None =>
-                submitState.set(SubmitState.Failed("Cannot update — no active workspace"))
+                submitState.set(SubmitState.Failed(LocalProblem.NoActiveWorkspace))
               case Some(key) =>
                 state.toUpdateRequest() match
                   case Validation.Success(_, request) =>
@@ -93,7 +95,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
                     createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess(wasCreate = true))
                   case None =>
                     submitState.set(SubmitState.Submitting)
-                    wsState.bootstrap(request, onSuccess(wasCreate = true), msg => submitState.set(SubmitState.Failed(msg)))
+                    wsState.bootstrap(request, onSuccess(wasCreate = true), failure => submitState.set(SubmitState.Failed(failure)))
               case Validation.Failure(_, errors) => validationFailed(errors)
       }
 
@@ -160,8 +162,8 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
           Some(div(cls := "submit-feedback submit-success",
             s"""Tree "${r.name}" saved with ID: ${r.id.value}"""
           ))
-        case (SubmitState.Failed(msg), _) =>
-          Some(div(cls := "submit-feedback submit-error", msg))
+        case (SubmitState.Failed(failure), _) =>
+          Some(div(cls := "submit-feedback submit-error", ErrorMessages.viewFailed(failure)))
       }
     )
 

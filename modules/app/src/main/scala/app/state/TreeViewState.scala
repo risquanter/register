@@ -124,7 +124,7 @@ final class TreeViewState(
 
   // Idempotency guard: `Var.set` doesn't dedupe by value, and consumers of
   // `selectedTree` recompute on every set; only write on a real change.
-  loadOptionStatePipeline(treeTrigger.events, "Tree not found").foreach { v =>
+  loadOptionStatePipeline(treeTrigger.events).foreach { v =>
     if selectedTree.now() != v then selectedTree.set(v)
   }(using unsafeWindowOwner)
 

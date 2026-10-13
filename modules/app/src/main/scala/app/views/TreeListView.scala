@@ -65,8 +65,12 @@ object TreeListView:
         case (LoadState.Loading, Some(prev)) if prev.nonEmpty =>
           renderSelector(prev, state, onRefreshExtra)
         case (LoadState.Loading, _) => renderPlaceholder("Loading trees…")
-        case (LoadState.Failed(msg), _) => renderError(msg, state)
+        case (LoadState.Failed(failure), _) => renderError(ErrorMessages.viewFailed(failure), state)
         case (LoadState.Idle, _) => renderPlaceholder("Waiting to load…")
+        // The tree list is a collection, so a successful read with nothing in
+        // it is an empty list rather than an absent one. `Absent` is therefore
+        // unreachable here, and it shares the empty list's placeholder.
+        case (LoadState.Absent, _) => renderPlaceholder("No saved trees yet.")
       }
 
     // ensureTreeListLoaded, not loadTreeList: both views' instances mount at

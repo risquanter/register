@@ -4,7 +4,9 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.FormInputs
+import app.core.LocalProblem
 import app.state.{ScenarioState, ScenarioSubmitState, LoadState}
+import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
@@ -258,7 +260,7 @@ object BranchBar:
   ): HtmlElement =
     def submit(): Unit =
       ScenarioName.fromString(nameInput.now()) match
-        case Left(errors) => createState.set(ScenarioSubmitState.Failed(errors.map(_.message).mkString("; ")))
+        case Left(errors) => createState.set(ScenarioSubmitState.Failed(LocalProblem.FormInvalid(errors)))
         case Right(name)  => scenarioState.create(name, forkOf, createState)
 
     div(
@@ -268,8 +270,8 @@ object BranchBar:
         labelText = "",
         valueVar = nameInput,
         errorSignal = createState.signal.map {
-          case ScenarioSubmitState.Failed(msg) => Some(msg)
-          case _                                => None
+          case ScenarioSubmitState.Failed(failure) => Some(ErrorMessages.viewFailed(failure))
+          case _                                   => None
         },
         filter = s => s.matches("^[a-zA-Z0-9 _-]*$"),
         placeholderText = "scenario-name"

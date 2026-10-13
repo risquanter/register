@@ -2,6 +2,7 @@ package app.state
 
 import zio.test.*
 
+import app.core.LocalProblem
 import com.risquanter.register.domain.data.iron.{NodeId, CommitHash}
 import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.http.responses.{TreeHistoryResponse, TreeHistoryEntry, HistoryOperation}
@@ -33,7 +34,7 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
       assertTrue(
         TreeHistoryState.deriveCommits(LoadState.Idle) == Nil,
         TreeHistoryState.deriveCommits(LoadState.Loading) == Nil,
-        TreeHistoryState.deriveCommits(LoadState.Failed("boom")) == Nil
+        TreeHistoryState.deriveCommits(LoadState.Failed(LocalProblem.NoActiveWorkspace)) == Nil
       )
     },
 
@@ -51,7 +52,7 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
       assertTrue(
         LECChartState.deriveDropped(Set(n1), LoadState.Idle) == Set.empty,
         LECChartState.deriveDropped(Set(n1), LoadState.Loading) == Set.empty,
-        LECChartState.deriveDropped(Set(n1), LoadState.Failed("x")) == Set.empty
+        LECChartState.deriveDropped(Set(n1), LoadState.Failed(LocalProblem.NoActiveWorkspace)) == Set.empty
       )
     }
   )

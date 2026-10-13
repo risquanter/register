@@ -2,6 +2,7 @@ package app.state
 
 import zio.test.*
 
+import app.core.LocalProblem
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.responses.{ChangedNodesResponse, NodeChangeEntry}
 
@@ -20,7 +21,7 @@ object ChangedNodesStateSpec extends ZIOSpecDefault:
       assertTrue(
         ChangedNodesState.deriveChangedNodeIds(LoadState.Idle) == Set.empty,
         ChangedNodesState.deriveChangedNodeIds(LoadState.Loading) == Set.empty,
-        ChangedNodesState.deriveChangedNodeIds(LoadState.Failed("boom")) == Set.empty
+        ChangedNodesState.deriveChangedNodeIds(LoadState.Failed(LocalProblem.NoActiveWorkspace)) == Set.empty
       )
     },
 

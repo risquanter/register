@@ -151,9 +151,13 @@ object DistributionChartView:
       case None =>
         specState match
           case LoadState.Loading     => renderLoading
-          case LoadState.Failed(msg) => renderError(msg)
+          case LoadState.Failed(f)   => renderError(ErrorMessages.viewFailed(f))
           case LoadState.Loaded(sp)  => renderChart(sp, onResult, onError)
-          case LoadState.Idle =>
+          // The preview spec is computed from the form's own parameters rather
+          // than fetched, so `Absent` cannot arise. It shares `Idle`'s message,
+          // which tells the user what to do rather than showing a spinner that
+          // would never resolve.
+          case LoadState.Idle | LoadState.Absent =>
             val reason =
               if !previewEnabled then PreviewIdleReason.PreviewDisabled
               else                    PreviewIdleReason.ParametersIncomplete
