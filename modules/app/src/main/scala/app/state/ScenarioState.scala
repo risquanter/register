@@ -10,8 +10,8 @@ import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
-/** Per-view active-branch selection (milestone-2b Phase B — BranchBar,
-  * DD-5/DD-8/DD-9). Design and Analyze each construct their own instance —
+/** Per-view active-branch selection, used by `BranchBar`. Design and Analyze
+  * each construct their own instance —
   * "which branch is this view's own context" is exactly the part that must
   * differ between them.
   *
@@ -102,7 +102,7 @@ final class ScenarioState(
           .tapError(f => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(f))))
           .runJs
 
-  /** Delete a scenario via its CAS precondition (DD-5 Option A). Fetches the
+  /** Delete a scenario via its compare-and-set precondition. Fetches the
     * head fresh right before deleting — rather than trusting the shared
     * list's last loaded value — so a delete clicked immediately after
     * `create()` (before that create's own refresh has resolved) still finds

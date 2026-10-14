@@ -49,7 +49,6 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
   /** Current user identity for API calls.
     * Layer 0 (capability-only): always None — x-user-id header absent.
     * Layer 1+ (Task L1.3): replace with AuthState.currentUserId signal.
-    * @see AUTHORIZATION-PLAN.md Wave 1
     */
   def currentUserId: Option[UserId.Authenticated] = None
 
@@ -78,9 +77,8 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     * On failure: clears the stale key, resets URL, signals WorkspaceExpired
     * via the provided callback (Scenario 3 — blue info banner).
     *
-    * The call site (this method) provides the contextual differentiation:
-    * we KNOW this is a pre-validation check, so failure means expired workspace,
-    * not a generic mid-session 404.
+    * This is a pre-validation check, and it names both outcomes it can see:
+    * an expired workspace and a key that no longer resolves.
     *
     * @param onTreesLoaded   Callback with tree list on success (populates TreeViewState)
     * @param onExpired        Callback to signal workspace expiry (sets GlobalError.WorkspaceExpired)

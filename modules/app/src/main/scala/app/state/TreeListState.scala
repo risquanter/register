@@ -16,8 +16,8 @@ import com.risquanter.register.http.responses.{ScenarioSummaryResponse, Simulati
   * the one list Analyze is also reading — the stale-Analyze-list bug this
   * class exists to close.
   *
-  * Keyed by `BranchChoice` (the single internal branch spelling, TODO item
-  * 22): each branch's list has its own entry and its own request pipeline,
+  * Keyed by `BranchChoice`, the single internal branch spelling: each
+  * branch's list has its own entry and its own request pipeline,
   * so a fetch for one branch can never overwrite another branch's list, and
   * a newer fetch for the same branch supersedes the older one
   * (`ZJS.loadStatePipeline` per branch — same shape as `ScenarioListState`).

@@ -112,7 +112,6 @@ final class AnalyzeQueryState(
     * Cleared on every new query execution. Infra-level errors (500, network)
     * bypass this channel and route to `GlobalError` / `ErrorBanner` instead.
     *
-    * @see Plan v2 §2.5 — Error Routing table
     */
   val queryServerError: Var[Option[String]] = Var(None)
 
@@ -225,7 +224,7 @@ final class AnalyzeQueryState(
     * `queryInput` text. Result lifecycle tracked in `queryResult`.
     * No-op if no workspace or tree is selected.
     *
-    * Error routing (ADR-010 / Plan v2 §2.5):
+    * Error routing (ADR-010):
     *   - 400 domain errors (parse/symbol/bind) → `queryServerError` (inline)
     *   - 5xx / network / other → `GlobalError` → `ErrorBanner`
     */

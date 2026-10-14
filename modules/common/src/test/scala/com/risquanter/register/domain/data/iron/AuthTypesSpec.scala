@@ -7,7 +7,7 @@ import zio.json.*
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
 import com.risquanter.register.domain.errors.{AppError, AuthError, AuthForbidden, AuthServiceUnavailable}
 
-/** Tests for Wave 0 auth identity types.
+/** Tests for the auth identity types.
   *
   * NOTE ON `.value` USAGE: UserId is a final class with no `unapply`, no public raw field,
   * and a redacted `toString` — by design (PII classification, ADR-022 pattern).

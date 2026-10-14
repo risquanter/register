@@ -49,5 +49,5 @@ object MergeMessages:
   def duplicateNames(perTree: Map[TreeId, List[SafeName.SafeName]]): String =
     perTree.toList
       .sortBy((treeId, _) => treeId.value)
-      .map((_, names) => names.map(_.value.toString).sorted.mkString(", "))
+      .map((_, names) => names.map(_.value).sorted.mkString(", "))
       .mkString("; ")

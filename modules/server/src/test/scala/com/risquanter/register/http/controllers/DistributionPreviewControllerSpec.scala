@@ -30,7 +30,6 @@ import com.risquanter.register.telemetry.TelemetryLive
   *   - [[UserContextExtractor.requirePresent]] → present, valid header returns 200
   *
   * @see DistributionPreviewController — wiring and authorization commentary
-  * @see PLAN-PREVIEW-PUBLIC-ENDPOINT.md — Test coverage requirements table
   */
 object DistributionPreviewControllerSpec extends ZIOSpecDefault:
 

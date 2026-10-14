@@ -5,7 +5,7 @@ import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported}
 
-/** `ScenarioService` for the in-memory backend (milestone-2b Phase B item 6).
+/** `ScenarioService` for the in-memory backend.
   *
   * The in-memory `RiskTreeRepository` has no Irmin, so no branches exist to
   * create/list/delete. Every method fails with `ScenariosNotSupported` (501) —

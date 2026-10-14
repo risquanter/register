@@ -5,7 +5,7 @@ import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported, ScenarioHeadStale}
 
-/** What a new scenario forks from (DD-5, amended 2026-07-20). A create always
+/** What a new scenario forks from. A create always
   * forks from exactly one source — main, or another scenario's current head —
   * never from nothing, so this is a mandatory two-case selector, not an
   * `Option[ScenarioName]`: `None` would have no distinct meaning from `Main`.
@@ -15,8 +15,7 @@ import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported, S
   * this answers "what does a new scenario fork from". Reusing one type for
   * two distinct meanings would be the reverse of the ADR-018 principle
   * (semantically distinct concepts sharing an encoding get distinct nominal
-  * types). Kept separate by decision, 2026-07-23 (BranchChoice consolidation
-  * sweep).
+  * types).
   */
 enum ScenarioSource:
   case Main
@@ -24,18 +23,18 @@ enum ScenarioSource:
   case AtCommit(commit: CommitHash)
 
 /** One scenario as returned by `list`. `head` is the branch's current commit,
-  * needed by the caller to satisfy `delete`'s CAS precondition (DD-5 Option A,
-  * locked 2026-07-20): the caller holds the head it observed here and passes
+  * needed by the caller to satisfy `delete`'s compare-and-set precondition:
+  * the caller holds the head it observed here and passes
   * it back to `delete`, preserving optimistic concurrency across the whole
   * list -> look -> delete interaction, not just the instant of the delete call.
   */
 final case class ScenarioSummary(name: ScenarioName.ScenarioName, head: CommitHash)
 
-/** Scenario lifecycle on top of Irmin branches (milestone-2b Phase B, DD-5/DD-11).
+/** Scenario lifecycle on top of Irmin branches.
   *
   * No `rename`: `createBranchAt` and `deleteBranch` are each individually atomic
-  * via CAS, but nothing makes the pair atomic together (2026-07-20 amendment to
-  * DD-5). The UI composes a rename as two independently-scoped calls: `create`
+  * via compare-and-set, but nothing makes the pair atomic together. The
+  * interface composes a rename as two independently-scoped calls: `create`
   * (duplicate under the new name) then `delete` (remove the old one).
   *
   * Every method takes `wsId` explicitly so workspace scoping is visible and
@@ -43,35 +42,36 @@ final case class ScenarioSummary(name: ScenarioName.ScenarioName, head: CommitHa
   */
 trait ScenarioService:
 
-  /** Create a scenario by forking `source`'s current head (DD-5, A9 fact 3 —
-    * an explicit fork is required; a bare first write starts a branch EMPTY,
-    * not as a copy of anything).
+  /** Create a scenario by forking `source`'s current head. An explicit fork is
+    * required: a bare first write starts a branch empty, not as a copy of
+    * anything.
     *
     * @param wsId Workspace that owns the scenario
     * @param name User-supplied scenario name (already validated `ScenarioName`)
     * @param source What to fork from — main, an existing scenario, or a
     *               specific commit (fork-from-history). Required; no default.
     * @return The new scenario's branch reference
-    * @see BranchAlreadyExists translated to `DataConflict` — name collision (CAS).
-    *      `BranchHeadStale` cannot occur here: `createBranchAt`'s CAS only
-    *      guards the new branch's name, never the source's staleness — forking
-    *      is by commit hash, immune to the source changing mid-fork (A9).
+    * @see BranchAlreadyExists translated to `DataConflict` — a name collision.
+    *      `BranchHeadStale` cannot occur here: the compare-and-set on
+    *      `createBranchAt` guards the new branch's name, never the source's
+    *      staleness — forking is by commit hash, so it is immune to the source
+    *      changing mid-fork.
     */
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
     (using Checked[Permission]): IO[AppError, BranchRef]
 
-  /** List a workspace's scenarios (DD-11: ownership = branch-name prefix filter).
-    * Never includes `main` — main is not a scenario (DD-5/DD-9 §0).
+  /** List a workspace's scenarios, where ownership is a branch-name prefix
+    * filter. Never includes `main` — main is not a scenario.
     */
   def list(wsId: WorkspaceId)(using Checked[Permission]): IO[AppError, List[ScenarioSummary]]
 
-  /** Delete a scenario via CAS (DD-5, A9 fact 2). Only removes the branch
-    * pointer — commits remain reachable by hash (A9 fact 5); forks survive.
+  /** Delete a scenario via compare-and-set. Only removes the branch
+    * pointer — commits remain reachable by hash, so forks survive.
     *
     * @param expectedHead The head the caller last observed (from `list`) —
-    *                     required, not resolved internally, so the CAS guards
-    *                     the caller's whole interaction, not just this call
-    *                     (DD-5 Option A, locked 2026-07-20)
+    *                     required, not resolved internally, so the
+    *                     compare-and-set guards the caller's whole
+    *                     interaction, not just this call
     * @see BranchHeadStale translated to `ScenarioHeadStale` — concurrent modification
     */
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)

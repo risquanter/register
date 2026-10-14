@@ -146,7 +146,9 @@ final class WorkspaceStoreLive private (
     yield ()
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op.
-    * Same non-atomic resolve + update pattern as addTree (see justification above).
+    * Resolves and then updates in two steps, unlike `addTree`, which enforces
+    * the tree ceiling in one `Ref.modify`; a removal has no ceiling to enforce,
+    * so it needs no single atomic step.
     */
   override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for

@@ -11,7 +11,7 @@ import com.risquanter.register.http.responses.MergeConflictEntry
   * know which case it is and the values that go with it. Free text could carry
   * an internal path or a repository message, and a case drawn from a closed set
   * cannot (ADR-035). The same value serves the server's log line, which renders
-  * it through `MergeConflict.getMessage`.
+  * it through `MergeConflict.logMessage`.
   */
 @jsonDiscriminator("kind")
 enum MergeRefusal:
@@ -53,7 +53,7 @@ object MergeRefusal:
     case DuplicateNames(perTree) =>
       "duplicate node name(s) — " + perTree.toList
         .sortBy((treeId, _) => treeId.value)
-        .map((treeId, names) => s"tree ${treeId.value}: ${names.map(_.value.toString).sorted.mkString(", ")}")
+        .map((treeId, names) => s"tree ${treeId.value}: ${names.map(_.value).sorted.mkString(", ")}")
         .mkString("; ")
     case InvariantBroken(trees) =>
       s"the merged state breaks a tree invariant in ${trees.size} tree(s) " +

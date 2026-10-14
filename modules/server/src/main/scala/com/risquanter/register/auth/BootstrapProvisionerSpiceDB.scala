@@ -47,7 +47,6 @@ private given JsonEncoder[SpiceDbWriteRequest] = DeriveJsonEncoder.gen
   * denial), which fails the enclosing bootstrap request.
   *
   * @see ADR-024 §7 — resource lifecycle write clarification
-  * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md §D — BootstrapProvisioner design
   */
 final class BootstrapProvisionerSpiceDB private (
   config:  SpiceDbConfig,
@@ -108,7 +107,7 @@ final class BootstrapProvisionerSpiceDB private (
       }
 
   // user.value — explicit PII opt-in; ownership writes are audit-relevant
-  // (same designated audit context as authz.check — AUTHORIZATION-PLAN §L2.2).
+  // (the same designated audit context as authz.check).
   private def logWriteResult(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId,

@@ -7,18 +7,18 @@ import com.risquanter.register.domain.errors.{AppError, DataConflict, ScenarioHe
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminBranch
 
-/** Irmin-backed `ScenarioService` (milestone-2b Phase B, DD-5/DD-11).
+/** Irmin-backed `ScenarioService`.
   *
-  * Branch shape: `scenarios.<workspaceId-lowercased-ulid>.<name-slug>` (DD-5).
+  * Branch shape: `scenarios.<workspaceId-lowercased-ulid>.<name-slug>`.
   * `WorkspaceId`/`ScenarioName` are already Iron-refined at this point (validate
   * once at the boundary), so composing them into a `BranchRef` can never fail —
   * a failure there is an invariant violation (`ZIO.die`), not a domain error.
   *
-  * CAS errors from `IrminClient` are translated into domain `SimError`s here,
-  * not left to reach HTTP as raw `IrminError`s (see `ErrorResponse.encodeIrminError`'s
-  * "safety net" comment — `BranchAlreadyExists`/`BranchHeadStale` reaching that
-  * point means this translation was skipped). Reuses `DataConflict`/`VersionConflict`
-  * rather than new types, mirroring the DD-10 `MergeConflict` reuse decision.
+  * Compare-and-set errors from `IrminClient` are translated into domain errors
+  * here rather than left to reach the wire as raw `IrminError`s, so a
+  * `BranchAlreadyExists` or `BranchHeadStale` arriving at the projection means
+  * this translation was skipped. Reuses `DataConflict`/`VersionConflict` rather
+  * than introducing new types.
   */
 final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
@@ -107,12 +107,12 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                        case Some(c) => ZIO.succeed(c)
                        case None =>
                          ZIO.die(new IllegalStateException(
-                           s"scenario branch ${branch.toBranchRef} has no head — violates DD-5/A9 fact 3 (creation always forks at a commit)"
+                           s"scenario branch ${branch.toBranchRef} has no head — creation always forks at a commit"
                          ))
       hash        <- refineCommitHash(commit.hash)
     yield ScenarioSummary(name, hash)
 
-  // ── naming (DD-5/DD-11) ──────────────────────────────────────────────────
+  // ── naming ───────────────────────────────────────────────────────────────
 
   /** The scenario name a listed store branch carries, or `None` when the branch
     * is main, belongs to another workspace, or was not composed by

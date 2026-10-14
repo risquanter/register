@@ -38,7 +38,7 @@ final case class Expiry(cause: ExpiryCause, at: Instant)
   * `seedEntityId` is the workspace's stochastic identity: the HDR generator's
   * Entity axis, shared by every simulation in this workspace. Assigned from the
   * store's monotonic counter (or provided at creation), globally unique per
-  * deployment, immutable (PLAN-SEED-IDENTITY §5.2). Never derived from the ULID.
+  * deployment, and immutable once assigned. Never derived from the ULID.
   */
 final case class WorkspaceRecord(
   id: WorkspaceId,

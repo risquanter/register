@@ -301,8 +301,8 @@ object TreeDetailView:
 
   // ── Extracted view helpers (F3a: named functions for inline lambdas) ──
 
-  /** ✎ marker for a node the active Compare diff reports as changed
-    * (milestone-2b Phase C) — Identical/unchanged nodes render nothing. */
+  /** ✎ marker for a node the active Compare diff reports as changed.
+    * Identical and unchanged nodes render nothing. */
   private def renderChangedMarker(changed: Boolean): Option[HtmlElement] =
     if changed then
       Some(span(cls := "node-changed-marker", title := "Changed vs. compared branch", "✎"))

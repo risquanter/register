@@ -41,8 +41,8 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
 
 object TreeHistoryService:
   /** In-memory backend variant: there is no persistent commit log, so history
-    * is always empty (DD-9 — history UI is disabled on the in-memory backend
-    * anyway). A read with no data, not an error, unlike scenario operations. */
+    * is always empty, and the history interface is disabled on that backend
+    * anyway. A read with no data, not an error, unlike scenario operations. */
   val empty: TreeHistoryService = new TreeHistoryService:
     def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
       (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]] =

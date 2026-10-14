@@ -176,8 +176,7 @@ object IronTapirCodecs {
   )(_.value)
 
   /** Codec for CommitHash as the `If-Match` header value on `deleteScenario`
-    * (DD-5 CAS precondition, transport locked 2026-07-20 — see
-    * milestone-2b-cache-and-decisions.md DD-8 note). RFC 7232 renders
+    * as its compare-and-set precondition. RFC 7232 renders
     * `If-Match` as a quoted string (`"<hash>"`); this codec strips the
     * quotes on decode and re-adds them on encode, so the same definition
     * works both server-side (decode) and in the generated sttp client
@@ -266,8 +265,7 @@ object IronTapirCodecs {
 
   /** Codec for SeedEntityId (Long in [1, 100000000)) — the workspace's HDR
     * Entity-axis seed. Used as an optional query parameter on workspace
-    * bootstrap so exports can be re-imported with the same entity
-    * (PLAN-SEED-IDENTITY §7, §8 round-trip).
+    * bootstrap so exports can be re-imported with the same entity.
     */
   given Codec[String, SeedEntityId.SeedEntityId, CodecFormat.TextPlain] =
     Codec.long.mapDecode[SeedEntityId.SeedEntityId](raw =>

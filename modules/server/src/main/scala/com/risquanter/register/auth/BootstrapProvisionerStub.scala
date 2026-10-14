@@ -13,7 +13,6 @@ import com.risquanter.register.domain.errors.{AuthError, AuthServiceUnavailable}
   * Use `BootstrapProvisionerStub.make` for the happy-path recording variant.
   * Use `BootstrapProvisionerStub.makeFailing` to test `recordOwnership` failure propagation.
   *
-  * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md §Wave 6 — test requirements
   */
 final class BootstrapProvisionerStub private (
   callsRef:   Ref[List[(UserId.Authenticated, WorkspaceId)]],

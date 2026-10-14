@@ -65,7 +65,6 @@ private given JsonDecoder[SpiceDbLookupResponseLine] = DeriveJsonDecoder.gen
   * Only `check()` and `listAccessible()` are implemented. This service
   * never writes authorization data — it is a pure Policy Enforcement Point.
   *
-  * @see AUTHORIZATION-PLAN.md — Task L2.2
   * @see ADR-024: Externalized Authorization / PEP Pattern
   */
 final class AuthorizationServiceSpiceDB private (
@@ -99,10 +98,17 @@ final class AuthorizationServiceSpiceDB private (
     tracing.span("spicedb.check", SpanKind.CLIENT) {
       for
         // No userId in trace attributes — avoid PII in trace backends that
-        // may not be access-controlled (AUTHORIZATION-PLAN.md §L2.2 Traces).
+        // may not be access-controlled.
         _         <- tracing.setAttribute("permission",    permission.zedName)
         _         <- tracing.setAttribute("resource_type", resource.resourceType.zedType)
-        _         <- tracing.setAttribute("resource_id",   resource.resourceId.value)
+        // Only a tree's identifier is recorded. A workspace, organization or
+        // team identifier is a confidential internal identifier and must not
+        // reach an exported span attribute (ADR-036).
+        _         <- resource.resourceType match
+                       case ResourceType.RiskTree =>
+                         tracing.setAttribute("resource_id", resource.resourceId.value)
+                       case ResourceType.Workspace | ResourceType.Organization | ResourceType.Team =>
+                         ZIO.unit
         startMs   <- Clock.currentTime(TimeUnit.MILLISECONDS)
         outcome   <- sendCheckRequest(user, permission, resource).either
         endMs     <- Clock.currentTime(TimeUnit.MILLISECONDS)
@@ -161,8 +167,8 @@ final class AuthorizationServiceSpiceDB private (
 
   // ─── listAccessible() ─────────────────────────────────────────────────────
 
-  // Intentionally uninstrumented: AUTHORIZATION-PLAN §L2.2 Observability scopes
-  // telemetry (span, authz.check.* metrics, audit log) to check() only — the
+  // Intentionally uninstrumented: telemetry (span, authz.check.* metrics,
+  // audit log) is scoped to check() only — the
   // per-request allow/deny enforcement decision. listAccessible is a listing
   // convenience whose result is shown to the user; failures surface as
   // AuthServiceUnavailable and are visible in ordinary request logs/traces.
@@ -256,7 +262,6 @@ final class AuthorizationServiceSpiceDB private (
       case Left(e: AuthServiceUnavailable)  => s"error reason=${e.reason}"
     // user.value — explicit PII opt-in; this is the designated audit log context.
     // user.toString would produce UserId(***) — PII is redacted for general logs.
-    // @see AUTHORIZATION-PLAN.md §L2.2 Observability
     ZIO.logInfo(
       s"authz.check user=${user.value} " +
       s"permission=${permission.zedName} " +
@@ -281,7 +286,6 @@ object AuthorizationServiceSpiceDB:
     * Provides deterministic control over SpiceDB HTTP responses without a live
     * SpiceDB instance.
     *
-    * @see AUTH-TESTING-PLAN.md §W3: T-U1 through T-U7
     */
   val layer: ZLayer[SpiceDbConfig & SttpBackend[Task, Any] & Tracing & Meter, Throwable, AuthorizationService] =
     ZLayer {

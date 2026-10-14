@@ -103,7 +103,7 @@ object Application extends ZIOAppDefault {
             ZIO.logInfo("repository.type=irmin; scenarios enabled") *>
               ZIO.scoped(irminScenarioServiceLayer.build.map(_.get[ScenarioService]))
           case RepositoryType.InMemory =>
-            ZIO.logInfo("repository.type=in-memory; scenarios disabled (ScenarioServiceNotSupported, item 6)") *>
+            ZIO.logInfo("repository.type=in-memory; scenarios disabled (ScenarioServiceNotSupported)") *>
               ZIO.succeed(ScenarioServiceNotSupported: ScenarioService)
         }
       } yield svc

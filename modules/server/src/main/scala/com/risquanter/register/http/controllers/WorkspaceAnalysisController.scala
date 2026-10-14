@@ -22,10 +22,9 @@ import com.risquanter.register.services.workspace.WorkspaceStore
   *    `userId` because it is immediately consumed by the Layer 2 check.
   *  - Layer 2: `authzService.check(userId, Permission.AnalyzeRun, ResourceRef(RiskTree, treeId))`
   *    calls are present in this controller, but the SpiceDB backend is not yet
-  *    deployed (Phase K). Currently resolved by [[AuthorizationServiceNoOp]]
-  *    (always-permit). Full enforcement activates when Phase K infra is provisioned.
+  *    deployed. Currently resolved by [[AuthorizationServiceNoOp]], which
+  *    always permits; full enforcement activates once SpiceDB is provisioned.
   *
-  * @see AUTHORIZATION-PLAN.md — Layered Model
   * @see ADR-024 — Application as Pure PEP
   */
 class WorkspaceAnalysisController private (

@@ -54,8 +54,8 @@ trait BaseEndpoint {
     *
     * All workspace-scoped endpoints under /w/{key}/... use this base.
     * Controllers extract the effective UserId via UserContextExtractor:
-    *   - Wave 1: noOp → always returns anonymous sentinel, NoOp.check() always passes
-    *   - Wave 2+: requirePresent → fails closed if header is absent
+    *   - `noOp` returns the anonymous sentinel, and `NoOp.check()` always passes
+    *   - `requirePresent` fails closed if the header is absent
     *
     * @see ADR-012: Claim Header Injection
     */

@@ -114,7 +114,7 @@ object Main:
         // startup call just returned.
         treeListState.seedMain(trees),
       onExpired = () =>
-        globalError.set(Some(GlobalError.WorkspaceExpired(ErrorMessages.WorkspaceExpiredOnStartup)))
+        globalError.set(Some(GlobalError.WorkspaceExpired(ErrorMessages.WorkspaceUnavailableOnStartup)))
     )
 
     // ── Navigation state ────────────────────────────────────────

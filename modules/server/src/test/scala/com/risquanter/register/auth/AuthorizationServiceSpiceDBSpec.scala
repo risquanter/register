@@ -18,8 +18,6 @@ import com.risquanter.register.telemetry.TelemetryLive
   * No live SpiceDB required. Uses SttpBackendStub to simulate SpiceDB HTTP
   * responses in isolation — tests the response-mapping logic only.
   *
-  * @see AUTH-TESTING-PLAN.md §W3 — Wave 3 prerequisite unit tests
-  * @see AUTHORIZATION-PLAN.md §L2.2 — SpiceDB HTTP API mapping table
   */
 object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
 
@@ -133,8 +131,8 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
 
     test("T-U6 — OTel counter and histogram record on every check() call without errors") {
       // Verifies that the OTel instrumentation does not throw or abort the effect.
-      // Exact counter values require an InMemoryMetricReader (integration test scope).
-      // See AUTH-TESTING-PLAN §W3 T-U6 for the full assertion at integration level.
+      // Exact counter values require an InMemoryMetricReader, which is
+      // integration-test scope; the full assertion lives there.
       for
         _ <- ZIO.serviceWithZIO[AuthorizationService](
                _.check(alice, Permission.ViewWorkspace, ws1Ref)

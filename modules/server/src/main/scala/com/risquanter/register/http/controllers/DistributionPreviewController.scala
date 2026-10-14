@@ -29,7 +29,6 @@ import com.risquanter.register.services.DistributionPreviewService
   * Only the component holding the connection knows the caller; the application
   * implements no per-address limit on any endpoint (ADR-021 §4).
   *
-  * @see AUTHORIZATION-PLAN.md -- Layered Model
   * @see ADR-024 -- Application as Pure PEP
   */
 class DistributionPreviewController private (

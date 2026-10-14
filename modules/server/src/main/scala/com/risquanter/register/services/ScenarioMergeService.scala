@@ -83,7 +83,7 @@ enum MergePreviewResult:
   case DuplicateNames(perTree: Map[TreeId, List[SafeName.SafeName]])
   case ScenarioMissing
 
-/** Scenario → main merge (DD-10).
+/** Scenario → main merge.
   *
   * Conflict handling is two-layered. The byte-level pre-check enumerates the
   * conflicting paths (Irmin's conflict error names no paths) and lets both
@@ -281,7 +281,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * (base = main head).
     *
     * With several LCAs (criss-cross histories) the first is used; scenario
-    * branches fork linearly from a single commit (DD-5), so multiple LCAs do
+    * branches fork linearly from a single commit, so multiple LCAs do
     * not arise through this application's own writes.
     */
   private def scan(wsId: WorkspaceId, branch: BranchRef, scenarioHead: CommitHash): IO[AppError, MergeScan] =
@@ -296,7 +296,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                            case None =>
                              ZIO.die(new IllegalStateException(
                                s"no common ancestor between main and ${branch.toBranchRef} — " +
-                               "violates DD-5 (scenarios always fork from an existing commit)"
+                               "a scenario always forks from an existing commit"
                              ))
           comparisons <- if base == scenarioHead || base == mainHead then ZIO.succeed(Nil)
                          else comparePaths(wsId, branch, base)

@@ -39,12 +39,14 @@ object ErrorMessages:
   val StaleVersion: String =
     "This was edited elsewhere since you loaded it. Reload to see the current version."
 
-  /** Shown when startup pre-validation finds the stored workspace expired or
-    * gone. The lifetime-aware `workspaceExpired` needs the server's durations,
-    * which that path does not carry.
+  /** Shown when startup pre-validation finds the stored workspace gone. It
+    * names no cause, because that path cannot tell an expired workspace from a
+    * key that no longer resolves: both answer identically so that neither is an
+    * existence oracle (ADR-035 §3). The cause-naming `workspaceExpired` is used
+    * where the server's durations are carried.
     */
-  val WorkspaceExpiredOnStartup: String =
-    "Your previous workspace has expired and its data is no longer available. " +
+  val WorkspaceUnavailableOnStartup: String =
+    "Your previous workspace is no longer available. " +
     "Creating a new tree will start a fresh workspace."
 
   /** Shown when the request never reached the server.
@@ -113,15 +115,22 @@ object ErrorMessages:
   def workspaceExpired(cause: ExpiryCause, lifetime: Duration, idleLimit: Duration): String =
     val reason = cause match
       case ExpiryCause.Inactivity =>
-        s"It was not used for ${hours(idleLimit)}, which is the limit."
+        s"It was not used for ${limitText(idleLimit)}, which is the limit."
       case ExpiryCause.Lifetime =>
-        s"It reached its ${hours(lifetime)} limit, which no amount of use extends."
+        s"It reached its ${limitText(lifetime)} limit, which no amount of use extends."
     s"Your workspace has expired. $reason Its data is no longer available, " +
     "and creating a new tree will start a fresh workspace."
 
-  private def hours(d: Duration): String =
-    val h = d.toHours
-    if h == 1 then "1 hour" else s"$h hours"
+  /** A configured limit as a sentence fragment. Rendered in minutes below one
+    * hour: both limits are operator-configured to any duration, and reading
+    * the hour count alone would render a sub-hour limit as "0 hours".
+    */
+  private def limitText(d: Duration): String =
+    (d.toMinutes, d.toHours) match
+      case (1, _)           => "1 minute"
+      case (m, _) if m < 60 => s"$m minutes"
+      case (_, 1)           => "1 hour"
+      case (_, h)           => s"$h hours"
 
   def capabilityUnavailable(capability: Capability): String = capability match
     case Capability.Scenarios =>
@@ -168,7 +177,7 @@ object ErrorMessages:
       "Edit either side so they agree, then merge again."
 
     case MergeRefusal.DuplicateNames(perTree) =>
-      val names = perTree.values.flatten.map(_.value.toString).toList.sorted
+      val names = perTree.values.flatten.map(_.value).toList.sorted
       s"Merging ${scenario.value} would leave a repeated node name in one tree (${names.mkString(", ")}). " +
       "Rename one of them, then merge again."
 

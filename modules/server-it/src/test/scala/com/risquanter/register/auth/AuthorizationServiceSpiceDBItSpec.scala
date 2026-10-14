@@ -23,8 +23,6 @@ import com.risquanter.register.auth.ResourceRef.asResource
   *
   * Run: sbt "serverIt/testOnly *AuthorizationServiceSpiceDBItSpec"
   *
-  * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md §SpiceDB Adapter Integration Tests
-  * @see AUTH-PHASES.md Phase 3
   */
 object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
 

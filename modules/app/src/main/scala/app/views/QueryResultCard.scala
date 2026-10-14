@@ -13,7 +13,7 @@ import com.risquanter.register.http.responses.QueryResponse
   * States: Idle, Loading, Loaded (Failed renders as emptyNode safety-net).
   *
   * Accepts a node-lookup signal for resolving node names in the
-  * matching-nodes list (Plan v2 §1.3.3, Work Stream A).
+  * matching-nodes list.
   *
   * Pure derived view — owns no state (ADR-019 Pattern 4).
   */

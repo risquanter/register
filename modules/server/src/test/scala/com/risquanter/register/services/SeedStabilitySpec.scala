@@ -13,8 +13,7 @@ import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
-/** Layer 4 of the seed-identity test plan (PLAN-SEED-IDENTITY §11):
-  * reproducibility integration at the **figure** level. Where
+/** Seed-identity reproducibility at the **figure** level. Where
   * `RiskTreeServiceLiveSpec` proves that recreation yields the same *seed
   * IDs*, this spec proves the property those IDs exist for: the simulated
   * outcomes themselves are stable under recreation and rename, respond to

@@ -26,7 +26,7 @@ import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.safeId
 
-/** System-level reproducibility integration (PLAN-SEED-IDENTITY §11):
+/** System-level reproducibility integration:
   *
   *   1. persist → "restart" → re-simulate → identical figures: the same Irmin
   *      store is read back through a completely fresh server stack (new repo,

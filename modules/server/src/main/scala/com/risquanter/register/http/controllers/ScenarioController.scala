@@ -13,15 +13,14 @@ import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergeConflictPath, MergePreviewResult}
 import com.risquanter.register.services.workspace.WorkspaceStore
 
-/** Scenario lifecycle controller (milestone-2b Phase B, DD-5).
+/** Scenario lifecycle controller.
   *
   * Owns workspace-scoped scenario create/list/delete. No dedicated
-  * `ResourceType` for a scenario — DD-11 makes ownership a prefix convention
+  * `ResourceType` for a scenario — ownership is a prefix convention
   * on the branch name, not a separate authorization resource, so every
   * operation checks against the workspace resource, mirroring
   * `WorkspaceLifecycleController`'s tree create/list/delete.
   *
-  * @see AUTHORIZATION-PLAN.md — Layered Model
   * @see ADR-024 — Application as Pure PEP
   */
 class ScenarioController private (

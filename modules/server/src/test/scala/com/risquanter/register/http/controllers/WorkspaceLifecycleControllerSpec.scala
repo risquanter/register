@@ -27,7 +27,7 @@ import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
 import com.risquanter.register.telemetry.TelemetryLive
 
-/** Unit tests for [[WorkspaceLifecycleController]] bootstrap endpoint (Wave 6).
+/** Unit tests for [[WorkspaceLifecycleController]]'s bootstrap endpoint.
   *
   * Verifies that:
   *  - [[BootstrapProvisionerStub]] records one `recordOwnership` call after successful bootstrap
@@ -36,7 +36,6 @@ import com.risquanter.register.telemetry.TelemetryLive
   *  - Bootstrap succeeds in capability-only mode (noOp extractor, NoOp provisioner)
   *  - Absent `x-user-id` header in identity/fine-grained mode is rejected with 403
   *
-  * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md §Wave 6 — Updated tests
   */
 object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
 
@@ -165,7 +164,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
 
   // ── Spec ─────────────────────────────────────────────────────────────────────
 
-  override def spec = suite("WorkspaceLifecycleController — bootstrapWorkspace (Wave 6)")(
+  override def spec = suite("WorkspaceLifecycleController — bootstrapWorkspace")(
 
     test("capability-only mode: bootstrap succeeds without x-user-id header") {
       for

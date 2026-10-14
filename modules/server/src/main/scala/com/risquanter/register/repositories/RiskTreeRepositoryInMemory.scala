@@ -61,27 +61,36 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
 
   override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
     requireMain(branch) {
-      val key = (wsId, id)
-      db.get(key) match
-        case None           => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
-        case Some(riskTree) =>
-          val updated = op(riskTree)
-          ZIO.succeed {
-            db += (key -> updated)
-            updated
-          }
+      // Suspended, so the lookup and `op` run when the effect runs rather than
+      // when it is constructed; a throwing `op` is then this effect's defect
+      // and not the caller's.
+      ZIO.suspendSucceed {
+        val key = (wsId, id)
+        db.get(key) match
+          case None           => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
+          case Some(riskTree) =>
+            val updated = op(riskTree)
+            ZIO.succeed {
+              db += (key -> updated)
+              updated
+            }
+      }
     }
 
   override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] =
     requireMain(branch) {
-      val key = (wsId, id)
-      db.get(key) match
-        case None           => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
-        case Some(riskTree) =>
-          ZIO.succeed {
-            db -= key
-            riskTree
-          }
+      // Suspended for the same reason as `update`: the lookup belongs to the
+      // effect's execution, not to its construction.
+      ZIO.suspendSucceed {
+        val key = (wsId, id)
+        db.get(key) match
+          case None           => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
+          case Some(riskTree) =>
+            ZIO.succeed {
+              db -= key
+              riskTree
+            }
+      }
     }
 
   override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =

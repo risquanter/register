@@ -23,9 +23,10 @@ import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeReposit
 import com.risquanter.register.services.{MergeConflictPath, MergePreviewResult, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 
-/** HTTP-layer tests for [[ScenarioController]] (milestone-2b Phase B, item 4).
+/** HTTP-layer tests for [[ScenarioController]].
   *
-  * `ScenarioServiceLiveSpec` already covers the CAS/business-logic depth
+  * `ScenarioServiceLiveSpec` already covers the compare-and-set and
+  * business-logic depth
   * against a fake `IrminClient` — this spec exercises what's new at the HTTP
   * boundary instead: the `ScenarioName`/`CommitHash` Tapir codecs added for
   * this item, the `If-Match` CAS transport (RFC 7232 quoting), request/
@@ -140,7 +141,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         resp.code.code == 200,
         decoded.map(_.name) == Right(scenarioName("draft-v1")),
         // The composed branch string embeds the workspace's own ID
-        // (scenarios.<workspaceId>.<name>, DD-5) — asserting its total
+        // (scenarios.<workspaceId>.<name>) — asserting its total
         // absence from the wire body verifies the leak this redesign closes.
         !body.contains("branch")
       )
@@ -273,10 +274,10 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       yield assertTrue(resp.code.code == 400)
     },
 
-    test("create with a full branch-ref-style name (containing dots): 400 — DD-11 invariant, only a slug is ever accepted") {
+    test("create with a full branch-ref-style name (containing dots): 400 — only a slug is ever accepted") {
       for
         (backend, key) <- buildBackend()
-        // The `scenarios.<workspaceId>.<name>` composed ref (DD-5) is a server-side
+        // The `scenarios.<workspaceId>.<name>` composed ref is a server-side
         // derivation, never caller input — this posts exactly that shape as `name`
         // to confirm the Iron `ScenarioName` codec at the Tapir boundary rejects it
         // (dots aren't in `^[a-zA-Z0-9 _-]+$`) rather than passing it through to

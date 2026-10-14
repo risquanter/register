@@ -92,9 +92,8 @@ case class AccessDenied(reason: String) extends SimError:
   * product serialisation exists for it, and a `case class` holding one returns
   * all three for the wrapper (ADR-022 R1).
   *
-  * A parameterless `case class` rather than a `case object`, because this is a
-  * `Throwable` — a singleton would capture one stack trace when it initialises
-  * instead of one per failure.
+  * A parameterless `case class` rather than a `case object`, so that it stays
+  * uniform with the hierarchy's other payload-free cases.
   */
 case class WorkspaceNotFound() extends SimError {
   override def logMessage: String = "Workspace not found"
@@ -112,7 +111,7 @@ case class WorkspaceNotFound() extends SimError {
   * it is what makes a log line answer "how long ago" rather than only "how long
   * were they given".
   *
-  * `getMessage` names none of them, which ADR-035 §3 requires: a log line reads
+  * `logMessage` names none of them, which ADR-035 §3 requires: a log line reads
   * them as annotations, where they are queryable, rather than as text in a
   * sentence.
   */
@@ -129,7 +128,7 @@ case class WorkspaceExpired(
 /** A tree the resolved workspace does not hold.
   *
   * `wsId` is a diagnostic for the server's own logs. It stays out of
-  * `getMessage`, which may name no confidential internal identifier
+  * `logMessage`, which may name no confidential internal identifier
   * (ADR-035 §3), and out of every response (ADR-036). The tree identifier is
   * not confidential and is the useful part of the message.
   */
@@ -162,7 +161,7 @@ case class NetworkTimeout(operation: String, duration: ScalaDuration) extends Ir
   override def logMessage: String = s"Network timeout after ${duration.toMillis}ms during: $operation"
 }
 
-/** CAS branch-create rejected (Phase B, DD-5 / A9 fact 2): `test_and_set_branch`
+/** Compare-and-set branch-create rejected: `test_and_set_branch`
   * with `test: null` failed because the branch already has a head. Not a
   * transport failure — Irmin answered correctly, the precondition (branch must
   * not yet exist) just didn't hold. Framed in IrminClient's own vocabulary
@@ -180,7 +179,7 @@ case class BranchAlreadyExists(branch: StoreBranch) extends IrminError {
   override def logMessage: String = s"Branch already exists: ${branch.name}"
 }
 
-/** CAS branch-delete rejected (Phase B, DD-5 / A9 fact 2): `test_and_set_branch`
+/** Compare-and-set branch-delete rejected: `test_and_set_branch`
   * with `test: expectedHead` failed because the branch's actual head no longer
   * matches — concurrent modification since it was last read. Non-retriable
   * without re-reading the branch's current state first. Carries either branch
@@ -261,10 +260,11 @@ case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: Comm
 
 /** Scenarios are unavailable in this deployment (repository.type=in-memory has no
   * Irmin to hold branches). A deliberate, expected condition — not a server
-  * malfunction — so it gets its own type mapping to 501, not `RepositoryFailure`'s
-  * 500 (which also scrubs the reason from the client response, wrong here since the
-  * reason is exactly what the caller needs to act on it). `ScenarioServiceNotSupported`
-  * (milestone-2b Phase B item 6) fails every method with this.
+  * malfunction — so it gets its own type, which projects onto `NotSupported`
+  * and answers 501 rather than `RepositoryFailure`'s 500. The reason stays in
+  * the server's log: the wire case names the condition, and the browser
+  * composes what a user reads from that case. `ScenarioServiceNotSupported`
+  * fails every method with this.
   */
 case class ScenariosNotSupported(reason: String) extends SimError {
   override def logMessage: String = s"Scenarios not supported: $reason"
@@ -347,7 +347,7 @@ object FolQueryFailure:
     * Example: `"Q[>=]^{2/3 x (leaf(x))"` — missing closing brace after
     * the quantifier ratio produces `ParseError("Expected '}' ...", pos=14)`.
     *
-    * HTTP 400 — `PARSE_ERROR`.
+    * Projects onto `QueryRejected` with an `Unparseable` problem — HTTP 422.
     */
   final case class FolParseFailure(message: String, position: Option[Int])
     extends FolQueryFailure:
@@ -361,13 +361,13 @@ object FolQueryFailure:
     *
     * Carries the engine's rendered messages, one per unresolved reference, so a
     * query naming several missing nodes reports them all. Mirrors `FolBindFailure`
-    * so `ErrorResponse.decode` round-trips the list losslessly through the
-    * per-detail message slot.
+    * so the projection onto the wire carries the whole list rather than only
+    * the first entry.
     *
     * Example: `leaf_descendant_of(x, "NoSuchNode")` where `"NoSuchNode"` is
     * not a registered node name.
     *
-    * HTTP 400 — `UNKNOWN_REFERENCE`.
+    * Projects onto `QueryRejected` with `UnknownReferences` — HTTP 422.
     */
   final case class FolUnknownReference(messages: List[String])
     extends FolQueryFailure:
@@ -386,7 +386,7 @@ object FolQueryFailure:
     * over; only `DomainType` sorts like `Asset` have finite domains.
     * The bind phase rejects this with `TypeNotQuantifiable("Loss")`.
     *
-    * HTTP 400 — `BIND_FAILED`.
+    * Projects onto `QueryRejected` with `TypeCheckFailed` — HTTP 422.
     */
   final case class FolBindFailure(errors: List[String])
     extends FolQueryFailure:
@@ -406,7 +406,7 @@ object FolQueryFailure:
     * `functionSymbols` set. `FolModel(catalog, model)` validation
     * catches this before any query is evaluated.
     *
-    * HTTP 500 — `MODEL_VALIDATION_FAILED`.
+    * Projects onto `InternalFault`, which carries only a trace — HTTP 500.
     */
   final case class FolModelValidationFailure(errors: List[String])
     extends FolQueryFailure:
@@ -425,7 +425,7 @@ object FolQueryFailure:
     * would reach this error. In practice, `FolModel` validation catches
     * such gaps first.
     *
-    * HTTP 400 — `DOMAIN_NOT_QUANTIFIABLE`.
+    * Projects onto `QueryRejected` with `NotQuantifiable` — HTTP 422.
     */
   final case class FolDomainNotQuantifiable(message: String)
     extends FolQueryFailure:
@@ -442,7 +442,7 @@ object FolQueryFailure:
     * simulation data is corrupted, surfacing as
     * `EvaluationError("Division by zero", phase="function:p95")`.
     *
-    * HTTP 500 — `EVALUATION_FAILED`.
+    * Projects onto `InternalFault`, which carries only a trace — HTTP 500.
     */
   final case class FolEvaluationFailure(message: String, phase: String)
     extends FolQueryFailure:
@@ -456,7 +456,7 @@ object FolQueryFailure:
     * Example: POST `/w/{key}/risk-trees/{treeId}/query` before any
     * simulation has been triggered for `treeId`.
     *
-    * HTTP 409 — `SIMULATION_REQUIRED`.
+    * Projects onto `Conflict` with `SimulationRequired` — HTTP 409.
     */
   final case class SimulationNotCached(treeId: TreeId)
     extends FolQueryFailure:
@@ -467,7 +467,6 @@ object FolQueryFailure:
     * `FolQueryFailure` hierarchy. Used by both the controller (parse errors)
     * and the service layer (evaluation errors).
     *
-    * @see T2.3b mapping table in IMPLEMENTATION-PLAN-QUERY-PANE.md
     */
   def fromQueryError(err: vql.error.QueryError): FolQueryFailure =
     import vql.error.QueryError as QE

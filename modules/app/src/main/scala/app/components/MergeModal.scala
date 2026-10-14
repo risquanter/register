@@ -66,19 +66,19 @@ object MergeModal:
 
   private def renderPreview(state: ScenarioMergeState, preview: LoadState[MergePreviewResponse]): HtmlElement =
     preview match
-      case LoadState.Idle | LoadState.Loading =>
+      case LoadState.Loading =>
         div(cls := "merge-modal-status", MergeMessages.Checking)
       case LoadState.Failed(failure) =>
         div(
           div(cls := "merge-modal-error", MergeMessages.previewFailed(failure)),
           recheckButton(state)
         )
-      // The preview endpoint either answers with a response or fails, and
-      // `loadInto` has no arm that produces `Absent`, so this state cannot be
-      // reached from here. It offers the re-check rather than a status line,
-      // because a state that is unreachable today must not strand the modal if
-      // that ever changes.
-      case LoadState.Absent =>
+      // Neither state has a request in flight, so both offer the re-check
+      // rather than a progress sentence. `Idle` is where a settled request with
+      // no result lands — an expired workspace or an absent scenario — and
+      // `Absent` cannot arise from this endpoint today, but a state that is
+      // unreachable now must not strand the modal if that ever changes.
+      case LoadState.Idle | LoadState.Absent =>
         div(recheckButton(state))
       // The preview status is a closed set, so every outcome has its own arm
       // and there is no wildcard rendering an unrecognised status as an empty

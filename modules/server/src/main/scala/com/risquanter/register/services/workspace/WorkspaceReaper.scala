@@ -29,7 +29,7 @@ import com.risquanter.register.services.{CascadeDelete, RiskTreeService, Scenari
   * This mirrors `WorkspaceLifecycleController.deleteWorkspace`'s cascade pattern. Tree deletion
   * failures are ignored (best-effort) — a tree may already have been manually deleted.
   *
-  * Scenario branches (`scenarios.<wsId>.*`, milestone-2b Phase B) are cascade-deleted
+  * Scenario branches (`scenarios.<wsId>.*`) are cascade-deleted
   * the same way via `ScenarioService.cascadeDeleteScenarios` (best-effort, same
   * single source of truth reused by `WorkspaceLifecycleController.deleteWorkspace`
   * and `evictExpired`). Without this, an expired workspace's scenario branches
