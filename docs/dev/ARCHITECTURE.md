@@ -137,15 +137,17 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 
 **Key Design Points:**
 - Request DTOs use plain types (String, Double, Long)
-- Custom JSON decoders validate via smart constructors during deserialization  
+- Custom JSON decoders validate via smart constructors during deserialization
 - Private domain constructors enforce validation
-- Response DTOs use `fromDomain()` factories
+- A response is either a view of a domain aggregate or the outcome of an operation, and the two take different shapes: a view declares its wire shape privately in the aggregate's own companion, an outcome is a public sealed enum with a derived discriminated codec (ADR-038)
+- The projection onto the wire is owned by the source type, named `toWire`, and returns a typed value; `fromWire` is its total inverse (ADR-038)
 - Error accumulation collects all validation errors in one pass
 - Field paths use ID-based format (e.g., `"riskLeaf[id=cyber].probability"`)
 
-**Benefits over alternatives:**
-- API stability: Domain model changes don't break HTTP contracts
-- Validation guarantee: Impossible to bypass smart constructors
+**What the separation delivers:**
+- Typed end to end: the shared module is cross-compiled, so the browser decodes into the same refined types the server encoded from, and a range or character-set restriction JSON cannot carry is still known on both sides
+- Validation guarantee: a decoder routed through the smart constructor re-checks every invariant, so a decoded aggregate is as trustworthy as a constructed one — in the browser as well as on the server
+- Confidential identifiers cannot reach the wire by accident: the identifiers ADR-036 confines carry no serialiser, so a wire-facing type naming one fails to compile (ADR-038)
 - Better UX: Users see all errors at once, not fail-fast
 - Testability: Can test HTTP, validation, and business logic independently
 

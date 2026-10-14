@@ -153,17 +153,6 @@ object AuthTypesSpec extends ZIOSpecDefault:
           assertTrue(WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5F!!").isLeft)
         }
       ),
-      suite("JSON codecs")(
-        test("encodes to ULID string") {
-          val wsId = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
-          assertTrue(wsId.toJson == "\"01ARZ3NDEKTSV4RRFFQ69G5FAV\"")
-        },
-        test("round-trips through JSON") {
-          val wsId    = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
-          val decoded = wsId.toJson.fromJson[WorkspaceId]
-          assertTrue(decoded == Right(wsId))
-        }
-      ),
       suite("compiler distinction from TreeId")(
         test("WorkspaceId and TreeId with same raw value are not equal") {
           val wsId   = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get

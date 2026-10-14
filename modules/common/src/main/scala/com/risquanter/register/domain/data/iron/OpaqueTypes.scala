@@ -50,10 +50,10 @@ type ExternalTokenStr = String :| (Not[Blank] & MaxLength[2048] & PrintableAscii
 // against live local/irmin-prod:3.11, 2026-07-18: `/` and `~` are rejected
 // with HTTP 500; `.`, `_`, `-`, alphanumerics are accepted). Segments allow
 // only [a-z0-9_-], never `.`, so the two-segment split is unambiguous. The
-// ref is never a URL path segment (DD-8: header or session), so Irmin
-// validity is the only wire contract. Segment semantics: DD-5 (closed
-// 2026-07-18) — TWO segments after the prefix, `scenarios.<workspaceId-
-// lowercased-ulid>.<name-slug>`; the name segment is produced by ScenarioName
+// ref is never a URL path segment — it travels in a header or the session — so
+// Irmin validity is the only wire contract. There are TWO segments after the
+// prefix, `scenarios.<workspaceId-lowercased-ulid>.<name-slug>`; the name
+// segment is produced by ScenarioName
 // (below), which shares this exact segment shape by construction.
 type BranchRefConstraint =
   Not[Blank] & MaxLength[160] & Match["^(main|scenarios\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63})$"]
@@ -167,7 +167,7 @@ object PRNGCounter:
     def value: Long = counter
 
 // ============================================================================
-// Seed Identity Types (TODO item 12 / PLAN-SEED-IDENTITY.md)
+// Seed Identity Types
 // ============================================================================
 // Stochastic identity, deliberately separate from app identity (ULID):
 // assigned at the creation boundary, stored on the owning aggregate, immutable
@@ -219,7 +219,7 @@ object SeedVarId:
   def fromLong(v: Long): Either[List[ValidationError], SeedVarId] =
     ValidationUtil.refineSeedVarId(v)
 
-  /** The per-tree distinctness rule (PLAN-SEED-IDENTITY §5.1), defined once.
+  /** The per-tree distinctness rule, defined once.
     *
     * Both enforcement layers delegate here — the request boundary
     * (RiskTreeRequests, field "request.seedVarIds", pre-assignment 400) and the
@@ -505,12 +505,11 @@ object MergeStagingRef:
       .map(MergeStagingRef(_))
 
 /** Which branch a request or view targets — the single internal spelling of
-  * "main vs. a named scenario" on both sides of the wire (closes TODO item
-  * 22's duplicate-spelling gap: internally, main has exactly one
-  * representation).
+  * "main vs. a named scenario" on both sides of the wire, so internally main
+  * has exactly one representation.
   *
-  * The wire keeps DD-8's encoding (`X-Active-Branch` header, absent = main):
-  * `fromWire`/`toWire` convert exactly once at the Tapir boundary (see
+  * The wire encoding is the `X-Active-Branch` header, where an absent header
+  * means main: `fromWire`/`toWire` convert exactly once at the Tapir boundary (see
   * `ActiveBranchHeader`), so no state past the boundary carries a bare
   * `Option` whose `None` could mean either "main" or "nothing chosen".
   *
@@ -523,13 +522,13 @@ enum BranchChoice:
   case Main
   case Scenario(name: ScenarioName.ScenarioName)
 
-  /** DD-8 wire shape: absent = main. Use only at wire/codec boundaries. */
+  /** Wire shape: an absent value means main. Use only at wire/codec boundaries. */
   def toWire: Option[ScenarioName.ScenarioName] = this match
     case Main           => None
     case Scenario(name) => Some(name)
 
 object BranchChoice:
-  /** DD-8 wire shape: absent = main. Use only at wire/codec boundaries. */
+  /** Wire shape: an absent value means main. Use only at wire/codec boundaries. */
   def fromWire(wire: Option[ScenarioName.ScenarioName]): BranchChoice =
     wire.fold(Main)(Scenario(_))
 
@@ -549,7 +548,7 @@ object BranchChoice:
           .fromString(branch.toBranchRef.stripPrefix(BranchRef.scenarioPrefix(wsId)))
           .map(Scenario(_))
 
-  /** Explicit string wire shape (E7): "main" or a scenario slug — no
+  /** Explicit string wire shape: "main" or a scenario slug — no
     * absent-means-main state. Used by the required `X-Branch` header codec,
     * the changed-nodes branch query codec, and the scenario-source DTO body.
     */
@@ -562,7 +561,7 @@ object BranchChoice:
     case s      => ScenarioName.fromString(s).map(BranchChoice.Scenario(_)).left.map(_.mkString(", "))
   }
 
-// ScenarioName: user-supplied scenario name (DD-5, closed 2026-07-18). Two
+// ScenarioName: user-supplied scenario name. Two
 // stages: an input whitelist (letters/digits/space/hyphen/underscore only —
 // anything else is a 400 at the boundary, never silently stripped: "no lossy
 // slugification") folded to the exact shape of one BranchRef segment (letters
@@ -608,9 +607,9 @@ object ScenarioName:
   given JsonDecoder[ScenarioName] = JsonDecoder[String].mapOrFail(s =>
     fromString(s).left.map(_.mkString(", ")))
 
-// ContentHash: SHA-256 hex digest computed by the JVM (DD-14 → Option B).
+// ContentHash: SHA-256 hex digest computed by the JVM.
 // Keys the content-addressed ContentCache: leaf keys hash the LeafSimContent
-// projection (DD-16), portfolio index hashes are Merkle over sorted child
+// projection, portfolio index hashes are Merkle over sorted child
 // hashes. SHA-256 only ⇒ uniform 64 lowercase hex chars, pinned exactly.
 type ContentHashConstraint = Match["^[a-f0-9]{64}$"]
 type ContentHashStr = String :| ContentHashConstraint
@@ -828,7 +827,6 @@ type UuidStr = String :| UuidConstraint
 // Extraction is `.value` (not `.reveal`) — signals "not a secret, but explicit extraction required".
 //
 // @see ADR-012: Claim Header Injection — mesh-injected; app contains zero JWT code.
-// @see AUTHORIZATION-PLAN.md — UserId design rationale and PII classification.
 /* final class UserId private (private val raw: UuidStr):
   /** Extract the raw UUID string. Use only in SpiceDB calls, audit logs, and serialisation. */
   def value: String = raw
@@ -879,7 +877,6 @@ object UserId:
 // Why not WorkspaceKeySecret? The key is a mutable credential (rotatable), PII-adjacent,
 // and must never appear in SpiceDB audit logs. WorkspaceId is a stable, non-secret ULID
 // generated once at workspace creation and never changed (survives key rotation).
-// @see AUTHORIZATION-PLAN.md — WorkspaceId design rationale.
 case class WorkspaceId(toSafeId: SafeId.SafeId):
   /** Extract the canonical ULID string. */
   def value: String = toSafeId.value.toString
@@ -889,10 +886,9 @@ object WorkspaceId:
   def fromString(s: String): Either[List[ValidationError], WorkspaceId] =
     SafeId.fromString(s).map(WorkspaceId(_))
 
-  // JSON codecs (companion object placement ensures implicit scope)
-  given JsonEncoder[WorkspaceId] = JsonEncoder[String].contramap(_.value)
-  given JsonDecoder[WorkspaceId] = JsonDecoder[String].mapOrFail(s =>
-    WorkspaceId.fromString(s).left.map(_.mkString(", ")))
+  // No JSON codec, and no Tapir Schema: a confidential internal identifier is
+  // not serialisable, so a wire-facing type that names one fails to compile
+  // rather than relying on review to catch the field (ADR-036).
 
 // ============================================================================
 // Telemetry Correlation Identifiers (ADR-002, ADR-018)

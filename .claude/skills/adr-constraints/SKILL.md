@@ -34,12 +34,12 @@ Import placement and grouping (ADR-011) and named constants and closed sets (ADR
 **Always:** ADR-001 · ADR-018 · ADR-029 · ADR-037 · ADR-010
 Every type here is correct-by-construction or it is a defect, so the question is never *whether* these bear but *how*: how the value is constructed and where it is validated (ADR-001), whether it needs a nominal wrapper to be distinguishable from a type with the same encoding (ADR-018), what content domain a string-backed field may admit (ADR-029), whether any of its values is one of a fixed set (ADR-037), and what failure it can produce as a value (ADR-010).
 
-**Also:** ADR-022 if it wraps a secret · ADR-036 if it is, or embeds, a scoping identifier · ADR-003 if it carries seed identity · ADR-032 if it enters a hash projection · ADR-034 if it is a mitigation parameter.
+**Also:** ADR-022 if it wraps a secret · ADR-036 if it is, or embeds, a scoping identifier · ADR-038 if it crosses the wire, which decides where its wire shape is declared and whether it may have a serialiser at all · ADR-003 if it carries seed identity · ADR-032 if it enters a hash projection · ADR-034 if it is a mitigation parameter.
 
 ### Adding or changing an endpoint, a DTO, or anything else on the wire
 
-**Always:** ADR-017 · ADR-036 · ADR-035 · ADR-010 · ADR-001
-The wire is the one surface where a mistake is published: the request shape and its bounds (ADR-017), what may cross in either direction (ADR-036), what a failure may disclose (ADR-035), how a typed error becomes a status (ADR-010), and that validation happens in the codec rather than the handler (ADR-001).
+**Always:** ADR-017 · ADR-038 · ADR-036 · ADR-035 · ADR-010 · ADR-001
+The wire is the one surface where a mistake is published: the request shape and its bounds (ADR-017), the shape a response takes and which of the two kinds it is (ADR-038), what may cross in either direction (ADR-036), what a failure may disclose (ADR-035), how a typed error becomes a status (ADR-010), and that validation happens in the codec rather than the handler (ADR-001).
 
 **Also:** ADR-021 if the route is workspace-scoped · ADR-030 and ADR-024 if it reads or mutates protected data · ADR-029 if any field carries user text · ADR-025 and ADR-027 if a browser navigates to the path · ADR-004a if the response carries a branch.
 
@@ -74,7 +74,7 @@ The two folds and where a transform may be applied (ADR-034), why the cached val
 **Always:** ADR-019 · ADR-001 · ADR-033
 Component shape, who owns state, when a value is a derived signal versus a state machine, and which tier renders a failure (ADR-019); the validation reused from the shared module (ADR-001); and the one sanctioned catch-all at the JavaScript boundary (ADR-033).
 
-**Also:** ADR-025 if the browser URL is read or written · ADR-029 if user text is rendered · ADR-018 if an identifier is unwrapped for display · ADR-010 if a server failure is classified.
+**Also:** ADR-025 if the browser URL is read or written · ADR-029 if user text is rendered · ADR-018 if an identifier is unwrapped for display · ADR-038 if the component holds a decoded response, since what it may rely on is decided there · ADR-010 if a server failure is classified.
 
 ### Touching authorization or a capability boundary
 
@@ -164,6 +164,7 @@ Use this when you already know the topic or the record's name. It answers "where
 | ADR-035 | `ADR-035-error-leakage-prevention.md` | What may reach a client in an error: exhaustive encoding, the typed boundary, message discipline |
 | ADR-036 | `ADR-036-confidential-internal-identifiers.md` | Which identifiers may cross the client boundary, in which direction, and the substitutes for those that may not |
 | ADR-037 | `ADR-037-in-code-constants.md` | Constants and closed sets: enums in their owner's companion, declared versus derived spellings, forbidden defaults |
+| ADR-038 | `ADR-038-response-wire-shapes.md` | Response shapes: the two kinds of response and the shape each takes, no raw primitive where a refined type exists, no serialiser on a confidential identifier, `toWire` owned by the source |
 | ADR-INFRA-006 | `ADR-INFRA-006.md` | Database credential delivery. Binds `register-infra`'s deployment, not this repository's code |
 | — | `ADR-00X.md` | The authoring template for a new record. Not a decision record |
 
@@ -193,6 +194,9 @@ Read it as an index of collisions, not as a substitute for either record. Where 
 | ADR-036 × ADR-004a | Two branch-name types embed the `WorkspaceId` — `BranchRef` and `MergeStagingRef` — so neither may appear in a wire-facing type. The containment is by type: the branch primitives take the sealed `StoreBranch`, everything that reads or writes tree data is declared over `BranchRef` alone, and `BranchChoice.fromBranchRef` takes `BranchRef` rather than `StoreBranch`, so a staging branch is excluded by a signature rather than by a check. *Stated in ADR-036 §2.* |
 | ADR-034 × ADR-001 | The no-elimination rule has two enforcement points and ADR-001's validate-at-the-boundary rule accounts for only one. A type closes the cases the parameter decides alone; the cases the outcomes decide cannot be typed at all, because the same parameter is ordinary for one node and annihilating for another. A new transform is checked against the layer check, never assumed covered by a type. *Stated in ADR-034 §6.* |
 | ADR-018 × ADR-022 | The two wrapper patterns are deliberately opposed. ADR-018 wants transparent serialisation and pattern matching; a credential type exists to prevent both, which is why R1 forbids the `case class` ADR-018 prescribes. Applying ADR-018's pattern to a credential reintroduces `copy`, `unapply` and an unredacted `toString`. *Stated in ADR-022 §1.* |
+| ADR-038 × ADR-022 | ADR-038 §4 removes the serialiser from a confidential identifier, and ADR-022's credential keeps one. Reading §4 as "sensitive values are not serialisable" deletes the codec the capability key needs, and the bootstrap response stops compiling. The test is what the value is for: an internal scoping key must never cross, a bearer credential exists in order to cross. *Stated in ADR-038 §4.* |
+| ADR-038 × ADR-001 | ADR-038 §1 puts the wire shape **inside** the domain type's companion, which reads as abandoning the separation ADR-001 is cited for. It is what delivers it: the decoder routes through the smart constructor, so validation happens in the codec exactly as ADR-001 requires, and on both sides of the wire at once because the module is cross-compiled. A public parallel class would satisfy the letter and lose the invariants. |
+| ADR-038 × ADR-037 | ADR-037 §2 permits a declared spelling where the string contracts with something other than the serialiser, and that carve-out does **not** reach a server-sent event. An event is an operation outcome, so ADR-038 §2 governs it and the codec is derived; the hand-written `toWire` pair is non-conforming rather than a licensed exception. |
 | ADR-003 × ADR-032 | `seedVarId` is in the hashed projection and the node's name is not. That is what makes a rename free — it changes no figure and invalidates no cache entry — and it is also why a seed identifier must never be re-issued: two different risks sharing one would collide in the cache. *Stated in ADR-003 §2.* |
 
 A change that spans two rows of Layer 1 is where a new collision is likely. When one is found, write the reconciliation into both records and add a row here: the records carry the content, this table makes the collision findable.
