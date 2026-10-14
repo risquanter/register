@@ -2,10 +2,11 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All eleven decisions, `EWB-D-1` to `EWB-D-11`, are ruled and recorded
-in §10. Nothing blocks implementation on a decision. Approval is in place: the
-token names this document and the file inventory exists beside it. Phase 1 is
-under way.
+**Status.** All twenty-four decisions, `EWB-D-1` to `EWB-D-24`, are ruled and
+recorded in §10. Nothing blocks implementation on a decision. Approval is in
+place: the token names this document and the file inventory exists beside it.
+Phases 1, 1a and 1b have landed, and so has Phase 2's first item. What remains
+is Phase 2's second item, Phase 2b, and Phases 3 to 6.
 
 `EWB-D-10` produces a new accepted decision record and a standing cleanup rule
 whose text reaches beyond this plan; §10 states both and §12 lists the files.
@@ -563,6 +564,164 @@ common supertype of the two, and the site then does not compile. `EWB-D-14` is
 the narrowing that answers this, and `EWB-D-15` is what makes each widening
 visible rather than silent.
 
+### 5.3 The two failures that never reach a controller
+
+`wireEither` projects a failure a controller produced. Two failures are answered
+before a controller runs, or after one has already failed, so neither passes
+through the projection, and today neither produces a `WireError` at all. Both are
+closed here, because an error boundary a whole class of failure bypasses is not a
+boundary (`EWB-D-21`, `EWB-D-23`).
+
+**The output both of them emit is declared once.** The `InternalFault` variant's
+status and body become a single named value in `BaseEndpoint`, and the `oneOf`
+variant is built from it, so a catch-all cannot drift from the declaration the
+endpoints publish:
+
+```scala
+/** The `500` output: the status and the body `WireError.InternalFault` is sent
+  * with. Declared once because two separate things send it — the `oneOf`
+  * variant below, and the catch-all that answers a defect, which never reaches
+  * an endpoint's own output.
+  */
+val internalFaultOut: EndpointOutput[WireError.InternalFault] =
+  statusCode(StatusCode.InternalServerError).and(jsonBody[WireError.InternalFault])
+```
+
+The variant then reads `oneOfVariant(internalFaultOut)` in place of
+`oneOfVariant(StatusCode.InternalServerError, jsonBody[WireError.InternalFault])`.
+The other eight variants are unchanged, because each is sent from one place only.
+
+**A defect.** A ZIO defect is a failure ZIO treats as a bug rather than an
+expected outcome, so it travels in the effect's cause rather than its typed error
+channel. Nothing in this application converts one into a response, so
+`ZioHttpInterpreter` folds the cause into
+`Response.internalServerError(cause.squash.getMessage)` — a plain-text body
+carrying the exception's own message. That is the disclosure ADR-035 forbids. It
+is also why `EWB-D-15`'s reasoning needs this step: that ruling argued "a bug goes
+to the defect channel, which is where `Throwable` belongs", which assumes the
+defect channel is opaque at the wire, and it is not yet.
+
+`RequestSpanInterceptor` closes it. It is already the outermost interceptor, so
+one place sees every request, and it already holds the span whose identifier the
+body needs. A Tapir `RequestInterceptor` is handed a `Responder`, which builds a
+response from a declared endpoint output, so the catch-all emits
+`internalFaultOut` rather than a hand-built body:
+
+```scala
+/** Answer a defect with the declared `500` output, carrying only the trace.
+  *
+  * A defect is a bug, so nothing about it may cross: the cause is logged
+  * against the same trace and the body carries the identifier alone (ADR-035).
+  * The response is built from `BaseEndpoint.internalFaultOut`, the same output
+  * the endpoints declare, so a defect and a projected `InternalFault` are one
+  * shape.
+  */
+private def answerDefect[B](
+  responder: Responder[Task, B],
+  request:   ServerRequest,
+  trace:     TraceId,
+  cause:     Cause[Throwable]
+): Task[RequestResult[B]]
+```
+
+and the interceptor's body becomes, in place of its current single
+`ZIO.logAnnotate(...)(downstream)`:
+
+```scala
+ZIO.logAnnotate(TraceAnnotation, trace.value)(
+  downstream.foldCauseZIO(
+    cause   => answerDefect(responder, request, trace, cause),
+    success => ZIO.succeed(success)
+  )
+)
+```
+
+The log line is written inside the annotation, so an operator finds the cause
+under the same trace the user is quoting. Nothing else about the interceptor
+changes.
+
+**A rejected request.** Validation happens in the Tapir codecs (ADR-001), so a
+body, header or path segment an Iron smart constructor refuses is rejected before
+a handler runs. Tapir's default decode-failure handler answers that with a
+plain-text `400`. So the commonest client error on this API is the one error that
+is not a `WireError` — while `WireError.ValidationRejected`'s own documentation,
+"A request body the decoders rejected", describes exactly the case it never
+receives.
+
+A `DecodeFailureHandler` produces it instead. The handler is effectful in this
+Tapir version, which is what lets it read the trace from the active span rather
+than sending a failure with no identifier. New file
+`modules/server/src/main/scala/com/risquanter/register/http/WireDecodeFailureHandler.scala`,
+beside the two interceptors:
+
+```scala
+/** Answers a request the decoders rejected with `WireError.ValidationRejected`,
+  * so every failure this service sends has one declared shape.
+  *
+  * `Tracing` is a parameter rather than an environment requirement because a
+  * Tapir handler's effect type is `Task`, whose environment is `Any`.
+  */
+object WireDecodeFailureHandler:
+  def handler(tracing: Tracing): DecodeFailureHandler[Task]
+
+  /** One `ValidationError` per rejected input, naming the input and why it was
+    * refused. The code comes from the existing set: an absent required input is
+    * `REQUIRED_FIELD`, a value the codec could not read is `TYPE_MISMATCH`, and
+    * a value it read and refused is `INVALID_FORMAT`.
+    */
+  private[http] def toValidationError(
+    failure: DecodeResult.Failure,
+    input:   EndpointInput[?]
+  ): ValidationError
+```
+
+`toValidationError` is `private[http]` rather than private so the mapping is
+testable without driving a request through the whole stack. It is the only part
+of this file carrying a judgement, and no new error code is introduced:
+`REQUIRED_FIELD`, `TYPE_MISMATCH` and `INVALID_FORMAT` are three existing cases of
+`ValidationErrorCode`. The message is the decode failure's own description of what
+it rejected, which names the input and the constraint and carries no internal
+path.
+
+Both are connected in `Application.startServer`, in the same
+`customiseInterceptors` chain that already prepends the two interceptors:
+
+```scala
+serverOptions = ZioHttpServerOptions
+  .customiseInterceptors[Any]
+  .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))
+  .prependInterceptor(SecurityHeadersInterceptor.interceptor)
+  .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
+  .corsInterceptor(CORSInterceptor.customOrThrow[Task](tapirCorsConfig))
+  .options
+```
+
+**One trace reader, not three.** `currentTraceId` in `WireEither.scala` and
+`currentTrace` in `RequestSpanInterceptor.scala` are the same four lines, and the
+two additions above would be the third and fourth copy. The reader becomes one
+definition, in a new file
+`modules/server/src/main/scala/com/risquanter/register/telemetry/ActiveTrace.scala`,
+which is where this module's other telemetry code lives:
+
+```scala
+/** The trace identifier of the active span.
+  *
+  * Reading it requires an effect because the OpenTelemetry context lives in a
+  * fibre reference rather than a thread-local, which is what lets it survive
+  * the async boundaries of a work-stealing executor. With no active span
+  * OpenTelemetry returns its invalid span context, whose identifier is
+  * thirty-two zeros, so work outside any span names an unlinked trace rather
+  * than a plausible identifier that resolves to nothing.
+  */
+object ActiveTrace:
+  def id(using tracing: Tracing): UIO[TraceId]
+```
+
+Both existing definitions are deleted and their call sites read `ActiveTrace.id`
+(`EWB-D-24`). The interceptor and the decode-failure handler hold `Tracing` as an
+ordinary parameter, so each supplies it explicitly: `ActiveTrace.id(using
+tracing)`.
+
 ---
 
 ## 6. Changes to the internal hierarchy
@@ -1079,6 +1238,13 @@ enum RequestFailure extends ViewFailure:
     */
   case Transport(cause: Throwable)
 
+  /** The server answered and the reply could not be read: a body no declared
+    * variant decodes, or a status no variant claims. Carries the status,
+    * because whether the request may have taken effect is the one thing the
+    * user can act on, and the status is the only evidence of it.
+    */
+  case Undecodable(status: StatusCode)
+
 /** A failure that never left the browser, so no request was made. */
 enum LocalProblem extends ViewFailure:
   /** The form's own validation rejected the input before it was sent. */
@@ -1088,10 +1254,42 @@ enum LocalProblem extends ViewFailure:
   case NoActiveWorkspace
 ```
 
-`RequestFailure` is restated here because it gains a supertype; its two cases are
-unchanged from `EWB-D-12`, and `BackendClient.endpointRequestZIO` keeps declaring
-`IO[RequestFailure, O]`, so the narrower type still names exactly what a request
-can produce. Moving it into this file is what lets the trait be sealed.
+`RequestFailure` is restated here because it gains a supertype; its first two
+cases are unchanged from `EWB-D-12`, and `BackendClient.endpointRequestZIO` keeps
+declaring `IO[RequestFailure, O]`, so the narrower type still names exactly what
+a request can produce. Moving it into this file is what lets the trait be sealed.
+
+**The third case is `EWB-D-22`, and it exists because two situations were being
+reported as one.** `BackendClient` maps every failure of `send` to `Transport`,
+whose sentence is "The request did not reach the server. Nothing was changed."
+But `send` also fails when the server *did* answer and the body did not decode:
+`toRequestThrowDecodeFailures` makes a decode rejection throw, the throw becomes
+a failed `Task`, and `.mapError(RequestFailure.Transport(_))` catches it. So a
+server answer the browser could not read is reported to the user as a request
+that never arrived, and the reassurance that nothing was changed is then false
+exactly when a write may have landed.
+
+`sttp`'s own `ResponseException` carries the response, so `BackendClient` reads
+the status from it rather than inventing one:
+
+```scala
+.mapError {
+  case e: ResponseException[?, ?] => RequestFailure.Undecodable(e.response.code)
+  case other                      => RequestFailure.Transport(other)
+}
+```
+
+The status is `sttp.model.StatusCode`, the typed value the client library already
+holds, rather than an `Int` (ADR-038 §3). Three sites match on `RequestFailure`'s
+cases and each gains one arm — `GlobalError.from`, `ErrorMessages.viewFailed` and
+`ZJS.recordToConsole` — and the compiler names them, because an inexhaustive match
+is a compile error in this build. `ZJS.settleLoad` already ends in a wildcard, so
+an undecodable answer becomes the view's own error line like any other failure.
+
+The new sentence is a named template beside `TransportFailed` (ADR-037), and
+`TransportFailed` itself is unchanged: it keeps "Nothing was changed", which
+becomes true of every failure it still describes once the undecodable case is
+carried separately.
 
 The four display states then carry `ViewFailure` in place of their `String`, and
 each view composes its sentence where it renders. That is what unblocks §7.5:
@@ -1111,7 +1309,7 @@ enum LoadState[+A]:
   case Idle
   case Loading
   case Absent                      // new — the request succeeded and found nothing
-  case Loaded(value: A)
+  case Loaded(data: A)
   case Failed(failure: ViewFailure)
 ```
 
@@ -1163,7 +1361,8 @@ Each phase ends with the whole suite green: `commonJVM/test`, `server/test`,
 payload and the closed preview status, both from `EWB-D-9`; the three typed
 telemetry identifiers and the retyped `RequestContext` with its placeholder
 constants, from `EWB-D-8`; `fromAppError`; the `oneOf` declaration in
-`BaseEndpoint`; `wireEither` and the 23 call sites; `GlobalError.fromWireError`
+`BaseEndpoint`; `wireEither` and its call sites, which the compiler enumerates
+rather than this plan; `GlobalError.fromWireError`
 with its message functions; the three `ZJS` sites with the console line of §7.1;
 the pre-validation match; the duplicated sentence and the `onExpired` deletion of
 §7.3; and every deletion in §8. Every string this phase writes is
@@ -1248,6 +1447,31 @@ private def logResolveFailure(outcome: Either[AppError, WorkspaceRecord]): UIO[U
 taking the outcome rather than the key, so the expiry arm can annotate
 `workspace_id`, `created_at` and `expires_at` from the record.
 
+**Phase 2b — the failures that bypass the boundary.** §5.3's two server-side
+closures, and the client case that reports whatever survives them. Three steps,
+in this order, because each one narrows what the next has to describe.
+
+1. *The defect catch-all*, from `EWB-D-21`. `BaseEndpoint.internalFaultOut`
+   declared once with the `oneOf` variant built from it; `ActiveTrace` replacing
+   the two duplicated trace readers at their call sites (`EWB-D-24`);
+   `answerDefect` and the `foldCauseZIO` in `RequestSpanInterceptor`. A new
+   `RequestSpanInterceptorSpec` pins that an endpoint whose logic dies answers
+   `500` with a body carrying the trace and nothing else.
+2. *The decode-failure handler*, from `EWB-D-23`. `WireDecodeFailureHandler` and
+   its connection in `Application.startServer`; a test of `toValidationError` per
+   rejection kind, and one request-level test that a request missing a required
+   header answers `400` with a `ValidationRejected` body.
+3. *The third request-failure case*, from `EWB-D-22`.
+   `RequestFailure.Undecodable`, `BackendClient`'s split `mapError`, and the
+   three match sites the compiler names. Last because the first two steps remove
+   the two commonest reasons a reply does not decode, so the sentence this case
+   renders is written against what actually remains: a response this service did
+   not write.
+
+After this phase every failure this service sends has a declared shape, which is
+what ADR-035's exhaustive-encoding rule asks for and what `§4`'s `oneOf` cannot
+deliver on its own.
+
 **Phase 3 — typed locations.** `ErrorLocation`, its two Iron refinements, and
 `ValidationError.location`. Every construction site of `ValidationError` in
 `common`.
@@ -1291,14 +1515,29 @@ exercised on a small surface before the largest one:
    double-encoded. Files: `SSEEvent.scala`, `SSEController.scala`,
    `InvalidationHandler.scala`, `SSEHubSpec.scala`.
 
-2. **The changed-node report.** `ChangedNodesResponse.status` is four values held
-   as `String`; it becomes a sealed enum carrying the entries in its `Ok` case,
-   and `NodeChangeEntry.nodeId` becomes `NodeId`. Second because it is the
-   reference case for ADR-038's second clause on a cross-compiled response, and
-   the browser already holds the type. Files: `ChangedNodesResponse.scala`,
+2. **The changed-node report, and the merge conflict entry.**
+   `ChangedNodesResponse.status` is four values held as `String`; it becomes a
+   sealed enum carrying the entries in its `Ok` case, and
+   `NodeChangeEntry.nodeId` becomes `NodeId`. Second because it is the reference
+   case for ADR-038's second clause on a cross-compiled response, and the
+   browser already holds the type.
+
+   `MergeConflictEntry(path: String, treeId: Option[String], nodeId: Option[String])`
+   joins this step (`EWB-D-24`): `treeId` and `nodeId` become `Option[TreeId]`
+   and `Option[NodeId]`, the same ADR-038 §3 case on the same kind of wire type,
+   and leaving one raw pair behind is the half-migration that rule warns
+   against. The same step turns around the one import that runs the wrong way:
+   `MergeRefusal`, a domain error, imports `MergeConflictEntry` from
+   `http/responses`, so a domain type depends on a response shape. Under
+   ADR-038 §2 a refusal is an operation outcome and declares its own payload, so
+   the entry is declared in `MergeRefusal`'s own file and
+   `ScenarioMergeResponse` reads it from there — which reverses the dependency
+   without duplicating the shape. Files: `ChangedNodesResponse.scala`,
    `WorkspaceTreeEndpoints.scala`, `ChangedNodesService.scala`,
    `WorkspaceTreeController.scala`, `ChangedNodesState.scala`,
-   `ChangedNodesStateSpec.scala`.
+   `ChangedNodesStateSpec.scala`, `MergeRefusal.scala`,
+   `ScenarioMergeResponse.scala`, `ScenarioMergeService.scala`,
+   `MergeMessages.scala`, `ScenarioMergeState.scala`.
 
 3. **The history operation.** `HistoryOperation`'s hand-written string codec
    carries a `case _ => Other` arm, so an unrecognized wire value becomes a
@@ -1819,7 +2058,7 @@ configuration — values in `application.conf`, overridable by environment
 variable — and says nothing about a constant compiled into the code. The
 boundary between the two is part of this decision.
 
-### EWB-D-12 — what carries a failed request in the browser — RULED 2026-10-11
+### EWB-D-12 — what carries a failed request in the browser — RULED 2026-10-11, third case added by `EWB-D-22`
 
 **Ruled: Option A.** A client-side failure type that is not a `Throwable`, in
 `app/core`:
@@ -1840,6 +2079,13 @@ enum RequestFailure:
 declared `Either[Throwable, X]` become `Either[RequestFailure, X]`.
 `GlobalError` then has one match with two arms, which are exactly
 `fromWireError` and the narrowed `fromThrowable`.
+
+**Two cases here, three after `EWB-D-22`.** The reasoning below is about the
+distinction between an answer and no answer, and it holds unchanged. What it
+missed is that `Transport` was catching a third situation as well: the server
+answered and the body did not decode. `EWB-D-22` adds `Undecodable(status:
+StatusCode)` for it and §7.8 carries the declaration; `GlobalError.from` then has
+three arms rather than two.
 
 **Why a second type is needed at all.** Two different failures reach the
 browser and only one of them is a `WireError`. A `WireError` exists only when
@@ -1931,11 +2177,16 @@ the revision removes.
 **Why the rejection below does not apply to the revised shape.** The argument
 against a flat shape was that `RequestFailure` must not gain a `Local` case,
 because `BackendClient.endpointRequestZIO` returns `IO[RequestFailure, O]` and
-can never construct one. That argument is untouched: `RequestFailure` keeps its
-two cases and nothing is added to it. `ViewFailure` is a supertype of it rather
-than a case list containing it, so the type that names what a request can do
-still names exactly that, and the display states name something wider by
-referring to the supertype.
+can never construct one. That argument is untouched, and the test it rests on is
+whether a case names something a request can actually produce. `ViewFailure` is a
+supertype of `RequestFailure` rather than a case list containing it, so the type
+that names what a request can do still names exactly that, and the display states
+name something wider by referring to the supertype.
+
+`EWB-D-22` later adds a third case, `Undecodable`, and passes that test rather
+than weakening it: an answer the browser cannot decode is something a request
+produces, and `BackendClient` is the one place that constructs it. A `Local` case
+would still be wrong here for the reason given below.
 
 **Why not a third arm on `RequestFailure`.** This was the original proposal: a
 `Local` case beside `Wire` and `Transport`, with the four display states typed
@@ -2318,6 +2569,170 @@ record with no reader. What settles it is that the record would hold a copy of
 state ZIO already carries on the same fibre, so it is not merely unread but
 redundant with a live source.
 
+### EWB-D-21 — where the defect catch-all lives — RULED 2026-10-14
+
+**Ruled: Option A, the catch-all in `RequestSpanInterceptor`, emitting the error
+output the endpoints already declare.**
+
+A ZIO defect escaping a controller is answered by `ZioHttpInterpreter` with
+`Response.internalServerError(cause.squash.getMessage)`, so the exception's own
+message becomes the body. Verified absent: there is no `exceptionHandler`, no
+`decodeFailureHandler` and no `handleErrorCause` anywhere in the server module or
+the integration harness, and `Application.startServer` uses
+`customiseInterceptors` only to prepend two interceptors.
+
+**Option A — the catch-all in `RequestSpanInterceptor`** (ruled). Tapir hands an
+interceptor a `Responder`, which builds a response from a declared endpoint
+output, so the interceptor answers with `BaseEndpoint.internalFaultOut` — the
+same status and body the `oneOf` variant sends.
+
+*Pros:* the interceptor is already outermost, so one place sees every request,
+and it already holds the span whose identifier the body needs. Emitting a
+declared output is what keeps the catch-all from being a second place that knows
+`InternalFault`'s wire shape.
+*Cons:* an interceptor named for tracing acquires a second responsibility, so its
+name under-describes it.
+
+*Concretely:* the database goes down mid-request. The caller receives `500` with
+body `{"trace":"4bf92f…"}` and nothing else, and the operator finds `Connection
+to postgres:5432 refused` in the server log under that same trace.
+
+**Option B — a handler on the routes, via `Routes#handleErrorCause` after
+`toHttp`.**
+
+*Pros:* a single-purpose handler at the wiring site, obvious to anyone reading
+`Application.startServer`, and it leaves the interceptor's name accurate.
+*Cons:* it sits outside Tapir's model, so it has no endpoint context and no
+access to a declared output. The body is hand-built, which is a second place
+knowing `InternalFault`'s wire shape — the duplication ADR-038 removes elsewhere.
+
+*Concretely:* the same `500` and the same body, assembled by hand, and a later
+change to `InternalFault` updates the endpoint declaration and silently leaves
+this one behind.
+
+**Trade-off.** Whether a single-purpose location is worth a hand-built body.
+What settles it is that the interceptor already holds the trace, and a `500`
+without a trace is the one failure a user most needs to be able to quote. The
+`internalFaultOut` value is what removes Option A's own version of the
+duplication risk, so the ruling takes the location and keeps the declaration.
+
+This also repairs `EWB-D-15`'s premise rather than reopening it. That ruling
+argued a bug belongs in the defect channel, which assumed the defect channel is
+opaque at the wire; this makes that true.
+
+### EWB-D-22 — how the browser reports an answer it cannot decode — RULED 2026-10-14
+
+**Ruled: Option A, a third `RequestFailure` case carrying the status.**
+
+`BackendClient` maps every failure of `send` to `Transport`, whose sentence is
+"The request did not reach the server. Nothing was changed." A decode rejection
+also fails `send`, because the interpreter is built with
+`toRequestThrowDecodeFailures`, so an answer the browser could not read is
+reported as a request that never arrived.
+
+**Option A — a third case, `Undecodable(status: StatusCode)`** (ruled).
+
+*Pros:* the browser can say something true — the server answered with this
+status and the reply could not be read. The two situations differ in exactly the
+way a user acts on, which is whether their change may have landed.
+*Cons:* it widens a type `EWB-D-12` ruled, so three match sites gain an arm and
+that decision's text needs this amendment beside it.
+
+*Concretely:* a workspace row is inserted and a follow-up write then fails. The
+banner says the server answered and the reply was unreadable, instead of claiming
+nothing was changed — which matters, because something was.
+
+**Option B — reword `Transport` so the sentence is true of both.**
+
+*Pros:* one sentence changes and no type changes, so no match site moves.
+*Cons:* the wording has to drop "Nothing was changed" to stay true in the rare
+case, and that is the reassurance the sentence exists to give in the common one.
+
+*Concretely:* the banner reads "The request failed and the result is unknown.
+Reload to see the current state." Correct in both cases, and needlessly alarming
+in the one that happens most.
+
+**Trade-off.** Whether one enum case and an amendment to `EWB-D-12` are worth
+keeping a true reassurance in the common case. What settles it is that collapsing
+the two costs the common case its accuracy to accommodate the rare one, which is
+the wrong direction.
+
+**The condition attached to the ruling is met.** It is one more case and nothing
+else: `RequestFailure` is already a flat enum under `ViewFailure`; three sites
+match on its cases — `GlobalError.from`, `ErrorMessages.viewFailed` and
+`ZJS.recordToConsole` — and the compiler names all three, because an inexhaustive
+match is a compile error in this build; and `ZJS.settleLoad` ends in a wildcard
+that already covers it. No signature changes:
+`BackendClient.endpointRequestZIO` keeps returning `IO[RequestFailure, O]`.
+
+It is compliant with the plan and the records. The status is
+`sttp.model.StatusCode`, a typed value the client library already carries, so
+ADR-038 §3's rule against a raw primitive where a typed value exists is satisfied
+rather than waived. The sentence is a named template beside the others, as
+ADR-037 and `EWB-D-10` require. ADR-019's two-tier presentation is unchanged: the
+banner reads the new case through `GlobalError`, and the inline view reads it
+through `viewFailed`. `EWB-D-13`'s invariant — that `RequestFailure` names
+exactly what a request can produce — holds, which is the test recorded there.
+
+### EWB-D-23 — the decode-failure mapping — RULED 2026-10-14
+
+**Ruled: Option A, a `DecodeFailureHandler` producing
+`WireError.ValidationRejected`.**
+
+Validation lives in the Tapir codecs (ADR-001), so a rejected body, header or
+path segment is answered before a handler runs — by Tapir's default handler, as a
+plain-text `400`.
+
+**Option A — a `DecodeFailureHandler` that builds `ValidationRejected`** (ruled).
+It is effectful in this Tapir version, so it reads `Tracing` and stamps a trace
+like every other wire failure.
+
+*Pros:* one error shape on the wire, and the browser renders the rejected input's
+name with the renderer it already has for `ValidationRejected`.
+*Cons:* someone must decide which decode failure becomes which
+`ValidationErrorCode`, so the mapping is a small new specification.
+
+*Concretely:* `PUT /w/{key}/risk-trees/{treeId}` sent without the `X-Branch`
+header returns `{"errors":[{"field":"X-Branch","code":"REQUIRED_FIELD",…}],
+"trace":"…"}`, and the form shows the field name.
+
+**Option B — narrow `ValidationRejected`'s documentation** to service-layer
+validation only, and accept the plain-text `400`.
+
+*Pros:* no new code, and the documentation then describes what the type actually
+carries instead of a case it never receives.
+*Cons:* the API's commonest client error answers in a format no other error uses,
+so the browser cannot decode it and falls into `EWB-D-22`'s path for an error the
+service wrote deliberately.
+
+*Concretely:* the same request returns `Invalid value for: header X-Branch
+(missing)` as text, and the banner says the reply could not be read.
+
+**Trade-off.** Whether a small mapping specification is worth one error shape on
+the wire. What settles it is the user-visible consequence the ruling named: it is
+the one case where a user would see an error shaped unlike every other. The
+mapping is three cases drawn from the existing `ValidationErrorCode` set, so no
+new closed set is introduced.
+
+### EWB-D-24 — `MergeConflictEntry` and the duplicated trace reader join this plan — RULED 2026-10-14
+
+**Ruled: both, in the phase each belongs to. Neither is a trade-off; both are
+scope placements recorded so the plan ships whole (G8).**
+
+`MergeConflictEntry(path: String, treeId: Option[String], nodeId: Option[String])`
+holds two identifiers as raw strings where `TreeId` and `NodeId` exist, which is
+ADR-038 §3's case, and `MergeRefusal` — a type in `domain/errors` — imports the
+entry from `http/responses`, so a domain type depends on a response shape. Both
+are answered in Phase 6 step 2, which already opens the merge-preview wire types:
+the entry's identifiers are typed, and the entry is declared in `MergeRefusal`'s
+own file under ADR-038 §2, which reverses the dependency.
+
+`currentTraceId` in `WireEither.scala` and `currentTrace` in
+`RequestSpanInterceptor.scala` are the same four lines, and §5.3 would add two
+more copies. One `ActiveTrace.id` replaces all of them, in Phase 2b step 1,
+because that step is where the third and fourth copies would otherwise be
+written.
+
 ---
 
 ## 11. ADR alignment
@@ -2325,7 +2740,7 @@ redundant with a live source.
 | ADR | What this plan touches | Status |
 |---|---|---|
 | ADR-010 (error handling strategy) | the hierarchy, the HTTP mapping, the code smells | **Compliant, and it closes a violation.** The "String Matching on Errors" code smell instructs pattern matching on types; `isWorkspaceSentinel` matches a string prefix on the browser side, and this plan deletes it. **The ADR is amended in two places:** §5 "Pure HTTP Error Mapping" is rewritten to describe a one-way projection onto `WireError` instead of `encode` and `decode`, and §1's hierarchy listing gains `TreeLoadFailure` and the `SimError` to `DomainError` rename. |
-| ADR-035 (error leakage prevention) | the boundary, the encoders, the failure's own message member | **Compliant, and strengthened.** **Its naming amendment is made.** ADR-035 named the member as `getMessage` in its leakage-vector list, in its §3 heading, in §3's first sentence and in its ADR-036 cross-reference. `EWB-D-15` removes `extends Throwable`, so `AppError` has no `getMessage` and the member is `logMessage` (§6.1). All four now read `logMessage`, and §3's opening states why: the name carries the destination, and an `AppError` is plain data with no exception apparatus behind its text. The discipline the section states is unchanged and still binds. §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. |
+| ADR-035 (error leakage prevention) | the boundary, the encoders, the failure's own message member | **Compliant, and strengthened.** **Its naming amendment is made.** ADR-035 named the member as `getMessage` in its leakage-vector list, in its §3 heading, in §3's first sentence and in its ADR-036 cross-reference. `EWB-D-15` removes `extends Throwable`, so `AppError` has no `getMessage` and the member is `logMessage` (§6.1). All four now read `logMessage`, and §3's opening states why: the name carries the destination, and an `AppError` is plain data with no exception apparatus behind its text. The discipline the section states is unchanged and still binds. §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. **Phase 2b closes two paths that bypassed §2 entirely:** a defect reached the wire as `cause.squash.getMessage` in a plain-text body, and a request the codecs rejected reached it as Tapir's own plain-text `400`. After `EWB-D-21` and `EWB-D-23` every response this service sends is a declared output, which is what §2's exhaustive-encoding rule asks for. |
 | ADR-036 (confidential internal identifiers) | `TreeNotInWorkspace`, `WorkspaceExpired`, the log line | Compliant. No wire case declares a `WorkspaceId`, so the output half holds structurally rather than by discipline. The input half is untouched. §6.2's log annotation is explicitly permitted: a confidential identifier may appear in a server log. |
 | ADR-022 (secret handling) | the three workspace errors | Compliant and unchanged. None carries a credential, so R1's `final class` rule has nothing to be violated at the container. |
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. |
