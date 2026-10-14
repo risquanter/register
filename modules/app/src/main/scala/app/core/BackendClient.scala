@@ -12,7 +12,7 @@ import sttp.capabilities.WebSockets
 import sttp.client3.*
 import sttp.client3.impl.zio.FetchZioBackend
 import sttp.model.Uri
-import sttp.tapir.Endpoint
+import sttp.tapir.{DecodeResult, Endpoint}
 import sttp.tapir.client.sttp.SttpClientInterpreter
 
 type ZioStreamsWithWebSockets = ZioStreams & WebSockets
@@ -63,17 +63,31 @@ private class BackendClientLive(
     * does not reliably set this header on bodiless GET requests, and the
     * browser Fetch API defaults to `Accept: *⁄*` which does not match
     * the nginx rule.  See ADR-027 / ADR-INFRA-007 for routing design.
+    *
+    * The decoded body is a `DecodeResult` rather than the decoded value, so a
+    * reply that does not decode is a value this client can classify. The
+    * throwing variant of the interpreter makes it an exception instead, which
+    * loses the status it arrived with, and the status is the only evidence of
+    * whether the request took effect.
     */
   private def endpointRequest[I, E, O](
       endpoint: Endpoint[Unit, I, E, O, Any]
-  ): I => Request[Either[E, O], Any] =
-    val toRequest = interpreter.toRequestThrowDecodeFailures(endpoint, baseUrl)
+  ): I => Request[DecodeResult[Either[E, O]], Any] =
+    val toRequest = interpreter.toRequest(endpoint, baseUrl)
     input => toRequest(input).header("Accept", "application/json")
 
-  /** The two failure cases are separated here, and this is the only place they
-    * can be told apart. A failure of `send` is the Fetch call itself not
-    * completing, so it becomes `Transport`. A `Left` body is the server's own
-    * typed answer, so it becomes `Wire`.
+  /** The three failure cases are separated here, and this is the only place
+    * they can be told apart.
+    *
+    * A failure of `send` is the Fetch call itself not completing, so it becomes
+    * `Transport` — the one case where nothing reached the server and nothing can
+    * have changed. Once a response exists, its body decides the rest: a decoded
+    * `Left` is the server's own typed answer and becomes `Wire`, and a body that
+    * did not decode becomes `Undecodable` carrying the status it arrived with.
+    *
+    * Telling the last two from `Transport` is the point of the three cases.
+    * `Transport` states that nothing was changed, and that is true only when the
+    * request never arrived.
     */
   def endpointRequestZIO[I, O](
       endpoint: Endpoint[Unit, I, WireError, O, Any]
@@ -81,7 +95,12 @@ private class BackendClientLive(
     backend
       .send(endpointRequest(endpoint)(payload))
       .mapError(RequestFailure.Transport(_))
-      .flatMap(response => ZIO.fromEither(response.body).mapError(RequestFailure.Wire(_)))
+      .flatMap { response =>
+        response.body match
+          case DecodeResult.Value(Right(output)) => ZIO.succeed(output)
+          case DecodeResult.Value(Left(error))   => ZIO.fail(RequestFailure.Wire(error))
+          case _: DecodeResult.Failure           => ZIO.fail(RequestFailure.Undecodable(response.code))
+      }
 
 object BackendClientLive:
 

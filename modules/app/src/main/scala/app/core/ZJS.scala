@@ -92,6 +92,8 @@ object ZJS:
       dom.console.warn(s"request failed: ${error.productPrefix} trace=${error.trace.value}")
     case RequestFailure.Transport(cause) =>
       dom.console.warn(s"request failed: Transport ${cause.safeMessage}")
+    case RequestFailure.Undecodable(status) =>
+      dom.console.warn(s"request failed: Undecodable status=${status.code}")
 
   /** What a view shows when its request fails.
     *

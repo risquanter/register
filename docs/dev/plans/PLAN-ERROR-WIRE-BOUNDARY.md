@@ -589,7 +589,18 @@ val internalFaultOut: EndpointOutput[WireError.InternalFault] =
 
 The variant then reads `oneOfVariant(internalFaultOut)` in place of
 `oneOfVariant(StatusCode.InternalServerError, jsonBody[WireError.InternalFault])`.
-The other eight variants are unchanged, because each is sent from one place only.
+
+The `400` output is declared the same way and for the same reason, because the
+decode-failure handler below is its second sender:
+
+```scala
+val validationRejectedOut: EndpointOutput[WireError.ValidationRejected] =
+  statusCode(StatusCode.BadRequest).and(jsonBody[WireError.ValidationRejected])
+```
+
+Both live in a companion `object BaseEndpoint`, because `BaseEndpoint` is a
+trait and a sender that is not an endpoint has no instance of it. The other
+seven variants stay inline, because each is sent from one place only.
 
 **A defect.** A ZIO defect is a failure ZIO treats as a bug rather than an
 expected outcome, so it travels in the effect's cause rather than its typed error
@@ -1269,15 +1280,38 @@ server answer the browser could not read is reported to the user as a request
 that never arrived, and the reassurance that nothing was changed is then false
 exactly when a write may have landed.
 
-`sttp`'s own `ResponseException` carries the response, so `BackendClient` reads
-the status from it rather than inventing one:
+**The decode failure stops being an exception, which is what makes the status
+reachable.** `ResponseException`, the exception sttp throws, carries no response,
+so there is nothing to read a status from once the rejection has been thrown.
+`BackendClient` therefore builds its requests with `interpreter.toRequest`
+instead, whose decoded body is a `DecodeResult`:
 
 ```scala
-.mapError {
-  case e: ResponseException[?, ?] => RequestFailure.Undecodable(e.response.code)
-  case other                      => RequestFailure.Transport(other)
-}
+private def endpointRequest[I, E, O](
+    endpoint: Endpoint[Unit, I, E, O, Any]
+): I => Request[DecodeResult[Either[E, O]], Any] =
+  val toRequest = interpreter.toRequest(endpoint, baseUrl)
+  input => toRequest(input).header("Accept", "application/json")
 ```
+
+The three outcomes are then one match over a response that exists, with the
+status in scope:
+
+```scala
+backend
+  .send(endpointRequest(endpoint)(payload))
+  .mapError(RequestFailure.Transport(_))
+  .flatMap { response =>
+    response.body match
+      case DecodeResult.Value(Right(output)) => ZIO.succeed(output)
+      case DecodeResult.Value(Left(error))   => ZIO.fail(RequestFailure.Wire(error))
+      case _: DecodeResult.Failure           => ZIO.fail(RequestFailure.Undecodable(response.code))
+  }
+```
+
+`Transport` now means only what its sentence says: `send` itself did not
+complete, so no response exists at all. A failure to decode is no longer an
+exception being caught, which is the second thing this change buys.
 
 The status is `sttp.model.StatusCode`, the typed value the client library already
 holds, rather than an `Int` (ADR-038 §3). Three sites match on `RequestFailure`'s
@@ -2626,9 +2660,15 @@ opaque at the wire; this makes that true.
 
 `BackendClient` maps every failure of `send` to `Transport`, whose sentence is
 "The request did not reach the server. Nothing was changed." A decode rejection
-also fails `send`, because the interpreter is built with
-`toRequestThrowDecodeFailures`, so an answer the browser could not read is
+also fails `send`, because the interpreter was built with
+`toRequestThrowDecodeFailures`, so an answer the browser could not read was
 reported as a request that never arrived.
+
+Implementing this showed that the interpreter has to change as well, and §7.8
+carries the correction: the exception sttp throws holds no response, so the
+status the ruling asks for is unreachable once a decode failure has been thrown.
+`toRequest` is used instead, which yields the failure as a value beside the
+response it came from.
 
 **Option A — a third case, `Undecodable(status: StatusCode)`** (ruled).
 

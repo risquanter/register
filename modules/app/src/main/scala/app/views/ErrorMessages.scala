@@ -1,6 +1,7 @@
 package app.views
 
 import java.time.Duration
+import sttp.model.StatusCode
 import app.core.{LocalProblem, RequestFailure, ViewFailure}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.ScenarioName
@@ -59,6 +60,18 @@ object ErrorMessages:
     "The request did not reach the server. Nothing was changed. " +
     "Check your connection and try again."
 
+  /** Shown when the server answered and the reply could not be read.
+    *
+    * It deliberately does not say that nothing was changed. The request reached
+    * the server, so a write may have taken effect, and the sentence beside this
+    * one would be false here. The status is the only thing the browser learned
+    * about the answer, so it is what the sentence carries and why this is a
+    * function of it rather than a fixed string.
+    */
+  def undecodableAnswer(status: StatusCode): String =
+    s"The server answered with status ${status.code} and the reply could not be read. " +
+    "Reload to see the current state."
+
   /** Shown when an action needs a workspace and the browser holds no key.
     *
     * One sentence covers every such action, because the condition and the
@@ -77,15 +90,16 @@ object ErrorMessages:
     * answered with, it is the same text the banner shows, because both read
     * the functions below.
     *
-    * The match is on the two kinds of answer rather than on a status or a
-    * message, so a view renders a failure it never had to compose, and a new
-    * case is a compile error here until it has a sentence.
+    * The match is on the kinds of answer rather than on a status or a message,
+    * so a view renders a failure it never had to compose, and a new case is a
+    * compile error here until it has a sentence.
     */
   def viewFailed(failure: ViewFailure): String = failure match
-    case RequestFailure.Wire(error)       => wire(error)
-    case RequestFailure.Transport(_)      => TransportFailed
-    case LocalProblem.FormInvalid(errors) => errors.map(_.message).mkString("; ")
-    case LocalProblem.NoActiveWorkspace   => NoActiveWorkspace
+    case RequestFailure.Wire(error)            => wire(error)
+    case RequestFailure.Transport(_)           => TransportFailed
+    case RequestFailure.Undecodable(status)    => undecodableAnswer(status)
+    case LocalProblem.FormInvalid(errors)      => errors.map(_.message).mkString("; ")
+    case LocalProblem.NoActiveWorkspace        => NoActiveWorkspace
 
   /** The sentence for each case the server can answer with.
     *

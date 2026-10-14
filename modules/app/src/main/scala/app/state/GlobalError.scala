@@ -67,12 +67,17 @@ object GlobalError:
 
   /** Classify any failed request.
     *
-    * The two arms are the two things that can go wrong, and they are disjoint:
-    * the server answered, or the call never happened.
+    * The three arms are disjoint: the server answered and the reply decoded,
+    * the call never happened, or the reply arrived and could not be read.
+    *
+    * The last carries no trace, because the trace is a field of a body that did
+    * not decode. The status takes its place in the sentence, which is the only
+    * thing the browser learned about that answer.
     */
   def from(failure: RequestFailure): GlobalError = failure match
-    case RequestFailure.Wire(error)      => fromWireError(error)
-    case RequestFailure.Transport(cause) => fromThrowable(cause)
+    case RequestFailure.Wire(error)         => fromWireError(error)
+    case RequestFailure.Transport(cause)    => fromThrowable(cause)
+    case RequestFailure.Undecodable(status) => ServerError(ErrorMessages.undecodableAnswer(status), None)
 
   /** Classify what the server answered with.
     *

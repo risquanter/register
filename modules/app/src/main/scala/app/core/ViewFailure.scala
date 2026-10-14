@@ -1,5 +1,7 @@
 package app.core
 
+import sttp.model.StatusCode
+
 import com.risquanter.register.domain.errors.ValidationError
 import com.risquanter.register.http.errors.WireError
 
@@ -22,11 +24,14 @@ sealed trait ViewFailure
 
 /** Why a request to the backend did not produce a result.
   *
-  * Two different failures reach the browser and only one of them is a
-  * `WireError`. A `WireError` exists only when the server answered. A transport
-  * failure is the browser reporting that the call never happened at all.
+  * Three failures reach the browser and only one of them is a `WireError`. A
+  * `WireError` exists when the server answered and the body decoded. A
+  * transport failure is the browser reporting that the call never happened at
+  * all. Between those sits an answer that arrived and could not be read, which
+  * is its own case because the three differ in the one way a user acts on:
+  * whether the request may have taken effect.
   *
-  * Neither case is a `Throwable`. ZIO's error channel is an unconstrained type
+  * No case is a `Throwable`. ZIO's error channel is an unconstrained type
   * parameter, so a client failure is an ordinary value and needs no exception
   * supertype to travel in it.
   */
@@ -40,6 +45,15 @@ enum RequestFailure extends ViewFailure:
     * body to read.
     */
   case Transport(cause: Throwable)
+
+  /** The server answered and the reply could not be read: a body no declared
+    * variant decodes, or a status no variant claims — a gateway's own error
+    * page, for instance.
+    *
+    * Carries the status, because the request may have taken effect and the
+    * status is the only evidence of that the browser has.
+    */
+  case Undecodable(status: StatusCode)
 
 /** A failure that never left the browser, so no request was made.
   *

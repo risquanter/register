@@ -2,6 +2,7 @@ package app.state
 
 import java.time.Duration
 import zio.test.*
+import sttp.model.StatusCode
 
 import app.core.RequestFailure
 import app.views.ErrorMessages
@@ -12,7 +13,7 @@ import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProbl
 
 /** Which banner treatment each failure gets.
   *
-  * There is a case per wire case and one for a transport failure, because
+  * There is a case per wire case and one per kind of request failure, because
   * `fromWireError` matches the wire cases exhaustively and a new one is a
   * compile error there until it has a treatment. These tests pin which
   * treatment it got, which the compiler cannot check.
@@ -107,6 +108,28 @@ object GlobalErrorSpec extends ZIOSpecDefault:
             assertTrue(message == ErrorMessages.TransportFailed) &&
             assertTrue(!message.contains("Failed to fetch"))
           case other => throw MatchError(other)
+      },
+      test("an unreadable answer names the status it arrived with") {
+        GlobalError.from(RequestFailure.Undecodable(StatusCode.BadGateway)) match
+          case GlobalError.ServerError(message, got) =>
+            assertTrue(
+              message == ErrorMessages.undecodableAnswer(StatusCode.BadGateway),
+              message.contains("502"),
+              got.isEmpty
+            )
+          case other => throw MatchError(other)
+      },
+      // The two are told apart because only one of them can promise that
+      // nothing was changed. An unreadable answer reached the server, so a
+      // write may have taken effect, and claiming otherwise would be false
+      // exactly when it matters most.
+      test("an unreadable answer does not claim that nothing was changed") {
+        val undecodable = ErrorMessages.undecodableAnswer(StatusCode.InternalServerError)
+        assertTrue(
+          ErrorMessages.TransportFailed.contains("Nothing was changed"),
+          !undecodable.contains("Nothing was changed"),
+          undecodable != ErrorMessages.TransportFailed
+        )
       }
     )
 

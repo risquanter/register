@@ -8,8 +8,30 @@ import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
-/** Base endpoint. Every endpoint trait builds from one of the two values here,
-  * so the error output is declared once for the whole API.
+object BaseEndpoint {
+
+  /** The `500` output: the status and the body `WireError.InternalFault` is sent
+    * with.
+    *
+    * Declared here rather than inline in the `oneOf` below because two separate
+    * things send it. One is that variant. The other is the catch-all that
+    * answers a failure which never reached an endpoint, and so has no declared
+    * output of its own to use; it reads this value, which is what stops a
+    * second description of the same body existing.
+    */
+  val internalFaultOut: EndpointOutput[WireError.InternalFault] =
+    statusCode(StatusCode.InternalServerError).and(jsonBody[WireError.InternalFault])
+
+  /** The `400` output, declared here for the same reason as the one above: a
+    * request the codecs reject never reaches a handler, so the decode-failure
+    * handler answers it and has no endpoint output of its own to use.
+    */
+  val validationRejectedOut: EndpointOutput[WireError.ValidationRejected] =
+    statusCode(StatusCode.BadRequest).and(jsonBody[WireError.ValidationRejected])
+}
+
+/** Base endpoint. Every endpoint trait builds from one of the two values in this
+  * trait, so the error output is declared once for the whole API.
   */
 trait BaseEndpoint {
 
@@ -22,19 +44,22 @@ trait BaseEndpoint {
     * The status is declared beside the case it belongs to, so a case cannot be
     * sent with the wrong status, and the generated OpenAPI document gains one
     * schema per status instead of a single envelope for all of them. A browser
-    * selects the variant by status alone, so no two variants share one.
+    * selects the variant by status alone, so no two variants share one. Two
+    * variants read their status and body from a named output in the companion,
+    * because something other than an endpoint also sends those two.
     *
     * Every variant names a concrete case rather than the enum, which is what
     * keeps a body free of a discriminator field. There is deliberately no
     * default variant: one would have to be typed as the enum itself, which
     * reintroduces the envelope, and a response this service did not write — a
     * gateway's `502`, say — carries no `WireError` body for any variant to
-    * decode. The browser classifies that as a transport failure instead.
+    * decode. The browser reports such a response as an answer it could not
+    * read, naming the status, rather than as a request that never arrived.
     */
   val baseEndpoint = endpoint
     .errorOut(
       oneOf[WireError](
-        oneOfVariant(StatusCode.BadRequest,          jsonBody[WireError.ValidationRejected]),
+        oneOfVariant(BaseEndpoint.validationRejectedOut),
         oneOfVariant(StatusCode.UnprocessableEntity, jsonBody[WireError.QueryRejected]),
         oneOfVariant(StatusCode.Forbidden,           jsonBody[WireError.AccessDenied]),
         oneOfVariant(StatusCode.NotFound,            jsonBody[WireError.NotFound]),
@@ -42,7 +67,7 @@ trait BaseEndpoint {
         oneOfVariant(StatusCode.Conflict,            jsonBody[WireError.Conflict]),
         oneOfVariant(StatusCode.NotImplemented,      jsonBody[WireError.NotSupported]),
         oneOfVariant(StatusCode.ServiceUnavailable,  jsonBody[WireError.DependencyUnavailable]),
-        oneOfVariant(StatusCode.InternalServerError,  jsonBody[WireError.InternalFault])
+        oneOfVariant(BaseEndpoint.internalFaultOut)
       )
     )
 

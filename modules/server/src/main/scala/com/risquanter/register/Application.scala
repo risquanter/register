@@ -9,7 +9,7 @@ import io.getquill.SnakeCase
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
-import com.risquanter.register.http.{HealthProbeServer, HttpApi, RequestSpanInterceptor, SecurityHeadersInterceptor}
+import com.risquanter.register.http.{HealthProbeServer, HttpApi, RequestSpanInterceptor, SecurityHeadersInterceptor, WireDecodeFailureHandler}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.StartupReadiness
@@ -343,8 +343,14 @@ object Application extends ZIOAppDefault {
     // the CORS handling included. The security-headers interceptor stays the
     // last one that modifies headers, which is what it requires — the span
     // interceptor adds none.
+    //
+    // The decode-failure handler replaces Tapir's default, which answers a
+    // rejected input with a plain-text body. Both it and the span interceptor's
+    // own catch-all send a declared `WireError` output, so every failure this
+    // server sends has one shape (ADR-035).
     serverOptions = ZioHttpServerOptions
       .customiseInterceptors[Any]
+      .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))
       .prependInterceptor(SecurityHeadersInterceptor.interceptor)
       .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
       .corsInterceptor(CORSInterceptor.customOrThrow[Task](tapirCorsConfig))

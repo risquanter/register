@@ -3,9 +3,9 @@ package com.risquanter.register.http.controllers
 import zio.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 
-import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.telemetry.ActiveTrace
 
 /** The one place a controller's failure becomes a wire failure.
   *
@@ -27,17 +27,5 @@ extension [R, A](effect: ZIO[R, AppError, A])
   def wireEither(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
     effect.either.flatMap {
       case Right(value) => ZIO.succeed(Right(value))
-      case Left(error)  => currentTraceId.map(trace => Left(WireError.fromAppError(error, trace)))
+      case Left(error)  => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace)))
     }
-
-/** The trace identifier of the active span.
-  *
-  * With no active span OpenTelemetry returns its invalid span context, whose
-  * identifier is thirty-two zeros — the value `TelemetryPlaceholders`
-  * recognises as unlinked. So a failure outside any span names an unlinked
-  * trace rather than a plausible identifier that resolves to nothing.
-  */
-private def currentTraceId(using tracing: Tracing): UIO[TraceId] =
-  tracing.getCurrentSpanContextUnsafe.map { ctx =>
-    TraceId.fromString(ctx.getTraceId).toOption.getOrElse(TelemetryPlaceholders.UnlinkedTrace)
-  }
