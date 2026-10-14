@@ -1265,6 +1265,87 @@ rules in `.claude/rules/scala-style.md` all landed on 2026-10-11 and are no
 longer this phase's work. The scattered use sites are reached by the standing
 rule as later tasks open those files, not by this phase.
 
+**Phase 6 — the response shapes.** ADR-038 defines the two shapes a response
+may take and forbids a raw primitive where a refined type exists. Bringing the
+non-conforming responses into it joins this plan rather than becoming a separate
+one, ruled 2026-10-14.
+
+The standing cleanup rule does not reach most of them on its own. Its trigger is
+a file already open for another reason, and the response declarations in
+`modules/common/src/main/scala/com/risquanter/register/http/responses/` and
+`.../http/endpoints/` are opened by no other phase here. Phases 3 and 4 reach the
+server-side halves — the services and controllers that build these responses —
+because the rename in Phase 4 opens every file that names an internal error. The
+declarations are deliberate work, and that is why they are a phase.
+
+Five steps, smallest and least observable first, so each clause of ADR-038 is
+exercised on a small surface before the largest one:
+
+1. **The server-sent events.** `SSEEvent`'s hand-written `eventType`
+   discriminator becomes a derived discriminated codec, and `NodeChangeType` and
+   `ConnectionState` lose their `toWire`/`fromWire` pairs. First because it is
+   the only item whose wire form no consumer reads yet: the events are
+   server-only, not cross-compiled, and no test pins the serialized bytes. It
+   also removes the trait-level encoder that encodes each payload as a quoted
+   JSON string rather than an object, so the `data:` line stops being
+   double-encoded. Files: `SSEEvent.scala`, `SSEController.scala`,
+   `InvalidationHandler.scala`, `SSEHubSpec.scala`.
+
+2. **The changed-node report.** `ChangedNodesResponse.status` is four values held
+   as `String`; it becomes a sealed enum carrying the entries in its `Ok` case,
+   and `NodeChangeEntry.nodeId` becomes `NodeId`. Second because it is the
+   reference case for ADR-038's second clause on a cross-compiled response, and
+   the browser already holds the type. Files: `ChangedNodesResponse.scala`,
+   `WorkspaceTreeEndpoints.scala`, `ChangedNodesService.scala`,
+   `WorkspaceTreeController.scala`, `ChangedNodesState.scala`,
+   `ChangedNodesStateSpec.scala`.
+
+3. **The history operation.** `HistoryOperation`'s hand-written string codec
+   carries a `case _ => Other` arm, so an unrecognized wire value becomes a
+   legitimate case instead of being rejected. Replacing it with a derived codec
+   is a correctness fix and not only a typing one, which is why it comes before
+   the two larger items. Files: `TreeHistoryResponse.scala`,
+   `TreeHistoryService.scala`, `TreeHistoryServiceSpec.scala`,
+   `TreeHistoryStateSpec.scala`.
+
+4. **The distribution preview.** Four defects in one type: `Schema.any` erases
+   the generated schema for the whole response, an `Array` field makes equality
+   reference equality, `distributionType` is a two-value set held as `String`,
+   and the file sits in `http/requests/` though it is a response. The file moves,
+   which makes this the most disruptive single step, so it comes after the three
+   that do not move anything. Files: `DistributionPreviewResponse.scala` (moved
+   to `http/responses/`), `DistributionPreviewEndpoints.scala`,
+   `DistributionPreviewService.scala`, `DistributionPreviewServiceSpec.scala`,
+   `DistributionChartState.scala`, `DistributionSpecBuilder.scala`.
+
+5. **The simulation response and the untyped bodies.** `SimulationResponse.name`
+   is a `String` where `SafeName` exists, and its `quantiles` map holds a fixed
+   key set as `Map[String, Double]`. The same step types the four bodies that are
+   a bare primitive or map: probability of exceedance returns `Double` where
+   `OccurrenceProbability` states the interval, the workspace reap count returns
+   `Map[String, Int]`, and `/health` returns `Map[String, String]`. Last because
+   `SimulationResponse` is the response four endpoints share, so it changes the
+   most observable wire at once, and because it is the only step reaching the
+   integration tier. Files: `SimulationResponse.scala`, `WorkspaceResponse.scala`,
+   `RiskTreeEndpoints.scala`, `WorkspaceLifecycleEndpoints.scala`,
+   `WorkspaceAnalysisEndpoints.scala`, `SystemEndpoints.scala`,
+   `WorkspaceTreeController.scala`, `WorkspaceLifecycleController.scala`,
+   `WorkspaceAnalysisController.scala`, `SimulationResponseSpec.scala`,
+   `WorkspaceLifecycleControllerSpec.scala`, `HttpApiIntegrationSpec.scala`,
+   `SeedReproducibilityItSpec.scala`, and the app readers `ZJS.scala`,
+   `SubmitState.scala`, `ScenarioSubmitState.scala`, `TreeListState.scala`,
+   `TreeViewState.scala`, `WorkspaceState.scala`, `TreeBuilderView.scala`,
+   `TreeListView.scala`.
+
+One thing to settle inside step 5 rather than in advance: `/health` is declared
+twice, in `RiskTreeEndpoints` and again in `SystemEndpoints`, with the same path
+and the same response type. Whether one of the two is unreferenced is decided by
+reading the route lists when the step opens those files, and an unreferenced
+declaration is deleted rather than typed.
+
+Every step ends with the whole suite green, and the phase takes one PATCH bump at
+its end, as the other phases do.
+
 Phase 1b is the telemetry phase, and there is no separate telemetry plan.
 `PLAN-TELEMETRY-PLUMBING.md` is retired: its four open questions are ruled in
 `EWB-D-19` and its work is Phase 1b above. This plan types the structure and
