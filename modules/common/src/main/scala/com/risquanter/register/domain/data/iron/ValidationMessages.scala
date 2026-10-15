@@ -27,6 +27,20 @@ object ValidationMessages:
   val reservedNodeName: String  = "Node name must not be a reserved query symbol (e.g. 'leaf', 'p95')"
 
   // ══════════════════════════════════════════════════════════════════
+  // ULID identifiers (SafeId and the nominal wrappers over it)
+  // ══════════════════════════════════════════════════════════════════
+  /** Why a ULID was refused, stating the constraint and not the value.
+    *
+    * The submitted value is deliberately absent. It is client-supplied text,
+    * and a validation message reaches a client inside
+    * `WireError.ValidationRejected`, so it is a disclosure surface whether or
+    * not the value came from the same client (ADR-035). The 26 characters and
+    * the alphabet are fixed by the ULID specification rather than chosen here.
+    */
+  val invalidUlid: String =
+    "Invalid ID (expected a 26-character ULID in Crockford base32: digits and uppercase letters, excluding I, L, O and U)"
+
+  // ══════════════════════════════════════════════════════════════════
   // Email
   // ══════════════════════════════════════════════════════════════════
   val emailInvalid: String      = "Please enter a valid email address"

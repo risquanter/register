@@ -1,10 +1,11 @@
 package com.risquanter.register.http
 
-import zio.{Task, ZIO}
+import zio.{Task, UIO, ZIO}
 import zio.telemetry.opentelemetry.tracing.Tracing
 
+import sttp.model.StatusCode
 import sttp.monad.MonadError
-import sttp.tapir.{DecodeResult, EndpointIO, EndpointInput}
+import sttp.tapir.{DecodeResult, EndpointIO, EndpointInput, ValidationError as TapirValidationError}
 import sttp.tapir.server.interceptor.DecodeFailureContext
 import sttp.tapir.server.interceptor.decodefailure.{DecodeFailureHandler, DefaultDecodeFailureHandler}
 import sttp.tapir.server.model.ValuedEndpointOutput
@@ -23,17 +24,24 @@ import com.risquanter.register.telemetry.ActiveTrace
   * plain-text body, which is the one error on this API a client could not decode
   * and the one that does not carry a trace.
   *
-  * Whether to answer at all is left to Tapir's default handler. A failure on a
-  * path segment deliberately produces no response, because another endpoint may
-  * still match the request, and answering there would turn a routing miss into a
-  * rejection.
+  * Whether to answer at all is left to Tapir's default handler, and so is the
+  * status. A failure on a path segment deliberately produces no response,
+  * because another endpoint may still match the request, and answering there
+  * would turn a routing miss into a rejection.
+  *
+  * Only the body is this handler's own. The status the default handler computed
+  * belongs to the input that was rejected, so it is carried rather than
+  * replaced: nearly every rejection is `400`, and the rest are decided by what
+  * the endpoint declares.
   */
 object WireDecodeFailureHandler:
 
-  /** The default handler, consulted only for its decision about whether this
-    * failure should be answered. Its own output is never used.
+  /** The default handler, consulted for two things: whether this failure should
+    * be answered at all, and the status and headers it should be answered with.
+    * Only its plain-text body is unused.
     */
   private val tapirDefault = DefaultDecodeFailureHandler[Task]
+
 
   /** The handler to pass to `ZioHttpServerOptions.customiseInterceptors`.
     *
@@ -47,14 +55,35 @@ object WireDecodeFailureHandler:
       ): Task[Option[ValuedEndpointOutput[?]]] =
         tapirDefault.respond(ctx) match
           case None => ZIO.none
-          case Some(_) =>
-            ActiveTrace.id(using tracing).map { trace =>
-              val rejected: WireError.ValidationRejected = WireError.ValidationRejected(
-                List(toValidationError(ctx.failure, ctx.failingInput)),
-                trace
-              )
-              Some(ValuedEndpointOutput(BaseEndpoint.validationRejectedOut, rejected))
-            }
+          case Some((status, headers)) =>
+            logIfChallengeAdvertised(status) *>
+              ActiveTrace.id(using tracing).map { trace =>
+                val rejected: WireError.ValidationRejected = WireError.ValidationRejected(
+                  List(toValidationError(ctx.failure, ctx.failingInput)),
+                  trace
+                )
+                Some(ValuedEndpointOutput(BaseEndpoint.rejectionOut, (status, headers, rejected)))
+              }
+
+  /** Records a `401` as a configuration defect of this service.
+    *
+    * A `401` from the decoders means the endpoint declares an authentication
+    * input, which only `Tapir.auth` creates. This service validates no
+    * credential: a token is checked at the mesh and its claims arrive as
+    * ordinary headers (ADR-012), so an endpoint that advertises a challenge is
+    * asking a client for something nothing here will read. The status is still
+    * answered, because suppressing it would leave the request unanswered, but
+    * it is logged, because the condition is a mistake in this service rather
+    * than in the request.
+    */
+  private def logIfChallengeAdvertised(status: StatusCode): UIO[Unit] =
+    ZIO
+      .logError(
+        "An endpoint declares an authentication input, so a decode failure answered 401 with a challenge. " +
+          "Credential validation belongs to the mesh and this service reads claims as headers."
+      )
+      .when(status == StatusCode.Unauthorized)
+      .unit
 
   /** One `ValidationError` for the rejected input, naming it and why it was
     * refused.
@@ -79,22 +108,25 @@ object WireDecodeFailureHandler:
       case DecodeResult.Mismatch(expected, _) =>
         (ValidationErrorCode.TYPE_MISMATCH, s"expects $expected")
       case DecodeResult.InvalidValue(errors) =>
-        (ValidationErrorCode.INVALID_FORMAT, invalidValueMessage(errors))
+        (ValidationErrorCode.INVALID_FORMAT, constraintBroken(errors))
       case DecodeResult.Error(_, _) =>
         (ValidationErrorCode.TYPE_MISMATCH, "could not be read")
 
     ValidationError(fieldName(input), code, message)
 
-  /** The constraints a validator reported, rendered without the rejected value.
+  /** What the refused value broke, in the words of whatever refused it.
     *
-    * The value itself is deliberately not echoed. It is client-supplied text,
-    * and a message is a leakage surface whether or not the value came from the
-    * same client (ADR-035).
+    * An Iron refinement puts its own sentence in `customMessage`, which is the
+    * branch every refusal from `IronTapirCodecs` takes. A validator declared on
+    * a schema instead carries no message and renders through `show`, which
+    * states the constraint — `length<=30`. Either way the rejected value is not
+    * echoed: it is client-supplied text, and a message is a disclosure surface
+    * whether or not the value came from the same client (ADR-035).
     */
-  private def invalidValueMessage(errors: List[sttp.tapir.ValidationError[?]]): String =
-    errors match
-      case Nil => "is not valid"
-      case es  => es.map(e => e.validator.toString).mkString("fails ", ", ", "")
+  private def constraintBroken(errors: List[TapirValidationError[?]]): String =
+    errors.flatMap(e => e.customMessage.orElse(e.validator.show)) match
+      case Nil      => "is not valid"
+      case messages => messages.mkString("; ")
 
   /** The name a client would recognise for the input that was rejected.
     *

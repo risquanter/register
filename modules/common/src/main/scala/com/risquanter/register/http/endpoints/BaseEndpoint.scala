@@ -1,6 +1,6 @@
 package com.risquanter.register.http.endpoints
 
-import sttp.model.StatusCode
+import sttp.model.{Header, StatusCode}
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
@@ -22,12 +22,30 @@ object BaseEndpoint {
   val internalFaultOut: EndpointOutput[WireError.InternalFault] =
     statusCode(StatusCode.InternalServerError).and(jsonBody[WireError.InternalFault])
 
-  /** The `400` output, declared here for the same reason as the one above: a
-    * request the codecs reject never reaches a handler, so the decode-failure
-    * handler answers it and has no endpoint output of its own to use.
+  /** The `400` output: the status and the body a rejected input is reported
+    * with, for the endpoint's own error variant below.
+    *
+    * The decode-failure handler does not use this one. A rejection it answers
+    * carries whichever status the rejected input decides, so it builds an
+    * output whose status is a value; this is the fixed-status form, and `400`
+    * is the only status the endpoint itself declares for the body.
     */
   val validationRejectedOut: EndpointOutput[WireError.ValidationRejected] =
     statusCode(StatusCode.BadRequest).and(jsonBody[WireError.ValidationRejected])
+
+  /** The same body with the status as a value, for the decode-failure handler.
+    *
+    * A rejection it answers carries whichever status the rejected input decides
+    * — `400` for a refused value, `415` for a `Content-Type` that does not
+    * match, `413` for a body over its declared maximum — so the status cannot
+    * be fixed in the output. The headers travel with it because a status can
+    * require one.
+    *
+    * Declared beside the fixed-status form rather than in the handler so that
+    * one body is described once, which is the reason the two above are here.
+    */
+  val rejectionOut: EndpointOutput[(StatusCode, List[Header], WireError.ValidationRejected)] =
+    statusCode.and(headers).and(jsonBody[WireError.ValidationRejected])
 }
 
 /** Base endpoint. Every endpoint trait builds from one of the two values in this
@@ -86,7 +104,7 @@ trait BaseEndpoint {
     */
   val authedBaseEndpoint = baseEndpoint.in(header[Option[UserId.Authenticated]]("x-user-id"))
 
-  /** Shared `X-Branch` input (E7). The target branch is an explicit, required
+  /** Shared `X-Branch` input. The target branch is an explicit, required
     * wire value — `"main"` or a scenario name — decoded once at the Tapir
     * boundary into the single internal `BranchChoice` spelling. Absence fails
     * decoding → 400: there is no absent-means-main state anywhere.

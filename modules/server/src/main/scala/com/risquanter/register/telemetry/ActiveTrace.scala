@@ -7,9 +7,10 @@ import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId}
 
 /** The trace identifier of the active span.
   *
-  * One definition, because three places need it: the wire boundary that stamps
-  * a projected failure, the request interceptor that annotates the request's
-  * log lines, and the catch-all that answers a failure reaching no endpoint.
+  * One definition, because four places need it: the wire boundary that stamps a
+  * projected failure, the request interceptor that annotates the request's log
+  * lines, the handler that answers a rejected input, and the catch-all that
+  * answers a failure reaching no endpoint.
   */
 object ActiveTrace:
 

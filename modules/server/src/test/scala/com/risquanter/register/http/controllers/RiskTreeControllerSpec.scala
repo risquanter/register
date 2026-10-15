@@ -235,34 +235,39 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         )
       },
       
-      test("NonNegativeLong codec rejects negative IDs") {
+      test("NonNegativeLong codec refuses negative IDs as read-then-refused") {
         import sttp.tapir.*
         import com.risquanter.register.http.codecs.IronTapirCodecs.given
-        
+
         val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
-        
+
+        // A refusal, not a read failure: "-1" parses as a Long and the
+        // refinement then rejects it, which is what makes the wire code
+        // INVALID_FORMAT rather than TYPE_MISMATCH.
         assertTrue(
-          codec.decode("-1") match { case DecodeResult.Error(_, _) => true; case _ => false },
-          codec.decode("-999") match { case DecodeResult.Error(_, _) => true; case _ => false }
+          codec.decode("-1").isInstanceOf[DecodeResult.InvalidValue],
+          codec.decode("-999").isInstanceOf[DecodeResult.InvalidValue]
         )
       },
-      
-      test("NonNegativeLong codec error messages are descriptive") {
+
+      test("NonNegativeLong codec refusal messages are descriptive and omit the value") {
         import sttp.tapir.*
         import com.risquanter.register.http.codecs.IronTapirCodecs.given
-        
+
         val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
-        
-        val result = codec.decode("-5")
-        result match {
-          case DecodeResult.Error(_, error) => 
-            val msg = error.getMessage.toLowerCase
-            assertTrue(
-              msg.contains("non-negative") || msg.contains(">= 0") || msg.contains("greater")
-            )
-          case _ => 
-            assertTrue(false) // Expected DecodeResult.Error for negative value
-        }
+
+        val messages = codec.decode("-987654321") match
+          case DecodeResult.InvalidValue(errors) => errors.flatMap(_.customMessage)
+          case _                                 => Nil
+
+        assertTrue(
+          messages.nonEmpty,
+          messages.exists { m =>
+            val lower = m.toLowerCase
+            lower.contains("non-negative") || lower.contains(">= 0") || lower.contains("greater") || lower.contains("zero")
+          },
+          !messages.exists(_.contains("987654321"))
+        )
       }
     )
   ) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom

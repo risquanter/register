@@ -18,14 +18,13 @@ extension [R, A](effect: ZIO[R, AppError, A])
   /** Project the typed domain failure onto the wire type, naming the trace the
     * failing work ran under.
     *
-    * This is where the trace is read, and it is the only place it can be: the
+    * This is the only place a controller's failure can pick up a trace: the
     * active span lives in a fibre reference, so reading it requires an effect,
     * and a failure value constructed in pure code deep in a service cannot
     * carry one. A trace identifier is constant across a request's whole span
     * tree, so the value read here is the same one the failing work ran under.
     */
   def wireEither(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
-    effect.either.flatMap {
-      case Right(value) => ZIO.succeed(Right(value))
-      case Left(error)  => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace)))
-    }
+    effect
+      .map(Right(_))
+      .catchAll(error => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace))))

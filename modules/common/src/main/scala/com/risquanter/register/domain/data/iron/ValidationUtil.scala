@@ -311,7 +311,7 @@ object ValidationUtil {
 
   // Refinement for risk/portfolio IDs (ULID, canonical uppercase Crockford base32, 26 chars)
   def refineId(value: String, fieldPath: String = "id"): Either[List[ValidationError], SafeId.SafeId] = {
-    refineUlid(value, fieldPath, "ID", SafeId.SafeId(_))
+    refineUlid(value, fieldPath, SafeId.SafeId(_))
   }
 
   // Refinement for tree IDs — delegates to refineId and wraps in TreeId case class.
@@ -404,11 +404,17 @@ object ValidationUtil {
   private def refineUlid[A](
       value: String,
       fieldPath: String,
-      label: String,
       wrap: UlidCanonical => A
   ): Either[List[ValidationError], A] = {
     val sanitized = Option(value).map(_.trim).getOrElse("")
     val normalized = sanitized.toUpperCase
+    val refusal = List(
+      ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_FORMAT,
+        message = ValidationMessages.invalidUlid
+      )
+    )
     ULID(normalized) match {
       case Right(parsed) =>
         val canonical = parsed.toString
@@ -416,25 +422,8 @@ object ValidationUtil {
           .refineEither[Match["^[0-9A-HJKMNP-TV-Z]{26}$"]]
           .map(wrap)
           .left
-          .map(err =>
-            List(
-              ValidationError(
-                field = fieldPath,
-                code = ValidationErrorCode.INVALID_FORMAT,
-                message = s"$label '$sanitized' is not a valid ULID: $err"
-              )
-            )
-          )
-      case Left(err) =>
-        Left(
-          List(
-            ValidationError(
-              field = fieldPath,
-              code = ValidationErrorCode.INVALID_FORMAT,
-              message = s"$label '$sanitized' is not a valid ULID: ${err.getMessage}"
-            )
-          )
-        )
+          .map(_ => refusal)
+      case Left(_) => Left(refusal)
     }
   }
 }

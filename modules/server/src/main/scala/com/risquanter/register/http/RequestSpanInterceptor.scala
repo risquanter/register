@@ -4,18 +4,13 @@ import io.opentelemetry.api.trace.SpanKind
 import sttp.monad.MonadError
 import sttp.tapir.model.ServerRequest
 import sttp.tapir.server.ServerEndpoint
-import sttp.tapir.server.interceptor.{EndpointInterceptor, RequestHandler, RequestInterceptor, RequestResult, Responder, ResponseSource}
-import sttp.tapir.server.model.ValuedEndpointOutput
-import zio.{Cause, Task, ZIO}
+import sttp.tapir.server.interceptor.{EndpointInterceptor, RequestHandler, RequestInterceptor, RequestResult, Responder}
+import zio.{Task, ZIO}
 import zio.telemetry.opentelemetry.tracing.Tracing
 
-import com.risquanter.register.domain.data.iron.TraceId
-import com.risquanter.register.http.endpoints.BaseEndpoint
-import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.telemetry.ActiveTrace
 
-/** Tapir request interceptor that opens one SERVER span per request, and answers
-  * any failure that reaches no endpoint's declared output.
+/** Tapir request interceptor that opens one SERVER span per request.
   *
   * The span is the root of the request's trace, so every span a service opens
   * below it is a child and carries the same trace identifier. That identifier is
@@ -27,10 +22,9 @@ import com.risquanter.register.telemetry.ActiveTrace
   * annotation travels in a fibre reference, which is how it reaches code running
   * on forked fibres without being passed to it.
   *
-  * The second responsibility is here rather than in a handler of its own because
-  * this interceptor is the outermost one, so it is the only place that sees every
-  * request whatever happened to it, and because answering such a failure needs
-  * the trace this one already holds.
+  * Answering a failure that reaches no declared output belongs to
+  * `DefectCatchAllInterceptor`, which is appended and therefore runs inside this
+  * one. That nesting is what puts the cause it logs under this span's trace.
   *
   * This is the general `RequestInterceptor` form rather than `transformResult`,
   * which `SecurityHeadersInterceptor` uses. The span has to be open while
@@ -70,57 +64,27 @@ object RequestSpanInterceptor:
             val downstream = requestHandler(EndpointInterceptor.noop)(request, endpoints)
             tracing.span(spanName(request), SpanKind.SERVER) {
               ActiveTrace.id(using tracing).flatMap { trace =>
-                ZIO.logAnnotate(TraceAnnotation, trace.value)(
-                  downstream.foldCauseZIO(
-                    cause =>
-                      if cause.isInterruptedOnly then ZIO.refailCause(cause)
-                      else answerDefect(responder, request, trace, cause),
-                    success => ZIO.succeed(success)
-                  )
-                )
+                ZIO.logAnnotate(TraceAnnotation, trace.value)(downstream)
               }
             }
 
-  /** The span's name: the HTTP method and the request's route family.
+  /** The HTTP method and the request's route family, with no capability key.
     *
     * Only the first path segment contributes, for two separate reasons. A
     * workspace-scoped path carries the capability key in its second segment, and
     * a span name is exported, so reproducing the path would publish the
     * credential. The later segments also hold per-resource identifiers, which
     * would make the name high-cardinality and useless for grouping.
+    *
+    * Two sinks read it: the span this interceptor opens, and the server log,
+    * whose default renders the whole request line and would otherwise write the
+    * key to standard output. One definition, so neither sink can drift from the
+    * other.
     */
-  private[http] def spanName(request: ServerRequest): String =
+  def spanName(request: ServerRequest): String =
     val family = request.pathSegments match
       case "w" :: _     => s"/w/$RedactedKeySegment"
       case segment :: _ => s"/$segment"
       case Nil          => "/"
     s"${request.method.method} $family"
 
-  /** Answer a failure that reached no endpoint's declared output, with the `500`
-    * output the endpoints themselves declare.
-    *
-    * Nothing about the failure crosses: the cause is logged under the same trace
-    * the response carries, and the body holds the identifier alone (ADR-035).
-    * The response is built from `BaseEndpoint.internalFaultOut`, so a failure
-    * answered here and one projected by `wireEither` are the same shape to a
-    * client.
-    *
-    * Without this, the zio-http interpreter folds the cause itself and writes
-    * `cause.squash.getMessage` into a plain-text body, which publishes an
-    * exception message and a shape no client decodes.
-    *
-    * An interruption is not answered here. The caller has gone, so there is
-    * nothing to answer, and treating it as a fault would log a request the
-    * client itself cancelled.
-    */
-  private def answerDefect[B](
-    responder: Responder[Task, B],
-    request:   ServerRequest,
-    trace:     TraceId,
-    cause:     Cause[Throwable]
-  ): Task[RequestResult[B]] =
-    ZIO.logErrorCause("request failed with no declared output", cause) *>
-      responder(
-        request,
-        ValuedEndpointOutput(BaseEndpoint.internalFaultOut, WireError.InternalFault(trace))
-      ).map(response => RequestResult.Response(response, ResponseSource.EndpointHandler))

@@ -14,7 +14,9 @@ import sttp.tapir.server.ziohttp.ZioHttpServerOptions
 import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.configs.TestConfigs
+import com.risquanter.register.domain.data.iron.{ScenarioName, TelemetryPlaceholders}
 import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.http.codecs.IronTapirCodecs
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.telemetry.TelemetryLive
@@ -39,6 +41,21 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
     * must come through exactly, because a client can act on it. */
   private val branchInput: EndpointInput[String] = header[String]("X-Branch")
 
+  /** A scenario name no refinement accepts, long enough to break the length
+    * bound and recognisable if any message repeats it. */
+  private val ScenarioNameTooLong: String = "LEAKCANARY" + "x" * 128
+
+  /** The `ValidationError` a real Iron codec's refusal maps to.
+    *
+    * `ScenarioName`'s codec is the representative: it reads the raw string
+    * first and refines second, which is the shape all twelve share.
+    */
+  private def refusalOf(raw: String): Option[com.risquanter.register.domain.errors.ValidationError] =
+    import IronTapirCodecs.given
+    summon[Codec[String, ScenarioName.ScenarioName, CodecFormat.TextPlain]].decode(raw) match
+      case failure: DecodeResult.Failure => Some(WireDecodeFailureHandler.toValidationError(failure, branchInput))
+      case _                             => None
+
   // ── The endpoint the request-level test drives ───────────────────────────────
 
   /** A minimal endpoint carrying the same required branch header the workspace
@@ -53,9 +70,14 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
 
   private def backend: ZIO[Tracing, Nothing, SttpBackend[Task, Any]] =
     ZIO.serviceWith[Tracing] { tracing =>
+      // The span interceptor is part of the arrangement under test, not scenery:
+      // the handler stamps the trace of the active span, and without a span open
+      // every rejection would carry the unlinked placeholder. Production prepends
+      // it in `Application.startServer`, so the stub does too.
       val options = ZioHttpServerOptions
         .customiseInterceptors[Any]
         .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))
+        .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
 
       TapirStubInterpreter(options, SttpBackendStub[Task, Any](summon[SttpMonadError[Task]]))
         .whenServerEndpointRunLogic(probe)
@@ -121,6 +143,30 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
       }
     ),
 
+    suite("a refusal that a real Iron codec produced")(
+
+      /** The cases above hand `toValidationError` a `DecodeResult` built by
+        * hand, which tests the mapping and not what the codecs actually emit.
+        * These two drive a real codec, so the classification and the message
+        * are checked against the value a request would really carry.
+        */
+      test("is an invalid format, not a type mismatch") {
+        assertTrue(
+          refusalOf(ScenarioNameTooLong).map(_.code).contains(ValidationErrorCode.INVALID_FORMAT)
+        )
+      },
+      test("carries the refinement's own sentence") {
+        val expected = ScenarioName.fromString(ScenarioNameTooLong).left.getOrElse(Nil).map(_.message)
+        assertTrue(
+          expected.nonEmpty,
+          refusalOf(ScenarioNameTooLong).map(_.message).contains(expected.mkString("; "))
+        )
+      },
+      test("repeats no part of the submitted value") {
+        assertTrue(!refusalOf(ScenarioNameTooLong).exists(_.message.contains(ScenarioNameTooLong)))
+      }
+    ),
+
     suite("the request path")(
       test("a missing required header is answered with a typed rejection, not text") {
         for
@@ -133,11 +179,17 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
           body.exists(_.errors.exists(_.code == ValidationErrorCode.REQUIRED_FIELD))
         )
       },
-      test("the rejection carries a trace") {
+      test("the rejection carries the trace of a real span") {
         for
           response <- getProbe(branch = None)
           body      = rejection(response)
-        yield assertTrue(body.map(_.trace.value).exists(_.nonEmpty))
+          trace     = body.map(_.trace)
+        yield assertTrue(
+          trace.isDefined,
+          // The unlinked placeholder is thirty-two zeros, which is non-empty, so
+          // asserting non-emptiness would pass with no span open at all.
+          !trace.contains(TelemetryPlaceholders.UnlinkedTrace)
+        )
       },
       test("a well-formed request still reaches the logic") {
         for

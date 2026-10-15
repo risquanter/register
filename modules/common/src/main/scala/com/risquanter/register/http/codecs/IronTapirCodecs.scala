@@ -1,7 +1,9 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
+import sttp.tapir.ValidationError as TapirValidationError
 import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId}
+import com.risquanter.register.domain.errors.ValidationError
 
 /**
  * Tapir codecs for Iron refined types.
@@ -22,11 +24,41 @@ import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, No
  */
 object IronTapirCodecs {
 
+  /** Occupies the rejected-value slot of every refusal reported here.
+    *
+    * Tapir renders that slot — `ValidationMessages.invalidValueMessage` ends
+    * "but got: ${ve.invalidValue}" — so a constant in it is what keeps
+    * client-submitted text out of a message whichever renderer runs (ADR-035).
+    */
+  private val ClientInputRedaction: String = "[withheld]"
+
+  /** Occupies the validator slot, which Tapir requires and a refinement cannot
+    * fill: an Iron constraint is not a `Validator`. The refusal's own sentence
+    * travels in `customMessage` instead. One value serves every codec here,
+    * including those whose raw input is numeric, because the slot's type comes
+    * from the validator rather than from the decoded value.
+    */
+  private val NoTapirValidator: Validator.Custom[String] =
+    Validator.Custom(_ => ValidationResult.Invalid())
+
+  /** One `DecodeResult.InvalidValue` for a value a refinement read and refused.
+    *
+    * `InvalidValue` rather than `Error` because the two mean different things to
+    * the decode-failure handler: `Error` says the input could not be read, and
+    * every codec here parses before it refines, so reaching a refinement proves
+    * the input was readable. Each refusal keeps the refinement's message and
+    * none of the submitted value.
+    */
+  private def refused(errs: List[ValidationError]): DecodeResult.InvalidValue =
+    DecodeResult.InvalidValue(
+      errs.map(e => TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(e.message)))
+    )
+
   /** Codec for PositiveInt (Int > 0). */
   given Codec[String, PositiveInt, CodecFormat.TextPlain] =
     Codec.int.mapDecode[PositiveInt](raw =>
       ValidationUtil.refinePositiveInt(raw, "value").fold(
-        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(identity)
@@ -35,7 +67,7 @@ object IronTapirCodecs {
   given Codec[String, NonNegativeInt, CodecFormat.TextPlain] =
     Codec.int.mapDecode[NonNegativeInt](raw =>
       ValidationUtil.refineNonNegativeInt(raw, "value").fold(
-        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(identity)
@@ -50,7 +82,7 @@ object IronTapirCodecs {
   given Codec[String, NonNegativeLong, CodecFormat.TextPlain] =
     Codec.long.mapDecode[NonNegativeLong](raw =>
       ValidationUtil.refineNonNegativeLong(raw, "id").fold(
-        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(identity)
@@ -66,7 +98,7 @@ object IronTapirCodecs {
   given Codec[String, SafeId.SafeId, CodecFormat.TextPlain] =
     Codec.string.mapDecode[SafeId.SafeId](raw =>
       SafeId.fromString(raw).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(_.value.toString)
@@ -90,7 +122,7 @@ object IronTapirCodecs {
   given Codec[String, TreeId, CodecFormat.TextPlain] =
     Codec.string.mapDecode[TreeId](raw =>
       TreeId.fromString(raw).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(_.value)
@@ -106,7 +138,7 @@ object IronTapirCodecs {
   given Codec[String, NodeId, CodecFormat.TextPlain] =
     Codec.string.mapDecode[NodeId](raw =>
       NodeId.fromString(raw).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(_.value)
@@ -126,7 +158,7 @@ object IronTapirCodecs {
   given Codec[String, WorkspaceKeySecret, CodecFormat.TextPlain] =
     Codec.string.mapDecode[WorkspaceKeySecret](raw =>
       WorkspaceKeySecret.fromString(raw).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(_.reveal)
@@ -147,7 +179,7 @@ object IronTapirCodecs {
   given Codec[String, UserId.Authenticated, CodecFormat.TextPlain] =
     Codec.string.mapDecode[UserId.Authenticated](raw =>
       UserId.fromString(raw).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(_.value)
@@ -165,7 +197,7 @@ object IronTapirCodecs {
   given Codec[String, ScenarioName.ScenarioName, CodecFormat.TextPlain] =
     Codec.string.mapDecode[ScenarioName.ScenarioName](raw =>
       ScenarioName.fromString(raw).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(_.value)
@@ -186,7 +218,7 @@ object IronTapirCodecs {
     Codec.string.mapDecode[CommitHash](raw =>
       val unquoted = raw.strip.stripPrefix("\"").stripSuffix("\"")
       CommitHash.fromString(unquoted).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(hash => s"\"${hash.value}\"")
@@ -202,7 +234,7 @@ object IronTapirCodecs {
       case "main" => DecodeResult.Value(BranchChoice.Main)
       case raw =>
         ScenarioName.fromString(raw).fold(
-          errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+          refused,
           name => DecodeResult.Value(BranchChoice.Scenario(name))
         )
     } {
@@ -270,7 +302,7 @@ object IronTapirCodecs {
   given Codec[String, SeedEntityId.SeedEntityId, CodecFormat.TextPlain] =
     Codec.long.mapDecode[SeedEntityId.SeedEntityId](raw =>
       SeedEntityId.fromLong(raw).fold(
-        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        refused,
         DecodeResult.Value(_)
       )
     )(_.value)

@@ -9,7 +9,7 @@ import io.getquill.SnakeCase
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
-import com.risquanter.register.http.{HealthProbeServer, HttpApi, RequestSpanInterceptor, SecurityHeadersInterceptor, WireDecodeFailureHandler}
+import com.risquanter.register.http.{DefectCatchAllInterceptor, HealthProbeServer, HttpApi, RequestSpanInterceptor, SecurityHeadersInterceptor, WireDecodeFailureHandler}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.StartupReadiness
@@ -336,24 +336,37 @@ object Application extends ZIOAppDefault {
       .allowHeaders("Content-Type", "Accept", "Authorization")
       .exposeHeaders("Content-Type")
       .maxAge(scala.concurrent.duration.Duration(3600, "s"))
-    // Each prepend goes to the front, so the span interceptor ends up first in
-    // the stack and is therefore the outermost: it is entered first on the
-    // request and leaves last on the response. That is what makes its span and
-    // its log annotation cover all downstream work, the header decoration and
-    // the CORS handling included. The security-headers interceptor stays the
-    // last one that modifies headers, which is what it requires — the span
-    // interceptor adds none.
+    // Tapir enters the first interceptor in the stack first and leaves it last,
+    // so order decides what decorates whose response. Each prepend appends to
+    // the prepended list, which makes the security-headers interceptor —
+    // prepended first — the outermost, the span interceptor second, and the CORS
+    // interceptor inside both. Every response therefore passes outward through
+    // CORS and then the security headers.
+    //
+    // The catch-all is appended rather than prepended, so it is the innermost
+    // request interceptor. It has to be inside CORS: CORS adds its headers to
+    // the response coming back from below it, and a browser rejects a
+    // cross-origin response that lacks them before any script reads the body —
+    // which would lose the trace a 500 exists to deliver. It stays inside the
+    // span interceptor too, so the cause it logs carries that span's trace.
     //
     // The decode-failure handler replaces Tapir's default, which answers a
-    // rejected input with a plain-text body. Both it and the span interceptor's
-    // own catch-all send a declared `WireError` output, so every failure this
-    // server sends has one shape (ADR-035).
+    // rejected input with a plain-text body. It and the catch-all both send a
+    // declared `WireError` output, so every failure this server sends has one
+    // shape (ADR-035).
     serverOptions = ZioHttpServerOptions
       .customiseInterceptors[Any]
       .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))
+      .exceptionHandler(DefectCatchAllInterceptor.exceptionHandler)
+      .serverLog(
+        ZioHttpServerOptions
+          .defaultServerLog[Any]
+          .showRequest(RequestSpanInterceptor.spanName)
+      )
       .prependInterceptor(SecurityHeadersInterceptor.interceptor)
       .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
       .corsInterceptor(CORSInterceptor.customOrThrow[Task](tapirCorsConfig))
+      .appendInterceptor(DefectCatchAllInterceptor.interceptor(tracing))
       .options
     httpApp = ZioHttpInterpreter(serverOptions).toHttp(endpoints)
 

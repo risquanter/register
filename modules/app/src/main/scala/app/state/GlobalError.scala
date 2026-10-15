@@ -70,13 +70,20 @@ object GlobalError:
     * The three arms are disjoint: the server answered and the reply decoded,
     * the call never happened, or the reply arrived and could not be read.
     *
-    * The last carries no trace, because the trace is a field of a body that did
-    * not decode. The status takes its place in the sentence, which is the only
-    * thing the browser learned about that answer.
+    * The transport arm discards its cause. A browser `fetch` rejection carries
+    * developer wording that differs between browsers — "Failed to fetch",
+    * "NetworkError when attempting to fetch resource" — so it is diagnostic
+    * rather than something to show a user, and the banner states what happened
+    * instead. The cause itself is written to the browser console by
+    * `ZJS.recordToConsole`, which is where a developer looks for it.
+    *
+    * The last arm carries no trace, because the trace is a field of a body that
+    * did not decode. The status takes its place in the sentence, which is the
+    * only thing the browser learned about that answer.
     */
   def from(failure: RequestFailure): GlobalError = failure match
     case RequestFailure.Wire(error)         => fromWireError(error)
-    case RequestFailure.Transport(cause)    => fromThrowable(cause)
+    case RequestFailure.Transport(_)        => NetworkError(ErrorMessages.TransportFailed)
     case RequestFailure.Undecodable(status) => ServerError(ErrorMessages.undecodableAnswer(status), None)
 
   /** Classify what the server answered with.
@@ -98,12 +105,3 @@ object GlobalError:
     case WireError.DependencyUnavailable(t)            => DependencyError(ErrorMessages.DependencyDown, Some(t))
     case WireError.InternalFault(t)                    => ServerError(ErrorMessages.InternalFault, Some(t))
 
-  /** Classify a transport failure.
-    *
-    * The cause is deliberately not read. A browser `fetch` rejection carries
-    * developer wording such as "Failed to fetch", which is diagnostic rather
-    * than something to show a user, so the banner states what happened and the
-    * cause goes to the browser console instead.
-    */
-  def fromThrowable(cause: Throwable): GlobalError =
-    NetworkError(ErrorMessages.TransportFailed)

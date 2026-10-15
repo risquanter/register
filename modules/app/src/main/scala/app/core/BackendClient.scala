@@ -32,8 +32,9 @@ trait BackendClient:
     * the payload, sends it to the backend via the Fetch API, and returns the
     * decoded response.
     *
-    * The two ways this can fail are the two cases of [[RequestFailure]]: the
-    * server answered with a typed error body, or the call never completed.
+    * The three ways this can fail are the three cases of [[RequestFailure]]:
+    * the server answered with a typed error body, the call never completed, or
+    * the server answered and the reply could not be read.
     *
     * @param endpoint the Tapir endpoint definition, from the shared common module
     * @param payload the input to the endpoint
