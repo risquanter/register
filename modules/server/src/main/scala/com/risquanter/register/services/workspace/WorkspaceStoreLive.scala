@@ -31,12 +31,6 @@ final class WorkspaceStoreLive private (
       ZIO.logAnnotate(k, v)(effect)
     }
 
-  private def logSecurityWarning(eventType: String, fields: (String, String)*)(msg: String): UIO[Unit] =
-    val allAnnotations = ("event_type" -> eventType) +: fields
-    allAnnotations.foldRight(ZIO.logWarning(msg): UIO[Unit]) { case ((k, v), effect) =>
-      ZIO.logAnnotate(k, v)(effect)
-    }
-
   // ── Pure validation (shared by resolveInternal and rotate) ────────────
 
   /** Pure workspace validation: O(1) lookup + dual timeout check.
@@ -142,7 +136,7 @@ final class WorkspaceStoreLive private (
                            val updated = ws.copy(trees = ws.trees + treeId)
                            (Right(()), state.copy(byHash = state.byHash.updated(keyHash, updated)))
                  }
-      _       <- ZIO.fromEither(result).tapError(logResolveFailure)
+      _       <- ZIO.fromEither(result)
     yield ()
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op.
@@ -248,42 +242,20 @@ final class WorkspaceStoreLive private (
 
   // ── Internal ──────────────────────────────────────────────────────────
 
-  /** Internal resolve without lastAccessedAt update — used by listTrees and the
-    * other reads that must not count as access. Logs on failure.
+  /** Internal resolve without the `lastAccessedAt` update, for the callers whose
+    * operation must not postpone the idle deadline.
+    *
+    * A failure is not logged here. Every caller reaches this through a request,
+    * and the projection onto the wire writes one line for the failure with the
+    * trace the response carries.
     */
   private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
       result <- ref.get.map(state => validateWorkspace(state.byHash, keyHash, now))
-      ws     <- ZIO.fromEither(result).tapError(logResolveFailure)
+      ws     <- ZIO.fromEither(result)
     yield ws
-
-  /** Security log for a failed resolve.
-    *
-    * The annotations name the workspace and the deadline it passed, which is
-    * what answers why a resolve failed. A confidential internal identifier may
-    * appear in a server log and may never cross the wire (ADR-036), so
-    * `workspace_id` belongs here and in no response. The capability key is
-    * annotated nowhere: a credential type prints redacted (ADR-022 R3), so the
-    * annotation carried the same constant for every workspace.
-    *
-    * Called by `addTree` and `resolveInternal`; `resolve` does not log.
-    */
-  private def logResolveFailure(error: AppError): UIO[Unit] =
-    error match
-      case WorkspaceNotFound() =>
-        logSecurityWarning("workspace.resolve_failed",
-          "reason" -> "not_found"
-        )("Workspace resolve failed")
-      case WorkspaceExpired(wsId, _, _, cause, expiredAt) =>
-        logSecurityWarning("workspace.resolve_failed",
-          "workspace_id" -> wsId.value,
-          "reason"       -> "expired",
-          "expiry_cause" -> cause.toString,
-          "expired_at"   -> expiredAt.toString
-        )("Workspace resolve failed")
-      case _ => ZIO.unit
 
 object WorkspaceStoreLive:
   /** Fixed counter base: fresh stores assign seedEntityIds 1, 2, 3… in creation

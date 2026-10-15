@@ -5,9 +5,13 @@ import zio.test.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
 
+import java.time.Instant
+import java.time.Duration as JDuration
+
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.iron.TelemetryPlaceholders
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure}
+import com.risquanter.register.domain.data.ExpiryCause
+import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, WorkspaceId}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceExpired}
 import com.risquanter.register.telemetry.TelemetryLive
 
 /** The trace identifier a wire failure carries names the span the failing work
@@ -32,6 +36,21 @@ object WireEitherSpec extends ZIOSpecDefault:
   private val failure: AppError = RepositoryFailure("a failure for the boundary to project")
 
   private val failing: IO[AppError, Nothing] = ZIO.fail(failure)
+
+  private val wsId: WorkspaceId =
+    WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
+
+  /** A caller-caused failure that carries structured fields, so one test covers
+    * both the level and the annotations. The two windows are the configured
+    * defaults and the instant only has to be a recognisable value.
+    */
+  private val expired: AppError =
+    WorkspaceExpired(wsId, JDuration.ofHours(72), JDuration.ofHours(1), ExpiryCause.Inactivity, Instant.EPOCH)
+
+  /** The projection's log line for a failure, or `None` if it wrote none. */
+  private def lineFor(error: AppError)(using Tracing): UIO[Option[ZTestLogger.LogEntry]] =
+    ZIO.fail(error).wireEither *>
+      ZTestLogger.logOutput.map(_.find(_.message() == error.logMessage))
 
   /** Names the span these tests open. It is never exported — no collector runs
     * during a test — so it only has to be recognisable in a failure message. */
@@ -78,6 +97,53 @@ object WireEitherSpec extends ZIOSpecDefault:
         failing.wireEither.map { projected =>
           assertTrue(
             projected.left.toOption.map(_.trace).contains(TelemetryPlaceholders.UnlinkedTrace)
+          )
+        }
+      }
+    },
+
+    test("a service-caused failure is logged at WARN") {
+      ZIO.serviceWithZIO[Tracing] { tracing =>
+        given Tracing = tracing
+
+        tracing.span(SpanName, SpanKind.SERVER) {
+          lineFor(failure).map(line =>
+            assertTrue(line.map(_.logLevel).contains(LogLevel.Warning))
+          )
+        }
+      }
+    },
+
+    test("a caller-caused failure is logged below WARN, and visible at the default level") {
+      ZIO.serviceWithZIO[Tracing] { tracing =>
+        given Tracing = tracing
+
+        tracing.span(SpanName, SpanKind.SERVER) {
+          lineFor(expired).map(line =>
+            assertTrue(
+              line.map(_.logLevel).contains(LogLevel.Info),
+              line.exists(_.logLevel < LogLevel.Warning)
+            )
+          )
+        }
+      }
+    },
+
+    test("the line carries the failure's own annotations and the trace the response names") {
+      ZIO.serviceWithZIO[Tracing] { tracing =>
+        given Tracing = tracing
+
+        tracing.span(SpanName, SpanKind.SERVER) {
+          for
+            context <- tracing.getCurrentSpanContextUnsafe
+            line    <- lineFor(expired)
+          yield assertTrue(
+            // A confidential internal identifier may be named in a server log.
+            line.flatMap(_.annotations.get("workspace_id")).contains(wsId.value),
+            line.flatMap(_.annotations.get("expiry_cause")).contains(ExpiryCause.Inactivity.toString),
+            line.exists(_.annotations.contains("expired_at")),
+            // The same identifier the caller received, so the two can be joined.
+            line.flatMap(_.annotations.get("trace_id")).contains(context.getTraceId)
           )
         }
       }

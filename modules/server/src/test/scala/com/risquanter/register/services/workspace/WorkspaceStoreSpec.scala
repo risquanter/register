@@ -7,7 +7,6 @@ import zio.test.TestClock
 import java.time.Duration
 
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.util.IdGenerators
@@ -273,42 +272,5 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         key   <- store.create()
         ws    <- store.resolve(key)
       yield assertTrue(ws.seedEntityId.value == 11L)
-    },
-
-    test("an expired resolve logs the workspace and which deadline passed") {
-      for
-        store  <- mkStore
-        key    <- store.create()
-        ws     <- store.resolve(key)
-        _      <- TestClock.adjust(2.minutes)
-        _      <- store.listTrees(key).exit
-        output <- ZTestLogger.logOutput
-        entry   = output.find(_.annotations.get("event_type").contains("workspace.resolve_failed"))
-      yield assertTrue(
-        entry.isDefined,
-        entry.get.annotations.get("workspace_id").contains(ws.id.value),
-        entry.get.annotations.get("reason").contains("expired"),
-        entry.get.annotations.get("expiry_cause").contains(ExpiryCause.Inactivity.toString),
-        entry.get.annotations.contains("expired_at"),
-        // The credential prints redacted, so annotating it identified nothing.
-        !entry.get.annotations.contains("workspace_key")
-      )
-    },
-
-    test("a resolve of an unknown key names no workspace") {
-      for
-        store  <- mkStore
-        key    <- store.create()
-        _      <- store.rotate(key)
-        _      <- store.listTrees(key).exit
-        output <- ZTestLogger.logOutput
-        entry   = output.find(_.annotations.get("event_type").contains("workspace.resolve_failed"))
-      yield assertTrue(
-        entry.isDefined,
-        entry.get.annotations.get("reason").contains("not_found"),
-        // No workspace was found, so there is no identifier to name.
-        !entry.get.annotations.contains("workspace_id"),
-        !entry.get.annotations.contains("workspace_key")
-      )
     }
   )

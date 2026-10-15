@@ -2,10 +2,10 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All twenty-five decisions, `EWB-D-1` to `EWB-D-25`, are ruled and
+**Status.** All twenty-six decisions, `EWB-D-1` to `EWB-D-26`, are ruled and
 recorded in §10. Nothing blocks implementation on a decision. Approval is in
 place: the token names this document and the file inventory exists beside it.
-Phases 1, 1a, 1b, 2 and 2b have landed. What remains is Phases 3 to 6.
+Phases 1, 1a, 1b, 2, 2b and 2c have landed. What remains is Phases 3 to 6.
 
 `EWB-D-21`'s location was revised on 2026-10-15 and `EWB-D-25` was added the same
 day. Phase 2b is the phase both bear on, and both are implemented: the defect
@@ -1116,6 +1116,18 @@ instant does not identify the deadline.
 The not-found arm annotates `"reason"` alone. No workspace was found, so there is
 no identifier to name.
 
+**Superseded by `EWB-D-26`.** The store no longer logs a resolve failure at all.
+Every caller reaches it through a request, so the projection onto the wire writes
+the line instead, and it can attach the trace the store could not. The
+annotations above moved onto the failures themselves, as `logAnnotations`.
+
+### 6.7 One log line per failure that becomes a response
+
+`wireEither` writes it, because that is the single point every controller failure
+passes through and the point where the trace is in scope. The level is the
+failure's own `origin`, which `EWB-D-26` states in full along with why the origin
+is a member of `AppError` rather than a match on the wire case.
+
 ### 6.3 `SimError` becomes `DomainError`
 
 The trait is named for simulation but holds validation, workspace, scenario and
@@ -1715,6 +1727,16 @@ which is what ADR-035's exhaustive-encoding rule asks for and what `§4`'s
 amendment: a request matching no route answers `404` and one whose method does
 not match answers `405`, both with a constant body, because neither reports a
 failure of this service.
+
+**Phase 2c — one log line per failed request.** `EWB-D-26`. `FailureOrigin` and
+the two new `AppError` members, with `origin` declared on all thirty-one leaf
+types and `logAnnotations` on the three that carry queryable fields; the log in
+`wireEither`; and the deletion of `WorkspaceStoreLive.logResolveFailure` with its
+two call sites and the `logSecurityWarning` helper left with no caller. Its tests
+go in `WireEitherSpec`, which already drives the boundary inside a real span:
+one per level, and one that the line carries the failure's annotations plus the
+same trace the response names. The two store-spec cases that pinned the old
+store-level line are removed, because the behaviour moved rather than going away.
 
 **Phase 3 — typed locations.** `ErrorLocation`, its two Iron refinements, and
 `ValidationError.location`. Every construction site of `ValidationError` in
@@ -3130,6 +3152,80 @@ treats the two failure kinds identically where it matters — its header, body a
 path-capture rules name both in one pattern — so the switch changes which code
 the wire carries and nothing about whether a response is sent at all.
 
+### EWB-D-26 — a failure that becomes a response is logged once, at the boundary — RULED 2026-10-15
+
+**The problem.** Whether a failed request is logged at all depended on whether
+some service had remembered to tap it. `WorkspaceStoreLive.resolveInternal`
+logged a failed resolve and `resolve` did not, so the path every
+workspace-scoped request actually takes — `resolve`, and the two trait methods
+built on it — wrote nothing. Nothing detects such an omission, which is how it
+arose: nobody decided the main entry point should be silent.
+
+**What is ruled.** `wireEither` is already the one point every controller
+failure passes through on its way to a response, and it already reads the trace.
+It now also writes one line per failure. The level comes from a new member on
+`AppError`:
+
+```scala
+enum FailureOrigin:
+  case Caller
+  case Service
+
+sealed trait AppError:
+  def logMessage: String
+  def origin: FailureOrigin
+  def logAnnotations: Map[String, String] = Map.empty
+```
+
+`origin` is abstract rather than defaulted, which is the whole point: a new
+failure case does not compile until it says which it is, so request-failure
+logging stops being something a contributor has to remember. An exhaustive match
+at the boundary would have been weaker, because a wildcard arm satisfies it.
+
+**Why the origin is read from the internal failure and not from the wire case.**
+`AuthServiceUnavailable` answers the same `AccessDenied` as an explicit deny, so
+that an outage is not observable from outside (ADR-035 §3). Reading the level
+from the wire case would carry that deliberate flattening into the server's own
+log, where it is not wanted. Reading it from the `AppError` keeps the outage at
+`Service` while its response stays indistinguishable from a deny.
+
+**The levels.** `Caller` is `INFO` and `Service` is `WARNING`. `INFO` rather than
+`DEBUG` because the deployment's log level defaults to `INFO`, so at `DEBUG`
+these lines would be absent from a default deployment — which is the condition
+this decision exists to end.
+
+**What it replaces.** `WorkspaceStoreLive.logResolveFailure` is deleted with its
+two call sites and the `logSecurityWarning` helper that had no other caller. Its
+annotations are not lost: they move onto `WorkspaceExpired.logAnnotations` and
+`TreeNotInWorkspace.logAnnotations`, where the boundary reads them and adds the
+trace the store could never supply. The four lifecycle events the store logs on
+create, evict, delete and rotate are untouched — they record operations that
+succeeded, which no failure boundary sees.
+
+**What it does not replace, and why that is not a shortfall.** The other failure
+logging in the server module stays. Those sites log one of three things a
+boundary cannot see: an anomaly on a request that succeeded, such as
+`QueryServiceLive`'s mitigation-resolution drift, whose own comment says it "is
+a no-op for that mitigation, not a request failure"; a failure that is
+deliberately handled, such as the cascade deletes that log each item and then
+`.ignore` it; or detail dropped before the failure propagates, such as
+`QueryServiceLive`'s cache diagnosis logged by `tapError` and then replaced by
+`mapError`. This decision makes request-failure logging exhaustive. It does not
+consolidate logging that is not about a request failure, and that was never
+available to it.
+
+**Cost, accepted.** Every failed request now writes a line, so a client sending
+invalid input produces log volume where it produced none. The level split is
+what keeps that tolerable, and it is why `Caller` and `Service` are separated
+rather than logged uniformly. Two sites double-log: the merge guard and the
+Irmin client each log pre-conversion detail and then fail with a narrower error
+the boundary also logs. Those pairs say different things and both are wanted.
+
+**ADR-002 is amended by this decision.** Its code-smell section demands that log
+levels be differentiated, which this satisfies; its one example put a validation
+failure at `logWarning`. That example now shows a caller-caused failure at
+`logInfo`, with the reason stated beside it.
+
 ---
 
 ## 11. ADR alignment
@@ -3143,7 +3239,7 @@ the wire carries and nothing about whether a response is sent at all.
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. |
 | ADR-019 (frontend component architecture) | `GlobalError`, `ErrorBanner` | Compliant. Pattern 7's two-tier error presentation is unchanged; the classifier's input type changes and a `NotFound` display case is added. |
 | ADR-028 (vague quantifier query pane) | `QueryProblem` | Compliant. The engine's rendered messages still reach the pane. `FolModelValidationFailure` and `FolEvaluationFailure` stop reaching it, which matches the ADR's own description of them as wiring faults rather than query errors. |
-| ADR-002 (observability) | the correlation identifier, the resolve log line | **Currently violated and fixed here.** A correlation identifier that never reaches a client cannot correlate anything; `EWB-D-8` decides the fix. §6.2 fixes the resolve-failure line, which annotates a redacted constant today and so identifies no workspace. |
+| ADR-002 (observability) | the correlation identifier, the failure log line | **Currently violated, fixed here, and the record is amended.** A correlation identifier that never reaches a client cannot correlate anything; `EWB-D-8` decides the fix. The resolve-failure line annotated a redacted constant and so identified no workspace; `EWB-D-26` replaces it with one line per failed request, written where the trace is in scope, so every line carries the identifier the response carries. **The amendment:** the record's code-smell section demands differentiated log levels, which `EWB-D-26` satisfies by origin, but its one example put a validation failure at `logWarning`. That example now shows a caller-caused failure at `logInfo`. The section's decision is unchanged and binds more concretely than before. |
 
 `docs/dev/ARCHITECTURE.md`'s "DTO/Domain Model Separation" section gains the error
 path. The `adr-constraints` skill is updated in the same pass, in
