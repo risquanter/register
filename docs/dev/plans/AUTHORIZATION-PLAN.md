@@ -788,7 +788,7 @@ trait AuthorizationService:
   // Returns a proof token Checked[P] on success — callers bind it via `given` in for-comprehensions.
   // Protected service methods require Checked[P] via `using` parameter; missing proof is a compile error.
   // PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
-  // Connectivity failure          → AuthServiceUnavailable (mapped to 403 at HTTP layer)
+  // Connectivity failure          → AuthServiceUnavailable (answered as a dependency outage)
   // No grant() / revoke() — pure PEP; tuple writes are ops-path only ([ADR-024: App is PEP Only](./ADR-024-externalized-authorization-pep-pattern.md#1-app-is-pep-only)).
 
   def listAccessible(

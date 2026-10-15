@@ -7,23 +7,6 @@ import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, TreeId, WorkspaceId}
 
-/** Every failure the application produces as a value.
-  *
-  * Plain data, and deliberately not a `Throwable`. An exception is how the
-  * platform reports a defect; these are expected outcomes a caller is meant to
-  * handle. Keeping the two apart is what lets a signature name what can go
-  * wrong: `IO[AppError, A]` states the closed set, where `Task[A]` would admit
-  * anything and a widening would be invisible.
-  *
-  * `logMessage` is the server's own text and belongs in the log. The name says
-  * where it goes: it never crosses to a client, because the browser composes
-  * what a user reads from the wire case and its typed values, so no internal
-  * reason can leak through a free-text field (ADR-035).
-  *
-  * The trace a failure ran under is not held here. It is read from the active
-  * span at the boundary that projects onto the wire, which is the only place an
-  * effect exists to read it.
-  */
 /** Who a failure is attributable to, which decides the level its log line is
   * written at (ADR-002).
   *
@@ -43,6 +26,23 @@ enum FailureOrigin:
   case Caller
   case Service
 
+/** Every failure the application produces as a value.
+  *
+  * Plain data, and deliberately not a `Throwable`. An exception is how the
+  * platform reports a defect; these are expected outcomes a caller is meant to
+  * handle. Keeping the two apart is what lets a signature name what can go
+  * wrong: `IO[AppError, A]` states the closed set, where `Task[A]` would admit
+  * anything and a widening would be invisible.
+  *
+  * `logMessage` is the server's own text and belongs in the log. The name says
+  * where it goes: it never crosses to a client, because the browser composes
+  * what a user reads from the wire case and its typed values, so no internal
+  * reason can leak through a free-text field (ADR-035).
+  *
+  * The trace a failure ran under is not held here. It is read from the active
+  * span at the boundary that projects onto the wire, which is the only place an
+  * effect exists to read it.
+  */
 sealed trait AppError:
   def logMessage: String
 

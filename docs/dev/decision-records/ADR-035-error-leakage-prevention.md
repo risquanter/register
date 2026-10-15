@@ -69,8 +69,18 @@ the trace is read, because reading the active span requires an effect:
 def wireEither(using Tracing): ZIO[R, Nothing, Either[WireError, A]] =
   effect
     .map(Right(_))
-    .catchAll(error => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace))))
+    .catchAll(error =>
+      ActiveTrace.id.flatMap(trace =>
+        logProjectedFailure(error, trace).as(Left(WireError.fromAppError(error, trace)))
+      )
+    )
 ```
+
+It is also the one place a failure that becomes a response is logged, at the
+level the failure's own `origin` decides (ADR-002). The line carries the same
+trace the response carries, so a failure a caller reports can be found in the
+log — which is what makes dropping the internal reason from the response safe
+rather than merely quiet.
 
 ### 3. Message Discipline and the Opaque Status
 

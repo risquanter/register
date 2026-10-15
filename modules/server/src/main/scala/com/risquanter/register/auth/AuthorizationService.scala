@@ -93,7 +93,7 @@ trait AuthorizationService:
     *
     * Fails the ZIO effect — callers use flatMap, never fold/map (fail-closed).
     * - PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
-    * - Connectivity / timeout        → AuthServiceUnavailable (mapped to 403 at HTTP layer)
+    * - Connectivity / timeout        → AuthServiceUnavailable (answered as a dependency outage)
     *
     * @see ADR-024: Fail-Closed by Default
     */
