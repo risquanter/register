@@ -156,7 +156,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             // Refused
             AccessDenied("no")                                     -> "AccessDenied",
             AuthForbidden("u", "read", "tree", "t1")               -> "AccessDenied",
-            AuthServiceUnavailable("down", None)                   -> "AccessDenied",
             // Conflicts
             DataConflict("dup")                                    -> "Conflict",
             VersionConflict("n1", "a", "b")                        -> "Conflict",
@@ -172,6 +171,7 @@ object WireErrorSpec extends ZIOSpecDefault:
             NetworkTimeout("read", 5.seconds)                      -> "DependencyUnavailable",
             IrminHttpError(StatusCode.BadGateway, "body")          -> "DependencyUnavailable",
             IrminGraphQLError(List("boom"), None)                  -> "DependencyUnavailable",
+            AuthServiceUnavailable("down", None)                   -> "DependencyUnavailable",
             // Faults
             BranchAlreadyExists(branch)                            -> "InternalFault",
             BranchHeadStale(branch, commit)                        -> "InternalFault",
@@ -219,14 +219,27 @@ object WireErrorSpec extends ZIOSpecDefault:
         }
       ),
       suite("indistinguishable outcomes really are identical")(
-        test("all three refusal paths serialise to the same bytes") {
+        test("both refusal paths serialise to the same bytes") {
           val explicit  = WireError.fromAppError(AccessDenied("policy says no"), trace)
           val forbidden = WireError.fromAppError(AuthForbidden("u", "read", "tree", "t1"), trace)
-          val outage    = WireError.fromAppError(AuthServiceUnavailable("SpiceDB unreachable", None), trace)
 
-          val encoded = List(explicit, forbidden, outage).map {
+          val encoded = List(explicit, forbidden).map {
             case denied: WireError.AccessDenied => denied.toJson
             case other                          => throw MatchError(other)
+          }
+          assertTrue(encoded.distinct.size == 1)
+        },
+        // An unreachable authorization service answers as a dependency outage,
+        // so what a caller sees must not say which dependency failed. If it
+        // were distinguishable from an Irmin outage, the answer would disclose
+        // that the authorization stack is the part that is down.
+        test("an authorization outage is indistinguishable from any other dependency outage") {
+          val authDown  = WireError.fromAppError(AuthServiceUnavailable("SpiceDB unreachable", None), trace)
+          val storeDown = WireError.fromAppError(IrminUnavailable("connection refused"), trace)
+
+          val encoded = List(authDown, storeDown).map {
+            case down: WireError.DependencyUnavailable => down.toJson
+            case other                                 => throw MatchError(other)
           }
           assertTrue(encoded.distinct.size == 1)
         },

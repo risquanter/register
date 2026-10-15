@@ -33,11 +33,11 @@ import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, Store
   * failed, or it has a defect.
   *
   * The distinction is drawn on the internal failure rather than on the wire
-  * case, because the wire deliberately flattens some of it. An unreachable
-  * authorization service answers the same `AccessDenied` as an explicit deny so
-  * that an outage is not observable from outside (ADR-035 §3); reading the level
-  * from the wire case would carry that flattening into the log, where it is not
-  * wanted.
+  * case, because the wire is deliberately coarser: several failures share one
+  * wire case, and they do not share an attribution. `WireError.InternalFault`
+  * carries both `RepositoryFailure`, which is this service's own, and
+  * `BranchAlreadyExists`, which is a caller's. Reading the level from the wire
+  * case would give one level to both.
   */
 enum FailureOrigin:
   case Caller
@@ -356,18 +356,19 @@ case class AuthForbidden(
     s"Access denied: user=$userId permission=$permission resource=$resourceType:$resourceId"
   override def origin: FailureOrigin = FailureOrigin.Caller
 
-/** SpiceDB unreachable, timed out, or returned an unexpected response — fail-closed.
-  * HTTP layer maps this to 403 Forbidden (not 503 — avoids revealing infrastructure state).
+/** SpiceDB unreachable, timed out, or returned an unexpected response.
+  *
+  * The request fails closed: no authorization decision was obtained, so none is
+  * assumed. It projects onto `WireError.DependencyUnavailable`, the same answer
+  * any other dependency outage produces, so the caller is told a service did
+  * not answer rather than that their access was refused — and which dependency
+  * it was stays internal (ADR-035 §2).
   *
   * @see ADR-024: Fail-Closed by Default
   */
 case class AuthServiceUnavailable(reason: String, cause: Option[Throwable]) extends AuthError:
   override def logMessage: String = s"Authorization service unavailable: $reason"
 
-  /** The one case where the log and the response part company. This answers the
-    * same `AccessDenied` as an explicit deny, so an outage is not observable
-    * from outside (ADR-035 §3). The log is server-side and tells them apart.
-    */
   override def origin: FailureOrigin = FailureOrigin.Service
 
 // ============================================================================

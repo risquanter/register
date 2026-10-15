@@ -70,9 +70,11 @@ enum WireError:
     */
   case WorkspaceExpired(cause: ExpiryCause, lifetime: Duration, idleLimit: Duration, trace: TraceId)
 
-  /** Refused. Every denial produces this one shape: an explicit deny and an
-    * unreachable authorization service must be indistinguishable, or an outage
-    * is observable from outside (ADR-035 §2).
+  /** Refused. Every denial produces this one shape, so a denial this service
+    * decided and one the authorization service decided are indistinguishable,
+    * and neither discloses whether the resource exists (ADR-035 §2). An
+    * authorization service that did not answer is not a denial and does not
+    * reach here; it is a dependency outage.
     */
   case AccessDenied(trace: TraceId)
 
@@ -144,11 +146,11 @@ object WireError:
       // workspace that the browser has no use for.
       case AppWorkspaceExpired(_, ttl, idle, cause, _) => WireError.WorkspaceExpired(cause, ttl, idle, t)
 
-      // Refused. The internal reason is dropped from all three: an explicit deny
-      // and an unreachable authorization service must look identical.
+      // Refused. The internal reason is dropped from both, so a denial this
+      // service decided and one the authorization service decided look
+      // identical, and neither discloses whether the resource exists.
       case AppAccessDenied(_)                  => WireError.AccessDenied(t)
       case AuthForbidden(_, _, _, _)           => WireError.AccessDenied(t)
-      case AuthServiceUnavailable(_, _)        => WireError.AccessDenied(t)
 
       // Conflicts
       case DataConflict(_)                     => WireError.Conflict(ConflictKind.Rejected(), t)
@@ -162,8 +164,13 @@ object WireError:
       // Capability absent
       case ScenariosNotSupported(_)            => WireError.NotSupported(Capability.Scenarios, t)
 
-      // Dependency did not answer
+      // Dependency did not answer. An unreachable authorization service is one
+      // of these rather than a denial: the request still fails closed, and the
+      // caller is told a service did not answer instead of that their access
+      // was refused. Which dependency it was stays internal (ADR-035 §2), so
+      // this answer is the same one any other outage produces.
       case IrminUnavailable(_)                 => WireError.DependencyUnavailable(t)
+      case AuthServiceUnavailable(_, _)        => WireError.DependencyUnavailable(t)
       case NetworkTimeout(_, _)                => WireError.DependencyUnavailable(t)
       case IrminHttpError(_, _)                => WireError.DependencyUnavailable(t)
       case IrminGraphQLError(_, _)             => WireError.DependencyUnavailable(t)

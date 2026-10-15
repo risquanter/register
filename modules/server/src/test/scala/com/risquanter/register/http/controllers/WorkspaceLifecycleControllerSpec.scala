@@ -198,12 +198,15 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       )
     },
 
-    test("recordOwnership failure propagates as 403") {
+    // The stub fails with `AuthServiceUnavailable`, which is an outage of the
+    // authorization service rather than a refusal, so the caller is told a
+    // dependency did not answer and the request still fails closed.
+    test("recordOwnership failure propagates as a dependency outage") {
       for
         stub     <- BootstrapProvisionerStub.makeFailing
         backend  <- buildBackend(UserContextExtractor.requirePresent, stub)
         response <- bootstrapRequest(backend, userId = Some(validUuid))
-      yield assertTrue(response.code.code == 403)
+      yield assertTrue(response.code.code == 503)
     },
 
     test("listWorkspaceTrees is branch-scoped: X-Branch selects which trees are visible") {

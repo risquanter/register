@@ -99,7 +99,7 @@ object GlobalError:
     case WireError.QueryRejected(problem, _)           => RequestRejected(ErrorMessages.query(problem))
     case WireError.NotFound(_)                         => NotFound
     case WireError.WorkspaceExpired(c, life, idle, _)  => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
-    case WireError.AccessDenied(_)                     => ServerError(ErrorMessages.Forbidden, None)
+    case WireError.AccessDenied(t)                     => ServerError(ErrorMessages.Forbidden, Some(t))
     case WireError.Conflict(conflict, _)               => Conflict(ErrorMessages.conflict(conflict))
     case WireError.NotSupported(capability, _)         => ServerError(ErrorMessages.capabilityUnavailable(capability), None)
     case WireError.DependencyUnavailable(t)            => DependencyError(ErrorMessages.DependencyDown, Some(t))

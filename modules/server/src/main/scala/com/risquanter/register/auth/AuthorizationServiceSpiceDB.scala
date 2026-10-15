@@ -58,9 +58,10 @@ private given JsonDecoder[SpiceDbLookupResponseLine] = DeriveJsonDecoder.gen
 /** Live SpiceDB HTTP adapter for the authorization service.
   *
   * Implements AuthorizationService by calling SpiceDB's REST API (v1).
-  * Fail-closed on all transport and SpiceDB-side errors: any failure mode
-  * maps to AuthServiceUnavailable, which the HTTP error encoder maps to
-  * 403 Forbidden — never 503 (which would reveal infrastructure state).
+  * Fail-closed on all transport and SpiceDB-side errors: any failure mode maps
+  * to AuthServiceUnavailable, which the wire projection answers as a dependency
+  * outage. No authorization decision was obtained, so none is assumed, and the
+  * caller is told a service did not answer rather than that access was refused.
   *
   * Only `check()` and `listAccessible()` are implemented. This service
   * never writes authorization data — it is a pure Policy Enforcement Point.

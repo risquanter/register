@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.configs.AuthMode
 import com.risquanter.register.domain.data.iron.UserId
-import com.risquanter.register.domain.errors.AuthServiceUnavailable
+import com.risquanter.register.domain.errors.AccessDenied
 
 object UserContextExtractorSpec extends ZIOSpecDefault:
 
@@ -53,11 +53,11 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
           result <- UserContextExtractor.requirePresent.extract(Some(validUserId))
         yield assertTrue(result == validUserId)
       },
-      test("fails with AuthServiceUnavailable mentioning mesh bypass when header is absent") {
+      test("refuses the request, naming the mesh bypass in the log text, when the header is absent") {
         for
           result <- UserContextExtractor.requirePresent.extract(None).either
         yield result match
-          case Left(err: AuthServiceUnavailable) =>
+          case Left(err: AccessDenied) =>
             assertTrue(
               err.logMessage.contains("Missing x-user-id header"),
               err.logMessage.contains("mesh bypass")
@@ -99,11 +99,11 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
           result <- UserContextExtractor.requirePresent.requireAuthenticated(Some(validUserId))
         yield assertTrue(result == validUserId)
       },
-      test("fails with AuthServiceUnavailable when header is absent") {
+      test("refuses the request when the header is absent") {
         for
           result <- UserContextExtractor.requirePresent.requireAuthenticated(None).either
         yield result match
-          case Left(err: AuthServiceUnavailable) =>
+          case Left(err: AccessDenied) =>
             assertTrue(
               err.logMessage.contains("Missing x-user-id header"),
               err.logMessage.contains("mesh bypass")

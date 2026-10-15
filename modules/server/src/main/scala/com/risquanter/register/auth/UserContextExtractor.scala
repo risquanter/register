@@ -4,7 +4,7 @@ import zio.{IO, UIO, ZIO}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.configs.AuthMode
 import com.risquanter.register.domain.data.iron.{UserId, UuidStr}
-import com.risquanter.register.domain.errors.{AppError, AuthServiceUnavailable}
+import com.risquanter.register.domain.errors.{AccessDenied, AppError}
 
 /** Extracts a validated UserId from the mesh-injected x-user-id claim header.
   *
@@ -80,8 +80,14 @@ object UserContextExtractor:
   /** identity / fine-grained mode — header must be present.
     *
     * If absent: the request either did not pass through an authenticated waypoint
-    * (mesh bypass) or the user is unauthenticated. Both cases fail closed.
+    * (mesh bypass) or the user is unauthenticated. Both cases fail closed, as a
+    * refusal rather than as a dependency outage — nothing this service depends
+    * on has failed, so the caller is refused rather than told to retry.
     * No JWT parsing needed — the mesh has already done all signature/expiry validation.
+    *
+    * Which of the two it was stays in the log: the refusal's text is this
+    * service's own and the projection drops it, so the caller is told only that
+    * access was refused (ADR-035 §2).
     *
     * @see ADR-012: Claim Header Injection (required external header stripping config)
     */
@@ -92,6 +98,6 @@ object UserContextExtractor:
       m match
         case Some(userId) => ZIO.succeed(userId)
         case None =>
-          ZIO.fail(AuthServiceUnavailable(
-            "Missing x-user-id header — unauthenticated request or mesh bypass detected", None
+          ZIO.fail(AccessDenied(
+            "Missing x-user-id header — unauthenticated request or mesh bypass detected"
           ))

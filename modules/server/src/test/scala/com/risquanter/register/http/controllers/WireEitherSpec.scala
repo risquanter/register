@@ -67,13 +67,11 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
 
   /** An unreachable authorization service.
     *
-    * This is the one failure whose log and response disagree, which is why it is
-    * pinned separately from every other service-caused case. It answers the same
-    * `AccessDenied` as an explicit deny, so an outage is not observable from
-    * outside (ADR-035 §3) — `WireErrorSpec` pins that half by showing all three
-    * refusal paths serialise to identical bytes. The log is where the two must
-    * stay apart, so the level is read from the internal failure and never from
-    * the wire case.
+    * Pinned separately because its level is the one a contributor is most
+    * likely to get wrong: the response says only that a dependency did not
+    * answer, naming none, so nothing in what the caller sees indicates that
+    * this failure is the service's own. The level is read from the internal
+    * failure, which does.
     */
   private val authOutage: AppError =
     AuthServiceUnavailable("the authorization service did not answer", None)
@@ -203,9 +201,9 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
             projected <- wireFailure(authOutage)
             line      <- lineFor(authOutage, projected.map(_.trace))
           yield assertTrue(
-            // The response is the same denial an explicit deny produces, and a
-            // level read from that wire case would record an outage as ordinary
-            // refused traffic. It is read from the internal failure instead.
+            // The outage is this service's own, so the line is an operational
+            // signal even though the caller is told only that a dependency did
+            // not answer.
             line.map(_.logLevel).contains(LogLevel.Warning)
           )
         }

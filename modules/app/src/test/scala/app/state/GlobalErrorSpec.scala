@@ -69,10 +69,12 @@ object GlobalErrorSpec extends ZIOSpecDefault:
             assertTrue(message.contains("72 hours")) && assertTrue(!message.contains("24"))
           case other => throw MatchError(other)
       },
-      test("a denial shows no trace, because its message is what to act on") {
+      // A denial carries its trace: the message says what happened, and the
+      // trace is what a user can quote when they believe the refusal is wrong.
+      test("a denial keeps the trace the response carried") {
         wire(WireError.AccessDenied(trace)) match
           case GlobalError.ServerError(message, got) =>
-            assertTrue(message == ErrorMessages.Forbidden) && assertTrue(got.isEmpty)
+            assertTrue(message == ErrorMessages.Forbidden) && assertTrue(got.contains(trace))
           case other => throw MatchError(other)
       },
       test("a conflict names the scenario it is about") {

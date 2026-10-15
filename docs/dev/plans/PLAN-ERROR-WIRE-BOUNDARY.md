@@ -2,10 +2,11 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All twenty-six decisions, `EWB-D-1` to `EWB-D-26`, are ruled and
+**Status.** All twenty-seven decisions, `EWB-D-1` to `EWB-D-27`, are ruled and
 recorded in §10. Nothing blocks implementation on a decision. Approval is in
 place: the token names this document and the file inventory exists beside it.
-Phases 1, 1a, 1b, 2, 2b and 2c have landed. What remains is Phases 3 to 6.
+Phases 1, 1a, 1b, 2, 2b and 2c have landed, and `EWB-D-27`'s projection change
+landed with them. What remains is Phases 3 to 6.
 
 `EWB-D-21`'s location was revised on 2026-10-15 and `EWB-D-25` was added the same
 day. Phase 2b is the phase both bear on, and both are implemented: the defect
@@ -187,9 +188,11 @@ enum WireError:
     */
   case WorkspaceExpired(cause: ExpiryCause, lifetime: Duration, idleLimit: Duration, trace: TraceId)
 
-  /** Refused. Every denial produces this one shape: an explicit deny and an
-    * unreachable authorization service must be indistinguishable, or an outage
-    * is observable from outside (ADR-035 §2). */
+  /** Refused. Every denial produces this one shape, so a denial this service
+    * decided and one the authorization service decided are indistinguishable,
+    * and neither discloses whether the resource exists (ADR-035 §2). An
+    * authorization service that did not answer is not a denial and does not
+    * reach here; it is a dependency outage (`EWB-D-27`). */
   case AccessDenied(trace: TraceId)
 
   /** The request conflicts with current state. */
@@ -441,11 +444,11 @@ def fromAppError(e: AppError, trace: TraceId): WireError =
     // name the deadline that actually ended this workspace.
     case AppWorkspaceExpired(_, ttl, idle, cause, _) => WorkspaceExpired(cause, ttl, idle, t)
 
-    // Refused. The internal reason is dropped from all three: an explicit deny
-    // and an unreachable authorization service must look identical (ADR-035 §2).
+    // Refused. The internal reason is dropped from both, so a denial this
+    // service decided and one the authorization service decided look identical
+    // (ADR-035 §2).
     case AppAccessDenied(_)                   => AccessDenied(t)
     case AuthForbidden(_, _, _, _)            => AccessDenied(t)
-    case AuthServiceUnavailable(_, _)         => AccessDenied(t)
 
     // Conflicts
     case DataConflict(_)                      => Conflict(ConflictKind.Rejected(), t)
@@ -459,11 +462,15 @@ def fromAppError(e: AppError, trace: TraceId): WireError =
     // Capability absent
     case ScenariosNotSupported(_)             => NotSupported(Capability.Scenarios, t)
 
-    // Dependency did not answer
+    // Dependency did not answer. An unreachable authorization service is one of
+    // these rather than a denial: the request still fails closed, and the
+    // caller is told a service did not answer instead of that their access was
+    // refused. Which dependency it was stays internal (ADR-035 §2).
     case IrminUnavailable(_)                  => DependencyUnavailable(t)
     case NetworkTimeout(_, _)                 => DependencyUnavailable(t)
     case IrminHttpError(_, _)                 => DependencyUnavailable(t)
     case IrminGraphQLError(_, _)              => DependencyUnavailable(t)
+    case AuthServiceUnavailable(_, _)         => DependencyUnavailable(t)
 
     // Faults. The three compare-and-set outcomes are translated into domain
     // errors by ScenarioService before they reach here; these arms are the net
@@ -1916,6 +1923,11 @@ which is internal. Dropping the refusal reason makes an explicit deny
 indistinguishable from an unreachable authorization service, which ADR-035 §2
 requires.
 
+**Superseded in part by `EWB-D-27`.** The last sentence held when this was
+ruled. An unreachable authorization service now answers as a dependency outage
+rather than as a denial, so what the dropped reason makes indistinguishable is
+one denial from another. Dropping it is still required, for that reason.
+
 *Cost:* three observable changes at once. There is one first-party consumer and no
 external API contract, so the cost is one coordinated change in a repository you
 own.
@@ -3183,11 +3195,12 @@ logging stops being something a contributor has to remember. An exhaustive match
 at the boundary would have been weaker, because a wildcard arm satisfies it.
 
 **Why the origin is read from the internal failure and not from the wire case.**
-`AuthServiceUnavailable` answers the same `AccessDenied` as an explicit deny, so
-that an outage is not observable from outside (ADR-035 §3). Reading the level
-from the wire case would carry that deliberate flattening into the server's own
-log, where it is not wanted. Reading it from the `AppError` keeps the outage at
-`Service` while its response stays indistinguishable from a deny.
+The wire case is deliberately coarser than the failure: several failures share
+one case and they do not share an attribution. `InternalFault` carries both
+`RepositoryFailure`, which is this service's own, and `BranchAlreadyExists`,
+which is a caller's, so a level read from the wire case would give one level to
+both. Reading it from the `AppError` keeps each failure at the level its own
+attribution decides, whatever the response flattens.
 
 **The levels.** `Caller` is `INFO` and `Service` is `WARNING`. `INFO` rather than
 `DEBUG` because the deployment's log level defaults to `INFO`, so at `DEBUG`
@@ -3225,6 +3238,48 @@ the boundary also logs. Those pairs say different things and both are wanted.
 levels be differentiated, which this satisfies; its one example put a validation
 failure at `logWarning`. That example now shows a caller-caused failure at
 `logInfo`, with the reason stated beside it.
+
+### EWB-D-27 — an authorization-service outage answers as a dependency outage — RULED 2026-10-15
+
+**The problem.** `AuthServiceUnavailable` projected onto `WireError.AccessDenied`,
+so when the authorization service was unreachable every caller was told "You do
+not have access to this. If you reached it from a link, the link may no longer be
+valid." An unreachable Irmin answers `DependencyUnavailable`, whose sentence is
+"A service this request needed did not answer. Nothing was changed. Try again in
+a moment." The same class of fault therefore produced opposite guidance depending
+on which dependency failed, and the authorization case told the user to stop
+trying during an incident they should have waited out.
+
+**Ruled: `AuthServiceUnavailable` projects onto `DependencyUnavailable`, and what
+the caller sees must not say which dependency failed.**
+
+Two reasons decide it. Failing closed is a property of the decision, not of the
+wording — the request is refused either way, and no authorization decision is
+assumed where none was obtained. And ADR-035 §3 bounds its own opaque-status rule
+to the case this is not: "The rule binds exactly where the caller's entitlement is
+in question." An outage is not a case where entitlement is in question; it is one
+where it is unknown.
+
+The second half of the ruling is what keeps the change from disclosing anything.
+`DependencyUnavailable` carries only a trace, and the browser's sentence for it
+names no dependency, so an authorization outage and a storage outage are the same
+answer. A test pins that: the two must serialise identically, which is the
+replacement for the test that pinned three refusal paths as identical.
+
+**What this supersedes.** `EWB-D-6`'s Option C was costed on the premise that
+"`AuthServiceUnavailable` must then map to the same value as `AuthForbidden`
+anyway"; that premise no longer holds, and Option C was not taken in any case.
+`EWB-D-26`'s argument for reading the log level from the internal failure rather
+than the wire case used this pair as its example. The argument stands and its
+example is now `InternalFault`, which carries both `RepositoryFailure`, this
+service's own, and `BranchAlreadyExists`, a caller's.
+
+**ADR-035 §3 is amended by this decision.** Its sentence "`AuthForbidden` and
+`AuthServiceUnavailable` both project onto `AccessDenied` for the same reason: an
+explicit deny and an unreachable authorization service are indistinguishable from
+outside" is replaced by one stating that the two denial paths are
+indistinguishable from each other, and that an outage is instead indistinguishable
+from any other dependency outage.
 
 ---
 
@@ -3423,10 +3478,13 @@ is therefore the step that enumerates `EWB-D-14`'s work.
 4. **Every case round-trips through its codec.** Encode and decode each case and
    assert equality. This is where the `java.time.Duration` codec question in §3.4
    is answered.
-5. **Three refusal paths produce identical bytes.** `AccessDenied(reason)`,
-   `AuthForbidden(...)` and `AuthServiceUnavailable(...)` must serialise to the
-   same JSON and the same status, so an authorization outage is not observable
-   from outside (ADR-035 §2).
+5. **Both refusal paths produce identical bytes.** `AccessDenied(reason)` and
+   `AuthForbidden(...)` must serialise to the same JSON and the same status, so
+   a denial this service decided and one the authorization service decided are
+   indistinguishable (ADR-035 §2). A second test pins the other half:
+   `AuthServiceUnavailable(...)` and `IrminUnavailable(...)` must also serialise
+   identically, so the answer to an outage does not disclose which dependency
+   failed.
 6. **A workspace absence and a tree-not-in-workspace produce identical bytes.**
    The same property, for the existence oracle.
 

@@ -98,9 +98,16 @@ The client-visible message is the one place both are forbidden.
 would reveal whether a resource exists collapses to one status, so neither the
 status nor the message distinguishes "not yours" from "does not exist". A caller
 who does not hold a resource's capability must not learn from the response
-whether it is there. `AuthForbidden` and `AuthServiceUnavailable` both project
-onto `AccessDenied` for the same reason: an explicit deny and an unreachable
-authorization service are indistinguishable from outside.
+whether it is there. `AccessDenied` and `AuthForbidden` both project onto the
+same wire case for the same reason: a denial this service decided and one the
+authorization service decided are indistinguishable from outside.
+
+An unreachable authorization service is **not** a denial. No decision was
+obtained, so none is assumed, and the request fails closed — but it answers as a
+dependency outage, indistinguishable from any other, so the answer does not
+disclose which dependency failed. Reporting it as a denial told a caller their
+access had been refused during an incident they should have waited out, which is
+why the two are separated.
 
 The rule binds exactly where the caller's entitlement is in question. It does not
 bind where the caller demonstrably holds the capability and the resource's own
