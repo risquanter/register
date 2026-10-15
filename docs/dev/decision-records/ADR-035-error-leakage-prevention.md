@@ -9,118 +9,135 @@
 ## Context
 
 - An error response is untrusted output: internal reasons, stack traces, and backend messages must never reach the client
-- `logMessage`, string interpolation, and JSON serialisation are the leakage vectors on the outbound path
+- Message text, string interpolation, and JSON serialisation are the leakage vectors on the outbound path
 - Convention-enforced scrubbing at the HTTP boundary is not sound: a new error variant added without a matching sanitisation clause bypasses the defence, and no compiler or linter catches the omission
 - A structural guarantee — exhaustive matching on a sealed hierarchy, checked at compile time — turns "remembered to sanitise" into "cannot compile without sanitising"
+- A failure that never reaches a handler bypasses any guarantee the handler's own type provides, so the boundary has to cover rejected input and bugs as well as returned errors
 - OWASP Top Ten 2025 A10 (Mishandling of Exceptional Conditions) and CWE-209 (Information Exposure Through Error Messages) apply directly
 
 ---
 
 ## Decision
 
-### 1. Exhaustive Error Sanitisation — Compile-Time Guarantee
+### 1. One Closed Wire Type, Projected Exhaustively
 
-The error hierarchy (ADR-010) is a sealed `AppError` trait with sealed sub-traits:
-
-```
-sealed trait AppError extends Throwable
-├── sealed trait SimError extends AppError          // domain/service failures
-├── sealed trait IrminError extends AppError        // storage-backend failures
-├── sealed trait AuthError extends AppError         // authorization failures (ADR-024)
-└── sealed trait FolQueryFailure extends AppError   // FOL query failures (ADR-028)
-```
-
-`ErrorResponse.encode` dispatches to a typed inner match so the compiler enforces
-that every variant is handled:
+`WireError` is a sealed enum of nine cases, and it is the only error type that
+crosses. Internal failures reach it through one total function:
 
 ```scala
-def encode(error: Throwable): (StatusCode, ErrorResponse) = error match
-  case e: AppError => encodeAppError(e)
-  case _           => makeGeneralResponse()
+enum WireError:
+  case ValidationRejected(errors: List[ValidationError], trace: TraceId)
+  case QueryRejected(problem: QueryProblem, trace: TraceId)
+  case NotFound(trace: TraceId)
+  case WorkspaceExpired(cause: ExpiryCause, lifetime: Duration, idleLimit: Duration, trace: TraceId)
+  case AccessDenied(trace: TraceId)
+  case Conflict(conflict: ConflictKind, trace: TraceId)
+  case NotSupported(capability: Capability, trace: TraceId)
+  case DependencyUnavailable(trace: TraceId)
+  case InternalFault(trace: TraceId)
 
-// Exhaustive — a new AppError subtype without a branch is a compile error
-private def encodeAppError(error: AppError): (StatusCode, ErrorResponse) = error match
-  case e: SimError        => encodeSimError(e)
-  case e: AuthError       => encodeAuthError(e)
-  case e: IrminError      => encodeIrminError(e)
-  case e: FolQueryFailure => encodeFolQueryFailure(e)
+object WireError:
+  def fromAppError(e: AppError, trace: TraceId): WireError = e match
+    case ValidationFailed(errors) => WireError.ValidationRejected(errors, trace)
+    // … one arm per AppError case
 ```
 
-`-Wconf:msg=match may not be exhaustive:error` in `scalacOptions` promotes an
-inexhaustive match to a **compile error**, so adding a variant without an
-`encode` branch fails the build rather than leaking at runtime.
+The projection is one-way: no case carries an internal type, and nothing decodes
+a `WireError` back into an `AppError`. `-Wconf:msg=match may not be exhaustive:error`
+in `scalacOptions` makes a new `AppError` case without an arm a **compile error**.
 
-### 2. Typed Error Channel — Structural Boundary
+### 2. Every Declared Status Is a Declared Case
 
-Tapir's base endpoint (ADR-001) wires error mapping into every endpoint, so
-`ErrorResponse` is the only type that can reach the wire:
+The shared error output lists one variant per wire case, each at its own status,
+so no status is shared and no case is undeclared:
 
 ```scala
-val baseEndpoint = endpoint
-  .errorOut(statusCode and jsonBody[ErrorResponse])
-  .mapErrorOut[Throwable](ErrorResponse.decode)(ErrorResponse.encode)
+.errorOut(
+  oneOf[WireError](
+    oneOfVariant(BaseEndpoint.validationRejectedOut),         // 400
+    oneOfVariant(StatusCode.UnprocessableEntity, jsonBody[WireError.QueryRejected]),
+    oneOfVariant(StatusCode.NotFound,            jsonBody[WireError.NotFound]),
+    // … seven in total
+  )
+)
 ```
 
-The ZIO error channel in each `serverLogic` block passes through
-`ErrorResponse.encode`. Internal error types (`AppError`, `Throwable`) are
-structurally inaccessible to the serialiser; an error type that bypasses
-`encode` is a type mismatch at compile time.
+Controllers reach it through one extension method, which is also the only place
+the trace is read, because reading the active span requires an effect:
 
-### 3. `logMessage` Discipline — No Sensitive Detail in Messages
+```scala
+def wireEither(using Tracing): ZIO[R, Nothing, Either[WireError, A]] =
+  effect
+    .map(Right(_))
+    .catchAll(error => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace))))
+```
 
-Every `AppError` carries a `logMessage`, which is logged server-side (ADR-002)
-and never serialised to the client. The name states the destination: an
-`AppError` is plain data rather than a `Throwable`, so there is no inherited
-`getMessage` and no exception apparatus behind the text. It must carry no
-secret, no internal reason forwarded to the wire, and no confidential internal
-identifier (ADR-036):
+### 3. Message Discipline and the Opaque Status
 
-- `RepositoryFailure(reason)` — `reason` is an internal diagnostic; `encode`
-  maps it to `"Internal server error"`, never the raw string
-- An error whose variants would reveal whether a resource exists collapses to one
-  opaque status, so neither the status nor the message distinguishes "not yours"
-  from "does not exist". The rule closes an enumeration oracle: a caller who does
-  not hold a resource's capability must not learn from the response whether it is
-  there. It therefore binds exactly where the caller's entitlement is in question —
-  a missing or foreign workspace or tree is a plain 404 regardless of variant — and
-  does not bind where the caller demonstrably holds the capability and the
-  resource's own lifetime has ended. An expired workspace answers `410 Gone` to
-  the holder of its key, which discloses nothing that holder did not already know
-- A credential in a message prints its redacted `toString` (`WorkspaceKeySecret(***)`,
-  ADR-022 R3), never the raw value
+`AppError` is plain data, not a `Throwable`, so there is no inherited
+`getMessage` behind any text. Each error's `logMessage` is logged server-side
+(ADR-002) and never serialised.
+
+- `RepositoryFailure(reason)` — `reason` is an internal diagnostic; the wire case is `InternalFault`, which carries a trace and nothing else
+- A credential in any message prints its redacted `toString` (`WorkspaceKeySecret(***)`, ADR-022 R3), never the raw value
+- A client-visible message names only client-safe values
+
+**A secret and a confidential identifier are bounded in opposite directions** —
+see ADR-036 §3 for the matching half — so one rule for both is wrong about one of
+them. Both terms are defined in
+[docs/user/TERMINOLOGY.md](../../user/TERMINOLOGY.md); the constraint is:
+
+| | a server log, including `logMessage` | the wire |
+|---|---|---|
+| secret (`WorkspaceKeySecret`) | never — a log's audience is wider than the service (ADR-022 R3) | yes, in the responses that mint it; never in an error |
+| confidential (`WorkspaceId`) | permitted — holding it grants nothing (ADR-036 §3) | never, in either direction (ADR-036 §1) |
+
+The client-visible message is the one place both are forbidden.
+
+**One opaque status where entitlement is in question.** An error whose variants
+would reveal whether a resource exists collapses to one status, so neither the
+status nor the message distinguishes "not yours" from "does not exist". A caller
+who does not hold a resource's capability must not learn from the response
+whether it is there. `AuthForbidden` and `AuthServiceUnavailable` both project
+onto `AccessDenied` for the same reason: an explicit deny and an unreachable
+authorization service are indistinguishable from outside.
+
+The rule binds exactly where the caller's entitlement is in question. It does not
+bind where the caller demonstrably holds the capability and the resource's own
+lifetime has ended: an expired workspace answers `410 Gone` to the holder of its
+key, which discloses nothing that holder did not already know.
+
+### 4. The Two Paths That Reach No Handler
+
+A request the codecs reject and a bug in a handler both bypass `wireEither`.
+Each has an interceptor that answers with a declared output:
+
+```scala
+.decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))   // → ValidationRejected
+.exceptionHandler(DefectCatchAllInterceptor.exceptionHandler)      // re-raises, so the catch-all answers
+.appendInterceptor(DefectCatchAllInterceptor.interceptor(tracing)) // → InternalFault, inside CORS
+```
+
+Two answers remain Tapir's and carry a constant body: `404` for a request
+matching no route, and `405` for a method mismatch. Neither reports a failure of
+this service.
 
 ---
 
 ## Code Smells
 
-### ❌ Non-Exhaustive Error Encoding
+### ❌ Internal Reason Forwarded to the Client
 
 ```scala
-// BAD: matching on Throwable — no exhaustiveness check
-def encode(error: Throwable) = error match
-  case ValidationFailed(errors) => ...
-  case _                        => makeGeneralResponse()
-// A new AppError subtype falls through to `_`; the compiler says nothing.
+// BAD: the backend's own text becomes the body
+case RepositoryFailure(reason) => WireError.ValidationRejected(
+  List(ValidationError("db", INTERNAL_ERROR, reason)), trace)
 
-// GOOD: inner match on the sealed hierarchy — completeness is compiler-enforced
-def encode(error: Throwable) = error match
-  case e: AppError => encodeAppError(e)  // exhaustive match inside
-  case _           => makeGeneralResponse()
+// GOOD: opaque case carrying only the trace; reason logged server-side
+case RepositoryFailure(_) => WireError.InternalFault(trace)
 ```
 
-### ❌ Leaking Internal Reason in a 500
-
-```scala
-// BAD: forwarding the reason string to the client
-case RepositoryFailure(reason) =>
-  response(500, "unknown", INTERNAL_ERROR, reason)  // leaks SQL / backend text
-
-// GOOD: opaque message; reason logged server-side only (ADR-002)
-case RepositoryFailure(reason) =>
-  response(500, "unknown", INTERNAL_ERROR, "Internal server error")
-```
-
-### ❌ Confidential Identifier in an Error Message
+### ❌ Confidential Identifier in a Client-Visible Message
 
 ```scala
 // BAD: the wire-facing failure names an internal scoping identifier (ADR-036)
@@ -132,22 +149,52 @@ ZIO.fail(ValidationFailed(List(ValidationError(
   "scenario", NOT_FOUND, s"Scenario '${name.value}' not found"))))
 ```
 
+### ❌ A Secret in a Log Line
+
+```scala
+// BAD: every reader of the log holds the capability
+ZIO.logInfo(s"resolving workspace for key ${key.reveal}")
+
+// GOOD: the confidential identifier is the one that may be logged
+logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created")
+```
+
+### ❌ A Distinct Status for "Not Yours"
+
+```scala
+// BAD: 403 versus 404 tells the caller the resource exists
+case TreeNotInWorkspace(_, _) => WireError.AccessDenied(trace)
+
+// GOOD: one opaque status for both, so neither answer distinguishes them
+case TreeNotInWorkspace(_, _) => WireError.NotFound(trace)
+```
+
+### ❌ An Error Shape Outside the Declared Output
+
+```scala
+// BAD: a plain-text body no client decodes and no trace to quote
+Response.internalServerError(cause.squash.getMessage)
+
+// GOOD: the declared output the endpoints themselves use
+ValuedEndpointOutput(BaseEndpoint.internalFaultOut, WireError.InternalFault(trace))
+```
+
 ---
 
 ## Implementation
 
 | Location | Pattern |
 |----------|---------|
-| `ErrorResponse.encode` | Split into `encode` + `encodeAppError` + `encodeSimError` + `encodeAuthError` + `encodeIrminError` + `encodeFolQueryFailure` — exhaustive inner match over all four `AppError` families |
-| `build.sbt` | `-Wconf:msg=match may not be exhaustive:error` promotes inexhaustive matches to compile errors |
-| `baseEndpoint` (ADR-001) | `mapErrorOut(ErrorResponse.decode)(ErrorResponse.encode)` — `ErrorResponse` is the only wire type |
+| `WireError.fromAppError` | One-way projection, exhaustive over `AppError` |
+| `BaseEndpoint` `oneOf` | One declared variant per wire case, each at its own status |
+| `WireEither.wireEither` | The single projection point, and the only reader of the trace for a controller failure |
+| `WireDecodeFailureHandler` | A rejected input answers `ValidationRejected` with the status the input decides |
+| `DefectCatchAllInterceptor` | A defect or escaped failure answers `InternalFault`, from inside the CORS interceptor |
+| `build.sbt` | `-Wconf:msg=match may not be exhaustive:error` promotes an inexhaustive match to a compile error |
 
 ---
 
 ## References
 
-- [ADR-010: Error Handling Strategy](./ADR-010.md) — owns the `AppError` hierarchy; this ADR strengthens sanitisation from convention to compiler-enforced
-- [ADR-029: Input Injection Defence](./ADR-029-input-injection-defence.md) — inbound counterpart; this ADR is the outbound counterpart
-- [ADR-036: Confidential Internal Identifiers](./ADR-036-confidential-internal-identifiers.md) — what `logMessage` and response bodies must not carry
-- [CWE-209: Information Exposure Through Error Messages](https://cwe.mitre.org/data/definitions/209.html)
-- [OWASP Error Handling Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html)
+- [OWASP Top Ten 2025 A10 — Mishandling of Exceptional Conditions](https://owasp.org/Top10/)
+- [CWE-209 — Generation of Error Message Containing Sensitive Information](https://cwe.mitre.org/data/definitions/209.html)

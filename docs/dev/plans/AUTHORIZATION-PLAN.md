@@ -85,7 +85,7 @@ This design addresses the "leaked URL" concern progressively:
 | JWT validation at mesh layer, not application | NIST SP 800-207 Zero Trust Architecture | Compliant. "Verify at perimeter, trust injected assertion internally" pattern. Risk: traffic bypassing the mesh can spoof headers — mitigated by `requirePresent` being fail-closed rather than falling back to anonymous. |
 | PEP-only design, no `grant()`/`revoke()` in app | XACML / NIST PEP–PDP–PAP–PIP separation; OWASP Broken Access Control (Top 10 #1) | Compliant. Eliminates privilege-escalation attack surface in the application. PAP is fully external (CI/CD + `zed` CLI). |
 | SpiceDB / Zanzibar ReBAC for fine-grained layer | Google Zanzibar (2019); SpiceDB open-source implementation | Compliant. Relationship graph (`org → team → workspace → tree`) avoids application-level graph traversal. Zookies provide causal consistency. |
-| Fail-closed on connectivity and identity errors | OWASP Secure Defaults; NIST 800-53 AC-17 | Compliant. `check()` fails the ZIO effect on network error (→ 503). Missing `x-user-id` header fails the request (→ 503), never falls back to anonymous. |
+| Fail-closed on connectivity and identity errors | OWASP Secure Defaults; NIST 800-53 AC-17 | Compliant. `check()` fails the ZIO effect on network error, and a missing `x-user-id` header fails the request, never falling back to anonymous. Both answer `403`: `AuthForbidden` and `AuthServiceUnavailable` both project onto `WireError.AccessDenied`, so an explicit deny and an unreachable authorization service are indistinguishable from outside (ADR-035 §2). A distinct status for the outage would be the enumeration oracle that rule forbids. |
 
 ### Known Design Constraint — Layer 1 Tenant Isolation
 

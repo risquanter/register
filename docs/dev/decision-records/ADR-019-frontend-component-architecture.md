@@ -162,10 +162,12 @@ Three properties keep it usable:
   action the user is offered — a refresh on `Conflict`, informational rather than
   error styling on `WorkspaceExpired` — is chosen at the rendering site, so one
   value can render differently in different contexts (ADR-010: errors are values).
-- **Classification is compiler-enforced.** `fromThrowable` routes domain failures
-  through `fromAppError`, whose match over the sealed `AppError` hierarchy is
-  exhaustive, so a new server-side error family cannot quietly degrade into
-  `NetworkError`.
+- **Classification is compiler-enforced.** `GlobalError.from` matches the three
+  cases of `RequestFailure` — the server answered, the call never happened, or
+  the reply could not be read — and routes the first through `fromWireError`,
+  whose match over the nine `WireError` cases is exhaustive. A new wire case is
+  therefore a compile error until it has a treatment, rather than quietly
+  degrading into `NetworkError`.
 - **The SPA does not retry.** Request-path resilience is the mesh's
   (ADR-012 §4, ADR-031); a failure that reaches the browser is final for that
   request and is displayed rather than re-attempted.
@@ -281,7 +283,7 @@ case Conflict(message: String)
 ```scala
 // BAD: the view already renders this inline — the user sees it twice
 submitState.set(SubmitState.Failed(e))
-globalError.set(Some(GlobalError.fromThrowable(e)))
+globalError.set(Some(GlobalError.from(e)))
 ```
 
 ```scala

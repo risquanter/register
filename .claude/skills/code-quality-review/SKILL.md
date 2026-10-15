@@ -36,7 +36,7 @@ boundary is deliberate — `NonFatal` does not catch `UndefinedBehaviorError`). 
 recommend a hygiene change you have not verified green. Full rule: `CLAUDE.md`,
 the noise filter's convention exception.
 
-Three binding rules on the report itself (`CLAUDE.md`, G6):
+Four binding rules on the report itself (`CLAUDE.md`, G6):
 
 - Presenting the review report is a presentation — halt after it. No fixes,
   no commits, no further tool calls until the user rules on the findings.
@@ -53,6 +53,16 @@ Three binding rules on the report itself (`CLAUDE.md`, G6):
   explicitly-labelled recommendation. A straightforward single-answer fix
   still gets a one-line concrete fix; the moment there is a real choice, it is
   a decision guide.
+- **No option in a decision guide may be recommended or dismissed on an
+  unverified premise.** An option is a claim about what the code or a library
+  would do, so it is subject to "quote the source before leaning on it"
+  exactly as a finding is — and a dismissal is subject to it more strictly,
+  because a dismissed option leaves the user's choice set while a recommended
+  one stays in it. Verify before presenting. Where a premise cannot be settled
+  without the user's authorization, present the option with the premise
+  labelled unverified, name the single check that would settle it, and rank
+  nothing until it is run. A comment in this repository describing a library's
+  behaviour is not a source for this purpose — the library is.
 
 ## Write boundary — read freely, write tests only, never production code
 

@@ -2,11 +2,17 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All twenty-four decisions, `EWB-D-1` to `EWB-D-24`, are ruled and
+**Status.** All twenty-five decisions, `EWB-D-1` to `EWB-D-25`, are ruled and
 recorded in §10. Nothing blocks implementation on a decision. Approval is in
 place: the token names this document and the file inventory exists beside it.
-Phases 1, 1a and 1b have landed, and so has Phase 2's first item. What remains
-is Phase 2's second item, Phase 2b, and Phases 3 to 6.
+Phases 1, 1a and 1b have landed, and so have Phase 2's first item and all three
+steps of Phase 2b. What remains is Phase 2's second item and Phases 3 to 6.
+
+`EWB-D-21`'s location was revised on 2026-10-15 and `EWB-D-25` was added the same
+day. Phase 2b is the phase both bear on, and both are implemented: the defect
+catch-all sits in its own appended interceptor, and every Iron codec reports a
+refusal as an invalid value. The path that revision required is in the file
+inventory and in §12.
 
 `EWB-D-10` produces a new accepted decision record and a standing cleanup rule
 whose text reaches beyond this plan; §10 states both and §12 lists the files.
@@ -512,16 +518,18 @@ extension [R, A](effect: ZIO[R, AppError, A])
     * is the identifier of the span the failing work ran under.
     */
   def wireEither(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
-    effect.either.flatMap {
-      case Right(value) => ZIO.succeed(Right(value))
-      case Left(error)  => currentTraceId.map(trace => Left(WireError.fromAppError(error, trace)))
-    }
-
-private def currentTraceId(using tracing: Tracing): UIO[TraceId] =
-  tracing.getCurrentSpanContextUnsafe.map { ctx =>
-    TraceId.fromString(ctx.getTraceId).toOption.getOrElse(TelemetryPlaceholders.UnlinkedTrace)
-  }
+    effect
+      .map(Right(_))
+      .catchAll(error => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace))))
 ```
+
+The success side is `map` and the failure side is `catchAll`, rather than
+`.either` followed by a match on the `Either` it produced. The match's success arm
+would rewrap a value that was never unwrapped for any purpose —
+`case Right(value) => ZIO.succeed(Right(value))` — which is the shape
+`.claude/rules/scala-style.md` names under "Compose, do not orchestrate". The
+trace reader is `ActiveTrace.id`, the one definition `EWB-D-24` rules, and the
+`tracing` context parameter in scope supplies it.
 
 **Why `Tracing` arrives as a context parameter rather than in the environment.**
 `serverLogic` fixes the environment. A controller builds
@@ -590,17 +598,30 @@ val internalFaultOut: EndpointOutput[WireError.InternalFault] =
 The variant then reads `oneOfVariant(internalFaultOut)` in place of
 `oneOfVariant(StatusCode.InternalServerError, jsonBody[WireError.InternalFault])`.
 
-The `400` output is declared the same way and for the same reason, because the
-decode-failure handler below is its second sender:
+The `400` output is declared the same way, for the endpoint's own variant:
 
 ```scala
 val validationRejectedOut: EndpointOutput[WireError.ValidationRejected] =
   statusCode(StatusCode.BadRequest).and(jsonBody[WireError.ValidationRejected])
 ```
 
-Both live in a companion `object BaseEndpoint`, because `BaseEndpoint` is a
-trait and a sender that is not an endpoint has no instance of it. The other
-seven variants stay inline, because each is sent from one place only.
+The decode-failure handler does **not** send that one. A rejection carries
+whichever status the rejected input decides, so the handler sends a third
+declaration whose status is a value rather than fixed:
+
+```scala
+val rejectionOut: EndpointOutput[(StatusCode, List[Header], WireError.ValidationRejected)] =
+  statusCode.and(headers).and(jsonBody[WireError.ValidationRejected])
+```
+
+The headers travel with it because a status can require one. `400` remains the
+only status the endpoint itself declares for that body, which is why the
+fixed-status form stays.
+
+All three live in a companion `object BaseEndpoint`, because `BaseEndpoint` is a
+trait and a sender that is not an endpoint has no instance of it. Declaring them
+together is what stops one body being described twice. The other seven variants
+stay inline, because each is sent from one place only.
 
 **A defect.** A ZIO defect is a failure ZIO treats as a bug rather than an
 expected outcome, so it travels in the effect's cause rather than its typed error
@@ -612,44 +633,97 @@ is also why `EWB-D-15`'s reasoning needs this step: that ruling argued "a bug go
 to the defect channel, which is where `Throwable` belongs", which assumes the
 defect channel is opaque at the wire, and it is not yet.
 
-`RequestSpanInterceptor` closes it. It is already the outermost interceptor, so
-one place sees every request, and it already holds the span whose identifier the
-body needs. A Tapir `RequestInterceptor` is handed a `Responder`, which builds a
-response from a declared endpoint output, so the catch-all emits
-`internalFaultOut` rather than a hand-built body:
+An interceptor of its own closes it, and **where that interceptor sits in the
+stack decides whether the response it writes is usable.** Tapir states the
+ordering rule in `CustomiseInterceptors`' own scaladoc: "The first interceptor in
+the interceptor stack is the one which is called first on request, and processes
+the resulting response as the last one." `prependInterceptor` puts an interceptor
+at the front of that stack and `appendInterceptor` at the end, and the parameter
+documentation for the end names this exact use — interceptors "called last on
+request / first on response, e.g. handling decode failures, or providing
+alternate responses".
+
+So the catch-all is **appended**, which makes it the innermost request
+interceptor: inside the CORS interceptor, inside the security headers, and
+inside the span the request opened. The first of those three is the one that
+would otherwise produce a broken response.
+
+`CORSInterceptor` adds its headers to the response that comes back out of
+whatever is below it:
 
 ```scala
-/** Answer a defect with the declared `500` output, carrying only the trace.
+next(request, endpoints).map {
+  case Response(serverResponse, source) => Response(serverResponse.addHeaders(responseHeaders), source)
+  case failure                          => failure
+}
+```
+
+A response produced *above* that interceptor never passes through the
+projection, so a catch-all placed outside CORS answers a browser with no
+`Access-Control-Allow-Origin` header. The browser then reports a cross-origin
+failure and never reads the body at all, which means the trace the `500` exists
+to deliver is unreachable by the one client that needs it. The same argument
+places the catch-all inside `SecurityHeadersInterceptor`, which decorates a
+response the same way.
+
+A Tapir `RequestInterceptor` is handed a `Responder`, which builds a response
+from a declared endpoint output, so the catch-all emits `internalFaultOut`
+rather than a hand-built body. New file
+`modules/server/src/main/scala/com/risquanter/register/http/DefectCatchAllInterceptor.scala`:
+
+```scala
+/** Answers a failure that reached no endpoint's declared output, with the `500`
+  * output the endpoints themselves declare.
   *
-  * A defect is a bug, so nothing about it may cross: the cause is logged
-  * against the same trace and the body carries the identifier alone (ADR-035).
-  * The response is built from `BaseEndpoint.internalFaultOut`, the same output
-  * the endpoints declare, so a defect and a projected `InternalFault` are one
-  * shape.
+  * Appended rather than prepended, so it is the innermost request interceptor
+  * and the CORS and security-header interceptors decorate its response on the
+  * way out. A response built outside those two reaches a browser without
+  * `Access-Control-Allow-Origin`, and the browser then rejects it before the
+  * body — carrying the trace — can be read.
+  *
+  * Nothing about the failure crosses: the cause is logged under the same trace
+  * the response carries, and the body holds the identifier alone (ADR-035). The
+  * response is built from `BaseEndpoint.internalFaultOut`, so a failure answered
+  * here and one projected by `wireEither` are the same shape to a client.
   */
-private def answerDefect[B](
-  responder: Responder[Task, B],
-  request:   ServerRequest,
-  trace:     TraceId,
-  cause:     Cause[Throwable]
-): Task[RequestResult[B]]
+object DefectCatchAllInterceptor:
+  def interceptor(tracing: Tracing): RequestInterceptor[Task]
+
+  private def answerDefect[B](
+    responder: Responder[Task, B],
+    request:   ServerRequest,
+    trace:     TraceId,
+    cause:     Cause[Throwable]
+  ): Task[RequestResult[B]]
 ```
 
-and the interceptor's body becomes, in place of its current single
-`ZIO.logAnnotate(...)(downstream)`:
+Its request handler catches the cause, and leaves an interruption alone:
 
 ```scala
-ZIO.logAnnotate(TraceAnnotation, trace.value)(
-  downstream.foldCauseZIO(
-    cause   => answerDefect(responder, request, trace, cause),
-    success => ZIO.succeed(success)
-  )
-)
+ActiveTrace.id(using tracing).flatMap { trace =>
+  next(request, endpoints).catchAllCause { cause =>
+    if cause.isInterruptedOnly then ZIO.refailCause(cause)
+    else answerDefect(responder, request, trace, cause)
+  }
+}
 ```
 
-The log line is written inside the annotation, so an operator finds the cause
-under the same trace the user is quoting. Nothing else about the interceptor
-changes.
+`catchAllCause` rather than `foldCauseZIO`, because the success arm would be
+`success => ZIO.succeed(success)` — the identity, written out. A fold whose
+success arm returns its argument unchanged is a catch.
+
+**The interruption guard is part of the specification, not an implementation
+detail.** A client that disconnects mid-request interrupts the fibre, and an
+interruption reaches `catchAllCause` as a cause exactly as a defect does.
+Answering it would build a `500` for a request that no longer has a caller, and
+would record a normal cancellation as a server fault in the log.
+`Cause.isInterruptedOnly` separates the two, and `ZIO.refailCause` lets the
+interruption continue unchanged.
+
+`RequestSpanInterceptor` keeps its single `ZIO.logAnnotate(...)(downstream)` and
+acquires no second responsibility. Because it stays outside the catch-all, the
+annotation it establishes is still in force when the catch-all logs the cause,
+so an operator finds that cause under the same trace the user is quoting.
 
 **A rejected request.** Validation happens in the Tapir codecs (ADR-001), so a
 body, header or path segment an Iron smart constructor refuses is rejected before
@@ -693,6 +767,90 @@ of this file carrying a judgement, and no new error code is introduced:
 `ValidationErrorCode`. The message is the decode failure's own description of what
 it rejected, which names the input and the constraint and carries no internal
 path.
+
+**The classification above is only true once the codecs report a refusal as a
+refusal**, which is `EWB-D-25`. Tapir gives a codec two separate ways to fail:
+`DecodeResult.Error(original, throwable)` means the raw bytes could not be read
+at all, and `DecodeResult.InvalidValue(errors)` means a value was read and then
+rejected by a constraint. All twelve Iron codecs in `IronTapirCodecs.scala` use
+the first for the second situation — each one parses successfully with
+`Codec.int`, `Codec.long` or `Codec.string` and then reports the refinement's
+refusal as `DecodeResult.Error`. The parse step already handles genuinely
+unreadable input itself, so every one of the twelve is a read-then-refuse
+reported as could-not-be-read, and `toValidationError` answers `TYPE_MISMATCH`
+where `INVALID_FORMAT` is the correct code.
+
+Three definitions in `IronTapirCodecs.scala` fix all twelve at once:
+
+```scala
+/** Occupies the rejected-value slot of every refusal this file reports.
+  *
+  * Tapir's own renderer prints that slot — `invalidValueMessage` ends
+  * "but got: ${ve.invalidValue}" — so a constant there is what keeps
+  * client-submitted text out of a message no matter which renderer runs
+  * (ADR-035).
+  */
+private val ClientInputRedaction: String = "[withheld]"
+
+/** Occupies the validator slot, which Tapir requires and this file has nothing
+  * to put in: an Iron refinement is not a `Validator`, and the refusal's text
+  * travels in `customMessage` instead. Declared once and shared by all twelve
+  * codecs, including those whose raw type is numeric, because the slot's type is
+  * fixed by the validator rather than by the decoded value.
+  */
+private val NoTapirValidator: Validator.Custom[String] =
+  Validator.Custom(_ => ValidationResult.Invalid())
+
+/** One `DecodeResult.InvalidValue` for a value the refinement read and refused,
+  * carrying each refusal's own sentence and none of the submitted value.
+  */
+private def refused(errs: List[ValidationError]): DecodeResult.InvalidValue =
+  DecodeResult.InvalidValue(
+    errs.map(e => TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(e.message)))
+  )
+```
+
+`ValidationError` here is this project's own type, and Tapir's identically-named
+one is imported as `TapirValidationError`. That rename is required rather than
+stylistic: the file opens with `import sttp.tapir.*`, so a bare `ValidationError`
+in it resolves to Tapir's, while in the other 78 files that name it the bare
+spelling means ours. An explicit import of our type wins over the wildcard and is
+what keeps one name meaning one thing across the module.
+
+Each of the twelve codecs then reads the same way — `ScenarioName` as the
+reference:
+
+```scala
+given Codec[String, ScenarioName.ScenarioName, CodecFormat.TextPlain] =
+  Codec.string.mapDecode[ScenarioName.ScenarioName](raw =>
+    ScenarioName.fromString(raw).fold(refused, DecodeResult.Value(_))
+  )(_.value)
+```
+
+The refusal's sentence now has somewhere to go, so the rendering function in
+`WireDecodeFailureHandler` reads it instead of rendering the validator:
+
+```scala
+private def constraintBroken(errors: List[TapirValidationError[?]]): String =
+  errors.flatMap(e => e.customMessage.orElse(e.validator.show)) match
+    case Nil      => "is not valid"
+    case messages => messages.mkString("; ")
+```
+
+`customMessage` is what `refused` populates, so for all twelve codecs the first
+branch is the one that runs. The `validator.show` fallback is for a
+`ValidationError` some other validator produced — a schema-level `MaxLength`
+renders as `length<=30` — so a refusal from outside this file still renders
+something true rather than nothing.
+
+One property of that fallback is worth knowing rather than discovering later.
+`Validator.show` renders a `Custom` validator as `showMessage.orElse(Some("custom"))`,
+and `NoTapirValidator` carries no `showMessage`, so the fallback would render the
+bare word `custom` for a refusal this file produced. No such refusal exists,
+because `refused` is the only constructor and it always supplies
+`customMessage` — the fallback is unreachable from here by construction, not by
+discipline. It is recorded because a future change that constructs a
+`TapirValidationError` without a message would meet it.
 
 Both are connected in `Application.startServer`, in the same
 `customiseInterceptors` chain that already prepends the two interceptors:
@@ -1054,8 +1212,24 @@ case GlobalError.ServerError(msg, trace) =>
   )
 ```
 
-`fromThrowable` stays, narrowed to its real job: a browser `fetch` failure is a
-`TypeError` and is not a `WireError`, so it still becomes `NetworkError`.
+`fromThrowable` is deleted and its one line inlined into `from`'s transport arm,
+which reads `case RequestFailure.Transport(_) => NetworkError(ErrorMessages.TransportFailed)`.
+A browser `fetch` failure is a `TypeError` rather than a `WireError`, so it still
+becomes `NetworkError`; what goes is the indirection, not the behaviour.
+
+Three things made the separate function worth removing. Its parameter was never
+read, so the signature claimed the cause informed the classification when it did
+not. It was public with one caller and no test. And the cause has a real consumer
+already — `ZJS.recordToConsole` writes it to the browser console — so the
+non-use here is a presentation decision, and `_` states it at the point a reader
+asks rather than two screens away behind a function name. The inlined arm also
+matches `ErrorMessages.viewFailed`, which already writes
+`case RequestFailure.Transport(_) => TransportFailed` for the inline-display path.
+
+The cause is not recoverable detail being thrown away. A failed cross-origin
+check and a genuine network failure both surface as a `TypeError` with no
+distinguishing field, because the Fetch specification returns an opaque network
+error precisely so script cannot tell them apart, so there is no branch to write.
 
 Every sentence those arms name comes from `app/views/ErrorMessages.scala`, which
 is where `EWB-D-10` and §7.7 put them, and together they are the whole of
@@ -1488,13 +1662,24 @@ in this order, because each one narrows what the next has to describe.
 1. *The defect catch-all*, from `EWB-D-21`. `BaseEndpoint.internalFaultOut`
    declared once with the `oneOf` variant built from it; `ActiveTrace` replacing
    the two duplicated trace readers at their call sites (`EWB-D-24`);
-   `answerDefect` and the `foldCauseZIO` in `RequestSpanInterceptor`. A new
-   `RequestSpanInterceptorSpec` pins that an endpoint whose logic dies answers
-   `500` with a body carrying the trace and nothing else.
-2. *The decode-failure handler*, from `EWB-D-23`. `WireDecodeFailureHandler` and
-   its connection in `Application.startServer`; a test of `toValidationError` per
-   rejection kind, and one request-level test that a request missing a required
-   header answers `400` with a `ValidationRejected` body.
+   `DefectCatchAllInterceptor` holding `answerDefect`, the `catchAllCause` and the
+   interruption guard, connected with `appendInterceptor` so it is the innermost
+   request interceptor. `RequestSpanInterceptor` keeps only the span and the log
+   annotation, and its scaladoc loses the claim that it is the outermost
+   interceptor. A new `DefectCatchAllInterceptorSpec` pins three things: an
+   endpoint whose logic dies answers `500` with a body carrying the trace and
+   nothing else; that response carries the CORS header, which is the property the
+   placement exists to secure and the one a prepended interceptor fails; and an
+   interrupted request is not answered at all.
+2. *The decode-failure handler*, from `EWB-D-23`, and the codec classification it
+   depends on, from `EWB-D-25`. `WireDecodeFailureHandler` and its connection in
+   `Application.startServer`; `refused`, `ClientInputRedaction` and
+   `NoTapirValidator` in `IronTapirCodecs.scala` with all twelve codecs reporting
+   through `refused`; `constraintBroken` reading the carried message. A test of
+   `toValidationError` per rejection kind, a test per rejection kind that drives a
+   real Iron codec rather than a hand-built `DecodeResult`, and one request-level
+   test that a request missing a required header answers `400` with a
+   `ValidationRejected` body.
 3. *The third request-failure case*, from `EWB-D-22`.
    `RequestFailure.Undecodable`, `BackendClient`'s split `mapError`, and the
    three match sites the compiler names. Last because the first two steps remove
@@ -1502,9 +1687,12 @@ in this order, because each one narrows what the next has to describe.
    renders is written against what actually remains: a response this service did
    not write.
 
-After this phase every failure this service sends has a declared shape, which is
-what ADR-035's exhaustive-encoding rule asks for and what `§4`'s `oneOf` cannot
-deliver on its own.
+After this phase every failure leaving endpoint logic has a declared shape,
+which is what ADR-035's exhaustive-encoding rule asks for and what `§4`'s
+`oneOf` cannot deliver on its own. The two exceptions are stated in `EWB-D-21`'s
+amendment: a request matching no route answers `404` and one whose method does
+not match answers `405`, both with a constant body, because neither reports a
+failure of this service.
 
 **Phase 3 — typed locations.** `ErrorLocation`, its two Iron refinements, and
 `ValidationError.location`. Every construction site of `ValidationError` in
@@ -2111,8 +2299,8 @@ enum RequestFailure:
 `BackendClient.endpointRequestZIO` returns `IO[RequestFailure, O]`, the five
 `ZJS` extensions lose their `E <: Throwable` bound, and the seven request buses
 declared `Either[Throwable, X]` become `Either[RequestFailure, X]`.
-`GlobalError` then has one match with two arms, which are exactly
-`fromWireError` and the narrowed `fromThrowable`.
+`GlobalError` then has one match with two arms: a call to `fromWireError`, and
+the transport arm answering `NetworkError` directly.
 
 **Two cases here, three after `EWB-D-22`.** The reasoning below is about the
 distinction between an answer and no answer, and it holds unchanged. What it
@@ -2126,7 +2314,7 @@ browser and only one of them is a `WireError`. A `WireError` exists only when
 the server answered; a transport failure is the browser reporting that the call
 never happened. §7.4 settles the first half by typing the helpers on the wire
 error, and this decision names what carries the second half, which §7.4 left
-open while §7.1 kept `fromThrowable` alive for it.
+open while §7.1 kept a transport arm in `GlobalError.from` for it.
 
 **What was rejected.** Three alternatives were weighed. They are written down
 because the cheapest one is what a later reader reaches for again.
@@ -2603,29 +2791,70 @@ record with no reader. What settles it is that the record would hold a copy of
 state ZIO already carries on the same fibre, so it is not merely unread but
 redundant with a live source.
 
-### EWB-D-21 — where the defect catch-all lives — RULED 2026-10-14
+### EWB-D-21 — where the defect catch-all lives — RULED 2026-10-14, location revised 2026-10-15
 
-**Ruled: Option A, the catch-all in `RequestSpanInterceptor`, emitting the error
-output the endpoints already declare.**
+**Ruled: the catch-all emits the error output the endpoints already declare, from
+an interceptor of its own, appended so that it is the innermost request
+interceptor.** §5.3 states the shape.
+
+**What was revised, and why.** The ruling of 2026-10-14 chose Option A below and
+placed the catch-all inside `RequestSpanInterceptor`. The output it emits is
+unchanged and the reasoning that chose a declared output over a hand-built body
+stands. What was wrong is the premise that decided the location: Option A's first
+pro asserted that `RequestSpanInterceptor` is the outermost interceptor, and it
+is not. Two facts settle it, both read from Tapir 1.13.4 rather than inferred.
+
+`CustomiseInterceptors.prependInterceptor` appends to the list it names:
+
+```scala
+def prependInterceptor(i: Interceptor[F]): CustomiseInterceptors[F, O] = copy(prependedInterceptors = prependedInterceptors :+ i)
+```
+
+and `ServerInterpreter.callInterceptors` applies the head of the stack *around*
+the recursion over its tail, so the first element is the outermost:
+
+```scala
+case i: RequestInterceptor[F] =>
+  i(responder, { ei => RequestHandler.from { (request, ses, _) => callInterceptors(is.tail, ei :: eisAcc, responder).apply(request, ses) } })
+```
+
+`Application.startServer` prepends `SecurityHeadersInterceptor` first and
+`RequestSpanInterceptor` second, so the security headers are outermost and the
+span interceptor is second. `corsInterceptor` is placed after the whole prepended
+list, so the CORS interceptor runs **inside** the span interceptor — which means a
+catch-all inside the span interceptor sits outside CORS, and §5.3 shows why that
+makes its response unreadable to a browser.
+
+The revision therefore changes the location and keeps everything else. The
+interceptor's `Cons` below is also answered rather than accepted: the tracing
+interceptor no longer acquires a second responsibility, because the catch-all is
+no longer in it.
 
 A ZIO defect escaping a controller is answered by `ZioHttpInterpreter` with
 `Response.internalServerError(cause.squash.getMessage)`, so the exception's own
-message becomes the body. Verified absent: there is no `exceptionHandler`, no
-`decodeFailureHandler` and no `handleErrorCause` anywhere in the server module or
-the integration harness, and `Application.startServer` uses
-`customiseInterceptors` only to prepend two interceptors.
+message becomes the body. That was the state when this decision was taken: there
+was no `exceptionHandler`, no `decodeFailureHandler` and no `handleErrorCause`
+anywhere in the server module or the integration harness, and
+`Application.startServer` used `customiseInterceptors` only to prepend two
+interceptors. All three are now set — see the amendment at the end of this
+decision for the exception handler, which a typed failure needs in order to
+reach the catch-all at all.
 
-**Option A — the catch-all in `RequestSpanInterceptor`** (ruled). Tapir hands an
+**Option A — the catch-all in `RequestSpanInterceptor`** (ruled 2026-10-14; its
+location superseded by the revision above, its output kept). Tapir hands an
 interceptor a `Responder`, which builds a response from a declared endpoint
 output, so the interceptor answers with `BaseEndpoint.internalFaultOut` — the
 same status and body the `oneOf` variant sends.
 
-*Pros:* the interceptor is already outermost, so one place sees every request,
-and it already holds the span whose identifier the body needs. Emitting a
-declared output is what keeps the catch-all from being a second place that knows
-`InternalFault`'s wire shape.
+*Pros:* one place sees every request, and the span whose identifier the body
+needs is open around it. Emitting a declared output is what keeps the catch-all
+from being a second place that knows `InternalFault`'s wire shape. **The pro
+originally written here claimed this interceptor is the outermost one, which is
+false** — the revision above reads the two Tapir definitions that settle it — and
+both surviving pros hold for an appended interceptor as well, which is why only
+the location changed.
 *Cons:* an interceptor named for tracing acquires a second responsibility, so its
-name under-describes it.
+name under-describes it. The revision removes this cost rather than accepting it.
 
 *Concretely:* the database goes down mid-request. The caller receives `500` with
 body `{"trace":"4bf92f…"}` and nothing else, and the operator finds `Connection
@@ -2653,6 +2882,48 @@ duplication risk, so the ruling takes the location and keeps the declaration.
 This also repairs `EWB-D-15`'s premise rather than reopening it. That ruling
 argued a bug belongs in the defect channel, which assumed the defect channel is
 opaque at the wire; this makes that true.
+
+**Amendment, 2026-10-15: the exception handler a typed failure needs.** The
+catch-all as ruled above sees a defect and nothing else. Tapir's own
+`DefaultExceptionHandler` is installed by default, it runs inside this
+interceptor, and it answers every exception itself with `500` and the fixed
+string `"Internal server error"` — no declared shape and no trace. So a
+`Throwable` failure escaping endpoint logic never reached the catch-all.
+
+`ExceptionInterceptor.onException` re-raises when a handler answers `None`:
+
+```scala
+handler(ExceptionContext(e, endpoint, request)).flatMap {
+  case Some(output) => responder(request, output)
+  case None         => monad.error(e)
+}
+```
+
+So `DefectCatchAllInterceptor.exceptionHandler` answers `None` for the general
+case and the failure passes outwards to the `catchAllCause`, which gives it the
+declared output and the trace. Tapir's two special arms are delegated to it
+rather than re-raised, because their status belongs to the request rather than to
+this service: a body over its declared maximum is `413` and a malformed
+multipart body is `400`, and answering either as `500` would be wrong. Neither is
+reachable while no endpoint declares a stream or multipart body, and
+`DecodeFailureStatusSurfaceSpec` is what keeps that true.
+
+Replacing the handler outright was the alternative and is rejected: it discards
+those two arms for no gain, since returning `None` for one case and delegating
+the others costs the same code.
+
+Two answers still come from Tapir and keep a constant body: `404` for a request
+matching no route, and `405` from the reject handler. Neither reports a failure
+of this service, so neither carries a trace worth delivering, and the catch-all's
+documentation says so rather than claiming every response has a declared shape.
+
+**The server log is redacted in the same change.** Tapir's default server log
+renders the whole request line through `ServerRequest.showShort`, so a failure
+reaching it would write `/w/<capability key>` to standard output at `ERROR` —
+the sink the span name is already redacted to avoid. `showRequest` is pointed at
+`RequestSpanInterceptor.spanName`, so both sinks read one definition and neither
+can drift from the other. That member stops being `private[http]` for this
+reason.
 
 ### EWB-D-22 — how the browser reports an answer it cannot decode — RULED 2026-10-14
 
@@ -2773,6 +3044,70 @@ more copies. One `ActiveTrace.id` replaces all of them, in Phase 2b step 1,
 because that step is where the third and fourth copies would otherwise be
 written.
 
+### EWB-D-25 — how an Iron refinement reports a refusal — RULED 2026-10-15
+
+**Ruled: Option C. The twelve Iron codecs report a refusal as
+`DecodeResult.InvalidValue`, carrying the refinement's own sentence in
+`customMessage` and a constant in the rejected-value slot.** §5.3 states the
+three definitions and the codec shape.
+
+**Goal.** `toValidationError` answers `INVALID_FORMAT` for a value that was read
+and then refused, and `TYPE_MISMATCH` for one that could not be read. Every Iron
+refinement produces the first situation and reports the second, so the code the
+wire carries is wrong for the commonest client error on this API. Deciding how
+the codecs report fixes the classification and decides what the message says.
+
+**What the codecs do today.** Each of the twelve `given Codec` definitions in
+`IronTapirCodecs.scala` parses with `Codec.int`, `Codec.long` or `Codec.string`
+and then calls a smart constructor, reporting a refusal as
+`DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; ")))`.
+The parse step handles unreadable input on its own, so reaching the smart
+constructor already proves the value was readable. The twelve are the codecs for
+`PositiveInt`, `NonNegativeInt`, `NonNegativeLong`, `SafeId`, `TreeId`, `NodeId`,
+`WorkspaceKeySecret`, `UserId.Authenticated`, `ScenarioName`, `CommitHash`,
+`BranchChoice` and `SeedEntityId`.
+
+**Option A — leave the codecs and remap the code.** Change `toValidationError`
+so `DecodeResult.Error` answers `INVALID_FORMAT`.
+
+*Cost:* it relabels the genuinely-unreadable case too, so the distinction the two
+codes exist to draw is lost rather than corrected. `TYPE_MISMATCH` would then
+have no producer at all.
+
+**Option B — switch to `InvalidValue` and keep the current renderer.** The
+codecs report `InvalidValue`; `constraintBroken` goes on rendering
+`e.validator.toString`.
+
+*Cost:* the refinement's sentence is discarded. `ValidationMessages` holds the
+useful text — "Scenario name must be at most 30 characters" — and the renderer
+would print a validator's `toString` instead, so the classification would be
+right and the message worse than today's.
+
+**Option C — switch to `InvalidValue` carrying the sentence** (ruled). The
+sentence travels in `customMessage`, a shared constant occupies the
+rejected-value slot, and the renderer reads the message.
+
+*Pros:* the code is correct and the message is the refinement's own sentence,
+which is written for the person who submitted the value. The non-disclosure
+becomes structural: Tapir's own renderer prints the rejected-value slot in every
+branch — `invalidValueMessage` ends `but got: ${ve.invalidValue}` — so putting a
+constant there means no renderer can echo client input, rather than relying on
+ours continuing not to read the field. No `ValidationUtil` message interpolates
+the submitted value, so passing the sentence through discloses nothing.
+*Cons:* three new definitions in the codec file, and the renderer changes with
+the codecs rather than being left alone.
+
+*Concretely:* a client sends `X-Branch: a-branch-name-well-over-thirty-characters`.
+Today the response says the header "could not be read", coded `TYPE_MISMATCH`.
+After the change it says the header is at most 30 characters, coded
+`INVALID_FORMAT`, and the submitted text appears nowhere in the body.
+
+**Trade-off.** Whether correcting the classification is worth touching the codec
+file and the renderer together. What settles it is that `DefaultDecodeFailureHandler.respond`
+treats the two failure kinds identically where it matters — its header, body and
+path-capture rules name both in one pattern — so the switch changes which code
+the wire carries and nothing about whether a response is sent at all.
+
 ---
 
 ## 11. ADR alignment
@@ -2878,6 +3213,21 @@ authorization for a module's own tests:
 - `modules/server/src/main/scala/com/risquanter/register/telemetry/RequestContext.scala`
 - `modules/server/src/test/scala/com/risquanter/register/telemetry/RequestContextSpec.scala`
 
+The defect catch-all's own interceptor (`EWB-D-21` as revised, Phase 2b step 1).
+One path, and it is the only one in this plan that the approved inventory does not
+already carry, because the earlier ruling put this code inside a file the
+inventory names:
+
+- `new: modules/server/src/main/scala/com/risquanter/register/http/DefectCatchAllInterceptor.scala`
+
+Its spec, `DefectCatchAllInterceptorSpec.scala`, is reached by the standing
+authorization for a module's own tests, as the fourteen telemetry suites above
+are. Three further new specs are reached the same way:
+`DecodeFailureStatusSurfaceSpec.scala` in `server`, which reads the endpoint list
+from `HttpApi.endpointsZIO` and fails if any endpoint declares an input whose
+rejection answers other than `400`; `IronTapirCodecsSpec.scala` in `common`; and
+`ErrorMessagesSpec.scala` in `app`.
+
 **Edited — browser**
 
 - `modules/app/src/main/scala/app/state/GlobalError.scala`
@@ -2904,6 +3254,7 @@ authorization for a module's own tests:
 **Edited — build and documents**
 
 - `build.sbt` (version bump only)
+- `.env` and `.env.irmin` (the `APP_VERSION` mirror each bump requires, per §13)
 - `docs/dev/ARCHITECTURE.md`
 - `docs/dev/decision-records/ADR-010.md`
 - `docs/dev/decision-records/ADR-035-error-leakage-prevention.md`

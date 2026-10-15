@@ -5535,7 +5535,11 @@ Verified against the code at register `0.10.28`:
   `ErrorResponse.encode` dispatches through `encodeAppError` and
   `GlobalError.fromThrowable` through `fromAppError`, both matching on the
   sealed `AppError`, so a missing sub-trait is a compile error rather than a
-  silent fall-through.
+  silent fall-through. The guarantee still holds and both mechanisms have since
+  been replaced: `PLAN-ERROR-WIRE-BOUNDARY.md` deletes `ErrorResponse` for a
+  one-way projection onto `WireError`, and `GlobalError.from` replaces
+  `fromThrowable`. The match is now on 31 leaf types rather than four
+  sub-traits, so the enforcement is stronger than this outcome recorded.
 - **vql-engine pin `0.16.0` → `0.17.0` (that plan §14).** `build.sbt`
   `vqlEngineVersion` is `0.17.0`. 0.17.0 reshapes `BindErrorDetail` into an
   eleven-case `enum` with **no `Other`** — superseding the two-case

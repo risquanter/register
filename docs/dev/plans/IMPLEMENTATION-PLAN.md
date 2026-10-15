@@ -727,6 +727,14 @@ Server:  ValidationFailed(errors)  →encode→  (400, ErrorResponse)  →wire�
 Client:                                                              →decode→  ValidationFailed(errors')
 ```
 
+> **The error path described in this phase has been replaced.**
+> `PLAN-ERROR-WIRE-BOUNDARY.md` deletes `ErrorResponse`, `ErrorDetail` and
+> `ErrorResponse.decode`, so nothing reconstructs a server error on the client
+> any more: the server projects `AppError` onto a separate `WireError` type and
+> the browser deserialises that type directly. `GlobalError.from` replaces
+> `fromThrowable` as the classifier. What follows is the record of what this
+> phase delivered at the time, kept as provenance.
+
 The frontend classifier `GlobalError.fromThrowable` then pattern-matches on the **shared
 sealed hierarchy** — the same types that cross-compile to JS via the `common` module.
 No status-code integer matching, no string parsing (ADR-010 §5). The reconstruction is
@@ -1392,28 +1400,35 @@ expired/missing workspaces on mount and triggers the dedicated
 `GlobalError.WorkspaceExpired` blue info banner (Scenario 3 in ADR-025). Key
 clearance and URL reset (`clearURL()`) also work.
 
-The **mid-session** path is **not yet implemented.** When the reaper evicts a
-workspace while the user is actively using it, subsequent API calls return an
-A13 opaque 404. The `GlobalError.fromThrowable` classifier sees this as an
-untyped error and routes it to `ServerError` (red banner) — not the dedicated
-`WorkspaceExpired` treatment (blue info banner). This happens because A13
-deliberately strips the error discriminator from the HTTP response, so
-`fromThrowable` cannot distinguish a workspace 404 from a generic 404.
+The **mid-session** path is answered by `PLAN-ERROR-WIRE-BOUNDARY.md`, and the
+design this section previously prescribed for it is withdrawn.
 
-What's needed for mid-session handling:
-1. **Call-site error classification:** Since A13 makes the error opaque at the
-   HTTP level, classification must happen at the call site where we *know* the
-   request was workspace-scoped. The `fromThrowable` classifier is the wrong
-   place — it has no call-site context.
-2. **Interception in workspace-scoped API calls:** Each workspace-scoped call
-   (tree list refresh, tree create, simulation run) should catch 404 errors and
-   route them to `GlobalError.WorkspaceExpired` with a "workspace expired" modal
-   and a "Create New Workspace" action, instead of the generic red error banner.
-3. **Workspace state cleanup:** Clear `WorkspaceState.workspaceKey`, call
-   `clearURL()`, same as the startup `preValidate` failure path.
+The obstacle it described was real at the time: a mid-session eviction answered
+an opaque 404 that carried no discriminator, so the classifier could not tell a
+gone workspace from any other missing resource, and the only remaining place to
+make the distinction was each workspace-scoped call site. That obstacle is
+removed rather than worked around. Expiry and absence are now two separate wire
+cases at two separate statuses — `WireError.WorkspaceExpired` answering `410
+Gone` and `WireError.NotFound` answering `404` — so `GlobalError.from` routes
+them to different treatments with no call-site context needed, which is what
+`EWB-D-4` ruled and what §7.1 of that plan implements.
 
-This is a frontend-only change. The server-side A13 opaque 404 behaviour is
-correct and should not be modified.
+Two of the three items below therefore do not apply. **Call-site error
+classification is not built**: it existed only to recover a distinction the wire
+now carries, and adding it would put the same decision in every workspace-scoped
+call. **Interception in each workspace-scoped API call is not built**, for the
+same reason. What survives is the state cleanup:
+
+- **Workspace state cleanup:** Clear `WorkspaceState.workspaceKey`, call
+  `clearURL()`, same as the startup `preValidate` failure path. §7.2 of
+  `PLAN-ERROR-WIRE-BOUNDARY.md` is where it lands, narrowed so that only an
+  answer actually meaning the workspace is gone discards the key — a dropped
+  connection or a server fault leaves it alone.
+
+This is a frontend-only change. The server-side opaque-404 behaviour for a
+resource the caller may not see is correct and should not be modified; expiry is
+the carve-out, and it answers `410 Gone` to the holder of the workspace's own
+key because that discloses nothing the holder did not already know (ADR-035 §3).
 
 **Checkpoint:**
 - [x] Reaper fiber runs at configured interval in free-tier mode ✅

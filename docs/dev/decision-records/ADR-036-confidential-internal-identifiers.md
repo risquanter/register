@@ -125,6 +125,25 @@ in a branch name. Complete removal from the client boundary, in both
 directions, stays the prescription; masking is at most defence in depth behind
 it, and is not required.
 
+#### Where this parts from a secret — see ADR-035 §3
+
+A secret and a confidential identifier are bounded in opposite directions, so a
+single "sensitive value" rule is wrong about one of them.
+
+A secret may never be logged, because possession of it is authorization and a log
+is read by a wider audience than the service that wrote it. It does cross the
+wire, because that is what a bearer credential is for.
+
+A confidential identifier is the reverse. It may be logged, for the reason this
+section already gives: holding it grants nothing, so a reader of a server log
+gains nothing by seeing it. What it may never do is cross the client boundary, in
+either direction, because a client that can see one has the reference it would
+need to target another tenant.
+
+So `logMessage`, which stays server-side, may name a `WorkspaceId` and may never
+name a `WorkspaceKeySecret`. ADR-035 §3 carries the full table and the reason the
+client-visible message is the one place both are forbidden.
+
 ### 4. Identifiers Not Confined by This Record
 
 `TreeId`, `NodeId` and `MitigationId` are **client-facing**. They are returned in
