@@ -233,9 +233,9 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       yield assertTrue(evicted.size == 1, evicted.exists(_.id == ws.id))
     },
 
-    // ── Seed identity (PLAN-SEED-IDENTITY §5.2 / §5.5) ──────────────────
+    // ── Seed identity ───────────────────────────────────────────────────
 
-    test("fresh store assigns seedEntityIds 1, 2, 3 in creation order (§5.5 determinism)") {
+    test("fresh store assigns seedEntityIds 1, 2, 3 in creation order") {
       for
         store <- mkStore
         k1    <- store.create()
@@ -265,7 +265,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       )))
     },
 
-    test("assignment after a provided value skips past it (no collision, §5.2)") {
+    test("assignment after a provided value skips past it, so no collision") {
       for
         store <- mkStore
         id    <- ZIO.fromEither(SeedEntityId.fromLong(10L)).orDieWith(e => new AssertionError(e.toString))

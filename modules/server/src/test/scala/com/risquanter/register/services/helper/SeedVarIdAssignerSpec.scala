@@ -76,8 +76,8 @@ object SeedVarIdAssignerSpec extends ZIOSpecDefault:
       )
     },
     test("a provided ID above the watermark raises the allocation base (no collision with auto-assignment)") {
-      // Fresh create: L1 provided 5; auto-assigned leaves start above it, never at 1..4
-      // (§5.1: a provided ID consumes the assignment space above it).
+      // Fresh create with a provided 5: auto-assigned leaves start above it,
+      // never at 1..4, because a provided ID consumes the space above it.
       val fixed = Map(name("Provided") -> sid(5L))
       val Right((ids, hw)) = SeedVarIdAssigner.assign(
         Seq(name("Provided"), name("Auto B"), name("Auto A")), fixed, highWater = 0L
@@ -102,7 +102,7 @@ object SeedVarIdAssignerSpec extends ZIOSpecDefault:
         hw.value == 11L
       )
     },
-    test("a provided ID near the range cap exhausts the assignment space above it (documented §5.1 edge)") {
+    test("a provided ID near the range cap exhausts the assignment space above it") {
       val fixed = Map(name("Near Cap") -> sid(49999999L))
       val result = SeedVarIdAssigner.assign(Seq(name("Near Cap"), name("Auto")), fixed, highWater = 0L)
       assertTrue(

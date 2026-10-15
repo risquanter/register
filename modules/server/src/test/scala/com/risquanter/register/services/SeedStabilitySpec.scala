@@ -176,7 +176,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
         )
       },
 
-      test("export → import with provided seedVarIds and matching entity → identical figures (§8 round trip)") {
+      test("export then import with provided seedVarIds and a matching entity produces identical figures") {
         for
           // Build a tree whose surviving seedVarIds are non-contiguous ({1,3}) so
           // that a fresh auto-assignment ({1,2}) could NOT reproduce them — the

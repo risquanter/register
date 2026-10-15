@@ -119,7 +119,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       yield assertTrue(evicted.exists(_.id == ws.id))
     },
 
-    // ── Seed identity (PLAN-SEED-IDENTITY §5.2) ─────────────────────────
+    // ── Seed identity ───────────────────────────────────────────────────
     // DB is shared across the suite, so these assert relative properties
     // (distinctness, monotonicity), not absolute counter values.
 
@@ -153,7 +153,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       )))
     },
 
-    test("assignment after a provided value skips past it (sequence bumped, §5.2)") {
+    test("assignment after a provided value skips past it, bumping the sequence") {
       for
         store <- ZIO.service[WorkspaceStore]
         id    <- ZIO.fromEither(SeedEntityId.fromLong(900100L)).orDieWith(e => new AssertionError(e.toString))
