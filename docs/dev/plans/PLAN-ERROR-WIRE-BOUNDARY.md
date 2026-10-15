@@ -5,8 +5,7 @@ Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 **Status.** All twenty-five decisions, `EWB-D-1` to `EWB-D-25`, are ruled and
 recorded in §10. Nothing blocks implementation on a decision. Approval is in
 place: the token names this document and the file inventory exists beside it.
-Phases 1, 1a and 1b have landed, and so have Phase 2's first item and all three
-steps of Phase 2b. What remains is Phase 2's second item and Phases 3 to 6.
+Phases 1, 1a, 1b, 2 and 2b have landed. What remains is Phases 3 to 6.
 
 `EWB-D-21`'s location was revised on 2026-10-15 and `EWB-D-25` was added the same
 day. Phase 2b is the phase both bear on, and both are implemented: the defect
@@ -1083,18 +1082,39 @@ not a later plan's. `EWB-D-19` folds in what the retired
 `PLAN-TELEMETRY-PLUMBING.md` would have done, and `§9`'s Phase 1b is where it
 lands.
 
-### 6.2 The resolve-failure log line gains the record
+### 6.2 The resolve-failure log line names the workspace
 
-`WorkspaceStoreLive.logResolveFailure` currently receives the capability key and
-annotates `"workspace_key" -> key.toString`, which renders as the same redacted
-constant for every workspace, so the line identifies nothing. The expiry arm has
-the record in scope. The annotation becomes `"workspace_id" -> ws.id.value`,
-`"created_at"` and `"expires_at"`, which is where the question "why did this
-resolve fail" is actually answered, and it is permitted because a confidential
-internal identifier may appear in a server log (ADR-036).
+`WorkspaceStoreLive.logResolveFailure` received the capability key and annotated
+`"workspace_key" -> key.toString`, which renders as the same redacted constant
+for every workspace, so the line identified nothing. The annotations become
+`"workspace_id"`, `"reason"`, `"expiry_cause"` and `"expired_at"`, which is where
+the question "why did this resolve fail" is answered. Naming the workspace is
+permitted because a confidential internal identifier may appear in a server log
+(ADR-036).
 
-This needs a signature change, since the function today receives only the key.
-That is a Phase 2 item and its signature is stated in §9.
+Every one of those values is on the failure itself. `WorkspaceExpired` carries
+`wsId`, `cause` and `expiredAt`, because §6.1 has the store compute the deadline
+where the record is in scope and put the result on the error. So the function
+takes the error and needs no record:
+
+```scala
+private def logResolveFailure(error: AppError): UIO[Unit]
+```
+
+The workspace's creation instant is deliberately absent. It is an input to the
+calculation §6.1 moved into the store, and `expiredAt` is that calculation's
+answer, so a line carrying both would carry an ingredient beside its result. A
+reader who needs the age has the `workspace.created` event, which names the same
+`workspace_id`.
+
+The annotation is `"expired_at"` and not `"expires_at"`, because the value is
+whichever deadline ended this workspace, while `WorkspaceRecord.expiresAt` is the
+absolute deadline alone — two different values whenever inactivity was the cause.
+`"expiry_cause"` says which of the two deadlines it was, without which the
+instant does not identify the deadline.
+
+The not-found arm annotates `"reason"` alone. No workspace was found, so there is
+no identifier to name.
 
 ### 6.3 `SimError` becomes `DomainError`
 
@@ -1645,15 +1665,17 @@ It also settles what Phase 1a needs. §7.5's per-case conflict treatment and the
 trace line on `InvariantBroken` both read the failure's case at render time, so
 they cannot be written while the state holds a composed sentence.
 
-*Then the log line.* `TreeNotInWorkspace`'s identifier and the log
-annotation change:
+*Then the log line*, from §6.2:
 
 ```scala
-private def logResolveFailure(outcome: Either[AppError, WorkspaceRecord]): UIO[Unit]
+private def logResolveFailure(error: AppError): UIO[Unit]
 ```
 
-taking the outcome rather than the key, so the expiry arm can annotate
-`workspace_id`, `created_at` and `expires_at` from the record.
+taking the failure rather than the key, so the expiry arm annotates
+`workspace_id`, `expiry_cause` and `expired_at` from the error that already
+carries them. `TreeNotInWorkspace` needs nothing in this step: it holds its own
+identifier and keeps it out of `logMessage` already, which landed with the change
+this plan's starting point assumes.
 
 **Phase 2b — the failures that bypass the boundary.** §5.3's two server-side
 closures, and the client case that reports whatever survives them. Three steps,

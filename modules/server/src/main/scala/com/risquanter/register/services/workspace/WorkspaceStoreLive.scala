@@ -142,7 +142,7 @@ final class WorkspaceStoreLive private (
                            val updated = ws.copy(trees = ws.trees + treeId)
                            (Right(()), state.copy(byHash = state.byHash.updated(keyHash, updated)))
                  }
-      _       <- ZIO.fromEither(result).tapError(logResolveFailure(key))
+      _       <- ZIO.fromEither(result).tapError(logResolveFailure)
     yield ()
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op.
@@ -256,19 +256,32 @@ final class WorkspaceStoreLive private (
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
       result <- ref.get.map(state => validateWorkspace(state.byHash, keyHash, now))
-      ws     <- ZIO.fromEither(result).tapError(logResolveFailure(key))
+      ws     <- ZIO.fromEither(result).tapError(logResolveFailure)
     yield ws
 
-  /** Security log for a failed resolve, shared by every caller that validates. */
-  private def logResolveFailure(key: WorkspaceKeySecret)(error: AppError): UIO[Unit] =
+  /** Security log for a failed resolve.
+    *
+    * The annotations name the workspace and the deadline it passed, which is
+    * what answers why a resolve failed. A confidential internal identifier may
+    * appear in a server log and may never cross the wire (ADR-036), so
+    * `workspace_id` belongs here and in no response. The capability key is
+    * annotated nowhere: a credential type prints redacted (ADR-022 R3), so the
+    * annotation carried the same constant for every workspace.
+    *
+    * Called by `addTree` and `resolveInternal`; `resolve` does not log.
+    */
+  private def logResolveFailure(error: AppError): UIO[Unit] =
     error match
-      case _: WorkspaceNotFound =>
+      case WorkspaceNotFound() =>
         logSecurityWarning("workspace.resolve_failed",
-          "workspace_key" -> key.toString, "reason" -> "not_found"
+          "reason" -> "not_found"
         )("Workspace resolve failed")
-      case _: WorkspaceExpired =>
+      case WorkspaceExpired(wsId, _, _, cause, expiredAt) =>
         logSecurityWarning("workspace.resolve_failed",
-          "workspace_key" -> key.toString, "reason" -> "expired"
+          "workspace_id" -> wsId.value,
+          "reason"       -> "expired",
+          "expiry_cause" -> cause.toString,
+          "expired_at"   -> expiredAt.toString
         )("Workspace resolve failed")
       case _ => ZIO.unit
 
