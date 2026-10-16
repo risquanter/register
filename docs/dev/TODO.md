@@ -2642,3 +2642,39 @@ comment explaining that each `prependInterceptor` goes to the front, so the span
 interceptor ends up outermost and the security-headers interceptor stays the last
 one to modify headers. The harness must reproduce that relationship, not just the
 presence of both.
+
+---
+
+## 58. The anonymous sentinel is built with a partial call, so a refinement change would fail at class-load time
+
+`UserContextExtractor.sentinelAuthenticated` is built as
+`UserId.fromString(AnonymousSentinelUuid).toOption.get`. The `.get` is a partial
+call on an `Option` in production code, and it runs during object
+initialisation rather than inside an effect.
+
+**Why it is safe today.** `AnonymousSentinelUuid` is declared as `UuidStr`, so
+Iron has already refined the literal at compile time, and `UserId.fromString`
+applies the same UUID refinement. The two agree, so the `Option` is always
+`Some`. A comment at the site says exactly this.
+
+**What makes it worth removing anyway.** The safety rests on two refinements
+agreeing, and nothing enforces that they do. If `UserId`'s refinement is ever
+narrowed — a version constraint on the UUID, a non-nil requirement, a rejection
+of the all-zeros value specifically — the `.get` throws. It throws during
+object initialisation, so the failure is a `NoClassDefFoundError` or an
+`ExceptionInInitializerError` at the first touch of `UserContextExtractor`,
+not a typed failure at a request boundary. The all-zeros UUID is a plausible
+thing for a future refinement to reject, because it is a reserved sentinel.
+
+**The work.** Give the sentinel a construction path that cannot throw. The
+options are a smart constructor on `UserId` that takes the already-refined
+`UuidStr` without re-refining, which removes the second refinement rather than
+trusting it to agree; or keeping `fromString` and folding the failure into a
+startup check, so a disagreement fails the application with a message naming
+both refinements instead of a class-initialisation error. The first is the
+smaller surface and the one to evaluate first.
+
+**Scope note.** This is auth-boundary code (ADR-012 §7 T4 — the sentinel must
+never hold a SpiceDB permission), so the change is a Decision Required rather
+than a mechanical fix: whichever route is taken alters how the one value that
+represents "no identity" is constructed.

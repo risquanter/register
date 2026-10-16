@@ -620,8 +620,17 @@ extension [R, A](effect: ZIO[R, AppError, A])
   def wireEither(scope: TreeScope)(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
     effect
       .map(Right(_))
-      .catchAll(error => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace, scope))))
+      .catchAll(error =>
+        ActiveTrace.id.flatMap(trace =>
+          logProjectedFailure(error, trace).as(Left(WireError.fromAppError(error, trace, scope)))
+        )
+      )
 ```
+
+The `logProjectedFailure` call is what `EWB-D-26` requires of this method, so it
+is part of the signature rather than an addition a later phase makes. Phase 3
+adds the `scope` parameter to a method that already writes the line; an
+implementation that took this block as a whole-body replacement would delete it.
 
 The success side is `map` and the failure side is `catchAll`, rather than
 `.either` followed by a match on the `Either` it produced. The match's success arm
@@ -1362,7 +1371,7 @@ def fromWireError(e: WireError): GlobalError = e match
     case RejectionDetail.Query(problem)              => InputRejected(ErrorMessages.query(problem))
   case WireError.NotFound(_)                         => NotFound
   case WireError.WorkspaceExpired(c, life, idle, _)  => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
-  case WireError.AccessDenied(_)                     => ServerError(ErrorMessages.Forbidden, None)
+  case WireError.AccessDenied(t)                     => ServerError(ErrorMessages.Forbidden, Some(t))
   case WireError.Conflict(conflict, _)               => Conflict(ErrorMessages.conflict(conflict))
   case WireError.NotSupported(capability, _)         => ServerError(ErrorMessages.capabilityUnavailable(capability), None)
   case WireError.DependencyUnavailable(t)            => DependencyError(ErrorMessages.DependencyDown, Some(t))
@@ -1383,9 +1392,11 @@ whose fault the display should imply, and this is the one where the problem is i
 text the user typed, so it gets the warning treatment and carries no trace while
 `ServerError` and `DependencyError` carry one and the fault icon.
 
-Four sites: the declaration at `GlobalError.scala:38`, the projection arm at
-`GlobalError.scala:99`, the render arm at `ErrorBanner.scala:48`, and the
-assertion at `GlobalErrorSpec.scala:41`.
+Four sites, named by what each one is rather than by line, because the projection
+arm moves whenever a case above it is edited: the case declaration in
+`GlobalError.scala`, the arm in `GlobalError.fromWireError` that a refused query
+takes, the render arm in `ErrorBanner.scala`, and the assertion in
+`GlobalErrorSpec.scala`.
 
 The existing code maps every query failure to `ServerError`, and that is wrong
 rather than merely blunt: `ErrorBanner` renders `ServerError` with the
@@ -1397,18 +1408,39 @@ That arm is reached more often than its inline handling suggests.
 so a query failure notifies the global observer **as well as** reaching
 `AnalyzeQueryState`'s own slot. The banner shows it either way.
 
-Two arms pass `None` for the trace explicitly, because `EWB-D-11` forbids a
-defaulted `Option`. That is the rule working rather than a cost it imposes. A
-denial and an absent capability both carry a trace on the wire, so `None` at the
-call site is where the browser's decision not to show it becomes visible instead
-of being hidden in a default.
+One arm passes `None` for the trace explicitly, because `EWB-D-11` forbids a
+defaulted `Option`. That is the rule working rather than a cost it imposes. An
+absent capability carries a trace on the wire, so `None` at the call site is
+where the browser's decision not to show it becomes visible instead of being
+hidden in a default.
+
+Passing `None` withholds the identifier from the screen and not from the browser.
+`ZJS.recordToConsole` writes the case and the trace of every failed request to
+the browser console, applied by `tapError` on every forked effect, so a developer
+reading a report about any failure has the identifier whether or not the banner
+showed it. That is what makes this a presentation choice with no diagnostic cost.
 
 **The browser displays it, and which cases show it is a presentation choice
 rather than a data one.** The identifier is on every wire case, so every
-`GlobalError` case can carry it; the two that render it are the ones where the
-user has nothing else to act on and a reference is the only useful thing on
-screen — a dependency outage and an internal fault. The others carry an
-actionable message of their own, and a trace identifier beside it is noise.
+`GlobalError` case can carry it. The rule deciding which show it is whether the
+user can resolve the failure themselves.
+
+A failure they cannot resolve carries the trace, because a reference is then the
+only useful thing on screen: a dependency outage, an internal fault, and a
+denial. A denial is in that set even though its message is actionable, because
+the action is to ask someone else to grant access, and the person they ask needs
+an identifier to look the request up. A user who believes a refusal is a mistake
+otherwise has nothing to quote.
+
+A failure where nothing about the request will ever succeed does not carry it. An
+absent capability is the case: the deployment does not offer the feature, so no
+trace lookup changes the answer and the identifier is noise beside a sentence
+that already says so.
+
+This rule replaces an earlier one that gave the trace to exactly two cases, a
+dependency outage and an internal fault, on the ground that every other case
+carries an actionable message. That reasoning treated "actionable" as meaning the
+user acts alone, which a denial breaks. Ruled 2026-10-16.
 
 **Every failure writes the identifier to the browser console, whichever case it
 is.** The display choice above governs the banner, not the diagnostic record. One
@@ -1433,9 +1465,12 @@ today — and it adds no dependency, because scalajs-dom is already used for
 `window` and `MouseEvent`.
 
 `GlobalError.ServerError` and `GlobalError.DependencyError` therefore take
-`trace: Option[TraceId]`, and they are the only two that do, because they are
-the two that render it. `ErrorBanner` renders it in a muted line under the
-message, selectable so it can be copied:
+`trace: Option[TraceId]`, and they are the only two display cases that do,
+because they are the two that render it. The field is an `Option` because those
+two cases are reached from wire cases on both sides of the rule above — a denial
+and an internal fault both become `ServerError`, and only one of them supplies a
+trace. `ErrorBanner` renders it in a muted line under the message, selectable so
+it can be copied:
 
 ```scala
 case GlobalError.ServerError(msg, trace) =>
@@ -1931,7 +1966,7 @@ failure of this service.
 
 **Phase 2c — one log line per failed request.** `EWB-D-26`. `FailureOrigin` and
 the two new `AppError` members, with `origin` declared on all thirty-one leaf
-types and `logAnnotations` on the three that carry queryable fields; the log in
+types and `logAnnotations` on the four that carry queryable fields; the log in
 `wireEither`; and the deletion of `WorkspaceStoreLive.logResolveFailure` with its
 two call sites and the `logSecurityWarning` helper left with no caller. Its tests
 go in `WireEitherSpec`, which already drives the boundary inside a real span:
@@ -1953,12 +1988,26 @@ loses its `QueryRejected` arm and reads `RejectionDetail` instead.
 parameter on `wireEither`, and the roughly twenty controller call sites that each
 state `InTree(treeId)` or `NoTree`. `WireDecodeFailureHandler` builds
 `RequestRejected` and returns an `ErrorLocation` from `fieldName`.
+
+`ValidationError`'s two remaining `String` fields are refined in the same edit.
+`field` and `message` are unrefined on a type that crosses the wire, which the
+project's domain-primitive rule rates a defect, and this phase is the one edit
+that opens the type — it is already adding `location`. Neither is an injection
+surface today, because both are server-authored: `fieldName` derives `field` from
+the Tapir input description and `constraintBroken` builds `message` from the
+refinement's own sentence with the submitted value dropped. So the refinement
+records a bound that already holds rather than closing a live hole, and doing it
+here avoids opening the type twice. The bound for `field` follows from what
+`fieldName` can return, and the bound for `message` from the longest refinement
+sentence; both are stated when the refinement is written, per the rule that a
+constant carries its origin.
 `BaseEndpoint` gains `requestRejectedOut` at `400` and moves
 `validationRejectedOut` to `422`.
 
-`GlobalError.RequestRejected` is renamed to `InputRejected` (§7.1), at four
-sites: `GlobalError.scala:38` and `:99`, `ErrorBanner.scala:48`, and
-`GlobalErrorSpec.scala:41`. The internal `AccessDenied` and `WorkspaceExpired`
+`GlobalError.RequestRejected` is renamed to `InputRejected` (§7.1), at the four
+sites §7.1 names: the case declaration, the projection arm a refused query takes,
+the render arm in `ErrorBanner.scala` and the assertion in
+`GlobalErrorSpec.scala`. The internal `AccessDenied` and `WorkspaceExpired`
 keep their names and their renamed imports, for the reason §5.1 records.
 
 **Phase 4 — typed load problems and the rename.** `TreeLoadProblem` replacing
@@ -3450,6 +3499,24 @@ deliberately handled, such as the cascade deletes that log each item and then
 consolidate logging that is not about a request failure, and that was never
 available to it.
 
+**A request the decoders rejected is logged at the handler, because the boundary
+never sees it.** A decode failure is answered before any controller runs, so it
+never reaches `wireEither` and the line above is never written for it. Without a
+line of its own, a trace a caller quotes from a `400` would match nothing in the
+log. `WireDecodeFailureHandler.logRejection` therefore writes one `INFO` line per
+rejected request, naming the field, the message and the status answered. It does
+not take a trace as an argument: the handler runs inside the span interceptor, so
+the annotation carrying the trace is already applied to every line it writes. The
+level is `INFO` for the same reason the `Caller` case is — a rejected request is
+the service working correctly.
+
+**An endpoint advertising an authentication challenge is logged as a defect of
+this service.** Tapir computes `401` for a decode failure only where the endpoint
+declares an authentication input. No endpoint here declares one, which
+`DecodeFailureStatusSurfaceSpec` pins, so `logIfChallengeAdvertised` records a
+configuration that should not exist rather than anything a caller did. That is
+why it is `ERROR` while the rejection line beside it is `INFO`.
+
 **Cost, accepted.** Every failed request now writes a line, so a client sending
 invalid input produces log volume where it produced none. The level split is
 what keeps that tolerable, and it is why `Caller` and `Service` are separated
@@ -3758,10 +3825,18 @@ rejection answers other than `400`; `IronTapirCodecsSpec.scala` in `common`; and
 - `docs/dev/decision-records/ADR-010.md`
 - `docs/dev/decision-records/ADR-035-error-leakage-prevention.md`
 - `docs/dev/decision-records/ADR-037-in-code-constants.md` (written 2026-10-11; the phase amends the architecture document to match it)
-- `.github/skills/code-quality-review/SKILL.md`
 - `.claude/skills/code-quality-review/SKILL.md`
+- `.claude/skills/adr-constraints/SKILL.md` (the collision row for ADR-035 × ADR-036 × ADR-022)
 - `docs/dev/plans/PLAN-RISKTRANSFORM.md` (repoint its four references at lines 9677, 9844, 9942, 9955)
 - `docs/dev/plans/IMPLEMENTATION-PLAN.md` (repoint its three `TES-D-9` references)
+- `docs/dev/decision-records/ADR-002.md` (the failure log level, amended by `EWB-D-26`)
+- `docs/dev/decision-records/ADR-019-frontend-component-architecture.md`
+- `docs/dev/decision-records/ADR-036-confidential-internal-identifiers.md` (the secret-versus-identifier split)
+- `docs/user/TERMINOLOGY.md` (definitions for both terms and the trust boundaries between them)
+- `docs/dev/plans/AUTHORIZATION-PLAN.md`
+
+There is no `.github/` directory in this repository. The skills live only under
+`.claude/skills/`, so the list above names one copy of each and not two.
 
 The two global instruction lines that `EWB-D-10` produces are written. The user's
 `~/.claude/CLAUDE.md` carries the boyscout section that names them, and the global

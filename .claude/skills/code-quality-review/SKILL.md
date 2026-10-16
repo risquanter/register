@@ -36,7 +36,7 @@ boundary is deliberate — `NonFatal` does not catch `UndefinedBehaviorError`). 
 recommend a hygiene change you have not verified green. Full rule: `CLAUDE.md`,
 the noise filter's convention exception.
 
-Four binding rules on the report itself (`CLAUDE.md`, G6):
+Three binding rules on the report itself (`CLAUDE.md`, G6):
 
 - Presenting the review report is a presentation — halt after it. No fixes,
   no commits, no further tool calls until the user rules on the findings.
@@ -53,16 +53,6 @@ Four binding rules on the report itself (`CLAUDE.md`, G6):
   explicitly-labelled recommendation. A straightforward single-answer fix
   still gets a one-line concrete fix; the moment there is a real choice, it is
   a decision guide.
-- **No option in a decision guide may be recommended or dismissed on an
-  unverified premise.** An option is a claim about what the code or a library
-  would do, so it is subject to "quote the source before leaning on it"
-  exactly as a finding is — and a dismissal is subject to it more strictly,
-  because a dismissed option leaves the user's choice set while a recommended
-  one stays in it. Verify before presenting. Where a premise cannot be settled
-  without the user's authorization, present the option with the premise
-  labelled unverified, name the single check that would settle it, and rank
-  nothing until it is run. A comment in this repository describing a library's
-  behaviour is not a source for this purpose — the library is.
 
 ## Write boundary — read freely, write tests only, never production code
 
@@ -214,6 +204,13 @@ accepted as clean:
 
 - New public types / methods not required by the task? **MUST-FIX** — unused API is a liability.
 - Every new public method has at least one call site? Zero-caller method is dead code. **MUST-FIX.**
+- **Surface that already exists and already carries information is judged differently
+  from surface newly written with no caller.** A field or parameter nothing reads may
+  mark a feature worth building rather than dead weight, so the finding is raised with
+  both options — put it to work, naming what functionality gains, and remove it. The
+  global instructions state this in full under "Decisions & review feedback"; it does
+  not soften the two MUST-FIX items above, which are about speculative surface being
+  written in the first place.
 - Existing public APIs removed or signature-changed without migrating all call sites? **MUST-FIX.**
 - Default parameter values unchanged unless task explicitly requires it?
 
