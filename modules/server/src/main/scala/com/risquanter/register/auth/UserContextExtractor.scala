@@ -28,6 +28,15 @@ object UserContextExtractor:
     */
   val AnonymousSentinelUuid: UuidStr = "00000000-0000-0000-0000-000000000000"
 
+  /** Appended to the startup line when the anonymous sentinel is live, which is
+    * the condition an operator must notice. Leading space: it joins the
+    * key-value line rather than starting one.
+    */
+  private val SentinelWarning: String =
+    " ⚠️  CAPABILITY-ONLY MODE: x-user-id header is IGNORED. " +
+      "Anonymous sentinel is active. No identity verification. " +
+      "Do NOT run in this mode in production with real user data."
+
   /** Emit a structured log entry describing which auth mode is active.
     *
     * Called once at application startup (from Application.startServer).
@@ -46,18 +55,14 @@ object UserContextExtractor:
       case AuthMode.CapabilityOnly => "capability-only"
       case AuthMode.Identity       => "identity"
       case AuthMode.FineGrained    => "fine-grained"
-    val extractorName = extractor match
-      case e if e eq noOp           => "noOp"
-      case e if e eq requirePresent => "requirePresent"
-      case _                        => extractor.getClass.getSimpleName
+    // The three values are one classification of the extractor, so they are
+    // produced together: naming it, whether the anonymous sentinel is live, and
+    // the operator warning that only the sentinel case carries.
+    val (extractorName, sentinelActive, warning) = extractor match
+      case e if e eq noOp           => ("noOp", true, SentinelWarning)
+      case e if e eq requirePresent => ("requirePresent", false, "")
+      case _                        => (extractor.getClass.getSimpleName, false, "")
 
-    val sentinelActive = extractor eq noOp
-    val warning =
-      if sentinelActive then
-        " ⚠️  CAPABILITY-ONLY MODE: x-user-id header is IGNORED. " +
-        "Anonymous sentinel is active. No identity verification. " +
-        "Do NOT run in this mode in production with real user data."
-      else ""
     ZIO.logInfo(
       s"auth.mode=$modeName auth.extractor=$extractorName auth.sentinel.active=$sentinelActive$warning"
     )

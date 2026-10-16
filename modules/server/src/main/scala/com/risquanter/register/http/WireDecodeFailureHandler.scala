@@ -42,7 +42,6 @@ object WireDecodeFailureHandler:
     */
   private val tapirDefault = DefaultDecodeFailureHandler[Task]
 
-
   /** The handler to pass to `ZioHttpServerOptions.customiseInterceptors`.
     *
     * `Tracing` is a parameter rather than an environment requirement because a
@@ -110,8 +109,8 @@ object WireDecodeFailureHandler:
     * `TYPE_MISMATCH`, and a value it read and then refused is `INVALID_FORMAT` —
     * which is what every Iron refinement produces.
     *
-    * Not private, so the mapping is testable without driving a request through
-    * the whole stack.
+    * Visible to the package, so the mapping is testable without driving a
+    * request through the whole stack.
     */
   private[http] def toValidationError(
     failure: DecodeResult.Failure,

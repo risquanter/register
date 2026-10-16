@@ -119,10 +119,10 @@ object WireError:
     * compile error here until an arm is written for it.
     */
   def fromAppError(e: AppError, trace: TraceId): WireError =
-    // Bound once so each arm reads `t` rather than repeating the parameter. The
-    // trace is not a field of the error: it is read from the active span at the
-    // boundary that calls this, which is the only place an effect exists to
-    // read it.
+    // A short local name, so the 31 arms below stay one line each and their
+    // wire cases line up. The trace is not a field of the error: it is read
+    // from the active span at the boundary that calls this, which is the only
+    // place an effect exists to read it.
     val t = trace
 
     e match
@@ -158,7 +158,7 @@ object WireError:
       case MergeConflict(scenario, refusal)    => WireError.Conflict(ConflictKind.MergeRefused(scenario, refusal), t)
       case MergeAlreadyRunning(scenario)       => WireError.Conflict(ConflictKind.MergeAlreadyRunning(scenario), t)
       case MergeTargetMoved(scenario)          => WireError.Conflict(ConflictKind.MergeTargetMoved(scenario), t)
-      case ScenarioHeadStale(scenario, exp, _) => WireError.Conflict(ConflictKind.ScenarioHeadStale(scenario, exp), t)
+      case ScenarioHeadStale(scenario, _, _)   => WireError.Conflict(ConflictKind.ScenarioHeadStale(scenario), t)
       case SimulationNotCached(treeId)         => WireError.Conflict(ConflictKind.SimulationRequired(treeId), t)
 
       // Capability absent

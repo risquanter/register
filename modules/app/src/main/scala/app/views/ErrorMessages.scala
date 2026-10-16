@@ -173,11 +173,13 @@ object ErrorMessages:
     case ConflictKind.MergeTargetMoved(scenario) =>
       s"Main changed while ${scenario.value} was being merged, so nothing was written. Re-run the preview and try again."
 
-    case ConflictKind.ScenarioHeadStale(scenario, _) =>
+    case ConflictKind.ScenarioHeadStale(scenario) =>
       s"${scenario.value} changed since you read it, so the change was not applied. Reload the scenario."
 
-    case ConflictKind.SimulationRequired(_) =>
-      "This tree has no simulation results yet. Run a simulation before querying it."
+    // The tree is named because a query can reach a tree other than the one on
+    // screen, and the remedy is to simulate that one.
+    case ConflictKind.SimulationRequired(treeId) =>
+      s"Tree ${treeId.value} has no simulation results yet. Run a simulation on it before querying it."
 
   /** Why a merge was refused, and what to do about it.
     *

@@ -1,7 +1,7 @@
 package com.risquanter.register.http.errors
 
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
-import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, TreeId}
+import com.risquanter.register.domain.data.iron.{ScenarioName, TreeId}
 import com.risquanter.register.domain.errors.MergeRefusal
 
 /** What the request conflicts with.
@@ -32,11 +32,13 @@ enum ConflictKind:
 
   /** The scenario's head is not what the caller last observed.
     *
-    * Carries what was expected and not the head the branch currently holds: the
-    * caller can act on its own expectation, while the current head only helps
-    * someone correlate activity in a workspace they do not hold.
+    * Carries the scenario and no commit hash. Neither hash is something the
+    * person can act on — the remedy is to reload the scenario either way — and
+    * the head the branch currently holds would additionally help someone
+    * correlate activity in a workspace they do not hold. A developer who needs
+    * to see which commit was expected has the trace and the server log.
     */
-  case ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash)
+  case ScenarioHeadStale(scenario: ScenarioName.ScenarioName)
 
   /** A query arrived before the tree had simulation results. */
   case SimulationRequired(treeId: TreeId)
