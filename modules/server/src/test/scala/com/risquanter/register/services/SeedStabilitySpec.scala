@@ -22,7 +22,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
   *
   * "Figures" here are `LossDistribution.outcomes` (trial → loss maps): node IDs are
   * ULIDs and legitimately differ between tree instances, so outcome maps are
-  * the byte-identical payload the plan pins.
+  * the byte-identical payload these tests pin.
   */
 object SeedStabilitySpec extends ZIOSpecDefault {
   private given Checked[Permission] = TestChecked.value
@@ -97,7 +97,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
     )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
-    suite("SeedStability (PLAN §11 Layer 4)")(
+    suite("SeedStability")(
 
       test("same logical tree created twice (different ULIDs) → byte-identical figures at every node") {
         for

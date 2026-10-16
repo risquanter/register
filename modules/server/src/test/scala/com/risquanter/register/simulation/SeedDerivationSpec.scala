@@ -3,11 +3,12 @@ package com.risquanter.register.simulation
 import zio.test.*
 import com.risquanter.register.domain.data.iron.{SeedEntityId, SeedVarId}
 
-/** Layer 1 of the seed-identity test plan (PLAN-SEED-IDENTITY §11):
-  * exact, hand-verifiable derivation + the HDR magnitude budget as an
-  * executable property. The budget test fails on the old hash-based
-  * derivation (String.hashCode var IDs, ±2.1×10⁹, blow the 10⁸ ID budget
-  * 21×) and permanently guards the paper's limits.
+/** Exact, hand-verifiable seed derivation, with the HDR magnitude budget as an
+  * executable property.
+  *
+  * The budget test guards the generator's published limit: var IDs must stay
+  * within an identifier budget of 10⁸, so any derivation spreading them over
+  * ±2.1×10⁹ exceeds it by a factor of 21 and fails here.
   */
 object SeedDerivationSpec extends ZIOSpecDefault:
 
@@ -27,7 +28,7 @@ object SeedDerivationSpec extends ZIOSpecDefault:
     MaxTrial * lane.cTrial + varIdValue * lane.cVar + entityId * lane.cEnt +
       seed3 * lane.cTime + seed4 * lane.cAgent
 
-  def spec = suite("SeedDerivation (PLAN §11 Layer 1)")(
+  def spec = suite("SeedDerivation")(
     test("exact literals: seedVarId k yields streams (2k, 2k+1)") {
       val s1 = SeedDerivation.streams(entity(7L), varId(1L), 0L, 0L)
       val s5 = SeedDerivation.streams(entity(7L), varId(5L), 0L, 0L)

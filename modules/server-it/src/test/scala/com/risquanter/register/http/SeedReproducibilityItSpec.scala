@@ -32,12 +32,11 @@ import com.risquanter.register.testutil.TestHelpers.safeId
   *      store is read back through a completely fresh server stack (new repo,
   *      client, cache, resolver — the in-process equivalent of a restarted
   *      server container), and re-simulation reproduces every figure.
-  *   2. The §8 export → import round trip at system level: seed identities
+  *   2. The export → import round trip at system level: seed identities
   *      read from one server's API reproduce identical figures on a different
   *      server instance when the seedEntityId is pinned.
   *   3. Order-independence: the demo-simple and demo-enterprise trees produce
-  *      identical figures regardless of creation order — the original item-12
-  *      symptom, asserted directly.
+  *      identical figures regardless of creation order, asserted directly.
   */
 object SeedReproducibilityItSpec extends ZIOSpecDefault:
   private given Checked[Permission] = TestChecked.value
@@ -140,7 +139,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       .map(_.values.map(c => c.name -> (c.curve, c.quantiles)).toMap)
 
   override def spec =
-    suite("SeedReproducibilityItSpec (PLAN §11 system level)")(
+    suite("SeedReproducibilityItSpec")(
 
       test("figures survive a restart: persist to Irmin, reload through a fresh stack, re-simulate → identical") {
         for
@@ -166,7 +165,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
         yield assertTrue(after == before, before(RootKey).nonEmpty)
       },
 
-      test("export → import onto a fresh server with pinned seedEntityId reproduces identical figures (§8 round trip, system level)") {
+      test("export → import onto a fresh server with pinned seedEntityId reproduces identical figures (round trip, system level)") {
         val entityPin = 4242L
         val sourceReq = treeReq("Round Trip Tree")
         for

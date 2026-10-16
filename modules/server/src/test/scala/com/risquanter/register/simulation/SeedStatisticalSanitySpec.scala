@@ -3,8 +3,7 @@ package com.risquanter.register.simulation
 import zio.test.*
 import com.risquanter.register.domain.data.iron.{SeedEntityId, SeedVarId}
 
-/** Layer 5 of the seed-identity test plan (PLAN-SEED-IDENTITY §11):
-  * statistical sanity on the streams the boundary-assigned identities select.
+/** Statistical sanity on the streams the boundary-assigned identities select.
   *
   * With seeds fixed every statistic below is a **constant** — these are
   * regression tests, not hypothesis tests, and cannot flake. The bounds are
@@ -12,10 +11,10 @@ import com.risquanter.register.domain.data.iron.{SeedEntityId, SeedVarId}
   * failure means the generator is genuinely misbehaving for this usage
   * pattern, not that a threshold was pinned knife-edge.
   *
-  * Why this exists: the Dieharder validation covered the HDR algorithm, but
-  * **dense consecutive var IDs are a new usage pattern** — the old
-  * hash-spread IDs never exercised adjacency, and a linear-mix generator
-  * earns an adjacency check (plan §11 Layer 5 rationale).
+  * Why this exists: the Dieharder validation covered the HDR algorithm on
+  * sparse identifiers. These tests cover **dense consecutive var IDs**, which
+  * that validation does not reach — adjacency is exactly what a linear-mix
+  * generator has to be checked on, and sparse identifiers never exercise it.
   */
 object SeedStatisticalSanitySpec extends ZIOSpecDefault:
 
@@ -38,7 +37,7 @@ object SeedStatisticalSanitySpec extends ZIOSpecDefault:
     val sy  = math.sqrt(ys.map(y => (y - my) * (y - my)).sum)
     cov / (sx * sy)
 
-  def spec = suite("SeedStatisticalSanity (PLAN §11 Layer 5)")(
+  def spec = suite("SeedStatisticalSanity")(
 
     test("adjacent leaves' streams are uncorrelated (Pearson, dense consecutive seedVarIds)") {
       // Leaves with seedVarId k and k+1 own raw var IDs (2k, 2k+1) and

@@ -10,7 +10,7 @@ object SeedVarIdAssignerSpec extends ZIOSpecDefault:
   private def sid(v: Long): SeedVarId.SeedVarId =
     SeedVarId.fromLong(v).toOption.get
 
-  def spec = suite("SeedVarIdAssigner (PLAN-SEED-IDENTITY §5.1)")(
+  def spec = suite("SeedVarIdAssigner")(
     test("create shape: all leaves unassigned get 1..n in sorted-name order") {
       val names = Seq(name("Zeta"), name("Alpha"), name("Mid"))
       val Right((ids, hw)) = SeedVarIdAssigner.assign(names, Map.empty, highWater = 0L): @unchecked
