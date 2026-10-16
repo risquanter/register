@@ -2678,3 +2678,47 @@ smaller surface and the one to evaluate first.
 never hold a SpiceDB permission), so the change is a Decision Required rather
 than a mechanical fix: whichever route is taken alters how the one value that
 represents "no identity" is constructed.
+
+---
+
+## 59. Log lines reach only standard output, and nothing ships them anywhere
+
+A kick-off entry, not a design. It records what is true today so the question
+can be examined rather than re-derived.
+
+**What exists.** `TelemetryLive` builds an `SdkTracerProvider` and an
+`SdkMeterProvider`, so spans and metrics are exported over the OpenTelemetry
+Protocol. There is no `SdkLoggerProvider`, no logback OpenTelemetry appender, and
+`opentelemetry-sdk-logs` is not a dependency. Log lines travel zio-logging →
+slf4j2 → logback → a `ConsoleAppender` on standard output. `logback.xml` declares
+that one appender, synchronous, with no `AsyncAppender` in front of it.
+
+**What this means in practice.** A log write happens inline on the fibre's
+carrier thread rather than on the blocking pool, so log volume consumes carrier
+threads rather than queue space. The collector configuration in
+`otel-collector-config.yaml` declares `traces` and `metrics` pipelines and no
+`logs` pipeline, so even in the development stack there is nothing a log line
+could be sent to.
+
+**Why it surfaces now.** The error-wire-boundary work made request-failure
+logging exhaustive: every failure that becomes a response writes one line at the
+projection boundary, and every rejected request writes one at the decode-failure
+handler. That is a deliberate increase in volume, accepted when it was ruled. The
+one unbounded line was a parser message carrying the whole remainder of a
+submitted query, and that is bounded now. What is left is a question about the
+sink rather than about any one line.
+
+**The question to examine, stated without a preferred answer.** Whether log lines
+should leave the process at all, and if so by what route. Options that exist
+include leaving standard output as the only sink and letting the platform collect
+it; putting a bounded `AsyncAppender` in front of the console appender so the
+write leaves the carrier thread; adding the OpenTelemetry log SDK and an appender
+so logs travel the same path as spans and metrics; or some combination. Each has
+a different cost and a different dependency, and none is obviously right.
+
+**The infrastructure half.** Whether a collector exists in a cluster, what a log
+pipeline would send to, and what is retained are `register-infra`'s concerns, and
+that repository carries the matching entry. The settled boundary note in
+`register-infra/docs/TODO.md` states that this repository owns only its own
+instrumentation and carries no requirement for cluster observability, so this
+entry is about what the application emits and not about what a cluster collects.
