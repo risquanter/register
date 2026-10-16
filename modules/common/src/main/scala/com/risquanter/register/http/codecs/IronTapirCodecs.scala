@@ -223,7 +223,7 @@ object IronTapirCodecs {
       )
     )(hash => s"\"${hash.value}\"")
 
-  /** Codec for BranchChoice — the explicit branch wire value (E7). "main" or a
+  /** Codec for BranchChoice — the explicit branch wire value. "main" or a
     * scenario slug; there is no absent-means-main state. Serves both the
     * required `X-Branch` header (`header[BranchChoice]`) and the changed-nodes
     * branch query parameters (`query[BranchChoice]`). Absence of a required

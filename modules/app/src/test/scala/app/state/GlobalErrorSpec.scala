@@ -69,8 +69,9 @@ object GlobalErrorSpec extends ZIOSpecDefault:
             assertTrue(message.contains("72 hours")) && assertTrue(!message.contains("24"))
           case other => throw MatchError(other)
       },
-      // A denial carries its trace: the message says what happened, and the
-      // trace is what a user can quote when they believe the refusal is wrong.
+      // A denial carries its trace: the message says what happened, and a user
+      // who believes the refusal is wrong needs someone else to lift it, so the
+      // reference is what they can quote.
       test("a denial keeps the trace the response carried") {
         wire(WireError.AccessDenied(trace)) match
           case GlobalError.ServerError(message, got) =>

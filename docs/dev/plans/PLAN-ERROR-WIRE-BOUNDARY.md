@@ -289,7 +289,7 @@ enum ConflictKind:
   case MergeTargetMoved(scenario: ScenarioName.ScenarioName)
 
   /** The scenario's head is not what the caller last observed. */
-  case ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash)
+  case ScenarioHeadStale(scenario: ScenarioName.ScenarioName)
 
   /** A query arrived before the tree had simulation results. */
   case SimulationRequired(treeId: TreeId)
@@ -298,10 +298,12 @@ object ConflictKind:
   given codec: JsonCodec[ConflictKind] = DeriveJsonCodec.gen[ConflictKind]
 ```
 
-`ScenarioHeadStale` keeps `expected` and drops the internal error's `actual`. The
-caller can act on what was expected; the head the branch currently carries is a
-second fact that only helps someone correlate activity in a workspace they do
-not hold.
+`ScenarioHeadStale` carries the scenario alone and drops both of the internal
+error's commit hashes. Neither is something the person can act on, because the
+remedy is to reload the scenario either way, and the head the branch currently
+carries would additionally help someone correlate activity in a workspace they do
+not hold. A developer who needs to see which commit was expected has the trace
+and the server log, where the internal error keeps both hashes.
 
 ### 3.3 `Capability` — a closed set, not prose
 
@@ -548,7 +550,7 @@ def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError =
     case MergeConflict(scenario, refusal)     => Conflict(ConflictKind.MergeRefused(scenario, refusal), t)
     case MergeAlreadyRunning(scenario)        => Conflict(ConflictKind.MergeAlreadyRunning(scenario), t)
     case MergeTargetMoved(scenario)           => Conflict(ConflictKind.MergeTargetMoved(scenario), t)
-    case ScenarioHeadStale(scenario, exp, _)  => Conflict(ConflictKind.ScenarioHeadStale(scenario, exp), t)
+    case ScenarioHeadStale(scenario, _, _)    => Conflict(ConflictKind.ScenarioHeadStale(scenario), t)
     case SimulationNotCached(treeId)          => Conflict(ConflictKind.SimulationRequired(treeId), t)
 
     // Capability absent
@@ -1571,7 +1573,7 @@ per-case treatment possible, and this is what each should be:
 | `MergeRefused(Conflicts(paths))` | the paths that changed on both branches, listed; the remedy is to edit either side to agree |
 | `MergeRefused(DuplicateNames(perTree))` | the repeated names, per tree; the remedy is to rename one |
 | `MergeRefused(InvariantBroken(trees))` | the merge was undone and the tree is as it was; this is a fault to report, not a conflict to resolve, and it is the one case that should carry the trace identifier prominently |
-| `ScenarioHeadStale(scenario, expected)` | the scenario changed since it was read; reload is the action |
+| `ScenarioHeadStale(scenario)` | the scenario changed since it was read; reload is the action |
 | `StaleVersion()` / `Rejected()` | the existing generic line, which is correct for a conflict with no further structure |
 
 ### 7.6 The merge-in-progress path, concretely

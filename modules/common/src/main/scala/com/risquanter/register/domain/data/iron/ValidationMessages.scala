@@ -13,8 +13,8 @@ object ValidationMessages:
   val nameInvalidChars: String  = "Name must use only letters, digits, spaces, hyphens, and forward slashes"
 
   // ══════════════════════════════════════════════════════════════════
-  // Scenario name (DD-5: ScenarioName — input whitelist folds to a BranchRef
-  // segment slug: letters -> lowercase, space -> '-')
+  // Scenario name — the input whitelist folds to a BranchRef segment slug:
+  // letters -> lowercase, space -> '-'
   // ══════════════════════════════════════════════════════════════════
   val scenarioNameRequired: String     = "Scenario name must not be blank"
   val scenarioNameTooLong: String      = s"Scenario name must be at most ${Constants.MaxScenarioNameLength} characters"
@@ -151,7 +151,7 @@ object ValidationMessages:
     "or remove conflicting estimates."
 
   // ══════════════════════════════════════════════════════════════════
-  // Seed identity (TODO item 12 / PLAN-SEED-IDENTITY.md)
+  // Seed identity
   // ══════════════════════════════════════════════════════════════════
   // Bounds are fixed by the HDR generator's 8-decimal-digit ID budget and
   // must match the Iron type-level literals in OpaqueTypes/ValidationUtil

@@ -137,6 +137,20 @@ case class AccessDenied(reason: String) extends SimError:
 case class WorkspaceNotFound() extends SimError {
   override def logMessage: String = "Workspace not found"
   override def origin: FailureOrigin = FailureOrigin.Caller
+
+  /** Carries the resolve-failure marker even though there is nothing to name.
+    *
+    * A key that resolves to nothing is the only signal that one is being
+    * replayed after it was rotated, deleted or guessed, and the marker is what
+    * lets that line be selected alongside the workspace lifecycle events rather
+    * than found by searching message text. There is no identifier to annotate:
+    * the key did not resolve, so no workspace is known, and the key itself may
+    * never be logged (ADR-022 R3).
+    */
+  override def logAnnotations: Map[String, String] = Map(
+    "event_type" -> "workspace.resolve_failed",
+    "reason"     -> "not_found"
+  )
 }
 
 /** A workspace past its absolute or idle timeout.
@@ -165,6 +179,8 @@ case class WorkspaceExpired(
   override def logMessage: String = "Workspace expired"
   override def origin: FailureOrigin = FailureOrigin.Caller
   override def logAnnotations: Map[String, String] = Map(
+    "event_type"   -> "workspace.resolve_failed",
+    "reason"       -> "expired",
     "workspace_id" -> wsId.value,
     "expiry_cause" -> cause.toString,
     "expired_at"   -> expiredAt.toString
@@ -395,6 +411,21 @@ object FolQueryFailure:
     */
   val NodeSortName: String = "Node"
 
+  /** How much of a parser message reaches the log line.
+    *
+    * The parser's "unexpected tokens" message renders every remaining token, so
+    * its length follows the submitted query, which is bounded only by the 8 MiB
+    * request-body cap. One line per failed request is written synchronously to
+    * standard output, so an unbounded message makes a request's log cost scale
+    * with its body. 300 characters is chosen here as enough to identify where a
+    * query stopped parsing while keeping the line a fixed cost.
+    *
+    * The full message still crosses to the caller who sent the query — it is
+    * their own text coming back, and bounding the query itself is a separate
+    * input-bound question.
+    */
+  val LoggedMessageLimit: Int = 300
+
   /** The `TypeId.value` of the `named` predicate's name-literal argument sort.
     * A `named(x, "Nonexistent")` whose literal fails the name validator crosses
     * this sort in `UnparseableConstant.sortName`, not `NodeSortName`, so it must
@@ -423,8 +454,14 @@ object FolQueryFailure:
     */
   final case class FolParseFailure(message: String, position: Option[Int])
     extends FolQueryFailure:
+    /** The parser's message, cut to `LoggedMessageLimit`, because the message
+      * for unexpected trailing tokens renders the whole remainder of the query.
+      */
     override def logMessage: String =
-      position.fold(message)(p => s"$message (at position $p)")
+      val bounded =
+        if message.length <= FolQueryFailure.LoggedMessageLimit then message
+        else s"${message.take(FolQueryFailure.LoggedMessageLimit)}… (message truncated)"
+      position.fold(bounded)(p => s"$bounded (at position $p)")
     override def origin: FailureOrigin = FailureOrigin.Caller
 
   /** Maps from a bind-phase failure whose every error is an unresolved node

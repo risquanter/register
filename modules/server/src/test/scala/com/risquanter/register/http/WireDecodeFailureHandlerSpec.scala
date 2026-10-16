@@ -112,12 +112,21 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
         )
         assertTrue(error.code == ValidationErrorCode.TYPE_MISMATCH)
       },
-      test("a value of the wrong shape is a type mismatch") {
+      /** `Mismatch` is the second of the two failure kinds carrying a value the
+        * client submitted, so the message must drop it for the same reason
+        * `Error`'s must. The expected value is the service's own and may appear.
+        */
+      test("a value of the wrong shape is a type mismatch naming only what was expected") {
+        val submitted = "LEAKCANARY-the-value-a-client-sent"
         val error = WireDecodeFailureHandler.toValidationError(
-          DecodeResult.Mismatch("main", "whatever"),
+          DecodeResult.Mismatch("main", submitted),
           branchInput
         )
-        assertTrue(error.code == ValidationErrorCode.TYPE_MISMATCH)
+        assertTrue(
+          error.code == ValidationErrorCode.TYPE_MISMATCH,
+          error.message.contains("main"),
+          !error.message.contains(submitted)
+        )
       },
       test("several values where one was expected is a type mismatch") {
         val error = WireDecodeFailureHandler.toValidationError(

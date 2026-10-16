@@ -145,6 +145,26 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
       .out(stringBody)
       .serverLogic[Task](_ => ZIO.fail(new RuntimeException("an escaped failure")))
 
+  /** A capability key for the workspace-path request. Any value works; it only
+    * has to be recognisable if it reaches a log line. */
+  private val CapabilityKey = "LEAKCANARYcapabilitykeyvalue0123"
+
+  /** An endpoint under the workspace path family that answers normally.
+    *
+    * Tapir's server log renders a request line for every request it handles,
+    * and its default renders the whole path, so an ordinary request to a
+    * workspace route is where the capability key would reach standard output.
+    * It succeeds rather than dying because the line under test is the one the
+    * log writes about a handled request.
+    */
+  private val reachableUnderWorkspacePath =
+    baseEndpoint.get
+      .in("w")
+      .in(path[String]("key"))
+      .in("probe")
+      .out(stringBody)
+      .serverLogic[Task](_ => ZIO.succeed(Right("reached the logic")))
+
   /** The options builder these tests add the catch-all to. */
   private type Customise = CustomiseInterceptors[Task, ZioHttpServerOptions[Any]]
 
@@ -154,9 +174,11 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
   /** The production interceptor chain, with the catch-all's placement left to
     * the caller so a test can show what each placement produces.
     *
-    * Everything else matches `Application.startServer`: the security headers
-    * prepended first and therefore outermost, the span interceptor second, and
-    * CORS after both.
+    * It reproduces the decode-failure handler, the exception handler, the server
+    * log's redacted request line, the security headers prepended first and
+    * therefore outermost, the span interceptor second, and CORS after both. Only
+    * the CORS configuration differs from `Application.startServer`, which reads
+    * its allowed origins from configuration.
     */
   private def chainWith(place: Placement, tracing: Tracing): Customise =
     place(
@@ -164,6 +186,11 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
         .customiseInterceptors[Any]
         .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))
         .exceptionHandler(DefectCatchAllInterceptor.exceptionHandler)
+        .serverLog(
+          ZioHttpServerOptions
+            .defaultServerLog[Any]
+            .showRequest(RequestSpanInterceptor.spanName)
+        )
         .prependInterceptor(SecurityHeadersInterceptor.interceptor)
         .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
         .corsInterceptor(
@@ -192,6 +219,21 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
 
   private val appended:  Placement = (c, i) => c.appendInterceptor(i)
   private val prepended: Placement = (c, i) => c.prependInterceptor(i)
+
+  /** Drives one request at a workspace-scoped path through the same chain, so
+    * the assertions can read what the server log wrote about it. */
+  private def getWorkspaceProbe: ZIO[Tracing, Throwable, Response[Either[String, String]]] =
+    ZIO.serviceWithZIO[Tracing] { tracing =>
+      val backend = TapirStubInterpreter(
+        chainWith(appended, tracing),
+        SttpBackendStub[Task, Any](summon[SttpMonadError[Task]])
+      ).whenServerEndpointRunLogic(reachableUnderWorkspacePath).backend()
+
+      basicRequest
+        .get(uri"http://localhost/w/$CapabilityKey/probe")
+        .header("Origin", TestOrigin)
+        .send(backend)
+    }
 
   private def fault(response: Response[Either[String, String]]): Option[WireError.InternalFault] =
     response.body.left.toOption.flatMap(_.fromJson[WireError.InternalFault].toOption)
@@ -262,6 +304,20 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
           !fault(response).map(_.trace).contains(TelemetryPlaceholders.UnlinkedTrace),
           !response.body.left.toOption.exists(_.contains("Internal server error")),
           !response.body.left.toOption.exists(_.contains("an escaped failure"))
+        )
+      },
+      /** The server log is a second sink for the request line, and its default
+        * renders the whole path. Pointing it at the span name is what keeps the
+        * capability key out of standard output, and nothing else asserts it.
+        */
+      test("the server log names the route family and never the capability key") {
+        for
+          _     <- getWorkspaceProbe
+          lines <- ZTestLogger.logOutput
+          text   = lines.map(_.message()).mkString("\n")
+        yield assertTrue(
+          text.contains("/w/{key}"),
+          !text.contains(CapabilityKey)
         )
       },
       test("prepended, the same answer loses that header — which is why it is appended") {

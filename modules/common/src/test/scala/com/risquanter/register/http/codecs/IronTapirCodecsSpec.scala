@@ -5,6 +5,7 @@ import zio.test.*
 import sttp.tapir.{Codec, CodecFormat, DecodeResult}
 
 import com.risquanter.register.domain.data.iron.{
+  BranchChoice,
   CommitHash,
   NodeId,
   NonNegativeInt,
@@ -153,8 +154,24 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
       NumberCanary.toString,
       messagesOf(SeedEntityId.fromLong(NumberCanary).left.getOrElse(Nil)),
       NumberCanary.abs.toString
+    ),
+    // The only codec here whose decode branches before it refines: "main" is
+    // answered without consulting a refinement, and every other value goes
+    // through ScenarioName, which is therefore the source of its sentence.
+    Refusal(
+      "BranchChoice",
+      codecFor[BranchChoice],
+      StringCanary,
+      messagesOf(ScenarioName.fromString(StringCanary).left.getOrElse(Nil)),
+      StringCanary
     )
   )
+
+  /** How many codecs in `IronTapirCodecs` refine, counted as `refused` call
+    * sites in that file. The assertion below compares the list against this
+    * number, so a codec added there fails this suite until it is listed here.
+    */
+  private val RefiningCodecCount: Int = 12
 
   /** The messages a decode failure carries, however it carries them.
     *
@@ -216,6 +233,9 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
     ),
 
     test("every refining codec in the file is covered here") {
-      assertTrue(refusals.map(_.name).distinct.size == refusals.size)
+      assertTrue(
+        refusals.size == RefiningCodecCount,
+        refusals.map(_.name).distinct.size == refusals.size
+      )
     }
   )

@@ -47,7 +47,7 @@ object ValidationUtil {
       }
   }
 
-  // Refinement for scenario names (DD-5): input whitelist letters/digits/space/
+  // Refinement for scenario names: input whitelist letters/digits/space/
   // hyphen/underscore (max 64), then fold letters to lowercase and map each
   // contiguous run of spaces -> a single '-' to produce the BranchRef segment
   // slug (scenarios.<ws>.<name-slug>) — "a  b" and "a b" both fold to "a-b",

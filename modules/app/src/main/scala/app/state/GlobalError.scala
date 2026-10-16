@@ -89,10 +89,17 @@ object GlobalError:
   /** Classify what the server answered with.
     *
     * The match is on the nine wire cases, so a new case is a compile error here
-    * until it has a treatment. Only `ServerError` and `DependencyError` are
-    * given the trace, because they are the two the banner displays it on; the
-    * others carry an actionable message of their own, beside which a trace
-    * identifier is noise.
+    * until it has a treatment.
+    *
+    * A trace is attached where the user cannot resolve the failure themselves: an
+    * internal fault, a dependency outage, and a denial, which they may need
+    * someone else to lift. It is withheld where nothing about the request will
+    * ever succeed, which is why an absent capability passes `None` — no trace
+    * lookup changes a deployment that does not offer the feature.
+    *
+    * Withholding it costs a developer nothing in either case, because
+    * `ZJS.recordToConsole` writes the trace of every failed request to the
+    * browser console whether or not the banner shows it.
     */
   def fromWireError(e: WireError): GlobalError = e match
     case WireError.ValidationRejected(errors, _)       => ValidationFailed(errors)

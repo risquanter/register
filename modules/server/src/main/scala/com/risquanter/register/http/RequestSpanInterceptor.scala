@@ -35,8 +35,13 @@ object RequestSpanInterceptor:
 
   /** The log annotation key carrying the trace identifier. Snake case matches
     * the annotation keys the workspace store already writes.
+    *
+    * Two places apply it: this interceptor, for every line written while the
+    * request runs, and the projection boundary, for the line it writes about a
+    * failure. One definition, so a line written by either is found by the same
+    * query.
     */
-  private val TraceAnnotation = "trace_id"
+  private[http] val TraceAnnotation = "trace_id"
 
   /** Stands in for the path segment holding a workspace capability key. A span
     * name is exported to the collector, and the key is a bearer credential, so
@@ -81,7 +86,7 @@ object RequestSpanInterceptor:
     * key to standard output. One definition, so neither sink can drift from the
     * other.
     */
-  def spanName(request: ServerRequest): String =
+  private[register] def spanName(request: ServerRequest): String =
     val family = request.pathSegments match
       case "w" :: _     => s"/w/$RedactedKeySegment"
       case segment :: _ => s"/$segment"

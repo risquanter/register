@@ -5,6 +5,7 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 
 import com.risquanter.register.domain.data.iron.TraceId
 import com.risquanter.register.domain.errors.{AppError, FailureOrigin}
+import com.risquanter.register.http.RequestSpanInterceptor
 import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.telemetry.ActiveTrace
 
@@ -23,7 +24,7 @@ private def logProjectedFailure(error: AppError, trace: TraceId): UIO[Unit] =
   val line: UIO[Unit] = error.origin match
     case FailureOrigin.Caller  => ZIO.logInfo(error.logMessage)
     case FailureOrigin.Service => ZIO.logWarning(error.logMessage)
-  (error.logAnnotations + ("trace_id" -> trace.value)).foldRight(line) {
+  (error.logAnnotations + (RequestSpanInterceptor.TraceAnnotation -> trace.value)).foldRight(line) {
     case ((k, v), effect) => ZIO.logAnnotate(k, v)(effect)
   }
 

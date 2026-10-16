@@ -6,6 +6,8 @@ import zio.test.*
 import sttp.model.{HeaderNames, StatusCode}
 import sttp.tapir.{auth, endpoint, header, EndpointIO, EndpointInput}
 import sttp.tapir.internal.*
+import sttp.tapir.server.model.MaxContentLength
+import sttp.tapir.server.model.EndpointExtensions.*
 
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisionerNoOp, UserContextExtractor}
 import com.risquanter.register.configs.TestConfigs
@@ -41,11 +43,15 @@ import com.risquanter.register.telemetry.TelemetryLive
 /** Guards the one assumption the rejection answer rests on: every decode
   * failure this API can produce answers `400`.
   *
-  * A rejected input is answered with the status Tapir computed for it, and four
+  * A rejected input is answered with the status Tapir computed for it, and five
   * declarations make that status something other than `400`. A `Content-Type`
   * header input or a `oneOfBody` make it `415`, a stream body makes it `413`,
-  * and an authentication input makes it `401` with a challenge header. The list
-  * below is the same one `DefaultDecodeFailureHandler.respond` matches on.
+  * an authentication input makes it `401` with a challenge header, and a
+  * `maxRequestBodyLength` on any endpoint makes an oversized plain body `413`
+  * too: `ServerInterpreter.decodeBody` turns the length exception into a decode
+  * error, and `respond` matches that error before it matches the body input.
+  * The list below is the same one `DefaultDecodeFailureHandler.respond` matches
+  * on.
   *
   * Why that matters: the browser decodes a failure through the endpoint's
   * declared error output, where the rejection body is declared at `400` alone.
@@ -134,6 +140,13 @@ object DecodeFailureStatusSurfaceSpec extends ZIOSpecDefault:
       case _: EndpointIO.StreamBodyWrapper[?, ?] => Some(StatusCode.PayloadTooLarge)
       case _                                     => None
 
+  /** Whether the endpoint carries the attribute `maxRequestBodyLength` sets.
+    * It is an endpoint attribute rather than an input, so the input traversal
+    * above cannot see it and it is read from the endpoint's info instead.
+    */
+  private def declaresBodyLimit(e: sttp.tapir.AnyEndpoint): Boolean =
+    e.info.attribute(MaxContentLength.attributeKey).isDefined
+
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
     suite("the statuses a decode failure can answer with")(
       // Without this the case below could pass because the detector matches
@@ -143,7 +156,9 @@ object DecodeFailureStatusSurfaceSpec extends ZIOSpecDefault:
           statusIfRejected(header[String](HeaderNames.ContentType)).contains(StatusCode.UnsupportedMediaType),
           statusIfRejected(header[String]("X-Branch")).isEmpty,
           endpoint.in(auth.bearer[String]()).auths.nonEmpty,
-          endpoint.in(header[String]("X-Branch")).auths.isEmpty
+          endpoint.in(header[String]("X-Branch")).auths.isEmpty,
+          declaresBodyLimit(endpoint.in(header[String]("X-Branch")).maxRequestBodyLength(1L)),
+          !declaresBodyLimit(endpoint.in(header[String]("X-Branch")))
         )
       },
       test("no endpoint declares an input whose rejection answers other than 400") {
@@ -159,7 +174,12 @@ object DecodeFailureStatusSurfaceSpec extends ZIOSpecDefault:
             if route.endpoint.auths.nonEmpty
           yield s"${route.endpoint.showShort} declares an authentication input, whose rejection answers " +
             s"${StatusCode.Unauthorized} with a challenge header"
-          offenders = byInput ++ byAuth
+          byLength = for
+            route <- endpoints
+            if declaresBodyLimit(route.endpoint)
+          yield s"${route.endpoint.showShort} declares a request body limit, whose rejection answers " +
+            s"${StatusCode.PayloadTooLarge}"
+          offenders = byInput ++ byAuth ++ byLength
           // The traversal reaching real inputs is the third thing that could
           // make this pass for the wrong reason: `X-Branch` is declared on
           // several endpoints, so finding it proves inputs are being read.

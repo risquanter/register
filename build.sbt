@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.10.56"
+ThisBuild / version      := "0.10.57"
 ThisBuild / scalaVersion := "3.8.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -8,7 +8,7 @@ ThisBuild / scalacOptions ++= Seq(
   "-Xlint:type-parameter-shadow",
   "-Xmax-inlines:64",
   // ADR-035 Decision 1: promote inexhaustive sealed-trait matches to compile errors.
-  // This ensures new AppError subtypes must be handled in ErrorResponse.encode.
+  // This ensures new AppError subtypes must be handled in WireError.fromAppError.
   "-Wconf:msg=match may not be exhaustive:error",
   // An unused import is reported as a warning. Escalating it to an error takes
   // `-Wconf:msg=unused import:error`, which is added per module as that module
