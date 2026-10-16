@@ -56,14 +56,31 @@ object WireDecodeFailureHandler:
         tapirDefault.respond(ctx) match
           case None => ZIO.none
           case Some((status, headers)) =>
+            val error = toValidationError(ctx.failure, ctx.failingInput)
             logIfChallengeAdvertised(status) *>
+              logRejection(error, status) *>
               ActiveTrace.id(using tracing).map { trace =>
-                val rejected: WireError.ValidationRejected = WireError.ValidationRejected(
-                  List(toValidationError(ctx.failure, ctx.failingInput)),
-                  trace
-                )
+                val rejected: WireError.ValidationRejected =
+                  WireError.ValidationRejected(List(error), trace)
                 Some(ValuedEndpointOutput(BaseEndpoint.rejectionOut, (status, headers, rejected)))
               }
+
+  /** Records a request the decoders rejected, so a failure that becomes a
+    * response is logged wherever it was produced.
+    *
+    * A rejected request is caller-caused by construction, which is `INFO`
+    * (ADR-002). There is no `AppError` here to read an origin from, because the
+    * request never reached a handler.
+    *
+    * The trace is not passed in: the span interceptor sits outside this handler
+    * and applies it as a log annotation, so the line already carries the same
+    * trace the response names.
+    */
+  private def logRejection(error: ValidationError, status: StatusCode): UIO[Unit] =
+    ZIO.logInfo(
+      s"Request rejected before any handler ran, answered $status: " +
+        s"${error.field} ${error.message} (${error.code.code})"
+    )
 
   /** Records a `401` as a configuration defect of this service.
     *

@@ -195,6 +195,34 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
         for
           response <- getProbe(branch = Some("main"))
         yield assertTrue(response.code.code == 200)
+      },
+
+      /** A rejection never passes through `wireEither`, so the line the
+        * projection boundary writes for a controller failure does not exist on
+        * this path. Without one, a trace a caller quotes from a `400` would
+        * match nothing in the log.
+        */
+      test("a rejected request writes one INFO line carrying the trace the response names") {
+        for
+          response <- getProbe(branch = None)
+          body      = rejection(response)
+          lines    <- ZTestLogger.logOutput
+          written   = lines.filter(_.message().contains("Request rejected before any handler ran"))
+        yield assertTrue(
+          written.size == 1,
+          written.forall(_.logLevel == LogLevel.Info),
+          written.exists(_.message().contains("X-Branch")),
+          body.exists(b => written.exists(_.annotations.get("trace_id").contains(b.trace.value)))
+        )
+      },
+
+      test("a well-formed request writes no rejection line") {
+        for
+          _     <- getProbe(branch = Some("main"))
+          lines <- ZTestLogger.logOutput
+        yield assertTrue(
+          !lines.exists(_.message().contains("Request rejected before any handler ran"))
+        )
       }
     )
   ).provideLayer(telemetry.orDie)
