@@ -168,3 +168,11 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/common/src/main/scala/com/risquanter/register/http/responses/DistributionPreviewResponse.scala
 - modules/server/src/main/scala/com/risquanter/register/http/WireDecodeFailureHandler.scala
 - modules/server/src/main/scala/com/risquanter/register/telemetry/ActiveTrace.scala
+- modules/server/src/main/scala/com/risquanter/register/http/DefectCatchAllInterceptor.scala
+- modules/server/src/test/scala/com/risquanter/register/http/DefectCatchAllInterceptorSpec.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStore.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/AuthorizationService.scala
+- modules/app/src/main/scala/app/views/RiskLeafFormView.scala
+- modules/app/src/main/scala/app/views/PortfolioFormView.scala
+- modules/app/src/main/scala/app/views/FormSubmitUtil.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/WorkspaceStoragePaths.scala

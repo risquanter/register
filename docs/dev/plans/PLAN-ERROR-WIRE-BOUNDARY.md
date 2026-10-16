@@ -2,7 +2,7 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All twenty-seven decisions, `EWB-D-1` to `EWB-D-27`, are ruled and
+**Status.** All twenty-eight decisions, `EWB-D-1` to `EWB-D-28`, are ruled and
 recorded in §10. Nothing blocks implementation on a decision. Approval is in
 place: the token names this document and the file inventory exists beside it.
 Phases 1, 1a, 1b, 2, 2b and 2c have landed, and `EWB-D-27`'s projection change
@@ -162,12 +162,19 @@ the case's own content reads first.
 
 ```scala
 enum WireError:
-  /** A request body the decoders rejected. Carries one entry per independent
-    * failure, so a form shows every problem at once. */
-  case ValidationRejected(errors: List[ValidationError], trace: TraceId)
+  /** A request refused before it could be understood as content: a header,
+    * query parameter or body the decoders rejected, or a request-level rule
+    * that failed. Carries one entry per independent failure, so a form shows
+    * every problem at once. Names no tree, because the paths that produce it
+    * include tree creation and the routes that name no tree at all
+    * (`EWB-D-28`). */
+  case RequestRejected(errors: List[ValidationError], trace: TraceId)
 
-  /** A well-formed request whose query the engine refused. */
-  case QueryRejected(problem: QueryProblem, trace: TraceId)
+  /** A well-formed request against a known tree whose content failed its own
+    * rules — either the submitted fields or the submitted query. `tree` is
+    * always present, which is what separates this case from `RequestRejected`
+    * (`EWB-D-28`). `RejectionDetail` is at §3.5. */
+  case ValidationRejected(tree: TreeId, detail: RejectionDetail, trace: TraceId)
 
   /** No such resource, or one the caller may not see. The two are one response
     * so that neither is an existence oracle. */
@@ -210,8 +217,8 @@ enum WireError:
   case InternalFault(trace: TraceId)
 
 object WireError:
+  given requestRejectedCodec:       JsonCodec[RequestRejected]       = DeriveJsonCodec.gen[RequestRejected]
   given validationRejectedCodec:    JsonCodec[ValidationRejected]    = DeriveJsonCodec.gen[ValidationRejected]
-  given queryRejectedCodec:         JsonCodec[QueryRejected]         = DeriveJsonCodec.gen[QueryRejected]
   given notFoundCodec:              JsonCodec[NotFound]              = DeriveJsonCodec.gen[NotFound]
   given workspaceExpiredCodec:      JsonCodec[WorkspaceExpired]      = DeriveJsonCodec.gen[WorkspaceExpired]
   given accessDeniedCodec:          JsonCodec[AccessDenied]          = DeriveJsonCodec.gen[AccessDenied]
@@ -323,6 +330,34 @@ by `app/compile`. If a platform did not derive one, the two fields would become
 `lifetimeSeconds: Long` and `idleLimitSeconds: Long` and the browser would build
 the `Duration`.
 
+### 3.5 `RejectionDetail` — the payload of a content rejection
+
+A tree's submitted fields and a submitted query fail in the same category: the
+request was well formed and its content broke its own rules. Both therefore
+answer `422 Unprocessable Content`. They carry different structure, so the
+status is shared by one wire case whose payload says which it was.
+
+```scala
+@jsonDiscriminator("kind")
+enum RejectionDetail:
+  /** Field-level failures, one entry per independent problem. */
+  case Fields(errors: List[ValidationError])
+
+  /** A query the engine refused. `QueryProblem` is at §3.1 and keeps all four
+    * of its cases, including `Unparseable`'s character offset, which a flat
+    * `ValidationError` triple has nowhere to carry. */
+  case Query(problem: QueryProblem)
+
+object RejectionDetail:
+  given codec: JsonCodec[RejectionDetail] = DeriveJsonCodec.gen[RejectionDetail]
+```
+
+This is the shape `Conflict` already has. `Conflict(conflict: ConflictKind, trace)`
+is one case at one status whose payload is a discriminated enum, and
+`ConflictKind.MergeRefused(scenario, refusal: MergeRefusal)` nests a second union
+inside it. `ValidationRejected(tree, detail)` with `RejectionDetail.Query(problem)`
+is the same construction at the same depth, so it introduces no new pattern.
+
 ---
 
 ## 4. The endpoint declaration — one `oneOf`, one status per case
@@ -352,8 +387,8 @@ After:
 val baseEndpoint = endpoint
   .errorOut(
     oneOf[WireError](
-      oneOfVariant(StatusCode.BadRequest,          jsonBody[WireError.ValidationRejected]),
-      oneOfVariant(StatusCode.UnprocessableEntity, jsonBody[WireError.QueryRejected]),
+      oneOfVariant(StatusCode.BadRequest,          jsonBody[WireError.RequestRejected]),
+      oneOfVariant(StatusCode.UnprocessableEntity, jsonBody[WireError.ValidationRejected]),
       oneOfVariant(StatusCode.Forbidden,           jsonBody[WireError.AccessDenied]),
       oneOfVariant(StatusCode.NotFound,            jsonBody[WireError.NotFound]),
       oneOfVariant(StatusCode.Gone,                jsonBody[WireError.WorkspaceExpired]),
@@ -376,6 +411,13 @@ is serialised. In the browser Tapir reads the response's status code, selects th
 variant declared for that status, and deserialises the body as that variant's
 type.
 
+**That second direction is why the one-to-one property is required rather than
+tidy, and it is what decided `EWB-D-28`.** The browser selects the variant from
+the status alone, so two cases at one status would leave one of them
+undecodable — the second would never be reached. A field-level rejection and a
+refused query both belong at `422`, so they are one case carrying a payload that
+says which, rather than two cases competing for the status.
+
 **There is no default variant.** `oneOfDefaultVariant` must be typed as the
 parent enum, because it is the arm that accepts a status the list does not name,
 so its body would have to decode as `WireError` itself — and under the per-case
@@ -385,10 +427,14 @@ rather than a silently mistyped error.
 
 **Why one status per case is required, not merely neat.** The browser's selection
 is by status alone. Two variants sharing a status would make the first one listed
-always win on decode, silently. That is the reason `QueryRejected` gets
-`422 Unprocessable Entity` rather than sharing `400`, and the reason the internal
-conflict errors collapse into one `Conflict` case with `ConflictKind` inside it
-rather than becoming seven variants at `409`. Where several outcomes share a
+always win on decode, silently. That is the reason the internal conflict errors
+collapse into one `Conflict` case with `ConflictKind` inside it rather than
+becoming seven variants at `409`, and the reason a rejected tree body and a
+refused query — both `422`, because both are content the server understood and
+could not process — collapse into one `ValidationRejected` with `RejectionDetail`
+inside it rather than becoming two variants at that status (`EWB-D-28`). A
+request refused before it could be read as content has its own case at `400`.
+Where several outcomes share a
 status they share a wire case, and the inner enumeration discriminates. The
 status-to-case relation is therefore one-to-one by construction, and §13 pins it
 with a test.
@@ -414,23 +460,69 @@ ones are therefore imported renamed, as `AppWorkspaceExpired` and `AppAccessDeni
 which is the one sanctioned use of a non-plain import (ADR-011 §2) and keeps each
 arm reading left to right: internal name in, wire name out.
 
+**Renaming the internal types instead was measured and declined.** The four lines
+above are the only place the two names are ever in scope together, because the
+projection is a single total function in one file and no other expression holds an
+`AppError` and a `WireError` at once. Renaming them — `OperationForbidden` and
+`WorkspacePastDeadline` were the candidates — would touch 33 sites, 20 for
+`WorkspaceExpired` and 13 for `AccessDenied`, to delete a device the records
+already sanction. It would also break a correspondence that is informative rather
+than confusing: one concept keeps one name across all three layers, so
+`AppError.WorkspaceExpired` projects to `WireError.WorkspaceExpired` and is
+displayed as `GlobalError.WorkspaceExpired`.
+
+This is why `GlobalError.RequestRejected` is renamed in §7.1 and these two are
+not. There the two names are in scope together in the browser's own code, the
+rename costs four sites, and the old name was the less descriptive of the two.
+
+**The tree a failure is about is supplied by the caller, not carried by the
+failure.** An `AppError` has no tree, and adding one would mean 38 construction
+sites across 18 files — including `Simulator.scala` and `CachedResultResolverLive.scala`,
+where no tree identifier is in scope. The controller calling the projection has
+the tree destructured in its own handler, so it states the scope at that call
+site (`EWB-D-28`):
+
 ```scala
-def fromAppError(e: AppError, trace: TraceId): WireError =
+/** Which tree a failure is being projected on. It never crosses the wire: the
+  * two wire cases each have a total field, and this is only the projection's
+  * input. Declared in `common` because `fromAppError` is.
+  */
+enum TreeScope:
+  case InTree(tree: TreeId)
+  case NoTree
+```
+
+```scala
+def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError =
   // Bound once so each arm reads `t` rather than repeating the parameter. The
   // trace is not a field of the error: it is read from the active span at the
   // boundary that calls this, which is the only place an effect exists to
-  // read it.
+  // read it. `scope` arrives the same way and for the same reason.
   val t = trace
 
+  // A content rejection names its tree; a request-level one has none to name.
+  def rejected(detail: RejectionDetail, fallback: List[ValidationError]): WireError =
+    scope match
+      case TreeScope.InTree(tree) => ValidationRejected(tree, detail, t)
+      case TreeScope.NoTree       => RequestRejected(fallback, t)
+
+  // A query runs only on a route carrying `path[TreeId]("treeId")`, so `NoTree`
+  // cannot occur here. It is this service's defect rather than the caller's, so
+  // it answers the opaque fault and the boundary log line records it.
+  def queryRejected(problem: QueryProblem): WireError =
+    scope match
+      case TreeScope.InTree(tree) => ValidationRejected(tree, RejectionDetail.Query(problem), t)
+      case TreeScope.NoTree       => InternalFault(t)
+
   e match
-    // Request rejected
-    case ValidationFailed(errors)             => ValidationRejected(errors, t)
+    // Content of a known tree, or a request that named none
+    case ValidationFailed(errors)             => rejected(RejectionDetail.Fields(errors), errors)
 
     // Query refused
-    case FolParseFailure(message, position)   => QueryRejected(QueryProblem.Unparseable(message, position), t)
-    case FolUnknownReference(messages)        => QueryRejected(QueryProblem.UnknownReferences(messages), t)
-    case FolBindFailure(errors)               => QueryRejected(QueryProblem.TypeCheckFailed(errors), t)
-    case FolDomainNotQuantifiable(message)    => QueryRejected(QueryProblem.NotQuantifiable(message), t)
+    case FolParseFailure(message, position)   => queryRejected(QueryProblem.Unparseable(message, position))
+    case FolUnknownReference(messages)        => queryRejected(QueryProblem.UnknownReferences(messages))
+    case FolBindFailure(errors)               => queryRejected(QueryProblem.TypeCheckFailed(errors))
+    case FolDomainNotQuantifiable(message)    => queryRejected(QueryProblem.NotQuantifiable(message))
 
     // Absent, or not the caller's. One shape for both, so neither is an
     // existence oracle. The workspace identifier may not cross (ADR-036); the
@@ -521,12 +613,14 @@ extension [R, A](effect: ZIO[R, AppError, A])
     * `Either` that `serverLogic` expects.
     *
     * Reads the trace from the active span, so the identifier a failure carries
-    * is the identifier of the span the failing work ran under.
+    * is the identifier of the span the failing work ran under. `scope` is the
+    * caller's statement of which tree the work was about, which the projection
+    * needs and the failure does not carry (§5.1).
     */
-  def wireEither(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
+  def wireEither(scope: TreeScope)(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
     effect
       .map(Right(_))
-      .catchAll(error => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace))))
+      .catchAll(error => ActiveTrace.id.map(trace => Left(WireError.fromAppError(error, trace, scope))))
 ```
 
 The success side is `map` and the failure side is `catchAll`, rather than
@@ -604,25 +698,36 @@ val internalFaultOut: EndpointOutput[WireError.InternalFault] =
 The variant then reads `oneOfVariant(internalFaultOut)` in place of
 `oneOfVariant(StatusCode.InternalServerError, jsonBody[WireError.InternalFault])`.
 
-The `400` output is declared the same way, for the endpoint's own variant:
+The two rejection outputs are declared the same way, each at its own status:
 
 ```scala
+val requestRejectedOut: EndpointOutput[WireError.RequestRejected] =
+  statusCode(StatusCode.BadRequest).and(jsonBody[WireError.RequestRejected])
+
 val validationRejectedOut: EndpointOutput[WireError.ValidationRejected] =
-  statusCode(StatusCode.BadRequest).and(jsonBody[WireError.ValidationRejected])
+  statusCode(StatusCode.UnprocessableEntity).and(jsonBody[WireError.ValidationRejected])
 ```
 
-The decode-failure handler does **not** send that one. A rejection carries
-whichever status the rejected input decides, so the handler sends a third
-declaration whose status is a value rather than fixed:
+The decode-failure handler sends neither. It runs before any handler, so it never
+has a tree and always produces `RequestRejected` — but a rejection carries
+whichever status the rejected input decides, so it sends a third declaration whose
+status is a value rather than fixed:
 
 ```scala
-val rejectionOut: EndpointOutput[(StatusCode, List[Header], WireError.ValidationRejected)] =
-  statusCode.and(headers).and(jsonBody[WireError.ValidationRejected])
+val rejectionOut: EndpointOutput[(StatusCode, List[Header], WireError.RequestRejected)] =
+  statusCode.and(headers).and(jsonBody[WireError.RequestRejected])
 ```
 
-The headers travel with it because a status can require one. `400` remains the
-only status the endpoint itself declares for that body, which is why the
-fixed-status form stays.
+The headers travel with it because a status can require one.
+
+**This third declaration is a known defect and not a licence.** A status it emits
+that the `oneOf` does not name is a response shape outside the declared output,
+which is what ADR-035's code-smell section forbids and what its §2 means by "no
+case is undeclared". `400` is declared; whatever else
+`DefaultDecodeFailureHandler.respond` computes is not. Closing it needs the real
+set of statuses that path can produce, which is Tapir's rather than ours and is
+measured by driving each failure kind through the handler. Until that is done the
+gap stands recorded here rather than resolved.
 
 All three live in a companion `object BaseEndpoint`, because `BaseEndpoint` is a
 trait and a sender that is not an endpoint has no instance of it. Declaring them
@@ -1155,9 +1260,82 @@ case class ValidationError(
 )
 ```
 
-`ErrorLocation` and the two Iron refinements it needs are specified in Phase 3,
-§9. This is the largest mechanical item in the plan and the reason it is its own
+This is the largest mechanical item in the plan and the reason it is its own
 phase rather than part of the boundary work.
+
+**`ErrorLocation`**, new file
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`:
+
+```scala
+/** Where an error is. A closed set, because every location this system points
+  * at already has a type — and because none of its cases can hold a value that
+  * must not cross the client boundary (ADR-036): there is no case for a
+  * `BranchRef` and none for an absolute storage path.
+  */
+@jsonDiscriminator("kind")
+enum ErrorLocation:
+  /** A path into the request body, as the form layer resolves it. */
+  case RequestField(path: FieldPath.FieldPath)
+
+  /** An HTTP request header, named by the header itself. `name` is not refined:
+    * this application names three header literals, and a refinement would
+    * encode an HTTP grammar nothing else here needs. */
+  case RequestHeader(name: String)
+
+  /** A node of the tree the request is about. It carries no `TreeId`: the tree
+    * is named once on `WireError.ValidationRejected`, and on the creation path
+    * no tree identifier exists yet — the request body carries none and
+    * `ResolvedCreate` produces none, so one here would be unsatisfiable
+    * (`EWB-D-28`). */
+  case Node(nodeId: NodeId)
+
+  /** The failure is about the request as a whole, with no narrower location. */
+  case Request
+
+object ErrorLocation:
+  given codec: JsonCodec[ErrorLocation] = DeriveJsonCodec.gen[ErrorLocation]
+```
+
+The `kind` discriminator is this plan's own rule for a payload carried inside a
+body, stated in §3: the inner payload enumerations "are encoded as part of a
+body, so each keeps its `kind` discriminator."
+
+**One Iron refinement, not two.** `FieldPathConstraint` is added to
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`,
+beside `SafeNameConstraint` and `BranchRefConstraint`:
+
+```scala
+type FieldPathConstraint =
+  Not[Blank] & MaxLength[200] &
+  Match["^[a-z][a-zA-Z0-9]*(\\[[0-9]{1,3}\\])?(\\.[a-z][a-zA-Z0-9]*(\\[[0-9]{1,3}\\])?)*$"]
+type FieldPathStr = String :| FieldPathConstraint
+
+object FieldPath:
+  opaque type FieldPath = FieldPathStr
+  object FieldPath:
+    def fromString(s: String, fieldPath: String): Either[List[ValidationError], FieldPath] = ???
+  extension (p: FieldPath) def value: String = p
+```
+
+The alphabet comes from the 29 distinct values the codebase passes as `field`
+today; all of them match except `X-Branch`, which is a header name and takes
+`RequestHeader`. `MaxLength[200]` bounds a value this application generates and
+no caller supplies, so it only has to be finite — the longest real value is 25
+characters. The three-digit index bound covers the largest collection the
+10 000-node tree ceiling permits.
+
+A second refinement for workspace-relative storage paths is **not** in this
+phase. Its only consumer would have been an `ErrorLocation` case for a storage
+path, and no such case survives; the type that holds such a path as a raw
+`String` is `MergeConflictPath`, which Phase 6 step 2 already opens
+(`EWB-D-24`).
+
+**The decode-failure handler's mapping.** `WireDecodeFailureHandler.fieldName`
+returns an `ErrorLocation` instead of a `String`. A header takes its own name;
+anything else takes its input's name when that name refines as a field path, and
+`Request` otherwise. Tapir's `show` rendering is no longer available as a
+fallback, because strings like `query parameter q` contain spaces and no field
+path admits them.
 
 ### 6.5 Deletions from `AppError.scala`
 
@@ -1178,8 +1356,10 @@ compiler checks every case rather than only the four sub-traits.
 
 ```scala
 def fromWireError(e: WireError): GlobalError = e match
-  case WireError.ValidationRejected(errors, _)      => ValidationFailed(errors)
-  case WireError.QueryRejected(problem, _)           => RequestRejected(ErrorMessages.query(problem))
+  case WireError.RequestRejected(errors, _)          => ValidationFailed(errors)
+  case WireError.ValidationRejected(_, detail, _)    => detail match
+    case RejectionDetail.Fields(errors)              => ValidationFailed(errors)
+    case RejectionDetail.Query(problem)              => InputRejected(ErrorMessages.query(problem))
   case WireError.NotFound(_)                         => NotFound
   case WireError.WorkspaceExpired(c, life, idle, _)  => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
   case WireError.AccessDenied(_)                     => ServerError(ErrorMessages.Forbidden, None)
@@ -1189,14 +1369,28 @@ def fromWireError(e: WireError): GlobalError = e match
   case WireError.InternalFault(t)                    => ServerError(ErrorMessages.InternalFault, Some(t))
 ```
 
-A `RequestRejected` display case is added, and it is the arm a refused query
-takes. The existing code maps every query failure to `ServerError`, and that is
-wrong rather than merely blunt: a refused query is a problem with text the user
-typed, it answers `422`, and `ErrorBanner` renders `ServerError` with the
-server-fault icon while reserving the warning icon for the user-input case. So
-someone with a syntax error in a query would read a server-fault presentation
-for their own typo. The case carries no trace, because the message names what to
-correct.
+**`GlobalError.RequestRejected` is renamed to `InputRejected`.** The display case
+already exists at `GlobalError.scala:38` and is the arm a refused query takes; it
+is renamed because `WireError.RequestRejected` now occupies the same name for a
+different thing — the browser case carries one sentence for the user to act on,
+the wire case carries a list of errors at `400`.
+
+The wire name is the one that stays, because a wire case name is serialised and
+appears in the generated contract, while `GlobalError` is the browser's own
+presentation classification and nothing about it crosses. `InputRejected` also
+names what the case is for better than the old name did: its siblings divide by
+whose fault the display should imply, and this is the one where the problem is in
+text the user typed, so it gets the warning treatment and carries no trace while
+`ServerError` and `DependencyError` carry one and the fault icon.
+
+Four sites: the declaration at `GlobalError.scala:38`, the projection arm at
+`GlobalError.scala:99`, the render arm at `ErrorBanner.scala:48`, and the
+assertion at `GlobalErrorSpec.scala:41`.
+
+The existing code maps every query failure to `ServerError`, and that is wrong
+rather than merely blunt: `ErrorBanner` renders `ServerError` with the
+server-fault icon, so someone with a syntax error in a query would read a
+server-fault presentation for their own typo.
 
 That arm is reached more often than its inline handling suggests.
 `toOutcomeEventStream` forks through `forkProvided` with the observer enabled,
@@ -1720,7 +1914,7 @@ in this order, because each one narrows what the next has to describe.
    `toValidationError` per rejection kind, a test per rejection kind that drives a
    real Iron codec rather than a hand-built `DecodeResult`, and one request-level
    test that a request missing a required header answers `400` with a
-   `ValidationRejected` body.
+   `RequestRejected` body.
 3. *The third request-failure case*, from `EWB-D-22`.
    `RequestFailure.Undecodable`, `BackendClient`'s split `mapError`, and the
    three match sites the compiler names. Last because the first two steps remove
@@ -1745,9 +1939,27 @@ one per level, and one that the line carries the failure's annotations plus the
 same trace the response names. The two store-spec cases that pinned the old
 store-level line are removed, because the behaviour moved rather than going away.
 
-**Phase 3 — typed locations.** `ErrorLocation`, its two Iron refinements, and
-`ValidationError.location`. Every construction site of `ValidationError` in
-`common`.
+**Phase 3 — typed locations and the content-rejection split.** `ErrorLocation`
+and `FieldPathConstraint` (§6.4); `ValidationError.location`; the two wire cases
+`RequestRejected` and `ValidationRejected` with `RejectionDetail` absorbing
+`QueryRejected` (§3.5, `EWB-D-28`), and the `oneOf` statuses that go with them.
+Every construction site of `ValidationError` in `common`, and the three readers
+of its location in `app`: `RiskLeafFormView.scala`, `PortfolioFormView.scala`
+and `FormSubmitUtil.scala`, which cannot keep compiling once the member is
+renamed because `ValidationError` is cross-compiled. `GlobalError.fromWireError`
+loses its `QueryRejected` arm and reads `RejectionDetail` instead.
+
+`TreeScope` and the third parameter on `fromAppError` (§5.1), the matching
+parameter on `wireEither`, and the roughly twenty controller call sites that each
+state `InTree(treeId)` or `NoTree`. `WireDecodeFailureHandler` builds
+`RequestRejected` and returns an `ErrorLocation` from `fieldName`.
+`BaseEndpoint` gains `requestRejectedOut` at `400` and moves
+`validationRejectedOut` to `422`.
+
+`GlobalError.RequestRejected` is renamed to `InputRejected` (§7.1), at four
+sites: `GlobalError.scala:38` and `:99`, `ErrorBanner.scala:48`, and
+`GlobalErrorSpec.scala:41`. The internal `AccessDenied` and `WorkspaceExpired`
+keep their names and their renamed imports, for the reason §5.1 records.
 
 **Phase 4 — typed load problems and the rename.** `TreeLoadProblem` replacing
 `TreeLoadFailure.reason: String`; `SimError` renamed to `DomainError`.
@@ -1934,7 +2146,7 @@ own.
 
 *Concretely:* a user types a query naming a node that does not exist. The browser
 receives `422` with
-`{"kind":"QueryRejected","problem":{"kind":"UnknownReferences","messages":[...]}}`
+`{"tree":"01ARZ…","detail":{"kind":"Query","problem":{"kind":"UnknownReferences","messages":[...]}},"trace":"…"}`
 and renders the engine's messages in the query pane, as it does today.
 
 **Option B — keep today's statuses, using value matchers.** Tapir's
@@ -3043,8 +3255,15 @@ exactly what a request can produce — holds, which is the test recorded there.
 
 ### EWB-D-23 — the decode-failure mapping — RULED 2026-10-14
 
-**Ruled: Option A, a `DecodeFailureHandler` producing
-`WireError.ValidationRejected`.**
+**Ruled: Option A, a `DecodeFailureHandler` producing the declared rejection
+shape rather than Tapir's plain text.**
+
+**Refined by `EWB-D-28`:** the case it produces is `RequestRejected` at `400`.
+The handler runs before any handler, so it never has a tree, and the case that
+carries one is now `ValidationRejected` at `422`. The option text below names
+`ValidationRejected` because that was the single rejection case when this was
+ruled; the decision itself — answer a rejected request with a declared typed
+shape — is unchanged.
 
 Validation lives in the Tapir codecs (ADR-001), so a rejected body, header or
 path segment is answered before a handler runs — by Tapir's default handler, as a
@@ -3060,8 +3279,12 @@ name with the renderer it already has for `ValidationRejected`.
 `ValidationErrorCode`, so the mapping is a small new specification.
 
 *Concretely:* `PUT /w/{key}/risk-trees/{treeId}` sent without the `X-Branch`
-header returns `{"errors":[{"field":"X-Branch","code":"REQUIRED_FIELD",…}],
-"trace":"…"}`, and the form shows the field name.
+header returns
+`{"errors":[{"location":{"kind":"RequestHeader","name":"X-Branch"},"code":"REQUIRED_FIELD",…}],"trace":"…"}`,
+and the form shows the header name. That body is a `RequestRejected`, and the
+`location` member is the typed `ErrorLocation` of §6.4, so this example states
+the shape after Phase 3 rather than the `field` string the handler builds before
+it.
 
 **Option B — narrow `ValidationRejected`'s documentation** to service-layer
 validation only, and accept the plain-text `400`.
@@ -3281,6 +3504,109 @@ outside" is replaced by one stating that the two denial paths are
 indistinguishable from each other, and that an outage is instead indistinguishable
 from any other dependency outage.
 
+### EWB-D-28 — the tree a content rejection is about, and where it is declared — RULED 2026-10-16
+
+**Ruled: `ValidationRejected` carries `tree: TreeId` and answers `422`; a
+request-level rejection becomes its own case `RequestRejected` at `400`;
+`QueryRejected` is absorbed into `RejectionDetail`. `ErrorLocation.Node` carries
+only `nodeId`.**
+
+**Goal.** A node-located validation error named a node and not the tree it
+belongs to, so a reader of the response had to recover the tree from the request.
+The same gap was wider on the query side: `QueryProblem.UnknownReferences`
+reports names that are "not in the tree" while naming no tree at all. Deciding
+where the tree is declared decides `ErrorLocation`'s shape, so it blocked
+Phase 3.
+
+**Why the tree is not a field of the location.** Two reasons, and the second is
+what settles it. `ErrorLocation` lives inside `ValidationError`, and
+`QueryRejected` carries a `QueryProblem` rather than a list of `ValidationError`,
+so a tree on the location could never reach the query case. And on the creation
+path no tree identifier exists when those errors are produced:
+`RiskTreeDefinitionRequest` is `(name, portfolios, leaves)` and `ResolvedCreate`
+is `(treeName, nodes, leafOccurrenceAndShape, providedSeedVarIds, rootName)` —
+neither carries one, node ids are minted during validation and the tree's is
+minted later in the service. Whether the tree gets an identifier at all is what
+the validation is deciding.
+
+**Why two cases rather than one with an optional tree.** The paths that produce a
+rejection divide cleanly. Tree creation, `POST /w/{key}/scenarios`,
+`POST /workspaces`, `POST /distribution/preview` and the workspace rotate and
+delete routes name no tree, and a decode failure on any of them is answered
+before a handler runs. Every other producing endpoint carries
+`path[TreeId]("treeId")`. So each case's field is total: `RequestRejected` never
+has a tree and `ValidationRejected` always does, and neither carries an optional
+field.
+
+**Where the projection gets the tree: the call site.** `fromAppError` is a
+function of the failure and the trace, and an `AppError` carries no tree. Three
+sources were available and the call site was taken.
+
+*The error value* would be compiler-enforced — a failure could not exist without
+a tree where one is required — and costs 38 `ValidationFailed` construction sites
+across 18 files, including 6 in `Simulator.scala` and 5 in
+`CachedResultResolverLive.scala` where no tree identifier is in scope and one
+would have to be threaded in. Those are the same sites, reached by the same
+argument, that this decision already declines to touch for
+`ErrorLocation.Node`.
+
+*A fibre reference* read inside `wireEither` would mirror what `ActiveTrace.id`
+already does for the trace, and was declined because the tree is not in the
+trace's situation: a controller that forgets to set it silently answers `400`
+where `422` was due, which is the failure mode `EWB-D-26` exists to end.
+
+*The call site* is taken, because the tree is lexically in scope on the line that
+calls the projection — every tree-scoped handler destructures `treeId` and ends
+its comprehension with `.wireEither`. The scope is stated there, as a required
+argument with two named cases so that nothing can be defaulted or dropped:
+
+```scala
+enum TreeScope:
+  case InTree(tree: TreeId)
+  case NoTree
+
+def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError
+
+extension [R, A](effect: ZIO[R, AppError, A])
+  def wireEither(scope: TreeScope)(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]]
+```
+
+`TreeScope` never crosses the wire — both wire cases have total fields, and this
+is only the projection's input. `AppError` is unchanged: no split, no new case,
+no added field. The residual weakness, stated rather than hidden, is that a wrong
+`NoTree` at a tree-scoped call site compiles; it is a named, greppable choice
+rather than a dropped argument, and §13 pins the statuses per route.
+
+A query failure reaching the projection with `NoTree` cannot occur, because the
+query route carries `path[TreeId]("treeId")`. It answers `InternalFault`, since a
+projection called wrongly is this service's defect rather than the caller's, and
+the boundary log line records it.
+
+**Why `422`, and why the query case merges into it rather than sharing the
+status.** A submitted tree body that parsed and failed its own rules is the same
+category as a query that parsed and failed to type-check: both are content the
+server understood and could not process, which is what `422` means. Two cases
+cannot share it — §4 states that the browser selects the variant from the status
+alone, so the second would never be decoded — so the two become one case whose
+payload discriminates. `RejectionDetail` is at §3.5, and the construction is the
+one `Conflict` already uses.
+
+**What was rejected, and why.** Flattening `QueryProblem` into
+`List[ValidationError]` was considered and declined: `Unparseable`'s
+`position: Option[Int]` has nowhere to go in a `(location, code, message)`
+triple, and the browser would have to choose a treatment by reading a generic
+`ValidationErrorCode` or the message prose instead of matching four declared
+cases. Retrofitting the pattern onto `MergeRefusal` was also declined, because
+merge is workspace-scoped and genuinely multi-tree —
+`DuplicateNames(perTree: Map[TreeId, List[SafeName]])` states which names
+repeated in which tree, and a single tree field cannot carry that.
+
+**Cost, accepted.** `QueryRejected` stops existing as a wire case, so the
+browser's match over the nine cases changes and `GlobalError` reads
+`RejectionDetail`. The case count and the one-status-per-case property both
+survive: `ValidationRejected` splits in two and `QueryRejected` is absorbed, so
+it is still nine cases at nine statuses.
+
 ---
 
 ## 11. ADR alignment
@@ -3487,6 +3813,17 @@ is therefore the step that enumerates `EWB-D-14`'s work.
    failed.
 6. **A workspace absence and a tree-not-in-workspace produce identical bytes.**
    The same property, for the existence oracle.
+7. **`fromAppError` honours the scope it is given.** `ValidationFailed` with
+   `TreeScope.InTree(tree)` produces `ValidationRejected(tree, Fields(errors))`
+   and with `TreeScope.NoTree` produces `RequestRejected(errors)`; a query
+   failure with `NoTree` produces `InternalFault`. This pins the branch
+   `EWB-D-28` introduced, which the compiler cannot check.
+
+**Per-route statuses, in the controller specs.** `EWB-D-28`'s residual weakness is
+that a wrong `TreeScope.NoTree` at a call site compiles, so each tree-scoped route
+gets an assertion that a content failure answers `422`, and each request-level
+route that a rejection answers `400`. That is what converts a silent downgrade
+into a failing test.
 
 **The span property, carried in from the retired telemetry plan.** One test, in
 Phase 1b: *the identifier a `WireError` carries equals the identifier of the span
