@@ -34,26 +34,26 @@ Import placement and grouping (ADR-011) and named constants and closed sets (ADR
 **Always:** ADR-001 · ADR-018 · ADR-029 · ADR-037 · ADR-010
 Every type here is correct-by-construction or it is a defect, so the question is never *whether* these bear but *how*: how the value is constructed and where it is validated (ADR-001), whether it needs a nominal wrapper to be distinguishable from a type with the same encoding (ADR-018), what content domain a string-backed field may admit (ADR-029), whether any of its values is one of a fixed set (ADR-037), and what failure it can produce as a value (ADR-010).
 
-**Also:** ADR-022 if it wraps a secret · ADR-036 if it is, or embeds, a scoping identifier · ADR-038 if it crosses the wire, which decides where its wire shape is declared and whether it may have a serialiser at all · ADR-003 if it carries seed identity · ADR-032 if it enters a hash projection · ADR-034 if it is a mitigation parameter.
+**Also:** ADR-022 if it wraps a secret · ADR-036 if it is, or embeds, a scoping identifier · ADR-038 if it crosses the wire, which decides where its wire shape is declared and whether it may have a serialiser at all · ADR-039 if it is ever read back from a store or any other external source, which obliges the same refinement on that path · ADR-003 if it carries seed identity · ADR-032 if it enters a hash projection · ADR-034 if it is a mitigation parameter.
 
 ### Adding or changing an endpoint, a DTO, or anything else on the wire
 
 **Always:** ADR-017 · ADR-038 · ADR-036 · ADR-035 · ADR-010 · ADR-001
 The wire is the one surface where a mistake is published: the request shape and its bounds (ADR-017), the shape a response takes and which of the two kinds it is (ADR-038), what may cross in either direction (ADR-036), what a failure may disclose (ADR-035), how a typed error becomes a status (ADR-010), and that validation happens in the codec rather than the handler (ADR-001).
 
-**Also:** ADR-021 if the route is workspace-scoped · ADR-030 and ADR-024 if it reads or mutates protected data · ADR-029 if any field carries user text · ADR-025 and ADR-027 if a browser navigates to the path · ADR-004a if the response carries a branch.
+**Also:** ADR-021 if the route is workspace-scoped · ADR-030 and ADR-024 if it reads or mutates protected data · ADR-029 if any field carries user text · ADR-039 for the browser's own side of the crossing, since a response is ingress there too · ADR-025 and ADR-027 if a browser navigates to the path · ADR-004a if the response carries a branch.
 
 ### Adding or changing a service or repository method
 
-**Always:** ADR-001 · ADR-030 · ADR-010 · ADR-033
-A service signature is where the project's two structural guarantees live: already-validated types in, never raw primitives (ADR-001), and the authorization proof in the signature rather than in a comment (ADR-030). Its failures are typed values (ADR-010), and whether it may catch anything at all is decided by ADR-033.
+**Always:** ADR-001 · ADR-030 · ADR-010 · ADR-033 · ADR-039
+A service signature is where the project's two structural guarantees live: already-validated types in, never raw primitives (ADR-001), and the authorization proof in the signature rather than in a comment (ADR-030). Its failures are typed values (ADR-010), and whether it may catch anything at all is decided by ADR-033. A repository method straddles the trust boundary — its signature side trusts its caller and its decode side does not trust the store — and ADR-039 is what decides which side a given line is on.
 
 **Also:** ADR-024 if it would write authorization data · ADR-012 and ADR-031 if it retries, times out, or waits · ADR-004a if it writes storage · ADR-036 if it takes or returns an identifier.
 
 ### Touching storage, branches, commits or a merge
 
-**Always:** ADR-004a · ADR-007 · ADR-032 · ADR-036
-The storage layout and the single-writer rule (ADR-004a), what a scenario is and how a branch is created, renamed and cleaned up (ADR-007), which of the two hash relations answers the question being asked (ADR-032), and the fact that both branch-name types embed the workspace identifier (ADR-036).
+**Always:** ADR-004a · ADR-007 · ADR-032 · ADR-036 · ADR-039
+The storage layout and the single-writer rule (ADR-004a), what a scenario is and how a branch is created, renamed and cleaned up (ADR-007), which of the two hash relations answers the question being asked (ADR-032), the fact that both branch-name types embed the workspace identifier (ADR-036), and that the store is outside the process so everything read back from it is refined on arrival (ADR-039).
 
 **Also:** ADR-029 if a value is interpolated into a GraphQL document · ADR-017 if node identity is involved · ADR-014 if the change could affect cache keys.
 
@@ -81,14 +81,14 @@ Component shape, who owns state, when a value is a derived signal versus a state
 **Always:** ADR-024 · ADR-030 · ADR-021 · ADR-012 · ADR-036
 The application is a read-only enforcement point (ADR-024), checks happen at the orchestration boundary and prove it in a signature (ADR-030), the capability credential and its lifetime (ADR-021), what the mesh is assumed to have done first (ADR-012), and which identifiers may never be accepted from a client (ADR-036).
 
-**Also:** ADR-022 if a credential type is involved · ADR-035 if a denial is rendered.
+**Also:** ADR-022 if a credential type is involved · ADR-039 if an external authorization answer is parsed · ADR-035 if a denial is rendered.
 
 ### Handling an error, or adding a catch
 
 **Always:** ADR-010 · ADR-035 · ADR-033 · ADR-002
 How failures are represented and mapped (ADR-010), what may reach a client (ADR-035), where an exception may be caught and how wide (ADR-033), and where the diagnosis is logged instead (ADR-002).
 
-**Also:** ADR-036 if the error names a resource · ADR-022 if a credential could appear in a message · ADR-019 if the browser must classify it.
+**Also:** ADR-039 if the failure is a peer's content being refused rather than a peer being unreachable, which are different errors · ADR-036 if the error names a resource · ADR-022 if a credential could appear in a message · ADR-019 if the browser must classify it.
 
 ### Adding or changing a dependency, a base image, or a container
 
@@ -102,7 +102,7 @@ Pinning, verification, cooldown, publisher trust and the per-ecosystem verificat
 **Always:** ADR-016 · ADR-031
 The single canonical source and how tests load it (ADR-016), and the rule that a backoff is a code constant while only a budget is configuration (ADR-031).
 
-**Also:** ADR-022 if the value is a secret · ADR-017 if it is a size or count bound, which belongs in a type rather than in configuration · ADR-003 if it is a simulation parameter.
+**Also:** ADR-022 if the value is a secret · ADR-039 since the environment is outside the process and a config value is refined on the way in · ADR-017 if it is a size or count bound, which belongs in a type rather than in configuration · ADR-003 if it is a simulation parameter.
 
 ### Adding logging, metrics or spans
 
@@ -165,6 +165,7 @@ Use this when you already know the topic or the record's name. It answers "where
 | ADR-036 | `ADR-036-confidential-internal-identifiers.md` | Which identifiers may cross the client boundary, in which direction, and the substitutes for those that may not |
 | ADR-037 | `ADR-037-in-code-constants.md` | Constants and closed sets: enums in their owner's companion, declared versus derived spellings, forbidden defaults |
 | ADR-038 | `ADR-038-response-wire-shapes.md` | Response shapes: the two kinds of response and the shape each takes, no raw primitive where a refined type exists, no serialiser on a confidential identifier, `toWire` owned by the source |
+| ADR-039 | `ADR-039-trust-boundary-ingress-validation.md` | Trust-boundary ingress: where the trust region ends, which crossings have a border, what is refined there, and when an exemption is recorded |
 | ADR-INFRA-006 | `ADR-INFRA-006.md` | Database credential delivery. Binds `register-infra`'s deployment, not this repository's code |
 | — | `ADR-00X.md` | The authoring template for a new record. Not a decision record |
 
@@ -198,6 +199,9 @@ Read it as an index of collisions, not as a substitute for either record. Where 
 | ADR-038 × ADR-022 | ADR-038 §4 removes the serialiser from a confidential identifier, and ADR-022's credential keeps one. Reading §4 as "sensitive values are not serialisable" deletes the codec the capability key needs, and the bootstrap response stops compiling. The test is what the value is for: an internal scoping key must never cross, a bearer credential exists in order to cross. *Stated in ADR-038 §4.* |
 | ADR-038 × ADR-001 | ADR-038 §1 puts the wire shape **inside** the domain type's companion, which reads as abandoning the separation ADR-001 is cited for. It is what delivers it: the decoder routes through the smart constructor, so validation happens in the codec exactly as ADR-001 requires, and on both sides of the wire at once because the module is cross-compiled. A public parallel class would satisfy the letter and lose the invariants. |
 | ADR-038 × ADR-037 | ADR-037 §2 permits a declared spelling where the string contracts with something other than the serialiser, and that carve-out does **not** reach a server-sent event. An event is an operation outcome, so ADR-038 §2 governs it and the codec is derived; the hand-written `toWire` pair is non-conforming rather than a licensed exception. |
+| ADR-039 × ADR-001 | ADR-001 §2 says controllers and services "perform no validation", and a reader who knows it well reports a repository refining a stored value as duplicated validation. It is not: "service" there is the ZIO service, the in-process business logic, so the sentence binds code **inside** the trust region and says nothing about where the region ends. A repository straddles — trusting its caller's `TreeId`, distrusting the store's bytes. *Stated in ADR-039 §2 and in ADR-001's context.* |
+| ADR-039 × ADR-029 | The same boundary is crossed in both directions and each record governs one. ADR-029's parser-boundary table is egress: what may be built into a document sent out. ADR-039 is ingress: what must be refined on the way in. Reading ADR-029's Irmin row as covering the boundary leaves the return path with no rule, which is how store content reaches the domain unrefined. *Stated in ADR-029 §3 and ADR-039 §1.* |
+| ADR-039 × ADR-010 | "The peer is unreachable" and "the peer returned content we refuse" are different failures, and collapsing them into one error case is invisible: both read as the dependency failing. Only the first is retried or reported as an outage. ADR-010 gives the shape a failure takes; ADR-039 says these are two of them. *Stated in ADR-039 §4.* |
 | ADR-003 × ADR-032 | `seedVarId` is in the hashed projection and the node's name is not. That is what makes a rename free — it changes no figure and invalidates no cache entry — and it is also why a seed identifier must never be re-issued: two different risks sharing one would collide in the cache. *Stated in ADR-003 §2.* |
 
 A change that spans two rows of Layer 1 is where a new collision is likely. When one is found, write the reconciliation into both records and add a row here: the records carry the content, this table makes the collision findable.

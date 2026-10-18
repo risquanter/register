@@ -97,6 +97,16 @@ val result = riskNameToId.get(userInput)  // Set.contains / Map.get only
 If a new code path introduces a parser boundary not in this table,
 document it here and verify it honours the no-re-parse discipline.
 
+**This table is the outgoing direction, and ADR-039 is the incoming one.** A
+boundary is crossed twice: a value leaves this process for an external parser,
+and content comes back from that same external system. This record governs what
+may be built into an outgoing document.
+[ADR-039](ADR-039-trust-boundary-ingress-validation.md) governs what must be
+refined on the way in, and a value that arrives and is then interpolated into a
+new document is subject to both — refined on ingress, then whitelist-constrained
+on egress. Neither direction implies the other: a store this service wrote to is
+still outside the process when it answers.
+
 ### 4. Iron whitelisting is defence-in-depth, not the primary XSS guard
 
 For Laminar-rendered output, the primary XSS guard is Laminar's typed
