@@ -36,6 +36,41 @@ sbt ~server/compile
 sbt ~app/compile
 ```
 
+### A compiler `StackOverflowError` is incremental state, not a defect in the code
+
+An incremental compile of a module that derives JSON codecs or Tapir schemas can
+fail with a `java.lang.StackOverflowError` thrown by the compiler itself.
+
+The symptom is what makes it costly, because it reads as a defect in the code
+being compiled. A stack overflow inside derivation looks like a type that
+recurses with no base case, so the response it invites is redesigning the type.
+Nothing in the message distinguishes the two.
+
+The cause is the incremental compilation state rather than the sources. That is
+what the difference between a dirty and a clean run of the same module shows,
+and it is the whole diagnosis — clean one module and compile it again:
+
+```bash
+sbt 'commonJVM/clean; commonJVM/compile'
+sbt 'commonJS/clean; commonJS/compile'
+sbt 'server/clean; server/compile'
+sbt 'app/clean; app/compile'
+```
+
+A clean compile that succeeds on unchanged sources is the proof that the sources
+were never the problem. Run it before changing anything, and do not count it
+against the two-attempt limit in the red-build rule below: it is a diagnosis,
+not a second attempt at the same fix.
+
+The module is cleaned on its own rather than the whole build, because a
+build-wide `clean` discards every other module's incremental state as well and
+buys a full rebuild for nothing. Clean the module the error names, which is not
+always the one being compiled: a `serverIt` or `app` compile fails this way on
+`commonJVM` or `commonJS` state, because those are what it depends on.
+
+Observed four times on 2026-10-20 while deriving schemas in `common`, on both
+platforms, and cleared every time by the corresponding line above.
+
 ### A warning category is enforced by the compiler or it is not a rule
 
 The project required zero warnings in two places — a phase-completion list and
@@ -658,7 +693,7 @@ sbt
 # > server/test
 # > "serverIt/testOnly *IrminSpec"
 # > reload   (after build.sbt changes)
-# > clean    (when incremental compilation misbehaves)
+# > commonJVM/clean   (on a compiler StackOverflowError — see Compilation)
 ```
 
 ---

@@ -249,6 +249,7 @@ First-party libraries (`metalog-distribution`, `vql-engine`, `hdr-rng`) are cons
 ```bash
 sbt compile                              # all modules
 sbt server/compile                       # single module (commonJVM, server, app)
+sbt 'commonJVM/clean; commonJVM/compile'  # a compiler StackOverflowError is incremental state, not the code
 
 sbt 'commonJVM/test; server/test'        # all unit tests (no Docker needed)
 sbt app/test                             # Scala.js tests

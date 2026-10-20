@@ -38,8 +38,12 @@ the noise filter's convention exception.
 
 Three binding rules on the report itself (`CLAUDE.md`, G6):
 
-- Presenting the review report is a presentation — halt after it. No fixes,
-  no commits, no further tool calls until the user rules on the findings.
+- The report opens with the work done — every fix made under the write boundary
+  below, one line per class of change, naming the files. It is kept separate
+  from the findings, so a reader can tell what the review changed from what it
+  is asking about.
+- Presenting the review report is a presentation — halt after it. No further
+  fixes and no commits until the user rules on the findings.
 - Never self-classify a finding as "non-blocking", "note-only-so-proceeding",
   or "acceptable" on the user's behalf. Severity is yours to assess; the
   disposition of every finding is the user's.
@@ -54,26 +58,48 @@ Three binding rules on the report itself (`CLAUDE.md`, G6):
   still gets a one-line concrete fix; the moment there is a real choice, it is
   a decision guide.
 
-## Write boundary — read freely, write tests only, never production code
+## Write boundary — fix what was already owed, never fix a finding
 
-The review role's permissions are tiered, and this boundary is absolute. It
-binds whoever runs this review:
+The review role's permissions are tiered. It binds whoever runs this review.
 
 - **Read: unrestricted.** Read any file needed to reach a verdict.
-- **Write: behavioural tests only.** The entire permitted write surface is
-  test code that pins behaviour — a coverage-gap pinning test, a regression
-  test reproducing a finding. Nothing outside a test file may be written.
-- **Production (non-test) code: forbidden without explicit authorization.**
-  Never change production code as part of a review — not to fix a finding,
-  not "while it's here", not a one-line touch-up, and not a revert. A
-  production-code change happens only when the user issues a request that
-  clearly signals that intent, and in the context of any code review even
-  then the change is presented and escalated for the user's explicit approval
-  before it is written.
+- **Write: behavioural tests.** Test code that pins behaviour — a coverage-gap
+  pinning test, a regression test reproducing a finding.
+- **Write: the boyscout obligations, without asking.** Anything the `boyscout`
+  skill already obliges on a file the change touched — unused imports removed,
+  comments brought to style, bare literals named, a recognised set created,
+  defaulted `Option`s removed, untyped identifiers typed. These are performed,
+  not reported. They were due in the edit that touched the file, so a review
+  that finds them outstanding discharges the obligation rather than handing it
+  back.
+- **Write: a plan passage the work has already superseded.** Where the shipped
+  code is right and the plan's text is what the work moved past — a passage a
+  later section of the same plan overrules, a signature the implementation
+  improved on, a count or a name the code has left behind — sweep the document
+  in the same pass. This reaches only the plan the session is working on, and
+  only where the code is provably the later word. An ADR, a plan not yet
+  implemented, or a divergence with no ruling behind it is presented and waits.
+- **Production code, to resolve a finding: forbidden without explicit
+  authorization.** Never change production code to fix something the review
+  found — not "while it's here", not a one-line touch-up, and not a revert.
 
-A finding never authorizes its own fix. A fix or revert named inside a
-finding is describing an option for the user to weigh, never an instruction
-the review may act on.
+The line between the two is what the change already owed against what the
+review discovered. An unused import on a touched file was owed, so remove it. A
+wrong condition is a finding, so report it and wait.
+
+A finding never authorizes its own fix. A fix or revert named inside a finding
+is describing an option for the user to weigh, never an instruction the review
+may act on.
+
+## What is not a finding
+
+Nothing the write boundary obliges you to fix is also a finding. An unused
+import is the recurring case: it is not MUST-FIX, not SHOULD-FIX and not a
+NOTE. Remove it, and account for it in the summary as work done. Reporting it
+spends the user's attention on something no decision attaches to.
+
+The same holds for a stale comment the change itself made false, and for a plan
+passage the code has superseded. Fix, then list.
 
 The criteria below are not exhaustive. Use general principles and industry best
 practices to catch issues the checklist has not yet anticipated.
@@ -469,7 +495,7 @@ naming conventions unless there is an explicit improvement reason:
 | Iron type alias / opaque type | Alongside existing refined types in the relevant `Types.scala` or companion object |
 | Smart constructor | Companion object of the domain type it validates |
 | Tapir codec for an Iron type | `IronTapirCodecs.scala` or the relevant codec file |
-| Validation utility / refiner | `ValidationUtil` alongside existing refiners |
+| Validation utility, or a method refining a value | `ValidationUtil`, alongside the methods already there |
 | Nominal wrapper (`case class NodeId`) | Alongside other ID wrappers in the same file |
 
 A new Iron type that is not co-located with its siblings creates a split source of
