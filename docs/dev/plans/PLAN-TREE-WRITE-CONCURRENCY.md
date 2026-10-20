@@ -13,6 +13,21 @@ content, tree name and `seedVarHighWater`.
 **Companion:** `PLAN-TREE-WRITE-CONCURRENCY-APPENDIX-WRITE-SHAPE.md` — the write
 shape analysis and the four options behind §2.0.
 
+**The error boundary was rewritten after this document was written, and the
+error types this plan relies on must be re-read before its design work starts.**
+`PLAN-ERROR-WIRE-BOUNDARY.md` replaced the error path: internal failures are
+projected one-way onto a closed `WireError` type whose case decides the HTTP
+status through a Tapir `oneOf`, the generic `ErrorResponse` envelope and its
+`decode` reconstruction are deleted, `ValidationError` carries a typed
+`ErrorLocation` instead of a `field: String`, and `VersionConflict`'s own fields
+are now `TreeId` and two `CommitHash` values. Everything in this document that
+names an error type, a status mapping or a client-side classification states the
+shape as it is now rather than as it was. That rewrite is itself still in
+progress, so further changes are likely: re-read `AppError.scala`,
+`WireError.scala` and `GlobalError.scala` against this plan before ruling its
+open decisions, and treat any mismatch as this document being stale rather than
+the code deviating.
+
 ---
 
 ## 1. Problem
@@ -70,20 +85,40 @@ Most of the machinery is present and unused on this path:
 
 | Piece | Where | State |
 |---|---|---|
-| `VersionConflict(nodeId, expected, actual)` | `AppError.scala:159` | Exists, `extends SimError` |
-| HTTP 409 mapping | `ErrorResponse.makeVersionConflictResponse`, default domain `"risk-trees"` | Exists, wired in `ErrorResponse.scala:175` |
-| SPA handling | `GlobalError.scala:94` — `case _: VersionConflict => Conflict(msg(e))` | Exists |
-| `CommitHash` as a wire value | `?at=` query param, `RevertTreeRequest.toCommit`, `TreeHistoryEntry.commitHash` | Exists |
-| The read that yields the version | `RiskTreeService.getById` now returns `(RiskTree, CommitHash)` | Landing via RISKTRANSFORM F8 |
-| Branch-pointer CAS | `IrminQueries.testAndSetBranch`, `IrminClient.deleteBranch`/`createBranchAt` | Exists, used for branch lifecycle only |
-
-The `VersionConflict` type's `"risk-trees"` default domain and its unused state
-strongly suggest it was introduced for exactly this purpose and never wired.
+| `VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash)` | `AppError.scala` | Exists, `extends SimError`, no production constructor |
+| HTTP 409 mapping | `WireError.fromAppError` projects it to `Conflict(ConflictKind.StaleVersion())` | Exists |
+| SPA handling | `GlobalError.fromWireError` classifies `WireError.Conflict` | Exists |
+| `CommitHash` as a wire value | `?at=` query param, `RevertTreeRequest.toCommit`, `TreeHistoryEntry.commitHash`, `ScenarioSummaryResponse.head` | Exists |
+| The read that yields the version | `RiskTreeService.getById` returns `(RiskTree, CommitHash)` | Exists |
+| Branch-pointer compare-and-set | `IrminQueries.testAndSetBranch`, `IrminClient.deleteBranch`/`createBranchAt` | Exists |
+| A client-supplied version token on a write | `deleteScenarioEndpoint`'s `If-Match` header, carrying the head read from `listScenarios` | Exists, for scenario deletion only |
+| Write-to-a-staging-branch then publish under one compare-and-set | `ScenarioMergeService` | Exists, for the merge only |
 
 **What does not exist:** `IrminQueries.setTree` takes no precondition, and
-`IrminClient.setTree` has no CAS parameter. Irmin's mutation surface as used
-here is `set_value`, `set_tree`, `remove`, `merge_with_branch`, `revert`,
-`test_and_set_branch`. There is no conditional tree write.
+`IrminClient.setTree` has no compare-and-set parameter. Irmin's mutation surface
+as used here is `set_value`, `set_tree`, `remove`, `merge_with_branch`,
+`revert`, `test_and_set_branch`. There is no conditional tree write.
+
+### 1.3 Two insights that bear on the decisions below
+
+**This mechanism already exists once, on a different operation, and it chose the
+header.** Scenario deletion carries a client-supplied version token:
+`deleteScenarioEndpoint` declares `.in(header[CommitHash]("If-Match"))`, the
+client obtains that commit from `ScenarioSummaryResponse.head` in the
+`listScenarios` **response body**, and `ScenarioState` echoes it back. So the
+project has a working round trip in which a commit leaves in a body and returns
+in a header, and `ScenarioHeadStale(scenario, expected, actual)` is the failure.
+Decision 1 and Decision 5 are both argued below partly on the premise that the
+header route is unavailable; that premise needs rechecking against this
+precedent before either is ruled.
+
+**The staging-branch machinery Decision 2 Option B would need now exists.**
+`ScenarioMergeService` assembles a merge on its own staging branch and publishes
+it to the target under one `test_and_set_branch`, with the staging reference
+typed separately from `BranchRef` so a staging branch cannot be passed where a
+scenario branch is expected. Decision 2 disfavours Option B partly on the cost
+of "temp-branch naming, lifecycle and cleanup on failure"; that cost has since
+been paid once and the pattern can be followed rather than invented.
 
 ---
 
@@ -151,6 +186,16 @@ the write path. Option A is the more correct use of HTTP, but it buys
 correctness the project cannot currently spend — nothing in the SPA reads
 response headers — in exchange for a materially larger change. Option C is
 rejected: an opt-in guard against silent data loss leaves the default wrong.
+
+**This recommendation rests on a premise that has since changed and must be
+rechecked before it is ruled.** It argues against Option A on the cost of
+sending the token in a header, and scenario deletion now does exactly that:
+`deleteScenarioEndpoint` takes `.in(header[CommitHash]("If-Match"))` and the SPA
+supplies it. The Tapir plumbing for a `CommitHash` request header therefore
+exists and is in use, which removes Option A's stated cost on the
+client-to-server leg entirely. The server-to-client leg is measured under
+Decision 5, and the measurement does not support a cost difference there
+either.
 
 #### Decision 2 — How is the precondition enforced against Irmin?
 
@@ -245,6 +290,76 @@ resolve-then-reload race that OD-5=D closed at the repository, one layer up.
 Decision 1 lands on the body field, Option B here if it lands on `If-Match`.
 Mixing them buys both sets of plumbing and neither's coherence.
 
+**A fourth option exists and is already in production on the scenario path:
+a commit in the response body, echoed back in a request header.**
+`ScenarioSummaryResponse.head` carries the commit out in a JSON body and
+`deleteScenarioEndpoint`'s `If-Match` takes it back in a header. That mixes the
+two mechanisms, which the paragraph above argues against, so "mixing them" is
+not automatically incoherent and the recommendation should be reconsidered with
+that precedent in view.
+
+#### The cost of Option A against Option B, measured
+
+Both options change the same three files, which are all the places the structure
+endpoint is named:
+
+```
+modules/common/.../http/endpoints/WorkspaceTreeEndpoints.scala:38    the declaration
+modules/server/.../http/controllers/WorkspaceTreeController.scala:55  the handler
+modules/app/.../state/TreeViewState.scala:199                         the caller
+```
+
+The kind of cost is one-time engineering work and the compiler finds all of it.
+The declaration gains one line, the handler returns a pair instead of a value,
+and the caller binds a pair instead of a value. There is no runtime cost either
+way, because a header and a body field are both bytes in the same response.
+
+The quoting an `ETag` needs is already written.
+`IronTapirCodecs.scala`'s `Codec[String, CommitHash, CodecFormat.TextPlain]`
+strips quotes on decode and adds them on encode, and its own comment states that
+the one definition serves both the server and the generated sttp client — so the
+same codec would serve a response header without modification.
+
+`BackendClient.endpointRequestZIO[I, O]` is generic in `O` and reads only
+`response.body`, so nothing in the browser's call layer changes either. It does
+not need to read a header, because the output type is decoded for it.
+
+**The premise this measurement rests on is unverified:** that Tapir's sttp client
+interpreter decodes a declared output header into `O` rather than discarding it.
+Tapir is a third-party library with no local checkout, so its source was not
+read. The single check that settles it is to declare
+`.out(header[CommitHash]("ETag"))` on one endpoint and compile — the output type
+either becomes a tuple or it does not.
+
+**Three things differ between the options, and none of them is plumbing cost.**
+An output header is a pattern this codebase has no instance of, so the first one
+establishes a convention rather than following one. A precondition failure in
+HTTP is `412 Precondition Failed` while this project answers conflicts with
+`409`, so the status must be chosen. And putting the commit in a response body
+puts transport metadata inside a domain payload, which ADR-038 governs.
+
+**Ruled direction for this question, 2026-10-19: verify the `ETag` route, and if
+it works with Tapir, adopt it rather than the body field.** Run the check above
+first. If a declared output header decodes into `O`, then the `ETag` and
+`If-Match` pairing is the route to take, and taking it means three further pieces
+of work rather than one:
+
+1. Establish the precedent deliberately. The first output header in the codebase
+   is a convention, so it is declared and documented as one rather than added as
+   a one-off.
+2. Consider moving the existing scenario path onto it. `ScenarioSummaryResponse`
+   carries `head` in a body today, and leaving it there while the tree path uses
+   an `ETag` is the half-migrated state the project's own convention rule warns
+   against. Whether that move belongs in this plan or its own is part of this
+   plan's elevation.
+3. Resolve the records. ADR-038 decides response shapes and does not currently
+   contemplate a response header carrying transport metadata; ADR-017 describes
+   the tree API's request shape. Whichever of them the chosen route contradicts
+   is amended in the same plan, not afterwards.
+
+If the check shows Tapir discards a declared output header, Decision 5 falls back
+to Option A and this ruling lapses.
+
 ## 3. Signatures (draft — subject to the decisions above; a Signature Echo follows approval)
 
 Written against Decision 1 = B and Decision 2 = A.
@@ -269,27 +384,35 @@ def update(
   op: RiskTree => RiskTree,
   branch: BranchRef,
   expectedRevision: CommitHash
-): Task[RiskTree]
+): IO[AppError, RiskTree]
 
 // modules/server/.../services/RiskTreeServiceLive.scala — update()
 (oldTree, head) <- getTreeOrFail(wsId, id, Revision.Head(branch))
 _ <- ZIO.when(head != req.expectedRevision)(
-       ZIO.fail(VersionConflict(id.value, req.expectedRevision.value, head.value)))
+       ZIO.fail(VersionConflict(id, req.expectedRevision, head)))
 ```
 
 Reusing the existing `VersionConflict` rather than adding a variant avoids
-touching every exhaustive `AppError` match — see ADR-035 alignment below.
+touching every exhaustive `AppError` match, which is a compile error at every
+match site when a leaf is added to the sealed hierarchy.
 
-Two points the echo must settle:
+**`VersionConflict`'s fields are already typed, and that typing is a guess this
+plan validates rather than inherits.** The case reads
+`VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash)`.
+It was typed by `PLAN-ERROR-WIRE-BOUNDARY.md`'s `EWB-D-29`, which removed three
+`String` fields because untyped identifiers are a defect that plan was closing
+across the board. The field names and types were derived from where the check
+would sit — this plan's own service-layer snippet above — and from nothing else.
+Three things that ruling deliberately did not decide, and that belong here:
+whether a tree-level conflict should also name the node that diverged; whether
+the client needs both commits or only the current head; and whether the token is
+a commit hash at all. A different answer here overrides the shape without
+reopening `EWB-D-29`.
 
-- `VersionConflict`'s first field is named `nodeId: String`. Here the conflict
-  is tree-level. Either the field is renamed (ripple: `ErrorResponse.scala:81`,
-  `:175`, `:300`, the SPA) or the tree id is passed in a field named for a node,
-  which is the kind of loose naming a review would flag.
-- `op: RiskTree => RiskTree` remains a constant function at its only call site.
-  Whether to keep the higher-order shape or change the contract to take a tree
-  is a live question, since the type currently promises something no caller
-  uses.
+One further point the echo must settle: `op: RiskTree => RiskTree` remains a
+constant function at its only call site. Whether to keep the higher-order shape
+or change the contract to take a tree is a live question, since the type
+currently promises something no caller uses.
 
 ---
 
@@ -297,7 +420,7 @@ Two points the echo must settle:
 
 - `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala`
-- `modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorResponse.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/errors/WireError.scala`
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala`
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala`
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala`
@@ -306,13 +429,18 @@ Two points the echo must settle:
 - `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala`
 - `modules/app/src/main/scala/app/state/GlobalError.scala`
 - `modules/app/src/main/scala/app/state/TreeBuilderState.scala`
-- `modules/common/src/test/scala/com/risquanter/register/domain/errors/ErrorResponseSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/errors/WireErrorSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/TreeWriteConcurrencyItSpec.scala` (new)
 
 The SPA files are provisional pending Decision 4. The exact set of app-side
 files must be re-derived by grep before approval, per the discovery-first
 inventory practice.
+
+This list is stated against the error path as it now is: the status mapping
+lives in `WireError.fromAppError` and is pinned by `WireErrorSpec`, so those are
+the files a new 409 touches. It must still be re-derived before approval,
+because `PLAN-ERROR-WIRE-BOUNDARY.md` is not finished.
 
 ---
 
@@ -327,8 +455,10 @@ inventory practice.
 | 017 (+NOTES) (tree API) | The PUT DTO | **Amendment required**: ADR-017 describes the update DTO's buckets; a required `expectedRevision` is a new element of that contract and belongs in the ADR |
 | 030 (authz orchestration) | Controller | Compliant: no change to `Checked[Permission]` propagation |
 | 032 (equality relations) | The token | Compliant: `expectedRevision` is a storage-side commit identifier, not a domain content hash. The two must not be conflated — see the R2 correction |
-| 035 (error leakage) | 409 body | Compliant if `VersionConflict` is reused, since its sanitisation clause exists. A **new** error variant would need its clause added, and the sealed-hierarchy match would fail to compile without it |
+| 035 (error leakage) | 409 body | Compliant, and structurally rather than by discipline: `WireError.Conflict` carries a `ConflictKind` drawn from a closed set and no free text, so no internal value can reach the body through it. `VersionConflict` already has its projection arm; a **new** error variant would need one, and the exhaustive match would fail to compile without it |
 | 036 (confidential identifiers) | The token | Compliant: `CommitHash` is already client-visible input and output; it is not a confidential identifier |
+| 038 (response wire shapes) | Decision 5 Option A only | If the commit travels in the `/structure` response, that response gains a field and ADR-038 decides its shape: the two permitted response kinds, and no raw primitive where a refined type exists. `ScenarioSummaryResponse.head: CommitHash` is the precedent to follow |
+| 039 (trust-boundary ingress) | `expectedRevision` on the way in | Compliant by construction: the token is a `CommitHash` refined by its Tapir codec at the request boundary, so the write path receives a validated value and never a `String` |
 
 ---
 
@@ -337,8 +467,11 @@ inventory practice.
 1. **Unit — `RiskTreeServiceLiveSpec`.** An update whose `expectedRevision`
    matches the head succeeds. An update whose `expectedRevision` is a different
    commit fails with `VersionConflict` and leaves the stored tree untouched.
-2. **Unit — `ErrorResponseSpec`.** `VersionConflict` maps to 409 with the
-   tree-level fields, and the body carries no internal detail (ADR-035).
+2. **Unit — `WireErrorSpec`.** `VersionConflict` projects to
+   `WireError.Conflict(ConflictKind.StaleVersion())`, which the `oneOf`
+   declaration answers at 409. The assertion already exists as one row of that
+   suite's exhaustive case-to-wire mapping; what this plan adds is the first
+   production constructor behind it.
 3. **Integration — new `TreeWriteConcurrencyItSpec`.** Against real Irmin:
    client A and client B both read at C0; A updates successfully; B's update
    with `expectedRevision = C0` is rejected; the tree at head still carries A's
@@ -356,10 +489,20 @@ inventory practice.
 
 This document confers **no** G3 coverage. To build it:
 
+0. Re-read the error path before anything else — see the remark at the top of
+   this document. `PLAN-ERROR-WIRE-BOUNDARY.md` rewrote it and is unfinished, so
+   every error type, status mapping and client classification named here is
+   stated against a moving target. Check Decision 1's and Decision 5's premises
+   against §1.3 in the same pass: both argue from costs that the scenario
+   deletion path has since paid.
+0a. Run the output-header check named under Decision 5 — declare
+   `.out(header[CommitHash]("ETag"))` on one endpoint and compile. It decides
+   Decision 5, and through it Decision 1, so it comes before either is ruled.
 1. Rule Decisions 1–5.
 2. Rewrite §3 against those rulings and present it as a Signature Echo,
-   settling the two points §3 already names (`VersionConflict.nodeId` on a
-   tree-level conflict; whether `repo.update` keeps `op: RiskTree => RiskTree`).
+   settling the two points §3 names: `VersionConflict`'s field shape, which
+   `EWB-D-29` typed as a guess for this plan to validate, and whether
+   `repo.update` keeps `op: RiskTree => RiskTree`.
 3. Re-derive the `## File inventory` by grep, per the discovery-first practice —
    the app-side entries are provisional pending Decision 4.
 4. Complete the ADR alignment (§5), including the ADR-017 amendment that a
