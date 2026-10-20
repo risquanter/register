@@ -2,8 +2,8 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, Revision, SafeName, TreeId, NodeId}
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, Revision, SafeName, TreeId, NodeId, ValidationUtil}
+import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.responses.MergeConflictEntry
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.IrminPath
@@ -150,7 +150,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                         case Some(commit) => ScenarioBranchOps.refineCommitHash(commit.hash)
                         case None =>
                           ZIO.fail(ValidationFailed(List(ValidationError(
-                            field = "scenario",
+                            location = ErrorLocation.requestField(FieldName.Scenario),
                             code = ValidationErrorCode.NOT_FOUND,
                             message = s"Scenario not found: ${name.value}"
                           ))))
@@ -338,9 +338,11 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * not refine is skipped here and caught by the post-merge guard, which reads
     * through `fromNodes`.
     *
-    * Which names count as repeated is decided by `SafeName.duplicates`, the
-    * same definition `RiskTree.fromNodes` reads, so this scan and the invariant
-    * it anticipates cannot disagree.
+    * Which names count as repeated is decided by `ValidationUtil.duplicateGroups`,
+    * the same grouping `SafeName.requireDistinct` uses inside
+    * `RiskTree.fromNodes`, so this scan and the invariant it anticipates cannot
+    * disagree. This one reports the names rather than failing, because a merge
+    * preview describes what a merge would do.
     */
   private def duplicateNodeNames(comparisons: List[PathComparison]): IO[AppError, Map[TreeId, List[SafeName.SafeName]]] =
     val nodeValues = comparisons.flatMap { c =>
@@ -360,7 +362,8 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       pairs
         .groupMap(_._1)(_._2)
         .view
-        .mapValues(SafeName.duplicates)
+        // Every member of a group is the same name, so the first one names it.
+        .mapValues(names => ValidationUtil.duplicateGroups(names, (n: SafeName.SafeName) => n.value).map(_._2.head))
         .filter(_._2.nonEmpty)
         .toMap
     }

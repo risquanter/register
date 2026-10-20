@@ -7,7 +7,7 @@ import sttp.tapir.server.ServerEndpoint
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.domain.data.iron.{BranchRef, Revision, ValidationUtil}
-import com.risquanter.register.domain.errors.ValidationFailed
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed}
 import com.risquanter.register.http.responses.{SimulationResponse, ChangedNodesResponse, NodeChangeEntry, TreeHistoryResponse}
 import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, ChangedNodesResult, TreeHistoryService}
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -91,7 +91,8 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        limit  <- ZIO.fromEither(ValidationUtil.refinePositiveInt(n, "n")).mapError(ValidationFailed(_))
+        limit  <- ZIO.fromEither(ValidationUtil.refinePositiveInt(n, ErrorLocation.requestField(FieldName.Limit)))
+                    .mapError(ValidationFailed(_))
         entries <- treeHistoryService.history(ws.id, treeId, branch, limit)
       yield TreeHistoryResponse(entries)).wireEither
   }

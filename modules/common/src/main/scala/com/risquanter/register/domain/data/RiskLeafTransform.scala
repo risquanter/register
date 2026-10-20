@@ -6,7 +6,7 @@ import com.risquanter.register.domain.data.iron.{
   DistributionType, PositiveInt, PositiveLong, ResidualProbability,
   RetentionFactor, ValidationMessages, ValidationUtil
 }
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
 
 /**
  * Param-stage transform on a leaf's occurrence probability. `Keep` is the
@@ -40,10 +40,10 @@ object LikelihoodTransform {
     JsonDecoder[Raw].mapOrFail {
       case Raw("keep", None, None) => Right(Keep)
       case Raw("scale", Some(f), None) =>
-        ValidationUtil.refineRetentionFactor(f, "factor").map(Scale(_))
+        ValidationUtil.refineRetentionFactor(f, ErrorLocation.requestField(FieldName.Factor)).map(Scale(_))
           .left.map(_.map(_.message).mkString("; "))
       case Raw("override", None, Some(p)) =>
-        ValidationUtil.refineResidualProbability(p, "probability").map(Override(_))
+        ValidationUtil.refineResidualProbability(p, ErrorLocation.requestField(FieldName.Probability)).map(Override(_))
           .left.map(_.map(_.message).mkString("; "))
       case other => Left(s"invalid likelihood transform: op '${other.op}' with mismatched fields")
     }
@@ -94,10 +94,10 @@ object OverrideDistributionParams {
     minLoss: Option[PositiveLong],
     maxLoss: Option[PositiveLong],
     terms: Option[PositiveInt],
-    fieldPrefix: String = "overrideParams"
+    subject: ErrorSubject
   ): Validation[ValidationError, OverrideDistributionParams] =
     RiskLeaf
-      .validateModeFields(distributionType, percentiles, quantiles, minLoss, maxLoss, terms, fieldPrefix)
+      .validateModeFields(distributionType, percentiles, quantiles, minLoss, maxLoss, terms, subject)
       .as(new OverrideDistributionParams(distributionType, percentiles, quantiles, minLoss, maxLoss, terms))
 
   given Equal[OverrideDistributionParams] = Equal.default
@@ -118,27 +118,27 @@ object OverrideDistributionParams {
           p.minLoss.map(identity), p.maxLoss.map(identity), p.terms.map(_.toInt))),
     JsonDecoder[Raw].mapOrFail { raw =>
       val distTypeV = ValidationUtil.toValidation(
-        ValidationUtil.refineDistributionType(raw.distributionType, "distributionType"))
-      val minV = optRefineLong(raw.minLoss, "minLoss")
-      val maxV = optRefineLong(raw.maxLoss, "maxLoss")
+        ValidationUtil.refineDistributionType(raw.distributionType, ErrorLocation.requestField(FieldName.DistributionType)))
+      val minV = optRefineLong(raw.minLoss, ErrorLocation.requestField(FieldName.MinLoss))
+      val maxV = optRefineLong(raw.maxLoss, ErrorLocation.requestField(FieldName.MaxLoss))
       val termsV = raw.terms match {
-        case Some(t) => ValidationUtil.toValidation(ValidationUtil.refinePositiveInt(t, "terms")).map(Some(_))
+        case Some(t) => ValidationUtil.toValidation(ValidationUtil.refinePositiveInt(t, ErrorLocation.requestField(FieldName.Terms))).map(Some(_))
         case None    => Validation.succeed(None)
       }
       Validation
         .validateWith(distTypeV, minV, maxV, termsV) { (dt, min, max, terms) => (dt, min, max, terms) }
         .flatMap { case (dt, min, max, terms) =>
-          create(dt, raw.percentiles, raw.quantiles, min, max, terms)
+          create(dt, raw.percentiles, raw.quantiles, min, max, terms, ErrorSubject.Request)
         }
-        .toEither.left.map(_.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+        .toEither.left.map(_.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
     }
   )
 
   private def optRefineLong(
     v: Option[Long],
-    field: String
+    location: ErrorLocation
   ): Validation[ValidationError, Option[PositiveLong]] = v match {
-    case Some(l) => ValidationUtil.toValidation(ValidationUtil.refinePositiveLong(l, field)).map(Some(_))
+    case Some(l) => ValidationUtil.toValidation(ValidationUtil.refinePositiveLong(l, location)).map(Some(_))
     case None    => Validation.succeed(None)
   }
 }
@@ -183,7 +183,7 @@ object DistributionTransform {
     JsonDecoder[Raw].mapOrFail {
       case Raw("keep", None, None, None) => Right(Keep)
       case Raw("scaleSeverity", Some(f), None, None) =>
-        ValidationUtil.refineRetentionFactor(f, "factor").map(ScaleSeverity(_))
+        ValidationUtil.refineRetentionFactor(f, ErrorLocation.requestField(FieldName.Factor)).map(ScaleSeverity(_))
           .left.map(_.map(_.message).mkString("; "))
       case Raw("override", None, None, Some(p)) => Right(Override(p))
       case other => Left(s"invalid distribution transform: op '${other.op}' with mismatched fields")
@@ -216,7 +216,7 @@ object RiskLeafTransform {
     * only the simulation-relevant params change, and the result is revalidated
     * through the smart constructor (errors accumulate). */
   def applyTo(t: RiskLeafTransform, leaf: RiskLeaf): Validation[ValidationError, RiskLeaf] = {
-    val fieldPrefix = s"mitigation.leafTransform[${leaf.id.value}]"
+    val subject = ErrorSubject.ExistingNode(leaf.id)
 
     val newProbability: Double = t.likelihood match {
       case LikelihoodTransform.Keep        => leaf.probability
@@ -224,7 +224,7 @@ object RiskLeafTransform {
       case LikelihoodTransform.Override(p) => p
     }
 
-    distributionFields(t.distribution, leaf, fieldPrefix).flatMap {
+    distributionFields(t.distribution, leaf, subject).flatMap {
       case (distType, percentiles, quantiles, minLoss, maxLoss, terms) =>
         RiskLeaf.create(
           id = leaf.id.value,
@@ -236,7 +236,7 @@ object RiskLeafTransform {
           minLoss = minLoss,
           maxLoss = maxLoss,
           parentId = leaf.parentId,
-          fieldPrefix = fieldPrefix,
+          subject = subject,
           terms = terms,
           seedVarId = leaf.seedVarId.value
         )
@@ -262,7 +262,7 @@ object RiskLeafTransform {
   private def distributionFields(
     dt: DistributionTransform,
     leaf: RiskLeaf,
-    fieldPrefix: String
+    subject: ErrorSubject
   ): Validation[ValidationError, DistFields] = dt match {
 
     case DistributionTransform.Keep =>
@@ -282,7 +282,7 @@ object RiskLeafTransform {
               val (newMin, newMax) = scaleSeverityBounds(min, max, f)
               if (!lowerBoundRepresentable(newMin))
                 Validation.fail(ValidationError(
-                  field   = s"$fieldPrefix.minLoss",
+                  location = ErrorLocation.Field(subject, FieldName.MinLoss),
                   code    = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
                   message = ValidationMessages.mitigationLowersMinLossBelowFloor(
                               min, minRepresentableFactor(min))

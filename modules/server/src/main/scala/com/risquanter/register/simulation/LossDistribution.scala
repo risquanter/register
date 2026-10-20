@@ -6,7 +6,7 @@ import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.{Loss, MitigationApplicationRecord, NodeProvenance, TrialId}
 import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt, ValidationMessages}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 
 /** LEC functional interface: the mapping from loss threshold to exceedance probability. */
 trait LECCurve {
@@ -129,16 +129,16 @@ object LossDistribution {
 
   private def layerOverflow(nodeId: NodeId): ValidationError =
     ValidationError(
-      field   = s"mitigatedResult.${nodeId.value}",
-      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = ValidationMessages.aggregatedLossOverflow
+      location = ErrorLocation.nodeField(nodeId, FieldName.MitigatedResult),
+      code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message  = ValidationMessages.aggregatedLossOverflow
     )
 
   private def layerEliminatesRisk(nodeId: NodeId): ValidationError =
     ValidationError(
-      field   = s"mitigatedResult.${nodeId.value}",
-      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = ValidationMessages.mitigationEliminatesRisk
+      location = ErrorLocation.nodeField(nodeId, FieldName.MitigatedResult),
+      code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message  = ValidationMessages.mitigationEliminatesRisk
     )
 
   /** Structural equality over every field; two readings differing only in timestamp are not equal. */

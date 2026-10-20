@@ -256,14 +256,14 @@ object FormInputs:
     val unsetValue = ""
 
     def toValue(sel: ParentSelection): String = sel match
-      case ParentSelection.Root         => rootLabel
-      case ParentSelection.Portfolio(n) => n
-      case ParentSelection.Unset        => unsetValue
+      case ParentSelection.Root     => rootLabel
+      case ParentSelection.Under(n) => n
+      case ParentSelection.Unset    => unsetValue
 
     def fromValue(raw: String): ParentSelection =
       if raw == unsetValue then ParentSelection.Unset
       else if raw == rootLabel then ParentSelection.Root
-      else ParentSelection.Portfolio(raw)
+      else ParentSelection.Under(raw)
 
     def correctedDisplay(sel: ParentSelection, opts: List[String]): String =
       val display = toValue(sel)
@@ -289,7 +289,7 @@ object FormInputs:
         // sequence touching `parentVar`.
         existingNames --> { names =>
           parentVar.now() match
-            case ParentSelection.Portfolio(name) if !names.contains(name) =>
+            case ParentSelection.Under(name) if !names.contains(name) =>
               parentVar.set(ParentSelection.Unset)
             case _ => ()
         }

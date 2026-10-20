@@ -1,43 +1,68 @@
 package app.state
 
+import zio.prelude.Validation
+
+import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
+import com.risquanter.register.domain.errors.{
+  ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
+}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
+
 /** A form's in-progress parent-field selection.
   *
-  * Distinct from the domain-level shape (`Option[String]`, where `None`
-  * means root) because a form needs a third state the domain doesn't:
-  * "nothing chosen yet, and nothing to silently default to." Collapsing that
-  * into `Option[String]` — as the domain correctly does, and as this form
-  * layer used to as well — is what let a system-forced correction and a
-  * genuine, deliberate user choice become indistinguishable by value alone:
-  * both ended up as the same `Option[String]`, with no way to tell "the
-  * system put this here" apart from "the user chose the same thing on
-  * purpose" (see docs/dev/ADR-019 Pattern 6).
+  * The same relationship as `ParentRef`, which is what a submitted node
+  * carries, and deliberately a different type. Two things separate them. The
+  * payload here is `String`, because a `Var` holds what the user is typing and
+  * a refined type cannot represent partially-typed input. And this type has a
+  * third case: `Unset` means nothing has been chosen yet, which a submitted
+  * node cannot express, and which keeps a system-forced correction
+  * distinguishable from a deliberate choice of the same value (ADR-019).
   *
-  * `Unset` is never a valid value to submit — `PortfolioFormState.toDraft`
-  * and `RiskLeafFormState.parentDraft` both fail validation on it, the same
-  * way an empty name does. It exists purely as the explicit "not decided
-  * yet" state a freshly-cleared or freshly-templated form starts in.
+  * `Unset` is never submitted — `toParentRef` refuses it the same way an empty
+  * name is refused.
   */
 enum ParentSelection:
   case Root
-  case Portfolio(name: String)
+  case Under(parent: String)
   case Unset
 
 object ParentSelection:
-  /** A saved node's own parent is always a definite, already-made choice —
-    * never `Unset`. Used when populating a form from a saved leaf/portfolio,
-    * and as the baseline `isFormDirty` compares the live form against.
-    */
-  def fromSaved(parent: Option[String]): ParentSelection =
-    parent match
-      case None       => ParentSelection.Root
-      case Some(name) => ParentSelection.Portfolio(name)
+  /** Every refusal a form produces is about a node with no identifier yet, so
+    * they all name the draft node and differ only in the field. */
+  private val parentLocation: ErrorLocation =
+    ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.ParentName)
 
-  /** `None` only for `Unset` — callers route that to a "Parent is required"
-    * validation error instead of silently defaulting to root or to some
-    * arbitrary existing portfolio.
+  /** A saved node's own parent is always a definite, already-made choice —
+    * never `Unset`. Used when populating a form from a saved leaf or
+    * portfolio, and as the baseline `isFormDirty` compares the live form
+    * against.
     */
-  def toSaved(selection: ParentSelection): Option[Option[String]] =
+  def fromSaved(parent: ParentRef): ParentSelection =
+    parent match
+      case ParentRef.Root          => ParentSelection.Root
+      case ParentRef.Under(name)   => ParentSelection.Under(name.value.toString)
+
+  /** The parent to submit, refined, or the refusal to show under the control.
+    *
+    * This is the one place the parent field crosses from text to a refined
+    * value, so both forms' `toDraft` call it and neither refines a parent of
+    * its own.
+    *
+    * {{{
+    * toParentRef(Under("IT"))  // Success(ParentRef.Under(SafeName("IT")))
+    * toParentRef(Unset)        // Failure — the parent is required
+    * }}}
+    */
+  def toParentRef(selection: ParentSelection): Validation[ValidationError, ParentRef] =
     selection match
-      case ParentSelection.Root         => Some(None)
-      case ParentSelection.Portfolio(n) => Some(Some(n))
-      case ParentSelection.Unset        => None
+      case ParentSelection.Root =>
+        Validation.succeed(ParentRef.Root)
+      case ParentSelection.Under(name) =>
+        toValidation(ValidationUtil.refineName(name, parentLocation)).map(ParentRef.Under(_))
+      case ParentSelection.Unset =>
+        Validation.fail(ValidationError(
+          parentLocation,
+          ValidationErrorCode.REQUIRED_FIELD,
+          ValidationMessages.parentRequired
+        ))

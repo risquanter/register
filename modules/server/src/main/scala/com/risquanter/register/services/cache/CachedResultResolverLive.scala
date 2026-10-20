@@ -11,7 +11,7 @@ import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, R
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
 
@@ -118,9 +118,9 @@ final case class CachedResultResolverLive(
   ): IO[AppError, LossDistribution] =
     ZIO.fromOption(tree.index.nodes.get(nodeId))
       .orElseFail(ValidationFailed(List(ValidationError(
-        field = "nodeId",
+        location = ErrorLocation.nodeField(nodeId, FieldName.Id),
         code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"Node not found in tree index: $nodeId"
+        message = "Node not found in tree index"
       ))))
       .flatMap(node => distributionOf(tree, hashes, cache, node, seedEntityId, records))
 
@@ -151,15 +151,15 @@ final case class CachedResultResolverLive(
           childResults <- ZIO.foreachPar(portfolio.childIds.toList) { childId =>
             ZIO.fromOption(tree.index.nodes.get(childId))
               .orElseFail(ValidationFailed(List(ValidationError(
-                field = s"riskPortfolio.${portfolio.id}.childIds",
+                location = ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds),
                 code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-                message = s"Child node not found in tree index: $childId"
+                message = s"Child node not found in tree index: ${childId.value}"
               ))))
               .flatMap(childNode => distributionOf(tree, hashes, cache, childNode, seedEntityId, records))
           }
           _ <- ZIO.when(childResults.isEmpty) {
             ZIO.fail(ValidationFailed(List(ValidationError(
-              field = s"riskPortfolio.${portfolio.id}.childIds",
+              location = ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds),
               code = ValidationErrorCode.EMPTY_COLLECTION,
               message = ValidationMessages.portfolioHasNoChildren
             ))))
@@ -192,9 +192,9 @@ final case class CachedResultResolverLive(
     for {
       key <- ZIO.fromOption(hashes.get(leaf.id))
         .orElseFail(ValidationFailed(List(ValidationError(
-          field = s"riskLeaf.${leaf.id}",
+          location = ErrorLocation.nodeField(leaf.id, FieldName.ContentHash),
           code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"Leaf not reachable from tree root (no content hash): ${leaf.id}"
+          message = "Leaf not reachable from tree root (no content hash)"
         ))))
       cached <- cache.get(key)
       result <- cached match {

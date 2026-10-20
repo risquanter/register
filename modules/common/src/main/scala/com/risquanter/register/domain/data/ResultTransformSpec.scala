@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationMessages, ValidationUtil}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 
 /**
  * Reified result-stage transform: pure data describing one atomic operation on
@@ -47,7 +47,7 @@ object ResultTransformSpec {
       if (cap > deductible) Validation.succeed(InsurancePolicy(deductible, cap))
       else
         Validation.fail(ValidationError(
-          field = "insurancePolicy.cap",
+          location = ErrorLocation.requestField(FieldName.Cap),
           code = ValidationErrorCode.INVALID_COMBINATION,
           message = ValidationMessages.capMustExceedDeductible
         ))
@@ -88,7 +88,7 @@ object ResultTransformSpec {
     JsonEncoder[RawDeductible].contramap(s => RawDeductible(Op.applyDeductible, s.deductible)),
     JsonDecoder[RawDeductible].mapOrFail { raw =>
       requireOp(Op.applyDeductible, raw.op) {
-        ValidationUtil.refineNonNegativeLong(raw.deductible, "deductible")
+        ValidationUtil.refineNonNegativeLong(raw.deductible, ErrorLocation.requestField(FieldName.Deductible))
           .map(ApplyDeductible(_)).left.map(firstError)
       }
     }
@@ -98,7 +98,7 @@ object ResultTransformSpec {
     JsonEncoder[RawCap].contramap(s => RawCap(Op.capLosses, s.cap)),
     JsonDecoder[RawCap].mapOrFail { raw =>
       requireOp(Op.capLosses, raw.op) {
-        ValidationUtil.refineLossCap(raw.cap, "cap")
+        ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))
           .map(CapLosses(_)).left.map(firstError)
       }
     }
@@ -108,7 +108,7 @@ object ResultTransformSpec {
     JsonEncoder[RawScale].contramap(s => RawScale(Op.scaleLosses, s.factor)),
     JsonDecoder[RawScale].mapOrFail { raw =>
       requireOp(Op.scaleLosses, raw.op) {
-        ValidationUtil.refineRetentionFactor(raw.factor, "factor")
+        ValidationUtil.refineRetentionFactor(raw.factor, ErrorLocation.requestField(FieldName.Factor))
           .map(ScaleLosses(_)).left.map(firstError)
       }
     }
@@ -118,7 +118,7 @@ object ResultTransformSpec {
     JsonEncoder[RawThreshold].contramap(s => RawThreshold(Op.filterBelowThreshold, s.threshold)),
     JsonDecoder[RawThreshold].mapOrFail { raw =>
       requireOp(Op.filterBelowThreshold, raw.op) {
-        ValidationUtil.refineNonNegativeLong(raw.threshold, "threshold")
+        ValidationUtil.refineNonNegativeLong(raw.threshold, ErrorLocation.requestField(FieldName.Threshold))
           .map(FilterBelowThreshold(_)).left.map(firstError)
       }
     }
@@ -128,8 +128,8 @@ object ResultTransformSpec {
     JsonEncoder[RawPolicy].contramap(s => RawPolicy(Op.insurancePolicy, s.deductible, s.cap)),
     JsonDecoder[RawPolicy].mapOrFail { raw =>
       requireOp(Op.insurancePolicy, raw.op) {
-        (ValidationUtil.refineNonNegativeLong(raw.deductible, "deductible"),
-         ValidationUtil.refineLossCap(raw.cap, "cap")) match {
+        (ValidationUtil.refineNonNegativeLong(raw.deductible, ErrorLocation.requestField(FieldName.Deductible)),
+         ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))) match {
           case (Right(d), Right(c)) => InsurancePolicy.create(d, c).toEither.left.map(e => firstError(e.toList))
           case (Left(e1), Left(e2)) => Left(firstError(e1 ++ e2))
           case (Left(e), _)         => Left(firstError(e))

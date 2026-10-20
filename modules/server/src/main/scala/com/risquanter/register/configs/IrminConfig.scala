@@ -6,6 +6,7 @@ import zio.config.magnolia.{DeriveConfig, deriveConfig}
 import java.time.Duration
 import com.risquanter.register.domain.data.iron.{BranchRef, Url}
 import com.risquanter.register.domain.data.iron.Url.*
+import com.risquanter.register.domain.errors.ErrorLocation
 
 /**
   * Configuration for Irmin GraphQL client.
@@ -34,6 +35,10 @@ final case class IrminConfig(
 }
 
 object IrminConfig {
+  /** A configuration value is not a field of any request, and the descriptors
+    * below keep only the message, so a narrower location would reach nothing. */
+  private val configLocation: ErrorLocation = ErrorLocation.Whole
+
   // Url config descriptor — reads a string and validates through Iron URL constraint.
   // IMPORTANT: Exposed as DeriveConfig[Url.Url], NOT Config[Url.Url].
   // A bare `given Config[Url.Url]` in this companion would leak through the
@@ -45,7 +50,7 @@ object IrminConfig {
   private val urlConfig: zio.Config[Url.Url] =
     zio.Config.string.mapOrFail { s =>
       Url
-        .fromString(s, "url")
+        .fromString(s, configLocation)
         .left
         .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
     }
@@ -53,7 +58,7 @@ object IrminConfig {
   private val branchRefConfig: zio.Config[BranchRef] =
     zio.Config.string.mapOrFail { s =>
       BranchRef
-        .fromString(s, "branch")
+        .fromString(s, configLocation)
         .left
         .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
     }

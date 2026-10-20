@@ -1,20 +1,37 @@
 package com.risquanter.register.services.helper
 
-import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 
-/** Boundary-time seedVarId assignment (PLAN-SEED-IDENTITY §5.1).
+/** Assigns a seedVarId to every leaf of a tree that does not already have one.
   *
-  * Pure: `(leaf names, already-fixed IDs, high-water) → (complete ID map, new high-water)`.
-  * Leaves absent from `fixed` receive consecutive IDs in sorted-name order,
-  * starting above `max(highWater, fixed IDs)` — deterministic across recreations
-  * of the same tree, never dependent on `Map` iteration order, and never
-  * colliding with a caller-provided ID. `fixed` carries IDs that must not
-  * change: carried-over assignments on update (immutability, §5.3) and
-  * caller-provided IDs (wired in via the DTOs).
+  * A seedVarId is the number that fixes which stream of random draws a leaf uses
+  * in simulation, so two leaves must never share one. This is a pure function:
+  * leaf names, the seedVarIds already spoken for, and the tree's high-water mark
+  * in; a seedVarId for every leaf plus a new high-water mark out.
   *
-  * The returned high-water is `max(highWater, every ID in the tree)` — it never
-  * decreases, so a deleted leaf's stream ID is never re-issued by auto-assignment.
+  * `fixed` holds the seedVarIds that must not move — those carried over from
+  * leaves an update keeps, because a seedVarId is immutable once assigned, and
+  * those the client supplied for new leaves. Every other leaf is sorted by name
+  * and given consecutive numbers starting above both the high-water mark and the
+  * highest value in `fixed`. Sorting by name rather than relying on map order is
+  * what makes rebuilding the same tree allocate the same numbers, and starting
+  * above `fixed` is what stops auto-assignment colliding with a supplied value.
+  *
+  * {{{
+  * // leaves Fire, Flood and Server outage, the last supplying 42, high-water 0
+  * assign(Seq("Fire", "Flood", "Server outage"), Map("Server outage" -> 42), 0)
+  * // Map("Server outage" -> 42, "Fire" -> 43, "Flood" -> 44), high-water 44
+  * }}}
+  *
+  * The returned high-water mark is the largest seedVarId in the tree and never
+  * decreases, so deleting a leaf does not free its number for reuse — a later
+  * leaf given that number would inherit the deleted risk's cached results.
+  *
+  * Two supplied values that collide with each other, or a supplied value equal to
+  * a carried-over one, are not caught here: `fixed` is keyed by leaf name, so both
+  * entries survive. `RiskTree.fromNodes` runs the distinctness check that refuses
+  * them.
   */
 object SeedVarIdAssigner:
 
@@ -52,7 +69,7 @@ object SeedVarIdAssigner:
 
   private def exhausted(value: Long): ValidationError =
     ValidationError(
-      field = "request.seedVarIds",
+      location = ErrorLocation.requestField(FieldName.SeedVarId),
       code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = s"seedVarId assignment space exhausted: next value $value exceeds the valid range"
+      message = ValidationMessages.seedVarIdAssignmentExhausted(value)
     )

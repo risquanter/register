@@ -3,7 +3,7 @@ package com.risquanter.register.services.workspace
 import zio.*
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, SeedEntityId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, TreeNotInWorkspace, ValidationError, ValidationErrorCode, ValidationFailed}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, TreeNotInWorkspace, ValidationError, ValidationErrorCode, ValidationFailed}
 
 /** Workspace lifecycle service — association/token index.
   *
@@ -133,7 +133,7 @@ object WorkspaceStore:
     */
   def maxTreesReached(limit: Int): AppError =
     ValidationFailed(List(ValidationError(
-      field   = "workspace.trees",
+      location = ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
       code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
       message = ValidationMessages.maxTreesPerWorkspaceReached(limit)
     )))

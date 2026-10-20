@@ -3,10 +3,12 @@ package com.risquanter.register.http.requests
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{
+  ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError, ValidationErrorCode
+}
 
 /** ADR-017 DTO validators for hierarchical risk tree operations. */
 object RiskTreeRequests {
@@ -17,10 +19,89 @@ object RiskTreeRequests {
     case Leaf
   }
 
+  /** A node's parent: the tree's root has none, every other node names one.
+    *
+    * {{{
+    * ParentRef.Root                        // the top portfolio
+    * ParentRef.Under(SafeName("IT"))       // a leaf sitting under "IT"
+    * }}}
+    */
+  enum ParentRef {
+    case Root
+    case Under(parent: SafeName.SafeName)
+  }
+
+  object ParentRef {
+    /** The parent's name, or `None` for the root — for the places that build a
+      * map keyed by parent or look an identifier up by name. */
+    def nameOf(ref: ParentRef): Option[SafeName.SafeName] = ref match
+      case Root           => None
+      case Under(parent)  => Some(parent)
+  }
+
+  /** Where a leaf's seed identifier comes from. Absent in the request means the
+    * server assigns one. */
+  enum SeedVarIdChoice {
+    case ServerAssigns
+    case Provided(seedVarId: SeedVarId.SeedVarId)
+  }
+
+  /** A submitted node's parent together with the subject that names that node
+    * in an error about it.
+    *
+    * The topology checks report against the node whose parent reference is
+    * wrong, so they need both halves and nothing else.
+    *
+    * {{{
+    * // the second submitted portfolio names a parent that does not exist
+    * SubmittedParent(ErrorSubject.NodeAtIndex(SubmittedCollection.Portfolios, 1), ParentRef.Under("Typo"))
+    * }}}
+    */
+  final case class SubmittedParent(subject: ErrorSubject, parent: ParentRef)
+
+  /** A portfolio of the submitted body, refined, with the subject that names it
+    * in any later error.
+    *
+    * {{{
+    * // "portfolios": [ { "name": "IT", "parentName": null } ]
+    * SubmittedPortfolio(ErrorSubject.nodeAtIndex(SubmittedCollection.Portfolios, 0), "IT", ParentRef.Root)
+    * }}}
+    */
+  final case class SubmittedPortfolio(
+    subject: ErrorSubject,
+    name: SafeName.SafeName,
+    parent: ParentRef
+  )
+
+  final case class SubmittedLeaf(
+    subject: ErrorSubject,
+    name: SafeName.SafeName,
+    parent: ParentRef,
+    probability: OccurrenceProbability,
+    distribution: Distribution,
+    seedVarId: SeedVarIdChoice
+  )
+
+  final case class ExistingPortfolio(
+    subject: ErrorSubject,
+    id: SafeId.SafeId,
+    name: SafeName.SafeName,
+    parent: ParentRef
+  )
+
+  final case class ExistingLeaf(
+    subject: ErrorSubject,
+    id: SafeId.SafeId,
+    name: SafeName.SafeName,
+    parent: ParentRef,
+    probability: OccurrenceProbability,
+    distribution: Distribution
+  )
+
   final case class ResolvedNode(
     id: SafeId.SafeId,
     name: SafeName.SafeName,
-    parentName: Option[SafeName.SafeName],
+    parent: ParentRef,
     kind: NodeKind
   )
 
@@ -54,240 +135,216 @@ object RiskTreeRequests {
   def resolveUpdate(req: RiskTreeUpdateRequest, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] =
     RiskTreeUpdateRequest.resolve(req, newId)
 
-  private[requests] def refineParentName(raw: Option[String], field: String): Validation[ValidationError, Option[SafeName.SafeName]] = {
+  /** The single place the wire's absent parent and the domain's named case meet.
+    * A JSON `null`, an absent key and a blank string all mean the root.
+    */
+  private[requests] def refineParentName(raw: Option[String], location: ErrorLocation): Validation[ValidationError, ParentRef] =
     raw.map(_.trim).filter(_.nonEmpty) match {
-      case Some(value) => toValidation(ValidationUtil.refineName(value, field)).map(Some(_))
-      case None => Validation.succeed(None)
+      case Some(value) => toValidation(ValidationUtil.refineName(value, location)).map(ParentRef.Under(_))
+      case None => Validation.succeed(ParentRef.Root)
     }
-  }
 
-  private[requests] def refineNameField(value: String, field: String): Validation[ValidationError, SafeName.SafeName] =
-    toValidation(ValidationUtil.refineName(value, field))
+  private[requests] def refineNameField(value: String, location: ErrorLocation): Validation[ValidationError, SafeName.SafeName] =
+    toValidation(ValidationUtil.refineName(value, location))
 
   private[requests] def refinePortfolioDefs(
     portfolios: Seq[RiskPortfolioDefinitionRequest],
-    baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName])]] =
+    collection: SubmittedCollection
+  ): Validation[ValidationError, Seq[SubmittedPortfolio]] =
     collectAllWithIndex(portfolios) { (p, idx) =>
-      val base = s"$baseLabel[$idx]"
+      val subject = ErrorSubject.nodeAtIndex(collection, idx)
       Validation.validateWith(
-        refineNameField(p.name, s"$base.name"),
-        refineParentName(p.parentName, s"$base.parentName")
-      )((name, parent) => (name, parent))
+        refineNameField(p.name, ErrorLocation.Field(subject, FieldName.Name)),
+        refineParentName(p.parentName, ErrorLocation.Field(subject, FieldName.ParentName))
+      )((name, parent) => SubmittedPortfolio(subject, name, parent))
     }
 
   private[requests] def refineLeafDefs(
     leaves: Seq[RiskLeafDefinitionRequest],
-    baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], OccurrenceProbability, Distribution, Option[SeedVarId.SeedVarId])]] =
+    collection: SubmittedCollection
+  ): Validation[ValidationError, Seq[SubmittedLeaf]] =
     collectAllWithIndex(leaves) { (l, idx) =>
-      val base = s"$baseLabel[$idx]"
+      val subject = ErrorSubject.nodeAtIndex(collection, idx)
       Validation.validateWith(
-        refineNameField(l.name, s"$base.name"),
-        refineParentName(l.parentName, s"$base.parentName"),
-        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, s"$base.probability")),
-        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms),
-        refineSeedVarIdOpt(l.seedVarId, s"$base.seedVarId")
-      )((name, parent, prob, dist, seed) => (name, parent, prob, dist, seed))
+        refineNameField(l.name, ErrorLocation.Field(subject, FieldName.Name)),
+        refineParentName(l.parentName, ErrorLocation.Field(subject, FieldName.ParentName)),
+        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
+        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, subject, terms = l.distributionShape.terms),
+        refineSeedVarIdChoice(l.seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId))
+      )((name, parent, prob, dist, seed) => SubmittedLeaf(subject, name, parent, prob, dist, seed))
     }
 
-  // Optional caller-provided seedVarId on a leaf definition (create; new leaves in update).
-  // Absent means "server assigns" (PLAN-SEED-IDENTITY §5.1); present values are range-refined here.
-  private[requests] def refineSeedVarIdOpt(raw: Option[Long], field: String): Validation[ValidationError, Option[SeedVarId.SeedVarId]] =
+  /** A caller-provided seedVarId on a leaf definition, range-refined. Absent
+    * means the server assigns one. */
+  private[requests] def refineSeedVarIdChoice(raw: Option[Long], location: ErrorLocation): Validation[ValidationError, SeedVarIdChoice] =
     raw match {
-      case Some(value) => toValidation(ValidationUtil.refineSeedVarId(value, field)).map(Some(_))
-      case None => Validation.succeed(None)
+      case Some(value) => toValidation(ValidationUtil.refineSeedVarId(value, location)).map(SeedVarIdChoice.Provided(_))
+      case None => Validation.succeed(SeedVarIdChoice.ServerAssigns)
     }
 
-  // §5.3 immutability: an existing node's seedVarId is never accepted on update —
-  // a mutable seed ID would let an edit silently re-roll the leaf's stochastic stream.
-  private[requests] def requireAbsentSeedVarId(raw: Option[Long], field: String): Validation[ValidationError, Unit] =
+  /** An existing node's seedVarId is never accepted on update: a mutable seed
+    * identifier would let an edit silently re-roll the leaf's stochastic
+    * stream. */
+  private[requests] def requireAbsentSeedVarId(raw: Option[Long], location: ErrorLocation): Validation[ValidationError, Unit] =
     raw match {
-      case Some(_) => Validation.fail(ValidationError(field, ValidationErrorCode.CONSTRAINT_VIOLATION, ValidationMessages.seedVarIdImmutable))
+      case Some(_) => Validation.fail(ValidationError(location, ValidationErrorCode.CONSTRAINT_VIOLATION, ValidationMessages.seedVarIdImmutable))
       case None => Validation.succeed(())
     }
 
   private[requests] def refineExistingPortfolios(
-    portfolios: Seq[RiskPortfolioUpdateRequest],
-    baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])]] =
+    portfolios: Seq[RiskPortfolioUpdateRequest]
+  ): Validation[ValidationError, Seq[ExistingPortfolio]] =
     collectAllWithIndex(portfolios) { (p, idx) =>
-      val base = s"$baseLabel[$idx]"
+      val subject = ErrorSubject.nodeAtIndex(SubmittedCollection.Portfolios, idx)
       Validation.validateWith(
-        toValidation(ValidationUtil.refineId(p.id, s"$base.id")),
-        refineNameField(p.name, s"$base.name"),
-        refineParentName(p.parentName, s"$base.parentName")
-      )((id, name, parent) => (id, name, parent))
+        toValidation(ValidationUtil.refineId(p.id, ErrorLocation.Field(subject, FieldName.Id))),
+        refineNameField(p.name, ErrorLocation.Field(subject, FieldName.Name)),
+        refineParentName(p.parentName, ErrorLocation.Field(subject, FieldName.ParentName))
+      )((id, name, parent) => ExistingPortfolio(ErrorSubject.ExistingNode(NodeId(id)), id, name, parent))
     }
 
   private[requests] def refineExistingLeaves(
-    leaves: Seq[RiskLeafUpdateRequest],
-    baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], OccurrenceProbability, Distribution)]] =
+    leaves: Seq[RiskLeafUpdateRequest]
+  ): Validation[ValidationError, Seq[ExistingLeaf]] =
     collectAllWithIndex(leaves) { (l, idx) =>
-      val base = s"$baseLabel[$idx]"
+      val subject = ErrorSubject.nodeAtIndex(SubmittedCollection.Leaves, idx)
       Validation.validateWith(
-        toValidation(ValidationUtil.refineId(l.id, s"$base.id")),
-        refineNameField(l.name, s"$base.name"),
-        refineParentName(l.parentName, s"$base.parentName"),
-        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, s"$base.probability")),
-        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms),
-        requireAbsentSeedVarId(l.seedVarId, s"$base.seedVarId")
-      )((id, name, parent, prob, dist, _) => (id, name, parent, prob, dist))
+        toValidation(ValidationUtil.refineId(l.id, ErrorLocation.Field(subject, FieldName.Id))),
+        refineNameField(l.name, ErrorLocation.Field(subject, FieldName.Name)),
+        refineParentName(l.parentName, ErrorLocation.Field(subject, FieldName.ParentName)),
+        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
+        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, subject, terms = l.distributionShape.terms),
+        requireAbsentSeedVarId(l.seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId))
+      )((id, name, parent, prob, dist, _) => ExistingLeaf(ErrorSubject.ExistingNode(NodeId(id)), id, name, parent, prob, dist))
     }
 
   // Guard: ensure no node name collides with a reserved FOL query symbol (e.g. "leaf", "p95").
   private[requests] def requireNoReservedNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Unit] = {
     val collisions = allNames.filter(n => FolSymbols.reservedNames.contains(n.value))
     if collisions.nonEmpty then
-      Validation.fail(ValidationError("request.names", ValidationErrorCode.RESERVED_NAME,
-        s"${ValidationMessages.reservedNodeName}: ${collisions.map(_.value).mkString(", ")}"))
+      Validation.fail(ValidationError(
+        ErrorLocation.requestField(FieldName.Name),
+        ValidationErrorCode.RESERVED_NAME,
+        ValidationMessages.reservedNodeNames(collisions.map(_.value.toString))
+      ))
     else Validation.succeed(())
   }
 
-  // Guard: ensure names are unique across all nodes so parent references are unambiguous; returns the deduped set.
-  // Which names count as repeated is decided by SafeName.duplicates, the one
-  // definition shared with RiskTree.fromNodes and the scenario merge name scan;
-  // this boundary contributes only the field path and the message.
-  private[requests] def requireUniqueNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Set[SafeName.SafeName]] =
-    SafeName.duplicates(allNames) match
-      case Nil  => Validation.succeed(allNames.toSet)
-      case dups =>
-        Validation.fail(ValidationError("request.names", ValidationErrorCode.AMBIGUOUS_REFERENCE, s"Duplicate names: ${dups.map(_.value).mkString(", ")}"))
-
-  // Guard: provided seedVarIds must be unique across all nodes of one tree
-  // (PLAN-SEED-IDENTITY.md §5.1 — scope is per-tree, deliberately not workspace-wide:
-  // scenario branches share seed IDs for common random numbers).
-  // The rule itself is defined once on the SeedVarId companion; this boundary
-  // layer contributes only the request-scoped field path.
-  private[requests] def requireUniqueSeedVarIds(
-    provided: Seq[(SafeName.SafeName, SeedVarId.SeedVarId)]
-  ): Validation[ValidationError, Unit] =
-    SeedVarId.requireDistinct(
-      provided.map { case (name, id) => name.value -> id },
-      field = "request.seedVarIds"
-    )
-
-  // Guard: pick exactly one root (prefer a portfolio root when any portfolios exist; otherwise allow lone leaf tree).
+  // Guard: pick exactly one root (a portfolio root when any portfolios exist; otherwise a lone leaf tree).
   private[requests] def requireSingleRoot(
-    portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    labelPrefix: String
+    nodes: Seq[(SafeName.SafeName, ParentRef)]
   ): Validation[ValidationError, SafeName.SafeName] = {
-    val portfolioRoots = portfolios.collect { case (name, None) => name }
-    val leafRoots = leaves.collect { case (name, None) => name }
-
-    val roots =  portfolioRoots ++leafRoots
+    val roots = nodes.collect { case (name, ParentRef.Root) => name }
 
     roots match {
-      case Seq() => Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
+      case Seq()     => Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.RootId), ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.exactlyOneRootRequired))
       case Seq(root) => Validation.succeed(root)
-      case _ => Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
+      case _         => Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.RootId), ValidationErrorCode.AMBIGUOUS_REFERENCE, ValidationMessages.multipleRootsFound))
     }
   }
 
   // Guard: leaves must point to portfolios as parents (unless lone leaf tree) and must exist.
   private[requests] def requireLeafParents(
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    leaves: Seq[SubmittedParent],
     portfolioNames: Set[SafeName.SafeName],
     allNameSet: Set[SafeName.SafeName],
-    totalNodes: Int,
-    labelPrefix: String
+    totalNodes: Int
   ): Validation[ValidationError, Unit] =
-    collectAllWithIndex(leaves) { (l, idx) =>
-      l._2 match {
-        case Some(parentName) if portfolioNames.contains(parentName) => Validation.succeed(())
-        case Some(parentName) if allNameSet.contains(parentName) => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.INVALID_NODE_TYPE, s"parentName '${parentName.value}' refers to a leaf; must reference a portfolio"))
-        case Some(parentName) => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parentName.value}' not found in portfolios"))
-        case None if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
-        case None => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.REQUIRED_FIELD, "leaf must have a parent portfolio"))
+    Validation.validateAll(leaves.map { l =>
+      val location = ErrorLocation.Field(l.subject, FieldName.ParentName)
+      l.parent match {
+        case ParentRef.Under(parent) if portfolioNames.contains(parent) => Validation.succeed(())
+        case ParentRef.Under(parent) if allNameSet.contains(parent) =>
+          Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.parentNameIsLeaf(parent.value.toString)))
+        case ParentRef.Under(parent) =>
+          Validation.fail(ValidationError(location, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.parentNameNotFound(parent.value.toString)))
+        case ParentRef.Root if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
+        case ParentRef.Root =>
+          Validation.fail(ValidationError(location, ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.leafNeedsPortfolioParent))
       }
-    }.map(_ => ())
+    }).as(())
 
   // Guard: portfolios must point to portfolios in the provided set (or be root).
-  private[requests] def requirePortfolioParents[A](
-    portfolios: Seq[A],
-    portfolioNames: Set[SafeName.SafeName],
-    labelPrefix: String,
-    parentOf: A => Option[SafeName.SafeName]
+  private[requests] def requirePortfolioParents(
+    portfolios: Seq[SubmittedParent],
+    portfolioNames: Set[SafeName.SafeName]
   ): Validation[ValidationError, Unit] =
-    collectAllWithIndex(portfolios) { (p, idx) =>
-      parentOf(p) match {
-        case Some(parent) if portfolioNames.contains(parent) => Validation.succeed(())
-        case Some(parent) => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parent.value}' not found in portfolios"))
-        case None => Validation.succeed(())
+    Validation.validateAll(portfolios.map { p =>
+      p.parent match {
+        case ParentRef.Under(parent) if portfolioNames.contains(parent) => Validation.succeed(())
+        case ParentRef.Under(parent) =>
+          Validation.fail(ValidationError(
+            ErrorLocation.Field(p.subject, FieldName.ParentName),
+            ValidationErrorCode.MISSING_REFERENCE,
+            ValidationMessages.parentNameNotFound(parent.value.toString)
+          ))
+        case ParentRef.Root => Validation.succeed(())
       }
-    }.map(_ => ())
+    }).as(())
 
   private[requests] def validateTopologyCreate(
     treeName: SafeName.SafeName,
-    portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
+    portfolios: Seq[SubmittedPortfolio],
+    leaves: Seq[SubmittedLeaf]
   ): Validation[ValidationError, SafeName.SafeName] = {
-    val allNames = portfolios.map(_._1) ++ leaves.map(_._1)
-    val portfolioNames = portfolios.map(_._1).toSet
+    val allNames = portfolios.map(_.name) ++ leaves.map(_.name)
+    val portfolioNames = portfolios.map(_.name).toSet
     val totalNodes = portfolios.size + leaves.size
 
     for {
       _ <- requireNoReservedNames(allNames)
-      allNameSet <- requireUniqueNames(allNames)
-      root <- requireSingleRoot(portfolios, leaves, "request.portfolios")
-      _ <- requireLeafParents(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
-      _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._2)
-      _ <- requireNoCycles(portfolios ++ leaves, "request")
+      allNameSet <- SafeName.requireDistinct(allNames, ErrorLocation.requestField(FieldName.Name)).map(_ => allNames.toSet)
+      root <- requireSingleRoot(portfolios.map(p => p.name -> p.parent) ++ leaves.map(l => l.name -> l.parent))
+      _ <- requireLeafParents(leaves.map(l => SubmittedParent(l.subject, l.parent)), portfolioNames, allNameSet, totalNodes)
+      _ <- requirePortfolioParents(portfolios.map(p => SubmittedParent(p.subject, p.parent)), portfolioNames)
+      _ <- requireNoCycles(portfolios.map(p => p.name -> p.parent) ++ leaves.map(l => l.name -> l.parent))
       _ <- requireNonEmptyPortfolios(
-        portfolioNames = portfolios.map(_._1),
-        portfolioParents = portfolios.map(_._2),
-        leafParents = leaves.map(_._2),
-        labelPrefix = "request.portfolios"
+        portfolioNames = portfolios.map(_.name),
+        portfolioParents = portfolios.map(_.parent),
+        leafParents = leaves.map(_.parent)
       )
     } yield root
   }
 
   private[requests] def validateTopologyUpdate(
     treeName: SafeName.SafeName,
-    portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newLeaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
+    portfolios: Seq[ExistingPortfolio],
+    leaves: Seq[ExistingLeaf],
+    newPortfolios: Seq[SubmittedPortfolio],
+    newLeaves: Seq[SubmittedLeaf]
   ): Validation[ValidationError, SafeName.SafeName] = {
-    val portNames = portfolios.map(_._2) ++ newPortfolios.map(_._1)
-    val leafNames = leaves.map(_._1) ++ newLeaves.map(_._1)
+    val portNames = portfolios.map(_.name) ++ newPortfolios.map(_.name)
+    val leafNames = leaves.map(_.name) ++ newLeaves.map(_.name)
     val allNames = portNames ++ leafNames
     val portfolioNames = portNames.toSet
     val totalNodes = portfolios.size + newPortfolios.size + leaves.size + newLeaves.size
 
+    val allParents =
+      portfolios.map(p => p.name -> p.parent) ++ leaves.map(l => l.name -> l.parent) ++
+      newPortfolios.map(p => p.name -> p.parent) ++ newLeaves.map(l => l.name -> l.parent)
+
     for {
       _ <- requireNoReservedNames(allNames)
-      allNameSet <- requireUniqueNames(allNames)
-      root <- requireSingleRoot(
-        portfolios = portfolios.map(p => p._2 -> p._3) ++ newPortfolios.map(p => p._1 -> p._2),
-        leaves = leaves.map(l => l._1 -> l._2) ++ newLeaves.map(l => l._1 -> l._2),
-        labelPrefix = "request.portfolios"
-      )
-      _ <- requireLeafParents(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
-      _ <- requireLeafParents(newLeaves, portfolioNames, allNameSet, totalNodes, "request.newLeaves")
-      _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._3)
-      _ <- requirePortfolioParents(newPortfolios, portfolioNames, "request.newPortfolios", _._2)
-      _ <- requireNoCycles(
-        parents = (portfolios.map(p => p._2 -> p._3) ++ leaves.map(l => l._1 -> l._2) ++ newPortfolios.map(p => p._1 -> p._2) ++ newLeaves.map(l => l._1 -> l._2)),
-        labelPrefix = "request"
-      )
+      allNameSet <- SafeName.requireDistinct(allNames, ErrorLocation.requestField(FieldName.Name)).map(_ => allNames.toSet)
+      root <- requireSingleRoot(allParents)
+      _ <- requireLeafParents(leaves.map(l => SubmittedParent(l.subject, l.parent)), portfolioNames, allNameSet, totalNodes)
+      _ <- requireLeafParents(newLeaves.map(l => SubmittedParent(l.subject, l.parent)), portfolioNames, allNameSet, totalNodes)
+      _ <- requirePortfolioParents(portfolios.map(p => SubmittedParent(p.subject, p.parent)), portfolioNames)
+      _ <- requirePortfolioParents(newPortfolios.map(p => SubmittedParent(p.subject, p.parent)), portfolioNames)
+      _ <- requireNoCycles(allParents)
       _ <- requireNonEmptyPortfolios(
         portfolioNames = portNames,
-        portfolioParents = portfolios.map(_._3) ++ newPortfolios.map(_._2),
-        leafParents = leaves.map(_._2) ++ newLeaves.map(_._2),
-        labelPrefix = "request.portfolios"
+        portfolioParents = portfolios.map(_.parent) ++ newPortfolios.map(_.parent),
+        leafParents = leaves.map(_.parent) ++ newLeaves.map(_.parent)
       )
     } yield root
   }
 
   // Guard: prevent cycles in a topology described by name -> parent pairs.
   private[requests] def requireNoCycles(
-    parents: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    labelPrefix: String
+    parents: Seq[(SafeName.SafeName, ParentRef)]
   ): Validation[ValidationError, Unit] = {
-    val parentMap = parents.flatMap { case (name, parent) => parent.map(name -> _) }.toMap
+    val parentMap = parents.flatMap { case (name, parent) => ParentRef.nameOf(parent).map(name -> _) }.toMap
 
     def isCycle(name: SafeName.SafeName, seen: Set[SafeName.SafeName]): Boolean = parentMap.get(name) match {
       case Some(p) if seen.contains(p) => true
@@ -296,7 +353,11 @@ object RiskTreeRequests {
     }
 
     parentMap.keys.find(n => isCycle(n, Set(n))) match {
-      case Some(cycle) => Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.CONSTRAINT_VIOLATION, s"Cycle detected at node '${cycle.value}'"))
+      case Some(cycle) => Validation.fail(ValidationError(
+        ErrorLocation.requestField(FieldName.ParentName),
+        ValidationErrorCode.CONSTRAINT_VIOLATION,
+        ValidationMessages.cycleDetected(cycle.value.toString)
+      ))
       case None => Validation.succeed(())
     }
   }
@@ -341,16 +402,19 @@ object RiskTreeRequests {
     */
   private[requests] def requireNonEmptyPortfolios(
     portfolioNames: Seq[SafeName.SafeName],
-    portfolioParents: Seq[Option[SafeName.SafeName]],
-    leafParents: Seq[Option[SafeName.SafeName]],
-    labelPrefix: String
+    portfolioParents: Seq[ParentRef],
+    leafParents: Seq[ParentRef]
   ): Validation[ValidationError, Unit] = {
-    val childParents = (portfolioParents.flatten ++ leafParents.flatten)
+    val childParents = (portfolioParents.flatMap(ParentRef.nameOf) ++ leafParents.flatMap(ParentRef.nameOf))
       .groupBy(identity).view.mapValues(_.size).toMap
     val emptyParents = portfolioNames.filterNot(childParents.contains)
 
     if emptyParents.nonEmpty then
-      Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.EMPTY_COLLECTION, s"Every portfolio must have at least one child: ${emptyParents.map(_.value).mkString(", ")}"))
+      Validation.fail(ValidationError(
+        ErrorLocation.requestField(FieldName.ChildIds),
+        ValidationErrorCode.EMPTY_COLLECTION,
+        ValidationMessages.portfoliosWithoutChildren(emptyParents.map(_.value.toString))
+      ))
     else Validation.succeed(())
   }
 

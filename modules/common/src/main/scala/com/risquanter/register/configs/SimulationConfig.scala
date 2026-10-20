@@ -2,10 +2,9 @@ package com.risquanter.register.configs
 
 import zio.Config
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
-import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.domain.data.iron.ValidationUtil
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /** Simulation execution configuration.
   *
@@ -41,7 +40,7 @@ object SimulationConfig {
 
   private val positiveIntConfig: Config[PositiveInt] =
     deriveConfig[Int].mapOrFail { value =>
-      ValidationUtil.refinePositiveInt(value).left.map(errorsToString)
+      ValidationUtil.refinePositiveInt(value, ErrorLocation.Whole).left.map(errorsToString)
     }
 
   given DeriveConfig[PositiveInt] = DeriveConfig(positiveIntConfig)

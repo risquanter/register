@@ -1285,20 +1285,25 @@ phase rather than part of the boundary work.
   */
 @jsonDiscriminator("kind")
 enum ErrorLocation:
-  /** A path into the request body, as the form layer resolves it. */
-  case RequestField(path: FieldPath.FieldPath)
+  /** A field of the request body. */
+  case RequestField(field: RequestFieldName)
 
-  /** An HTTP request header, named by the header itself. `name` is not refined:
-    * this application names three header literals, and a refinement would
-    * encode an HTTP grammar nothing else here needs. */
-  case RequestHeader(name: String)
+  /** A field of a submitted distribution. The same field names occur under two
+    * contexts — a form's draft leaf and a request body — so the context is a
+    * component rather than a prefix spelled into a name. */
+  case DistributionField(context: DistributionContext, field: DistributionFieldName)
 
-  /** A node of the tree the request is about. It carries no `TreeId`: the tree
-    * is named once on `WireError.ValidationRejected`, and on the creation path
-    * no tree identifier exists yet — the request body carries none and
+  /** An HTTP request header. A closed set rather than a name, so no spelling
+    * a client never supplied can reach the wire as free text. */
+  case RequestHeader(header: RequestHeaderName)
+
+  /** A node of the tree the request is about, and which aspect of it failed. It
+    * carries no `TreeId`: the tree is named once on
+    * `WireError.ValidationRejected`, and on the creation path no tree
+    * identifier exists yet — the request body carries none and
     * `ResolvedCreate` produces none, so one here would be unsatisfiable
     * (`EWB-D-28`). */
-  case Node(nodeId: NodeId)
+  case Node(nodeId: NodeId, aspect: NodeAspect)
 
   /** The failure is about the request as a whole, with no narrower location. */
   case Request
@@ -1311,42 +1316,172 @@ The `kind` discriminator is this plan's own rule for a payload carried inside a
 body, stated in §3: the inner payload enumerations "are encoded as part of a
 body, so each keeps its `kind` discriminator."
 
-**One Iron refinement, not two.** `FieldPathConstraint` is added to
-`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`,
-beside `SafeNameConstraint` and `BranchRefConstraint`:
+**`RequestHeaderName`**, declared in the same file, because `ErrorLocation` is
+the type that owns the set (ADR-037 §1):
 
 ```scala
-type FieldPathConstraint =
-  Not[Blank] & MaxLength[200] &
-  Match["^[a-z][a-zA-Z0-9]*(\\[[0-9]{1,3}\\])?(\\.[a-z][a-zA-Z0-9]*(\\[[0-9]{1,3}\\])?)*$"]
-type FieldPathStr = String :| FieldPathConstraint
+/** The request headers this application declares. Each spelling is declared
+  * rather than derived from the case name, because the string is a contract
+  * with HTTP rather than with the encoder, so a Scala rename must not reach it
+  * (ADR-037 §2).
+  */
+@jsonDiscriminator("kind")
+enum RequestHeaderName(val wireName: String):
+  case UserId  extends RequestHeaderName("x-user-id")
+  case Branch  extends RequestHeaderName("X-Branch")
+  case IfMatch extends RequestHeaderName("If-Match")
 
-object FieldPath:
-  opaque type FieldPath = FieldPathStr
-  object FieldPath:
-    def fromString(s: String, fieldPath: String): Either[List[ValidationError], FieldPath] = ???
-  extension (p: FieldPath) def value: String = p
+object RequestHeaderName:
+  given codec: JsonCodec[RequestHeaderName] = DeriveJsonCodec.gen[RequestHeaderName]
 ```
 
-The alphabet comes from the 29 distinct values the codebase passes as `field`
-today; all of them match except `X-Branch`, which is a header name and takes
-`RequestHeader`. `MaxLength[200]` bounds a value this application generates and
-no caller supplies, so it only has to be finite — the longest real value is 25
-characters. The three-digit index bound covers the largest collection the
-10 000-node tree ceiling permits.
+The set is closed by this application's own endpoint definitions, which declare
+exactly three request headers: `x-user-id` on `authedBaseEndpoint` and on
+`bootstrapWorkspaceEndpoint`, `X-Branch` on `BaseEndpoint.activeBranchHeader`,
+and `If-Match` on the scenario delete endpoint. A client cannot widen it,
+because Tapir reports a decode failure against a declared input and the name
+therefore comes from the endpoint definition rather than from the request.
 
-A second refinement for workspace-relative storage paths is **not** in this
-phase. Its only consumer would have been an `ErrorLocation` case for a storage
-path, and no such case survives; the type that holds such a path as a raw
-`String` is `MergeConflictPath`, which Phase 6 step 2 already opens
-(`EWB-D-24`).
+An enum is what closes this slot, not a refinement. A character-class
+refinement would bound the alphabet of a name still written as free text; the
+enum removes the name from the wire and leaves the serialised form derived from
+a case this repository declares. With it, no `ErrorLocation` case carries free
+text at all.
+
+**The locations are enums, not a refined string.** An earlier draft of this
+section bounded the location with an Iron refinement over a `String`. That was
+wrong, and the reason it was wrong is visible in the consumers: the browser
+routes an error to its form control by matching substrings of the path, and
+falls through to a generic banner when none matches.
+
+```scala
+  private def fieldForShapeError(field: String): Option[RiskLeafField] =
+    if field.contains("percentiles") then Some(RiskLeafField.Percentiles)
+    else if field.contains("quantiles") then Some(RiskLeafField.Quantiles)
+    else if field.contains("minLoss") then Some(RiskLeafField.MinLoss)
+    else if field.contains("maxLoss") then Some(RiskLeafField.MaxLoss)
+    else if field.contains("terms") then Some(RiskLeafField.Terms)
+    else None
+```
+
+`RiskLeafField` and `PortfolioField` are already enums, so the location was the
+one untyped link in a chain typed at both ends. A refinement bounds the
+alphabet and leaves that function exactly as it is. An enum deletes it: each
+case maps to its control, and a location added later is a compile error at the
+form instead of an error silently shown as a banner. The set is fixed and
+known, so it is an enum in its owner's companion (ADR-037 §1).
+
+All three enums are declared in `ErrorLocation.scala`, because `ErrorLocation`
+is the type that owns the sets.
+
+```scala
+/** A field of the request body, named rather than spelled. */
+@jsonDiscriminator("kind")
+enum RequestFieldName:
+  case Name, Id, Branch, Scenario, TreeId, At, Source, ToCommit, Request
+  case Mitigations, NodeId, NodeIds, Nodes, RootId, SeedVarHighWater
+  case NodeName, NodeSeedVarId, TreeNames
+  case WorkspaceTrees, WorkspaceSeedEntityId
+  case InsurancePolicyCap, TargetingPredicateSource
+
+/** Which submitted distribution a field belongs to. The same field names occur
+  * under both, which is why this is a component and not a name prefix. */
+@jsonDiscriminator("kind")
+enum DistributionContext:
+  case Leaf, Request
+
+/** A field of a submitted distribution. `PercentileAt` and `QuantileAt` carry
+  * the element index as an `Int` rather than as `[3]` inside text, and their
+  * index-less siblings are the whole-collection failures — a monotonicity
+  * violation names the collection, not an element. */
+@jsonDiscriminator("kind")
+enum DistributionFieldName:
+  case DistributionType, MinLoss, MaxLoss, Terms
+  case ExpertParams, LognormalParams, MetalogFit, LognormalFit
+  case Percentiles, Quantiles
+  case PercentileAt(index: NonNegativeInt)
+  case QuantileAt(index: NonNegativeInt)
+
+/** Which aspect of a node failed. Not confined to a submitted field: an
+  * aggregated loss, a content hash and a mitigated result are computed, and
+  * naming them is what tells a reader where to look. */
+@jsonDiscriminator("kind")
+enum NodeAspect:
+  case ParentId, ChildIds, SeedVarId
+  case AggregatedLoss, ContentHash, MitigatedResult
+```
+
+`NonNegativeInt` is `Int :| GreaterEqual[0]` and already exists in
+`OpaqueTypes.scala`. No upper bound is stated, because the index names an
+element of a collection the request already bounds.
+
+**Where the node identifier goes.** Thirteen sites spell a node identifier into
+the path today. The identifier moves into `Node`'s own `nodeId` and what remains
+is the aspect, so no location carries an identifier as text.
+
+| Today | `nodeId` | `aspect` |
+|---|---|---|
+| `nodes[<id>].parentId` | that node | `ParentId` |
+| `nodes[<id>].childIds` | that node | `ChildIds` |
+| `riskLeaf.<id>.metalogFit` | the leaf | `MetalogFit` |
+| `riskLeaf.<id>.lognormalFit` | the leaf | `LognormalFit` |
+| `riskLeaf.<id>.expertParams` | the leaf | `ExpertParams` |
+| `riskLeaf.<id>.lognormalParams` | the leaf | `LognormalParams` |
+| `riskLeaf.<id>.distributionType` | the leaf | `DistributionType` |
+| `riskPortfolio.<id>.childIds` | the portfolio | `ChildIds` |
+| `riskPortfolio.<id>` | the portfolio | `AggregatedLoss` |
+| `riskLeaf.<id>` | the leaf | `ContentHash` |
+| `mitigatedResult.<id>` | that node | `MitigatedResult` |
+
+`riskLeaf` and `riskPortfolio` leave the location because the node's own type
+says which it is. `mitigatedResult` moves from prefix to aspect, because it
+names what failed rather than what it failed on. `AggregatedLoss` and
+`ContentHash` are named here for the first time: each is taken from the message
+beside it, which already says "aggregated loss overflow" and "no content hash".
+
+Four `DistributionFieldName` cases take their names from the same path under
+either context, so `leaf.percentiles[3]` and `request.percentiles[3]` become
+`DistributionField(Leaf, PercentileAt(3))` and
+`DistributionField(Request, PercentileAt(3))`.
+
+**A missing case is corrected without asking.** This enumeration is derived
+from the locations the code names today, and a first pass over thirty-odd cases
+can miss one — a path assembled in a branch no sweep read, or a case only a
+test reaches. Adding the case, and the arm it needs at every match, is
+mechanical work and is done as part of the phase. It is not a deviation to
+present, and it is not a decision. What stays a decision is a location that
+needs a shape these four enums cannot express.
+
+**No storage-path refinement.** A second refinement for workspace-relative
+storage paths is not in this phase. Its only consumer would have been an
+`ErrorLocation` case for a storage path, and no such case survives; the type
+that holds such a path as a raw `String` is `MergeConflictPath`, which Phase 6
+step 2 already opens (`EWB-D-24`).
 
 **The decode-failure handler's mapping.** `WireDecodeFailureHandler.fieldName`
-returns an `ErrorLocation` instead of a `String`. A header takes its own name;
-anything else takes its input's name when that name refines as a field path, and
-`Request` otherwise. Tapir's `show` rendering is no longer available as a
-fallback, because strings like `query parameter q` contain spaces and no field
-path admits them.
+returns an `ErrorLocation` instead of a `String`. It matches on three kinds of
+endpoint input today:
+
+```scala
+  private def fieldName(input: EndpointInput[?]): String =
+    input match
+      case EndpointIO.Header(name, _, _)        => name
+      case EndpointIO.FixedHeader(header, _, _) => header.name
+      case other                                => other.show
+```
+
+Each branch takes a different destination:
+
+- `EndpointIO.Header` is a header this application declared, so it maps to
+  `RequestHeader` with the matching `RequestHeaderName` case.
+- `EndpointIO.FixedHeader` is a header Tapir pins itself rather than one this
+  application declares, `Content-Type` being the realistic one. Its name is
+  outside the enum, and its failure is about the request as a whole rather than
+  a field a client can correct, so it maps to `Request`.
+- Anything else maps to the `RequestFieldName` case for the input's own name,
+  and to `Request` when the input is not one the enum names. Tapir's `show`
+  rendering is no longer used, because a rendering like `query parameter q` is
+  a sentence about an input rather than a name for one.
 
 ### 6.5 Deletions from `AppError.scala`
 
@@ -1976,14 +2111,20 @@ one per level, and one that the line carries the failure's annotations plus the
 same trace the response names. The two store-spec cases that pinned the old
 store-level line are removed, because the behaviour moved rather than going away.
 
-**Phase 3 — typed locations and the content-rejection split.** `ErrorLocation`
-and `FieldPathConstraint` (§6.4); `ValidationError.location`; the two wire cases
+**Phase 3 — typed locations and the content-rejection split.** `ErrorLocation`,
+`RequestFieldName`, `DistributionContext`, `DistributionFieldName`, `NodeAspect`
+and `RequestHeaderName` (§6.4); `ValidationError.location`; the two wire cases
 `RequestRejected` and `ValidationRejected` with `RejectionDetail` absorbing
 `QueryRejected` (§3.5, `EWB-D-28`), and the `oneOf` statuses that go with them.
-Every construction site of `ValidationError` in `common`, and the three readers
-of its location in `app`: `RiskLeafFormView.scala`, `PortfolioFormView.scala`
-and `FormSubmitUtil.scala`, which cannot keep compiling once the member is
-renamed because `ValidationError` is cross-compiled. `GlobalError.fromWireError`
+Every construction site of `ValidationError`, which is not confined to
+`common`: the type is cross-compiled, so renaming the member breaks every module
+at once. Fourteen files under `common/main` construct one, twenty under
+`server/main` and two under `app/main`, with five more across the test sources.
+The compiler enumerates them and `§13` states how that list is produced rather
+than assembling it here. Three of the `app` files read the location rather than
+building one — `RiskLeafFormView.scala`, `PortfolioFormView.scala` and
+`FormSubmitUtil.scala` — and those are the sites where the substring matching in
+`fieldForShapeError` and `formFieldFor` becomes an exhaustive match. `GlobalError.fromWireError`
 loses its `QueryRejected` arm and reads `RejectionDetail` instead.
 
 `TreeScope` and the third parameter on `fromAppError` (§5.1), the matching
@@ -2011,6 +2152,17 @@ sites §7.1 names: the case declaration, the projection arm a refused query take
 the render arm in `ErrorBanner.scala` and the assertion in
 `GlobalErrorSpec.scala`. The internal `AccessDenied` and `WorkspaceExpired`
 keep their names and their renamed imports, for the reason §5.1 records.
+
+**Phase 3b — the refusal itself becomes a typed case.** `EWB-D-38`. `FieldProblem`
+replaces `ValidationError.message: String`, declared in `ErrorLocation.scala`
+beside the other closed sets a `ValidationError` is made of.
+`ValidationErrorCode` is no longer stored on a `ValidationError` and is derived
+by `FieldProblem.code`; `ValidationMessages` becomes the single `render`
+function over the cases. 152 construction sites and 65 message templates, and a
+change to the wire shape of a validation error, so ADR-017 and ADR-038 are both
+re-reviewed for it. **Gated on Phase 3 being green**, because it changes the
+shape of the argument Phase 3 is currently changing the value of, and no work on
+it starts before then.
 
 **Phase 4 — typed load problems and the rename.** `TreeLoadProblem` replacing
 `TreeLoadFailure.reason: String`; `SimError` renamed to `DomainError`.
@@ -2120,6 +2272,135 @@ declaration is deleted rather than typed.
 
 Every step ends with the whole suite green, and the phase takes one PATCH bump at
 its end, as the other phases do.
+
+**Phase 7 — the storage trust boundary.** ADR-039 states that a value entering
+process memory from outside is refined at the border, and that an ingress
+rejection is a typed failure rather than a transport fault. The Irmin store and
+the Postgres database are two such borders, and the error channel across both
+collapses to a string today. Joining this plan rather than becoming a separate
+one, for the reason Phase 6 gives: these are the error-path files this plan
+already opens, and a boundary migrated halfway is worse than one not started.
+
+It is last because Phase 3 gives it `ErrorLocation` and `ErrorSubject` to name a
+rejected value with, and Phase 4's rename opens every file that names an
+internal error. Phase 3's own pass over `RiskNode.scala` and `RiskTree.scala`
+stays mechanical — `field` becomes `location` and nothing else — because the
+decode change in step 3 below needs the repository side to move in the same
+step.
+
+Five steps.
+
+1. **The ingress rejection becomes a type.** Added to `AppError.scala`:
+
+```scala
+/** Which border a rejected value crossed. */
+enum TrustBoundary:
+  case Store, Database, Authorization
+
+/** Content an external system returned that this service refuses.
+  *
+  * Distinct from a transport failure at the same border: a peer that cannot be
+  * reached is retried or reported as an outage, and content that does not
+  * refine never succeeds on retry (ADR-039).
+  */
+case class IngressRejected(
+  boundary: TrustBoundary,
+  subject:  ErrorSubject,
+  errors:   List[ValidationError]
+) extends DomainError:
+  override def logMessage: String =
+    s"${boundary.toString} returned a value this service refuses: " +
+      errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")
+  override def origin: FailureOrigin = FailureOrigin.Service
+```
+
+   `subject` reuses Phase 3's enum rather than naming a storage path, which is
+   what keeps the "no storage-path refinement" ruling of §6.4 intact: a stored
+   value is a node, a mitigation or a tree, and `ErrorSubject` already says so.
+   `fromAppError` gains one arm projecting it to `InternalFault`, on the same
+   grounds as `RepositoryFailure`: a store this service wrote is not the
+   caller's doing and the caller can act on nothing.
+
+2. **`handleIrmin` is deleted.** `IrminError` already extends `AppError`, and the
+   repository's methods already declare `IO[AppError, A]`, so every call it
+   wraps type-checks without it. The wrapper is therefore pure loss: it maps
+   seven typed cases onto `RepositoryFailure(String)`, and §5.1's own table
+   sends the Irmin cases to `DependencyUnavailable` at `503` while
+   `RepositoryFailure` goes to `InternalFault` at `500`. An Irmin outage during
+   a tree read is reported as an internal fault today for no reason other than
+   this function. Deleting it and inlining its call sites restores the status
+   the projection already specifies. File:
+   `repositories/RiskTreeRepositoryIrmin.scala`.
+
+3. **A stored value keeps its validation structure.** `RiskLeaf` and
+   `RiskPortfolio` gain a decode that returns the accumulated errors, and the
+   derived `JsonDecoder` is defined in terms of it so there is one parse rather
+   than two:
+
+```scala
+object RiskLeaf:
+  def decodeValidated(json: String): Either[List[ValidationError], RiskLeaf]
+
+object RiskPortfolio:
+  def decodeValidated(json: String): Either[List[ValidationError], RiskPortfolio]
+```
+
+   A string that is not the expected JSON shape yields one `ValidationError` at
+   `ErrorLocation.Whole` with `INVALID_FORMAT`, so a parse failure and a
+   refinement failure have one shape and the caller is not made to distinguish
+   them. The flattening in the `given decoder` is what `zio-json`'s `mapOrFail`
+   forces — its function returns `Either[String, A]` — so the storage path stops
+   going through `JsonDecoder` and calls `decodeValidated` directly. The
+   repository's `decodeNode`, `decodeMeta`, `decodeMitigation` and `rebuildTree`
+   then fail with `IngressRejected` carrying the list, instead of interpolating
+   it into a sentence. Files: `domain/data/RiskNode.scala`,
+   `domain/data/RiskTree.scala`, `domain/data/Mitigation.scala`,
+   `repositories/RiskTreeRepositoryIrmin.scala`.
+
+4. **The database classifies once, from a code rather than from prose.**
+   `WorkspaceStorePostgres.db` maps every driver failure to
+   `RepositoryFailure(getMessage)`, and one caller then recovers a decision from
+   that text with `reason.contains("seed_entity_id")`, dying on the arm that
+   does not match. The classification moves into the helper and reads the
+   driver's `SQLState`, which is a standard code and not a sentence:
+
+```scala
+private def classify(err: Throwable): AppError
+```
+
+   `23505` is the unique-violation state. Which unique constraint was violated
+   decides whether the result is the duplicate-seed-entity rejection or a plain
+   `RepositoryFailure`; whether the driver exposes the constraint name is
+   confirmed when the step opens the file, and the fallback if it does not is to
+   classify on the state alone and keep the constraint distinction at the one
+   call site that needs it. File:
+   `services/workspace/WorkspaceStorePostgres.scala`.
+
+5. **The Irmin response model names its identifiers.** `IrminCommit.hash`,
+   `.key` and `.parents` are `String` where `CommitHash` exists, and
+   `TreeNode.hash` is the same value in the GraphQL response type. They become
+   `CommitHash`, refined where the response is parsed, so the one late
+   refinement in `resolveHead` becomes the general case rather than the
+   exception. `TreeNode.path` becomes `IrminPath`, which `childPaths` already
+   refines by hand.
+
+   `IrminBranch.name` and `IrminClient.branches` stay `String`, and that is a
+   recorded exemption under ADR-039 §5 rather than an omission: the store may
+   hold branches this service did not create, so refining the listing to
+   `BranchRef` would reject a foreign branch instead of ignoring it. The comment
+   at the site says so. Files:
+   `infra/irmin/model/IrminCommit.scala`,
+   `infra/irmin/model/IrminResponses.scala`,
+   `infra/irmin/IrminClient.scala`,
+   `infra/irmin/IrminClientLive.scala`,
+   `repositories/RiskTreeRepositoryIrmin.scala`.
+
+The step order is smallest blast radius first: step 1 adds a type nothing yet
+throws, step 2 is a deletion, and steps 3 and 5 change how values are parsed.
+Step 4 is independent of the other four and could run at any point in the phase.
+
+`VersionConflict`'s three fields are typed per `EWB-D-29` and that edit has
+landed, so the phase does not carry it. No decision in this phase is open.
 
 Phase 1b is the telemetry phase, and there is no separate telemetry plan.
 `PLAN-TELEMETRY-PLUMBING.md` is retired: its four open questions are ruled in
@@ -3331,7 +3612,7 @@ name with the renderer it already has for `ValidationRejected`.
 
 *Concretely:* `PUT /w/{key}/risk-trees/{treeId}` sent without the `X-Branch`
 header returns
-`{"errors":[{"location":{"kind":"RequestHeader","name":"X-Branch"},"code":"REQUIRED_FIELD",…}],"trace":"…"}`,
+`{"errors":[{"location":{"kind":"RequestHeader","header":{"kind":"Branch"}},"code":"REQUIRED_FIELD",…}],"trace":"…"}`,
 and the form shows the header name. That body is a `RequestRejected`, and the
 `location` member is the typed `ErrorLocation` of §6.4, so this example states
 the shape after Phase 3 rather than the `field` string the handler builds before
@@ -3678,6 +3959,735 @@ it is still nine cases at nine statuses.
 
 ---
 
+### EWB-D-29 — `VersionConflict` is typed and kept — RULED 2026-10-19
+
+`VersionConflict` had three `String` fields and no production constructor, which
+is the same untyped-identifier defect Phase 7 step 5 removes elsewhere. The
+question was whether to type it or delete it, and the answer turns on whether
+the type marks a feature worth building. It does:
+`PLAN-TREE-WRITE-CONCURRENCY.md` names it in its draft signatures, its file
+inventory and its ADR-alignment table, and rules the direction — a
+client-supplied version token that rejects a stale whole-tree write.
+
+**Ruled: type the fields and keep the case.**
+
+```scala
+case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash) extends SimError
+```
+
+The first field names a tree rather than a node because the precondition is on
+the branch head, which no single node owns. `PLAN-TREE-WRITE-CONCURRENCY.md`
+raises the same point against its own draft and leaves it for its echo to
+settle; this ruling settles it.
+
+**The shape is an educated guess and is not a design ruling.** It follows from
+where the check would sit — `RiskTreeServiceLive.update`, which holds a `TreeId`
+and compares two commits — and nothing more. Whether a tree-level conflict needs
+to name the node that diverged, whether the client needs both commits or only
+the current head, and whether the token is a commit at all are decided by
+`PLAN-TREE-WRITE-CONCURRENCY.md`'s own design work. This phase types the fields
+so that plan inherits a correct type instead of a `String` triple; it does not
+pre-empt that plan, and a change there overrides this shape without needing to
+revisit this decision.
+
+Deletion was the alternative and was rejected. Adding a leaf back to a sealed
+hierarchy with exhaustive matching is a compile error at every match site, so
+deleting the case moves that cost into the other plan — which currently assumes
+the opposite, stating that reusing the existing case "avoids touching every
+exhaustive `AppError` match".
+
+---
+
+### EWB-D-30 — how an error names the node it is about — RULED 2026-10-19
+
+**Ruled: `ErrorSubject` names a node by its identifier where one exists, and by
+its position within a named collection where one does not.**
+
+A tree update request carries four collections — the portfolios already in the
+tree, the leaves already in the tree, the portfolios being added, and the leaves
+being added. Each is indexed from zero independently, so a position alone named
+four different rows. The browser does not read the position today, but the tree
+endpoints are a public contract and a client submitting a multi-node update has
+no other way to map an error back to the row that caused it.
+
+```scala
+/** Which submitted collection a node came from. The four are indexed
+  * independently from zero, so a position alone does not identify a row. */
+@jsonDiscriminator("kind")
+enum SubmittedCollection:
+  case Portfolios, Leaves, NewPortfolios, NewLeaves
+
+object SubmittedCollection:
+  given codec: JsonCodec[SubmittedCollection] = DeriveJsonCodec.gen[SubmittedCollection]
+```
+
+```scala
+  /** A node already in the tree, pointed at by its identifier. */
+  case ExistingNode(nodeId: NodeId)
+
+  /** A node pointed at by its position in a submitted list, because it has no
+    * identifier yet or because its identifier is what failed to refine. */
+  case NodeAtIndex(collection: SubmittedCollection, index: NonNegativeInt)
+```
+
+```scala
+  def nodeAtIndex(collection: SubmittedCollection, index: Int): ErrorSubject =
+    index.refineEither[GreaterEqual[0]].fold(_ => Request, NodeAtIndex(collection, _))
+```
+
+The two cases are named for how the node is pointed at rather than for whether
+it was submitted, because an update submits existing nodes too. `ExistingNode`
+is what `EWB-D-28` ruled carries only `nodeId`; this decision renames that case
+and adds the positional one beside it.
+
+The field checks — `refinePortfolioDefs`, `refineLeafDefs`,
+`refineExistingPortfolios`, `refineExistingLeaves` — report at
+`NodeAtIndex` even for a node that already exists, because those are the
+functions refining the identifier and the identifier may be the value that
+failed. `ExistingNode` appears only in the topology checks, which run after
+refinement has succeeded.
+
+The topology checks take the node's parent together with the subject naming it:
+
+```scala
+final case class SubmittedParent(subject: ErrorSubject, parent: ParentRef)
+```
+
+`requirePortfolioParents` therefore loses its type parameter and its
+`parentOf` extractor, because every caller now maps its own collection into
+`SubmittedParent` before calling.
+
+---
+
+### EWB-D-31 — the uniqueness checks collapse into one, reporting per duplicate — RULED 2026-10-19
+
+**Ruled: the unification ruled on 2026-10-07 is carried into Phase 3 and done
+here; one shared check reports one error per duplicated key, and the name rule
+adopts that shape rather than keeping its combined sentence.**
+
+`PLAN-TYPED-ERROR-STRUCTURE.md` ruled the collapse and sequenced it to land with
+the typed error location, because the four methods it removes exist only to
+supply a location string. That plan was superseded by this one, and §14 carried
+three of its unlanded items across without this one. Phase 3 is the work that
+introduces `ErrorLocation`, so the collapse happens here.
+
+```scala
+/** Fails when the submitted collection contains duplicates. Duplicates are
+  * found by grouping on the key: a group larger than one is a duplication,
+  * and each one becomes an error carrying its group.
+  *
+  * {{{
+  * // four nodes named Fire, Flood, Fire, Fire
+  * requireDistinctBy(nodes, _.name, toError)
+  * // toError called once, with ("Fire", the three Fire nodes)
+  * // Flood is in a group of one, so it is not a duplication
+  * }}}
+  */
+def requireDistinctBy[A, K](
+  elements: Seq[A],
+  key: A => K,
+  toError: (K, Seq[A]) => ValidationError
+)(using Ordering[K]): Validation[ValidationError, Unit]
+```
+
+```scala
+def requireDistinctNames(names: Seq[SafeName], location: ErrorLocation): Validation[ValidationError, Unit]
+
+def requireDistinct(holders: Seq[(SafeName, SeedVarId)], location: ErrorLocation): Validation[ValidationError, Unit]
+```
+
+A per-group function rather than one over the whole list, so the non-empty
+failure is built in one place and no caller can report some duplications and
+leave the rest out. The two error codes stay distinct and are not a parameter of
+the shared check: a repeated name is `AMBIGUOUS_REFERENCE`, because a child
+names its parent by name and the reference then resolves to two nodes, while a
+repeated seed identifier is `DUPLICATE_VALUE`, because nothing refers to a node
+by its seed identifier.
+
+The message carries the number of occurrences, so a user resolving one of three
+repetitions sees the count fall rather than an unchanged sentence:
+
+```scala
+def duplicateNodeNames(name: String, occurrences: Int): String =
+  s"duplicate node name: $name — used by $occurrences nodes; names must be unique within a tree"
+```
+
+Deleted: `SafeName.duplicates`, `RiskTree.requireDistinctNodeNames`,
+`RiskTree.requireDistinctSeedVarIds`, `RiskTreeRequests.requireUniqueNames`
+— whose call site keeps `.map(_ => allNames.toSet)` for the deduplicated set it
+uses — and `RiskTreeRequests.requireUniqueSeedVarIds`.
+
+Three assertions read one of the two name sentences and change when they become
+one: `RiskTreeDefinitionRequestsSpec.scala:113`, `:251`, and
+`TreeBuilderLogicSpec.scala:27`.
+
+**The location both rules report at inside `RiskTree.fromNodes` — RULED
+2026-10-19.** Both report at `ErrorLocation.Whole`, and the offending values are
+named in the message.
+
+The reason is what a location is for: it points at the input the caller can
+change. No input of `fromNodes` is a field, and on three of its call sites there
+is no request at all, so there is nothing for a narrower location to name. The
+node identifiers the alternative would have carried do not close that gap
+either, because a submission that fails has no persisted nodes — the identifiers
+in it were generated for a tree that was never written, so the client cannot
+resolve one and neither can a reader of the log.
+
+Naming one holder of a duplicate group was the alternative. It was rejected on
+the same ground: it names a node out of several where none is more at fault,
+while supplying an identifier that resolves to nothing. Taking the location as a
+parameter was the other, and the two call sites inside `RiskTree` itself — the
+Tapir schema's decode direction and the JSON decoder — are `given` instances
+with no caller context, so they would hardcode a default regardless.
+
+Two facts about this function bear on the choice. It has six production call
+sites, not two: a store read (`RiskTreeRepositoryIrmin.scala:171`), the create
+and update request paths (`RiskTreeServiceLive.scala:331` and `:370`),
+mitigation application (`MitigationApplication.scala:165`), and `RiskTree`'s own
+Tapir schema and JSON decoder (`RiskTree.scala:71` and `:94`). And on the two
+request paths the failure becomes `ValidationFailed`, a caller-origin error, so
+its location reaches the client inside `WireError.ValidationRejected`; on the
+other four it appears only in a server log. The update path is the designated
+catcher for a new leaf supplying a seed identifier an existing leaf already
+holds, so that one answers a client.
+
+These two checks are a safety net on every path that reaches them. The request
+boundary rejects duplicate names and duplicate seed identifiers before
+`fromNodes` runs, so a duplicate arriving here means the server produced one.
+
+---
+
+### EWB-D-32 — an absent JSON value becomes a named case at the boundary — RULED 2026-10-19
+
+**Ruled: where the absence of a request field has a meaning, that meaning is a
+case of an enum, converted once where the body is decoded. `Option` appears in
+the wire type and nowhere inward of it.**
+
+An `Option` carried inward states that a value may be missing and leaves every
+later layer to re-derive what missing meant. The two instances in the tree
+request path:
+
+```scala
+/** A node's parent: the tree's root has none, every other node names one.
+  *
+  * {{{
+  * ParentRef.Root                        // the top portfolio
+  * ParentRef.Under(SafeName("IT"))       // a leaf sitting under "IT"
+  * }}}
+  */
+enum ParentRef:
+  case Root
+  case Under(parent: SafeName.SafeName)
+```
+
+```scala
+/** Where a leaf's seed identifier comes from. Absent in the request means the
+  * server assigns one. */
+enum SeedVarIdChoice:
+  case ServerAssigns
+  case Provided(seedVarId: SeedVarId.SeedVarId)
+```
+
+`refineParentName(raw: Option[String], location: ErrorLocation)` returns
+`ParentRef` and is the single place the two representations meet; a JSON `null`
+or a blank string becomes `ParentRef.Root` there. Worked through, for a request
+body of
+
+```json
+"portfolios": [
+  { "name": "IT",   "parentName": null },
+  { "name": "Apps", "parentName": "IT" }
+]
+```
+
+`refinePortfolioDefs` returns `Seq(("IT", ParentRef.Root), ("Apps", ParentRef.Under("IT")))`
+where it returns `Seq(("IT", None), ("Apps", Some("IT")))` today, and
+`refineExistingPortfolios` returns
+`Seq((SafeId("01HF…A1"), "IT", ParentRef.Root), (SafeId("01HF…B2"), "Apps", ParentRef.Under("IT")))`.
+
+The four return types become:
+
+```scala
+Seq[(SafeName.SafeName, ParentRef)]
+Seq[(SafeName.SafeName, ParentRef, OccurrenceProbability, Distribution, SeedVarIdChoice)]
+Seq[(SafeId.SafeId, SafeName.SafeName, ParentRef)]
+Seq[(SafeId.SafeId, SafeName.SafeName, ParentRef, OccurrenceProbability, Distribution)]
+```
+
+**The sweep of every `Option` reaching this service from JSON**, so the rule is
+applied once rather than per site. Six wire fields carry an absence that has a
+name and take this treatment: `parentName` on
+`RiskTreeDefinitionRequest.scala:43` and `:50` and on
+`RiskTreeUpdateRequest.scala:64` and `:72`, and `seedVarId` on
+`RiskTreeDefinitionRequest.scala:53` and `RiskTreeUpdateRequest.scala:75`. Both
+`seedVarId` fields are additionally written `Option[Long] = None`, a defaulted
+`Option`, which ADR-037 forbids outright. About twenty further `Option`
+occurrences inside `RiskTreeRequests.scala` are these same two values carried
+inward and disappear with them.
+
+Two groups are identified and **not** in this plan's scope. The five `Option`
+fields of `DistributionShapeRequest.scala:27-31` — `percentiles`, `quantiles`,
+`terms`, `minLoss`, `maxLoss` — are a tagged union written as a flat record:
+which of them must be present is decided by `distributionType`, and
+`Distribution.create` enforces the combinations at runtime that a sealed set of
+cases would make unrepresentable. Correcting it changes the request wire shape,
+so it is governed by ADR-017 and ADR-038 and needs its own decision. The two
+response fields `resolvedTerms` and `anchorCount` on
+`DistributionPreviewResponse.scala:32-33` are the same question on the outgoing
+side.
+
+**Where this rule stops: `providedSeedVarIds` stays a `Map`.**
+`ResolvedCreate` and `ResolvedUpdate` both carry
+`providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId]`, holding only
+the leaves whose seed identifier the client supplied. That type does not change,
+and the distinction is what keeps this decision from reaching it.
+
+A `SeedVarIdChoice` on one leaf answers whether that leaf has an identifier.
+Absence there means something specific — the server assigns one — and `Option`
+does not say so, which is why the enum replaces it. The map answers which leaves
+supplied one. A name that is not a key is not an encoded meaning but
+non-membership, which a collection already expresses. Replacing the map with
+something that names absence would require an entry per leaf saying it has none,
+which is the `Option` this decision removes, copied into every row of a table
+whose purpose is to list the rows that exist.
+
+So the change reaches the line that builds the map and not the map itself. In
+`RiskTreeUpdateRequest.scala`, `case (name, _, _, _, Some(seed))` becomes
+`case (name, _, _, _, SeedVarIdChoice.Provided(seed))`, and the map it produces
+is identical.
+
+Worked through, with a create request whose three leaves are `Server outage`
+carrying a client-supplied `seedVarId` of 42, `Flood`, and `Fire`. Resolution
+produces `Map(SafeName("Server outage") -> SeedVarId(42))`, with the other two
+absent. `SeedVarIdAssigner.assign` then receives that map together with every
+leaf name and a high-water mark of 0, which is the value a tree with no prior
+leaves starts from. It sorts the unassigned names so a rebuild of the same tree
+allocates identically, and allocates above both the high-water mark and the
+highest supplied identifier, returning
+`Map("Server outage" -> 42, "Fire" -> 43, "Flood" -> 44)` and a new high-water
+mark of 44.
+
+From that point the map is total over the tree's leaves, and `buildNodes` reads
+it with `Map.apply` at `RiskTreeServiceLive.scala:281`. That call is partial and
+deliberately so: the response to a missing key is already chosen, stated at the
+end of `buildNodes`, where `.orDie` carries the reason that a request resolved
+and validated before that point cannot be missing a leaf, so an absence there is
+a broken invariant rather than an outcome a caller can act on. This plan does
+not change that.
+
+---
+
+### EWB-D-33 — the four submission checks return records carrying the subject — RULED 2026-10-19
+
+**Ruled: `refinePortfolioDefs`, `refineLeafDefs`, `refineExistingPortfolios` and
+`refineExistingLeaves` return records rather than tuples, and each record
+carries the `ErrorSubject` that later checks use to name the node.**
+
+The position of a node in a submitted collection is currently derived twice. The
+submission check derives it to name its own field errors, discards it, and the
+topology check then counts the sequence again with `zipWithIndex` to name a
+parent error. Both are correct only because `collectAllWithIndex` returns its
+results in submitted order and drops none, which nothing states and nothing
+tests. A later change making it skip failed entries and continue would renumber
+the survivors, and a parent error would name the wrong node with nothing
+failing.
+
+Carrying the subject forward removes the second derivation. It adds a component
+to tuples already five and six wide, read by the resolvers as
+`case (_, name, parent, _, _)`, so the tuples become records in the same step —
+a seven-wide tuple read by position is a worse defect than the one being
+removed.
+
+```scala
+/** A portfolio of the submitted body, refined, with the subject that names it
+  * in any later error.
+  *
+  * {{{
+  * // "portfolios": [ { "name": "IT", "parentName": null } ]
+  * SubmittedPortfolio(ErrorSubject.nodeAtIndex(SubmittedCollection.Portfolios, 0), "IT", ParentRef.Root)
+  * }}}
+  */
+final case class SubmittedPortfolio(
+  subject: ErrorSubject,
+  name: SafeName.SafeName,
+  parent: ParentRef
+)
+
+final case class SubmittedLeaf(
+  subject: ErrorSubject,
+  name: SafeName.SafeName,
+  parent: ParentRef,
+  probability: OccurrenceProbability,
+  distribution: Distribution,
+  seedVarId: SeedVarIdChoice
+)
+
+final case class ExistingPortfolio(
+  subject: ErrorSubject,
+  id: SafeId.SafeId,
+  name: SafeName.SafeName,
+  parent: ParentRef
+)
+
+final case class ExistingLeaf(
+  subject: ErrorSubject,
+  id: SafeId.SafeId,
+  name: SafeName.SafeName,
+  parent: ParentRef,
+  probability: OccurrenceProbability,
+  distribution: Distribution
+)
+```
+
+```scala
+private[requests] def refinePortfolioDefs(
+  portfolios: Seq[RiskPortfolioDefinitionRequest]
+): Validation[ValidationError, Seq[SubmittedPortfolio]]
+
+private[requests] def refineLeafDefs(
+  leaves: Seq[RiskLeafDefinitionRequest]
+): Validation[ValidationError, Seq[SubmittedLeaf]]
+
+private[requests] def refineExistingPortfolios(
+  portfolios: Seq[RiskPortfolioUpdateRequest]
+): Validation[ValidationError, Seq[ExistingPortfolio]]
+
+private[requests] def refineExistingLeaves(
+  leaves: Seq[RiskLeafUpdateRequest]
+): Validation[ValidationError, Seq[ExistingLeaf]]
+```
+
+Which subject each record carries, per `EWB-D-30`: a submitted record carries
+`ErrorSubject.nodeAtIndex(collection, index)`, because a node being added has no
+identifier; an existing record carries `ErrorSubject.ExistingNode(NodeId(id))`,
+because by the point the record is built every field of that element has
+refined and the identifier is therefore valid. The subject a field error used
+while refining is still the positional one, since the identifier may be the
+value that failed.
+
+The topology call sites then read the subject instead of recomputing it:
+
+```scala
+// builds: SubmittedParent(NodeAtIndex(Portfolios, 1), ParentRef.Under("Typo"))
+requirePortfolioParents(
+  portfolios.map(p => SubmittedParent(p.subject, p.parent)),
+  portfolioNames
+)
+```
+
+One `.map` serves the create and the update path, because the difference between
+a position and an identifier is already settled inside the record's subject.
+
+---
+
+### EWB-D-34 — where a distinctness rule lives, and what it is called — RULED 2026-10-19
+
+**Ruled: the generic mechanism lives in `ValidationUtil`; a rule about a refined
+domain type lives in that type's companion; a check whose values have no refined
+type calls the generic mechanism directly. The companion-level methods are all
+named `requireDistinct`.**
+
+Only the merge scan is in that last case, and it reports a list of names rather
+than a failure, so it calls `duplicateGroups`. Every rule ending in a
+`ValidationError` goes through a companion — `EWB-D-36` refines the one
+remaining caller that did not have a type to hang its rule on.
+
+Five places in the main sources decide which values repeat, each with its own
+grouping expression: `SafeName.duplicates`, the body of
+`SeedVarId.requireDistinct`, `TreeBuilderLogic.preValidateTopology`, and two
+inside `RiskTree.validateMitigations` — one over mitigation identifiers and one
+over mitigation names. Four of the five end in a `ValidationError` and one ends
+in a list of names that a merge preview reports.
+
+`EWB-D-31` collapses the four. This decision says where the results live, so the
+end state is not five rules in five idioms replaced by one mechanism in four
+idioms.
+
+| Where | What | Why there |
+|---|---|---|
+| `ValidationUtil` | `duplicateGroups`, `requireDistinctBy` | generic over the element and the key, no domain knowledge |
+| `SafeName` companion | `requireDistinct(names, location)` | carries the name rule's error code and message |
+| `SeedVarId` companion | `requireDistinct(holders, location)` | carries the seed rule's error code and message |
+| `Mitigation` companion | `requireDistinctIds`, `requireDistinctNames` | the same, for the two mitigation rules |
+| `TreeBuilderLogic` | calls `SafeName.requireDistinct` | `EWB-D-36` makes its names `SafeName`, so the name rule's own companion method is what it needs |
+
+`EWB-D-31` writes the name-rule method as `requireDistinctNames`, and it is
+`requireDistinct` instead. Read at a call site the pair was
+`SafeName.requireDistinctNames(names, loc)` beside
+`SeedVarId.requireDistinct(holders, loc)`, where the first repeats what its
+companion already said. `Mitigation` keeps two names because it holds two rules
+over one collection and `requireDistinct` alone could not say which.
+
+The two parameter shapes stay different, and that is not an inconsistency. A
+repeated name identifies its own holders, because the name is what the holders
+are called, so listing the names is a complete report. A repeated seed
+identifier identifies nothing, so the error carries the nodes holding it. The
+same asymmetry is why `EWB-D-31` keeps the two error codes distinct.
+
+---
+
+### EWB-D-35 — one word for a parent reference, two types for the two trust levels — RULED 2026-10-19
+
+**Ruled: the browser and the request path use the same case names for a node's
+parent, and remain two types. `Under(parent)` on both sides.**
+
+```scala
+// modules/common — past the request boundary, so the payload has refined
+enum ParentRef:
+  case Root
+  case Under(parent: SafeName.SafeName)
+
+// modules/app — inside the form, so the payload is what the user is typing
+enum ParentSelection:
+  case Root
+  case Under(parent: String)
+  case Unset
+```
+
+`ParentSelection` already existed with the case spelled `Portfolio(name)`. The
+rename to `Under(parent)` leaves one word for one relationship, so a reader
+moving between the two sides has nothing to translate.
+
+The payload type is what keeps them two types, not the naming. The form holds
+text the user is still typing, and `FormMode`'s own note on `FieldSnapshot`
+states why it must: the dirty check "has to fire on partially-typed or
+currently-invalid input, which a refined type cannot represent". So the form's
+case holds `String` and the request path's holds `SafeName`.
+
+The third case is the other half. `Unset` means nothing has been chosen yet,
+which a decoded request body cannot express — a body either names a parent or
+does not. Carrying `Unset` inward would add a case that cannot occur to
+`buildNodes`, `requireSingleRoot`, `requireLeafParents`, `requireNoCycles`,
+`requireNonEmptyPortfolios` and the three checks in `TreeBuilderLogic`, each
+then holding an arm nothing reaches. That is what `EWB-D-32` removed, in a new
+shape.
+
+Two alternatives were considered and are recorded as rejected. A single
+three-case type used on both sides would put unrefined text in `ResolvedNode`
+and give `refineParentName` nothing to produce, against ADR-001's
+validate-once-at-the-boundary rule, as well as adding the unreachable case
+above. A type generic in its payload would keep the refinement and avoid the
+unreachable case, but the form's third state would then need either a nested
+`Option` — the thing `EWB-D-32` removes — or a wrapper type, which is
+`ParentSelection` again, so it ends with two types plus a type parameter on a
+two-case type.
+
+Two cases named `Portfolio` are **not** renamed: `FormTarget.Portfolio` and
+`TreePreview`'s private `TreeNode.Portfolio`. Both say that a node is a
+portfolio, which is the domain's own word for a node kind, and neither names a
+parent.
+
+---
+
+### EWB-D-36 — the shared topology checker takes refined values — RULED 2026-10-19
+
+**Ruled: `TreeBuilderLogic`'s two type aliases become the refined types.**
+
+```scala
+type Name = SafeName.SafeName
+type Parent = ParentRef
+```
+
+`TreeBuilderLogic` is the pure topology validator shared by the browser and the
+Java Virtual Machine tests: exactly one root, no cycles, every named parent
+present, no name used twice. Its aliases were `String` and `Option[String]`,
+which reads as a deliberate boundary for unrefined draft input and is not one.
+All six production call sites hold already-refined drafts and widen them to
+match, at `TreeBuilderState` lines 164, 180, 239, 273, 304 and 329, each in the
+shape `p.name.value.toString -> p.parent.map(_.value.toString)`. The only
+callers passing genuinely raw values are the fixtures in `TreeBuilderLogicSpec`.
+
+The reason is that a parameter type is a claim about what a function must defend
+against. Unrefined text claims the function may be handed anything, and this one
+neither is nor would reject it — a malformed name passes its relationship checks
+untouched, and the only thing preventing that today is the caller having refined
+first, which is exactly the fact the signature denies. With the refined types
+the signature and the behaviour agree.
+
+The widening also cost something invisible: the same unwrapping repeated at six
+sites, each an opportunity to unwrap differently, and each reading as plumbing
+in review.
+
+Consequences: the six call sites drop both conversions, and roughly twenty-five
+fixture pairs in `TreeBuilderLogicSpec` written as `"Root" -> None` become
+refined constructions. No assertion changes; `TreeBuilderStateSpec` already uses
+the idiom for a refined name.
+
+---
+
+### EWB-D-37 — the leaf form composes its submission, and refinement happens once — RULED 2026-10-19
+
+**Ruled: `RiskLeafFormState` gains a `toDraft` that accumulates every field
+failure, replacing the tuple of options the view matches on today. The form's
+own fields stay unrefined; everything past `toDraft` is refined.**
+
+```scala
+def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, Distribution)]
+```
+
+Today the leaf view matches three containers — a `Validation` for the
+distribution shape, an `Option` for the probability, and a nested
+`Option[Option[String]]` for the parent — and writes a literal "Parent is
+required" into the parent field when the outer option is empty. The portfolio
+form already composes the same work with `Validation.validateWith`. The nested
+option exists because of that tuple: the outer layer is how the view learns the
+parent is unset, and the inner is the parent-or-root shape `EWB-D-32` replaces.
+So the nesting cannot be removed without deciding the submission shape.
+
+After this, `parentDraft` and `refinedProbability` are deleted — the only
+readers of both are the two submit handlers — and the parent's message comes
+from `ParentSelection`, which is where the portfolio form's identical sentence
+already lives.
+
+**The display must not change, and one thing decides whether it does.** Every
+failing field already has an inline slot, and `FormState.withSubmitErrors`
+resolves a field's text as `reactive.orElse(submitted)`, so routing a
+submit-time refusal into a slot whose reactive signal already carries the same
+sentence changes nothing visible. The exception is the parent, the one field
+with no reactive source. The leaf view has two routers that know different
+fields — one for the five distribution fields and one for the name and the
+parent — and sending every error through the first alone would leave the parent
+error matching nothing and surfacing in the banner instead of under the select.
+The two merge into one exhaustive match, which Phase 3 already rewrites. The
+test that pins it: a parent left unset together with descending percentiles
+shows two field errors and an empty banner.
+
+**Why this and `EWB-D-36` are one change.** Each removes one of the two places
+the refinement was undone or redone. This decision moves refinement to the form
+boundary, so `TreeBuilderState.addLeaf` and `updateLeaf` take refined values and
+stop refining; `EWB-D-36` lets those values reach the shared checker without
+being widened back. Taken separately, either leaves a chain that refines early
+and then discards it, or refines late and then carries it.
+
+```
+form Vars                    unrefined text        a Var holds keystrokes
+  ↓  toDraft                 refines               the one boundary
+addLeaf / addPortfolio       refined in            no refining of its own
+LeafDraft / PortfolioDraft   refined fields
+  ↓
+preValidateTopology          refined in            no widening
+```
+
+Two helpers lose the callers that needed them. `TreeBuilderState`'s
+`validateParentName` is called only from the two leaf methods and goes
+entirely; `validateName` loses the same two call sites and stays for the two
+that refine the tree's own name.
+
+Both decisions also converge on one subject. The form's own refusals now come
+from `toDraft`, and `EWB-D-31`'s consolidation already has `TreeBuilderLogic`
+reporting at `ErrorSubject.DraftNode`, so every error the form can produce names
+that subject and differs only in its field — which is what lets the two routers
+merge. They cannot collide: a malformed name fails `toDraft` and the topology
+check is never reached, while a well-formed but duplicated name passes
+`toDraft` and only the topology error exists.
+
+---
+
+### EWB-D-38 — `ValidationError.message` becomes a typed case, as Phase 3b — RULED 2026-10-19
+
+**Ruled: the free-text `message` is replaced by `FieldProblem`, a discriminated
+enum whose cases carry the values their sentence names. It lands as Phase 3b,
+after Phase 3 is green, and no work on it starts before then.**
+
+`ValidationError` is the one internal error type that is also a wire type. Phase
+3 closes two of its three components: the location becomes `ErrorLocation` and
+the classification is already `ValidationErrorCode`. The third stays free text
+generated by the server and displayed verbatim, so the server decides the
+wording for an interface it cannot see, and the browser cannot shorten,
+translate, or reformat a value inside it.
+
+Two measurements decide the shape. Of the 35 declared `ValidationErrorCode`
+cases, `ValidationError` uses 20; the other 15 serve the merge, query, access
+and concurrency errors. And the usage is coarse: `CONSTRAINT_VIOLATION` appears
+at 30 construction sites, `REQUIRED_FIELD` at 18, `INVALID_RANGE` at 15. Thirty
+different refusals share one code, which is why the code cannot be rendered from
+and the sentence has to carry the meaning.
+
+The pattern is the one §3.5 already applies to the query half of a content
+rejection. `RejectionDetail` has two cases, `Fields` and `Query`, and the query
+one carries `QueryProblem` — a discriminated enum that classifies and carries
+its values together, with no separate code beside it, which is what lets
+`Unparseable` hold a character offset. `FieldProblem` is that type's sibling for
+the field half.
+
+```scala
+/** Why one field was refused, with the values its sentence names. The sibling of
+  * `QueryProblem`: the query half of a content rejection carries its structure in
+  * one discriminated enum, and this is the field half.
+  */
+@jsonDiscriminator("kind")
+enum FieldProblem:
+  case Required
+  case TooLong(limit: NonNegativeInt)
+  case InvalidCharacters
+  case DuplicateNodeName(name: SafeName.SafeName, occurrences: NonNegativeInt)
+  case SeedVarIdInUse(seedVarId: SeedVarId.SeedVarId, holders: List[SafeName.SafeName])
+  case SeedVarIdImmutable
+  case ParentNotFound(parent: SafeName.SafeName)
+  case ParentIsLeaf(parent: SafeName.SafeName)
+  case PortfolioHasNoChildren(portfolios: List[SafeName.SafeName])
+
+object FieldProblem:
+  given codec: JsonCodec[FieldProblem] = DeriveJsonCodec.gen[FieldProblem]
+
+  /** The coarse, filterable classification, derived from the case rather than
+    * stored beside it — the same relation `WireError` has to its status. */
+  def code(problem: FieldProblem): ValidationErrorCode = problem match
+    case Required                  => ValidationErrorCode.REQUIRED_FIELD
+    case TooLong(_)                => ValidationErrorCode.INVALID_LENGTH
+    case InvalidCharacters         => ValidationErrorCode.INVALID_PATTERN
+    case DuplicateNodeName(_, _)   => ValidationErrorCode.AMBIGUOUS_REFERENCE
+    case SeedVarIdInUse(_, _)      => ValidationErrorCode.DUPLICATE_VALUE
+    case SeedVarIdImmutable        => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case ParentNotFound(_)         => ValidationErrorCode.MISSING_REFERENCE
+    case ParentIsLeaf(_)           => ValidationErrorCode.INVALID_NODE_TYPE
+    case PortfolioHasNoChildren(_) => ValidationErrorCode.EMPTY_COLLECTION
+```
+
+```scala
+case class ValidationError(
+  location: ErrorLocation,
+  problem: FieldProblem
+)
+```
+
+`ValidationMessages` stops being a list of strings and becomes one total
+function, `render(problem: FieldProblem): String`, which both the browser and a
+server log line call.
+
+**Where it is declared, and why that opens no new hierarchy.**
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`
+already holds every closed set a `ValidationError` is made of — `ErrorSubject`,
+`FieldName`, `SubmittedCollection`, `ErrorLocation` and `RequestHeaderName` —
+so this is the third and last of them and the file needs no sibling. Not
+`http/errors/` beside `QueryProblem`, even though it is that type's counterpart:
+`QueryProblem` is wire-only, while `ValidationError` is internal and wire at
+once, so its components live on the domain side and cross-compile with it. The
+resulting structure adds no level; it fills the one slot still carrying prose.
+
+**`ValidationErrorCode` stops being stored and becomes derived.** It keeps all
+35 cases, because 15 serve the other error types, and the 20 that
+`ValidationError` used are produced by `FieldProblem.code`. That removes the
+30-way `CONSTRAINT_VIOLATION`: the case carries the meaning and the code stays
+the coarse filter its own scaladoc describes.
+
+**Splitting `DUPLICATE_VALUE` into per-subject codes is ruled against.**
+`DUPLICATE_NODE_NAME` and `DUPLICATE_SEED_VAR_ID` beside
+`FieldProblem.DuplicateNodeName` and `FieldProblem.SeedVarIdInUse` would be a
+second distinction of the same thing, and the codes would be removed again by
+this decision. So no new codes are added in Phase 3.
+
+**Why it is a separate phase rather than part of Phase 3.** It is on theme and
+is the direct next step, so G8 keeps it inside this plan rather than routing it
+elsewhere. It changes the wire shape of a validation error, so ADR-017 and
+ADR-038 both bear on it, and it reaches 152 `ValidationError` construction sites
+and 65 message templates — the size of Phase 3 again. Phase 3 changes one
+argument at each of those sites; this changes the argument's shape at all of
+them, so interleaving the two would leave neither verifiable until both were
+done.
+
+---
+
 ## 11. ADR alignment
 
 | ADR | What this plan touches | Status |
@@ -3689,6 +4699,7 @@ it is still nine cases at nine statuses.
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. |
 | ADR-019 (frontend component architecture) | `GlobalError`, `ErrorBanner` | Compliant. Pattern 7's two-tier error presentation is unchanged; the classifier's input type changes and a `NotFound` display case is added. |
 | ADR-028 (vague quantifier query pane) | `QueryProblem` | Compliant. The engine's rendered messages still reach the pane. `FolModelValidationFailure` and `FolEvaluationFailure` stop reaching it, which matches the ADR's own description of them as wiring faults rather than query errors. |
+| ADR-039 (trust-boundary ingress validation) | the Irmin and Postgres borders, the ingress rejection type | **Currently violated, fixed in Phase 7.** The record states that a value entering process memory from outside is refined at the border and that an ingress rejection is a typed failure distinct from a transport fault. Today `handleIrmin` collapses seven typed Irmin cases into `RepositoryFailure(String)`, the repository's four stored-value decoders interpolate an accumulated `ValidationError` list into a sentence, and `WorkspaceStorePostgres` recovers a branch from that sentence with `reason.contains`. Phase 7 closes all three and records the one exemption the record requires, on the branch listing. No amendment to the record is needed: it was written against these findings. |
 | ADR-002 (observability) | the correlation identifier, the failure log line | **Currently violated, fixed here, and the record is amended.** A correlation identifier that never reaches a client cannot correlate anything; `EWB-D-8` decides the fix. The resolve-failure line annotated a redacted constant and so identified no workspace; `EWB-D-26` replaces it with one line per failed request, written where the trace is in scope, so every line carries the identifier the response carries. **The amendment:** the record's code-smell section demands differentiated log levels, which `EWB-D-26` satisfies by origin, but its one example put a validation failure at `logWarning`. That example now shows a caller-caused failure at `logInfo`. The section's decision is unchanged and binds more concretely than before. |
 
 `docs/dev/ARCHITECTURE.md`'s "DTO/Domain Model Separation" section gains the error
@@ -3845,6 +4856,31 @@ The two global instruction lines that `EWB-D-10` produces are written. The user'
 `boyscout` skill states each one with its test and its reason, as obligations 3
 and 5. Neither is this plan's work any more.
 
+**Added by Phase 7 — the storage trust boundary**
+
+Five paths the approved inventory does not yet carry. All five exist.
+
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminCommit.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala`
+
+Three further integration suites read a commit hash as a `String` and are
+reached if step 5's retyping touches them, which the compiler decides:
+`IrminMergeSemanticsSpec.scala`, `IrminRevertSemanticsSpec.scala` and
+`PinnedReadAuthorizationItSpec.scala`, all under
+`modules/server-it/src/test/scala/`. They are named here rather than discovered
+mid-phase, because `server-it` has no `src/main` and so carries no standing
+authorization for its own tests.
+
+Every other file Phase 7 edits is already named: `AppError.scala`,
+`WireError.scala`, `RiskNode.scala`, `RiskTree.scala`, `Mitigation.scala`,
+`RiskTreeRepositoryIrmin.scala`, `IrminClientLive.scala` and
+`WorkspaceStorePostgres.scala`. `WorkspaceStorePostgresSpec.scala` is reached by
+the standing authorization for a module's own tests, since `server`'s `src/main`
+is listed.
+
 ---
 
 ## 13. Verification plan
@@ -3895,6 +4931,20 @@ is therefore the step that enumerates `EWB-D-14`'s work.
    and with `TreeScope.NoTree` produces `RequestRejected(errors)`; a query
    failure with `NoTree` produces `InternalFault`. This pins the branch
    `EWB-D-28` introduced, which the compiler cannot check.
+8. **Each declared header maps to its own `RequestHeaderName` case, and a
+   header Tapir pins maps to `Request`.** One assertion per case over
+   `fieldName`, plus one for `EndpointIO.FixedHeader`. The enum's own
+   exhaustiveness does not reach this, because the mapping is from Tapir's
+   input to the case and a wrong pairing compiles. The same test asserts each
+   case's `wireName` against the literal the endpoint declares, so a rename of
+   a case cannot move the header spelling (ADR-037 §2).
+9. **The browser routes every location it can receive.** The two form mappings
+   lose their `else None` fallback and match the location's cases, so the
+   compiler is what proves the routing total. The test that remains is the one
+   the compiler cannot write: for each form, that a location belonging to a
+   different form is not routed to one of its controls. The substring matching
+   in `fieldForShapeError` and `fieldForDraftError` goes, and with it the
+   silent fall-through that showed a field error as a banner.
 
 **Per-route statuses, in the controller specs.** `EWB-D-28`'s residual weakness is
 that a wrong `TreeScope.NoTree` at a call site compiles, so each tree-scoped route
@@ -3931,6 +4981,24 @@ narrowed pre-validation behaviour: a `DependencyUnavailable` during pre-validati
 must leave the stored capability key untouched. That test fails against the
 current wildcard, which is what makes it a regression test for the fourth defect
 in §1.
+
+**Phase 7, the storage trust boundary.** Four properties, each pinning one step.
+
+In `RiskTreeRepositoryIrminSpec`, a read whose Irmin call fails with
+`IrminUnavailable` fails with `IrminUnavailable` and not with
+`RepositoryFailure`, which is step 2's whole content and is the property
+`handleIrmin` silently removed. In the same suite, a stored node whose JSON
+refines to nothing fails with `IngressRejected` carrying more than one
+`ValidationError` when more than one field is bad — the accumulation is the
+point, and a single-error assertion would pass against a `.flatMap` rewrite.
+
+In `WorkspaceStorePostgresSpec`, inserting two workspaces with the same
+`seedEntityId` yields the duplicate rejection, and the suite drives the real
+database rather than a stubbed error, because the behaviour under test is the
+driver's `SQLState` reaching `classify`.
+
+In `WireErrorSpec`, `IngressRejected` projects to `InternalFault`, added to the
+existing exhaustive case-to-wire assertion rather than as a separate test.
 
 **Every phase.** All four tiers green: `commonJVM/test`, `server/test`,
 `app/test`, `serverIt/test`. Leaked Docker containers, networks and volumes

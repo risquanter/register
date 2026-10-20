@@ -1,11 +1,10 @@
 package com.risquanter.register.domain.data
 
-import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, SeedVarId}
+import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, SeedVarId, ValidationMessages}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import zio.prelude.Validation
-import io.github.iltotore.iron.*
 
 /** Domain model for a risk tree configuration.
   * 
@@ -92,25 +91,11 @@ object RiskTree {
       // Decoder: Deserialize via the smart constructor (rebuilds index, re-validates)
       JsonDecoder[RiskTreeJson].mapOrFail { json =>
         fromNodes(json.id, json.name, json.nodes, json.rootId, Some(json.seedVarHighWater), json.mitigations.getOrElse(Nil)).toEither.left.map(errors =>
-          s"Invalid tree structure: ${errors.map(e => s"[${e.field}] ${e.message}").mkString("; ")}"
+          s"Invalid tree structure: ${errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")}"
         )
       }
     )
   }
-
-  /** Defense in depth: no two leaves in a tree may share a seedVarId.
-    *
-    * The request boundary enforces the same rule pre-assignment
-    * (RiskTreeRequests); the rule itself is defined once on the SeedVarId
-    * companion. This layer contributes the domain-scoped field path and covers
-    * programmatically-built and store-loaded trees (correct-by-construction
-    * layering).
-    */
-  private def requireDistinctSeedVarIds(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
-    SeedVarId.requireDistinct(
-      nodes.collect { case leaf: RiskLeaf => leaf.name.value -> leaf.seedVarId },
-      field = "nodes.seedVarId"
-    )
 
   /** Upper bound on a tree's node count — a resource limit against oversized
     * trees on merges, store-loads, and programmatic construction. */
@@ -119,25 +104,10 @@ object RiskTree {
   private def validateNodeCount(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
     if (nodes.sizeIs <= MaxNodes) Validation.succeed(())
     else Validation.fail(ValidationError(
-      field = "nodes",
+      location = ErrorLocation.Whole,
       code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = s"too many nodes: ${nodes.size} exceeds the limit of $MaxNodes"
+      message = ValidationMessages.tooManyNodes(nodes.size, MaxNodes)
     ))
-
-  /** Node names are unique across the whole tree. The request boundary
-    * (RiskTreeRequests.requireUniqueNames) enforces the same rule on the write
-    * paths; folding it into fromNodes makes it hold for merges, store-loads, and
-    * programmatic construction too (correct-by-construction layering, matching
-    * requireDistinctSeedVarIds). Which names count as repeated is decided by
-    * SafeName.duplicates, the one definition this and the merge name scan share. */
-  private def requireDistinctNodeNames(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
-    SafeName.duplicates(nodes.map(_.name)) match
-      case Nil  => Validation.succeed(())
-      case dups => Validation.fail(ValidationError(
-        field = "nodes.name",
-        code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
-        message = s"duplicate node name(s): ${dups.map(_.value).mkString(", ")}"
-      ))
 
   /** Create a RiskTree from a flat list of nodes.
     *
@@ -157,13 +127,22 @@ object RiskTree {
     seedVarHighWater: Option[SeedVarId.SeedVarId] = None,
     mitigations: Seq[Mitigation]
   ): Validation[ValidationError, RiskTree] = {
+    // Both uniqueness rules are defined once in their type's companion and
+    // enforced twice: at the request boundary, which can name the field that
+    // carried the offending value, and here, which covers merges, store reads
+    // and programmatic construction. Here there is no field to name — on three
+    // of this function's call sites there is no request at all — so both report
+    // at the whole, and the offending values are named in the message.
     Validation
       .validateWith(
         TreeIndex.fromNodeSeq(nodes),
-        requireDistinctSeedVarIds(nodes),
+        SeedVarId.requireDistinct(
+          nodes.collect { case leaf: RiskLeaf => leaf.name -> leaf.seedVarId },
+          ErrorLocation.Whole
+        ),
         resolveSeedVarHighWater(nodes, seedVarHighWater),
         validateNodeCount(nodes),
-        requireDistinctNodeNames(nodes)
+        SafeName.requireDistinct(nodes.map(_.name), ErrorLocation.Whole)
       ) { (index, _, highWater, _, _) => (index, highWater) }
       .flatMap { (index, highWater) =>
         Validation
@@ -171,9 +150,9 @@ object RiskTree {
             Validation
               .fromPredicateWith[ValidationError, TreeIndex](
                 ValidationError(
-                  field = "rootId",
+                  location = ErrorLocation.requestField(FieldName.RootId),
                   code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-                  message = s"rootId '${rootId.value}' not found in nodes"
+                  message = ValidationMessages.rootIdNotFound(rootId.value)
                 )
               )(index)((idx: TreeIndex) => idx.nodes.contains(rootId)),
             validateMitigations(mitigations)
@@ -194,34 +173,21 @@ object RiskTree {
   private def validateMitigations(
     mitigations: Seq[Mitigation]
   ): Validation[ValidationError, Unit] = {
-    val duplicateIds = mitigations.groupBy(_.id).collect { case (mid, ms) if ms.sizeIs > 1 => mid }
-    val duplicateNames = mitigations.groupBy(_.name.value).collect { case (n, ms) if ms.sizeIs > 1 => n }
-
-    val distinctIdsV =
-      if (duplicateIds.isEmpty) Validation.succeed(())
-      else Validation.fail(ValidationError(
-        field = "mitigations",
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"duplicate mitigation id(s): ${duplicateIds.map(_.value).toList.sorted.mkString(", ")}"
-      ))
-
-    val distinctNamesV =
-      if (duplicateNames.isEmpty) Validation.succeed(())
-      else Validation.fail(ValidationError(
-        field = "mitigations",
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"duplicate mitigation name(s): ${duplicateNames.toList.sorted.mkString(", ")}"
-      ))
+    val mitigationsLocation = ErrorLocation.requestField(FieldName.Mitigations)
 
     val countV =
       if (mitigations.sizeIs <= MaxMitigations) Validation.succeed(())
       else Validation.fail(ValidationError(
-        field = "mitigations",
+        location = mitigationsLocation,
         code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"too many mitigations: ${mitigations.size} exceeds the limit of $MaxMitigations"
+        message = ValidationMessages.tooManyMitigations(mitigations.size, MaxMitigations)
       ))
 
-    Validation.validateWith(distinctIdsV, distinctNamesV, countV) { (_, _, _) => () }
+    Validation.validateWith(
+      Mitigation.requireDistinctIds(mitigations, mitigationsLocation),
+      Mitigation.requireDistinctNames(mitigations, mitigationsLocation),
+      countV
+    ) { (_, _, _) => () }
   }
 
   /** Resolve and validate the tree's seed watermark (see fromNodes scaladoc). */
@@ -233,9 +199,9 @@ object RiskTree {
     (provided, maxAssigned) match {
       case (Some(hw), Some(mx)) if hw.value < mx.value =>
         Validation.fail(ValidationError(
-          field = "seedVarHighWater",
+          location = ErrorLocation.requestField(FieldName.SeedVarHighWater),
           code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"seedVarHighWater ${hw.value} is below the highest assigned seedVarId ${mx.value}"
+          message = ValidationMessages.seedVarHighWaterBelowMax(hw.value, mx.value)
         ))
       case (Some(hw), _) => Validation.succeed(hw)
       case (None, Some(mx)) => Validation.succeed(mx)
@@ -243,9 +209,9 @@ object RiskTree {
         // Unreachable for valid trees (every path terminates at a leaf), but
         // total: a leafless node collection has no derivable watermark.
         Validation.fail(ValidationError(
-          field = "seedVarHighWater",
+          location = ErrorLocation.requestField(FieldName.SeedVarHighWater),
           code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = "tree has no leaves — seedVarHighWater cannot be derived"
+          message = ValidationMessages.seedVarHighWaterNotDerivable
         ))
     }
   }

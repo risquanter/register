@@ -7,7 +7,8 @@ import app.components.FormInputs.*
 import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
  * Complete form for creating a RiskLeaf.
@@ -203,7 +204,7 @@ object RiskLeafFormView:
         case FormMode.Templating(FormTarget.Leaf(n)) =>
           builderState.leavesVar.now().find(_.name == n).foreach { source =>
             builderState.populateLeafForm(state, source)
-            if source.parent.isEmpty then state.parentVar.set(ParentSelection.Unset)
+            if source.parent == ParentRef.Root then state.parentVar.set(ParentSelection.Unset)
           }
         case _ =>
           // parentVar reset here too, not just resetFields() — otherwise a
@@ -438,9 +439,9 @@ object RiskLeafFormView:
     submitError: Var[Option[String]]
   ): Unit =
     state.triggerValidation()
-    (state.currentShapeValidation(), state.refinedProbability, state.parentDraft) match
-      case (Validation.Success(_, shape), Some(prob), Some(parent)) =>
-        builderState.addLeaf(state.nameVar.now(), parent, shape, prob) match
+    state.toDraft match
+      case Validation.Success(_, (name, parent, prob, shape)) =>
+        builderState.addLeaf(name, parent, shape, prob) match
           case Validation.Success(_, _) =>
             // Fields are left as-is — TreeBuilderState.addLeaf already moved
             // `activeForm` to `Locked(newTarget)`, which locks these same,
@@ -449,17 +450,10 @@ object RiskLeafFormView:
             // touched-state reset here.
             submitError.set(None)
           case Validation.Failure(_, errs) =>
-            FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError, {
-              case "name"   => Some(RiskLeafField.Name)
-              case "parent" => Some(RiskLeafField.Parent)
-              case _        => None
-            })
-      case (shapeV, _, parentOpt) =>
-        // Shape/probability invalid, and/or parent still Unset. Surface the
-        // SPECIFIC, field-routed reasons inline below each field (probability
-        // is already covered reactively).
-        if parentOpt.isEmpty then state.setSubmitFieldError(RiskLeafField.Parent, "Parent is required")
-        routeLeafShapeErrors(state, shapeErrorsOf(shapeV), submitError)
+            routeLeafErrors(state, errs.toList, submitError)
+      case Validation.Failure(_, errs) =>
+        // Every field's refusal at once, each routed to its own inline slot.
+        routeLeafErrors(state, errs.toList, submitError)
 
   /** Handle update-leaf submission (edit mode). */
   private def handleUpdate(
@@ -469,51 +463,49 @@ object RiskLeafFormView:
     submitError: Var[Option[String]]
   ): Unit =
     state.triggerValidation()
-    (state.currentShapeValidation(), state.refinedProbability, state.parentDraft) match
-      case (Validation.Success(_, shape), Some(prob), Some(parent)) =>
-        builderState.updateLeaf(originalName, state.nameVar.now(), parent, shape, prob) match
+    state.toDraft match
+      case Validation.Success(_, (name, parent, prob, shape)) =>
+        builderState.updateLeaf(originalName, name, parent, shape, prob) match
           case Validation.Success(_, _) =>
             // TreeBuilderState.updateLeaf already moved `activeForm` back to
             // `Locked(t)`, locking these same, just-saved values for viewing.
             submitError.set(None)
           case Validation.Failure(_, errs) =>
-            FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError, {
-              case "name"   => Some(RiskLeafField.Name)
-              case "parent" => Some(RiskLeafField.Parent)
-              case _        => None
-            })
-      case (shapeV, _, parentOpt) =>
-        if parentOpt.isEmpty then state.setSubmitFieldError(RiskLeafField.Parent, "Parent is required")
-        routeLeafShapeErrors(state, shapeErrorsOf(shapeV), submitError)
+            routeLeafErrors(state, errs.toList, submitError)
+      case Validation.Failure(_, errs) =>
+        routeLeafErrors(state, errs.toList, submitError)
 
-  /** Extract the validation errors from a shape result (empty when it succeeded). */
-  private def shapeErrorsOf(shapeV: Validation[ValidationError, ?]): List[ValidationError] =
-    shapeV match
-      case Validation.Failure(_, errs) => errs.toList
-      case _                           => Nil
-
-  /** Route distribution-shape validation errors to their per-field inline slots
-    * (same visual channel as reactive errors, via `setSubmitFieldError`). Errors
-    * with no matching form field fall back to the submit-error banner carrying
-    * their real message — never a generic constant. */
-  private def routeLeafShapeErrors(
+  /** Show every refusal under the input it belongs to, whichever check produced
+    * it — this form's own field refinement or the tree-wide topology rules. */
+  private def routeLeafErrors(
     state: RiskLeafFormState,
     errors: List[ValidationError],
     submitError: Var[Option[String]]
   ): Unit =
-    val unrouted = errors.filterNot { err =>
-      fieldForShapeError(err.field) match
-        case Some(field) => state.setSubmitFieldError(field, err.message); true
-        case None        => false
-    }
-    submitError.set(unrouted.headOption.map(_.message))
+    FormSubmitUtil.routeErrors(state, errors, submitError, inputFor)
 
-  /** Map a `Distribution.create` field path (e.g. `leaf.percentiles[1]`) to the
-    * form field whose inline error slot should display it. */
-  private def fieldForShapeError(field: String): Option[RiskLeafField] =
-    if field.contains("percentiles") then Some(RiskLeafField.Percentiles)
-    else if field.contains("quantiles") then Some(RiskLeafField.Quantiles)
-    else if field.contains("minLoss") then Some(RiskLeafField.MinLoss)
-    else if field.contains("maxLoss") then Some(RiskLeafField.MaxLoss)
-    else if field.contains("terms") then Some(RiskLeafField.Terms)
-    else None
+  /** The input a refusal belongs under. One mapping for every input this form
+    * owns, so the name, the parent, the probability and the five distribution
+    * inputs are routed by the same match.
+    *
+    * An element failure and a collection failure share one input, because the
+    * form edits the whole list as one comma-separated value.
+    *
+    * Visible to the package so the mapping is testable without rendering the
+    * form.
+    */
+  private[views] def inputFor(location: ErrorLocation): Option[RiskLeafField] =
+    location match
+      case ErrorLocation.Field(_, FieldName.Name)             => Some(RiskLeafField.Name)
+      case ErrorLocation.Field(_, FieldName.ParentName)       => Some(RiskLeafField.Parent)
+      case ErrorLocation.Field(_, FieldName.Probability)      => Some(RiskLeafField.Probability)
+      case ErrorLocation.Field(_, FieldName.Percentiles)      => Some(RiskLeafField.Percentiles)
+      case ErrorLocation.Field(_, FieldName.PercentileAt(_))  => Some(RiskLeafField.Percentiles)
+      case ErrorLocation.Field(_, FieldName.Quantiles)        => Some(RiskLeafField.Quantiles)
+      case ErrorLocation.Field(_, FieldName.QuantileAt(_))    => Some(RiskLeafField.Quantiles)
+      case ErrorLocation.Field(_, FieldName.MinLoss)          => Some(RiskLeafField.MinLoss)
+      case ErrorLocation.Field(_, FieldName.MaxLoss)          => Some(RiskLeafField.MaxLoss)
+      case ErrorLocation.Field(_, FieldName.Terms)            => Some(RiskLeafField.Terms)
+      // A mode-level mismatch names the distribution rather than one of its
+      // fields, so it belongs in the banner.
+      case _                                                  => None

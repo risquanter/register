@@ -7,6 +7,7 @@ import app.components.{Icons, TreeNodeRow}
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, DistributionType}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
  * Hierarchical tree preview rendered from TreeBuilderState signals.
@@ -87,7 +88,7 @@ object TreePreview:
 
     // Build child lookup: parent name → children (portfolios + leaves unified)
     val allNodes: List[(TreeNode, Option[String])] =
-      portfolios.map(p => (TreeNode.Portfolio(p.name), p.parent.map(_.value))) ++
+      portfolios.map(p => (TreeNode.Portfolio(p.name), ParentRef.nameOf(p.parent).map(_.value))) ++
       leaves.map { l =>
         val node = TreeNode.Leaf(
           n           = l.name,
@@ -98,7 +99,7 @@ object TreePreview:
           minLoss     = l.distribution.minLoss.map(identity),
           maxLoss     = l.distribution.maxLoss.map(identity)
         )
-        (node, l.parent.map(_.value))
+        (node, ParentRef.nameOf(l.parent).map(_.value))
       }
 
     val childrenOf: Map[Option[String], List[TreeNode]] =
@@ -161,7 +162,7 @@ object TreePreview:
         kind        = nodeKind,
         depth       = depth,
         tooltip     = Some(node.tooltip),
-        onRemove    = Some(() => builderState.removeNode(node.name.value)),
+        onRemove    = Some(() => builderState.removeNode(node.name)),
         onNodeClick = onNodeClick,
         isSelected  = isSelected
       )

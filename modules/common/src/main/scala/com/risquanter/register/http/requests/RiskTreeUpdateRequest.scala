@@ -2,7 +2,8 @@ package com.risquanter.register.http.requests
 
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import zio.prelude.Validation
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.data.iron.SeedVarId
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, SubmittedCollection, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.*
 
 final case class RiskTreeUpdateRequest(
@@ -16,34 +17,36 @@ object RiskTreeUpdateRequest:
   given JsonCodec[RiskTreeUpdateRequest] = DeriveJsonCodec.gen
 
   def resolve(req: RiskTreeUpdateRequest, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] = {
-    val treeNameV = refineNameField(req.name, "request.name")
-    val portfoliosV = refineExistingPortfolios(req.portfolios, "request.portfolios")
-    val leavesV = refineExistingLeaves(req.leaves, "request.leaves")
-    val newPortfoliosV = refinePortfolioDefs(req.newPortfolios, "request.newPortfolios")
-    val newLeavesV = refineLeafDefs(req.newLeaves, "request.newLeaves")
+    val treeNameV = refineNameField(req.name, ErrorLocation.requestField(FieldName.Name))
+    val portfoliosV = refineExistingPortfolios(req.portfolios)
+    val leavesV = refineExistingLeaves(req.leaves)
+    val newPortfoliosV = refinePortfolioDefs(req.newPortfolios, SubmittedCollection.NewPortfolios)
+    val newLeavesV = refineLeafDefs(req.newLeaves, SubmittedCollection.NewLeaves)
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, newPortfoliosV, newLeavesV) {
       (treeName, portfolios, leaves, newPortfolios, newLeaves) =>
-        val providedSeeds = newLeaves.collect { case (name, _, _, _, Some(seed)) => name -> seed }
+        val providedSeeds = newLeaves.collect {
+          case SubmittedLeaf(_, name, _, _, _, SeedVarIdChoice.Provided(seed)) => name -> seed
+        }
         Validation.validateWith(
-          validateTopologyUpdate(treeName, portfolios, leaves.map { case (_, name, parent, _, _) => (name, parent) }, newPortfolios, newLeaves.map { case (name, parent, _, _, _) => (name, parent) }),
-          requireUniqueSeedVarIds(providedSeeds)
+          validateTopologyUpdate(treeName, portfolios, leaves, newPortfolios, newLeaves),
+          SeedVarId.requireDistinct(providedSeeds, ErrorLocation.requestField(FieldName.SeedVarId))
         ) { (rootName, _) =>
-          val existingPortfolioNodes = portfolios.map { case (id, name, parent) =>
-            name -> ResolvedNode(id, name, parent, NodeKind.Portfolio)
+          val existingPortfolioNodes = portfolios.map { p =>
+            p.name -> ResolvedNode(p.id, p.name, p.parent, NodeKind.Portfolio)
           }
-          val existingLeafNodes = leaves.map { case (id, name, parent, _, _) =>
-            name -> ResolvedNode(id, name, parent, NodeKind.Leaf)
+          val existingLeafNodes = leaves.map { l =>
+            l.name -> ResolvedNode(l.id, l.name, l.parent, NodeKind.Leaf)
           }
-          val addedPortfolioNodes = newPortfolios.map { case (name, parent) =>
-            name -> ResolvedNode(newId(), name, parent, NodeKind.Portfolio)
+          val addedPortfolioNodes = newPortfolios.map { p =>
+            p.name -> ResolvedNode(newId(), p.name, p.parent, NodeKind.Portfolio)
           }
-          val addedLeafNodes = newLeaves.map { case (name, parent, _, _, _) =>
-            name -> ResolvedNode(newId(), name, parent, NodeKind.Leaf)
+          val addedLeafNodes = newLeaves.map { l =>
+            l.name -> ResolvedNode(newId(), l.name, l.parent, NodeKind.Leaf)
           }
 
-          val existingLeafOccurrenceAndShape = leaves.collect { case (_, name, _, prob, dist) => name -> (prob, dist) }.toMap
-          val addedLeafOccurrenceAndShape = newLeaves.map { case (name, _, prob, dist, _) => name -> (prob, dist) }.toMap
+          val existingLeafOccurrenceAndShape = leaves.map(l => l.name -> (l.probability, l.distribution)).toMap
+          val addedLeafOccurrenceAndShape = newLeaves.map(l => l.name -> (l.probability, l.distribution)).toMap
 
           ResolvedUpdate(
             treeName = treeName,

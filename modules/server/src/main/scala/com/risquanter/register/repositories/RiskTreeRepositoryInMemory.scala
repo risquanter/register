@@ -4,7 +4,7 @@ import zio.*
 import zio.json.EncoderOps
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, TreeLoadFailure, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, RepositoryFailure, TreeLoadFailure, ValidationFailed, ValidationError, ValidationErrorCode}
 
 /** In-memory implementation of RiskTreeRepository for testing and development.
   *
@@ -42,7 +42,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       case Revision.Head(branch) => requireMain(branch)(effect)
       case Revision.At(_) =>
         ZIO.fail(ValidationFailed(List(ValidationError(
-          field = "at",
+          location = ErrorLocation.requestField(FieldName.At),
           code = ValidationErrorCode.NOT_SUPPORTED,
           message = "point-in-time reads require the Irmin backend"
         ))))
@@ -95,7 +95,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
 
   override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
     ZIO.fail(ValidationFailed(List(ValidationError(
-      field = "toCommit",
+      location = ErrorLocation.requestField(FieldName.ToCommit),
       code = ValidationErrorCode.NOT_SUPPORTED,
       message = "revert requires the Irmin backend (point-in-time reads unavailable in memory)"
     ))))

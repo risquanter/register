@@ -3,8 +3,8 @@ package com.risquanter.register.domain.data
 import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
 import sttp.tapir.Schema
-import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
 
 /** What a mitigation applies to; resolves server-side to the scoped node set. */
 sealed trait MitigationTarget
@@ -76,7 +76,7 @@ object MitigationSpec {
         for {
           h <- stamp match {
             case None    => Right(None)
-            case Some(s) => ContentHash.fromString(s, "overrideBaseStamp")
+            case Some(s) => ContentHash.fromString(s)
               .map(Some(_)).left.map(_.map(_.message).mkString("; "))
           }
           a <- anchor match {
@@ -118,9 +118,9 @@ object Mitigation {
     name: SafeName.SafeName,
     target: MitigationTarget,
     spec: MitigationSpec,
-    precedence: MitigationPrecedence,
-    fieldPrefix: String = "mitigation"
+    precedence: MitigationPrecedence
   ): Validation[ValidationError, Mitigation] = {
+    val specLocation = ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Spec)
 
     val overrideRulesV: Validation[ValidationError, Unit] = spec match {
       case MitigationSpec.LeafStage(transform, stamp, anchor) =>
@@ -133,13 +133,13 @@ object Mitigation {
               Option.when(anchor.isEmpty)("override anchor")
             ).flatten
             Validation.fail(ValidationError(
-              field = s"$fieldPrefix.spec",
+              location = specLocation,
               code = ValidationErrorCode.REQUIRED_FIELD,
               message = s"An Override mitigation must carry its ${missing.mkString(" and ")}"
             ))
           case (false, _, _) =>
             Validation.fail(ValidationError(
-              field = s"$fieldPrefix.spec",
+              location = specLocation,
               code = ValidationErrorCode.INVALID_COMBINATION,
               message = "Only an Override mitigation may carry a base stamp or override anchor"
             ))
@@ -150,13 +150,13 @@ object Mitigation {
     val stepsV: Validation[ValidationError, Unit] = spec match {
       case MitigationSpec.ResultStage(pipeline) if pipeline.steps.sizeIs < MinPipelineSteps =>
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.spec",
+          location = specLocation,
           code = ValidationErrorCode.CONSTRAINT_VIOLATION,
           message = s"result-stage pipeline is empty: at least $MinPipelineSteps step is required"
         ))
       case MitigationSpec.ResultStage(pipeline) if pipeline.steps.sizeIs > MaxPipelineSteps =>
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.spec",
+          location = specLocation,
           code = ValidationErrorCode.CONSTRAINT_VIOLATION,
           message = s"result-stage pipeline has too many steps: ${pipeline.steps.size} exceeds the limit of $MaxPipelineSteps"
         ))
@@ -167,6 +167,40 @@ object Mitigation {
       .validateWith(overrideRulesV, stepsV) { (_, _) => () }
       .map(_ => new Mitigation(id, name, target, spec, precedence))
   }
+
+  /** Mitigation identifiers are unique within one tree. One error per repeated
+    * identifier, carrying how many mitigations hold it. */
+  def requireDistinctIds(
+    mitigations: Seq[Mitigation],
+    location: ErrorLocation
+  ): Validation[ValidationError, Unit] =
+    ValidationUtil.requireDistinctBy(
+      mitigations,
+      _.id.value,
+      (id, group) =>
+        ValidationError(
+          location = location,
+          code = ValidationErrorCode.DUPLICATE_VALUE,
+          message = ValidationMessages.duplicateMitigationIds(id.toString, group.size)
+        )
+    )
+
+  /** Mitigation names are unique within one tree, so a user naming one in a
+    * selection cannot mean two. */
+  def requireDistinctNames(
+    mitigations: Seq[Mitigation],
+    location: ErrorLocation
+  ): Validation[ValidationError, Unit] =
+    ValidationUtil.requireDistinctBy(
+      mitigations,
+      _.name.value,
+      (name, group) =>
+        ValidationError(
+          location = location,
+          code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
+          message = ValidationMessages.duplicateMitigationNames(name.toString, group.size)
+        )
+    )
 
   private def hasOverrideComponent(t: RiskLeafTransform): Boolean =
     (t.likelihood, t.distribution) match {
@@ -191,14 +225,13 @@ object Mitigation {
       Raw(m.id.value, m.name.value, m.target, m.spec, m.precedence.key)),
     JsonDecoder[Raw].mapOrFail { raw =>
       val idV   = ValidationUtil.toValidation(MitigationId.fromString(raw.id))
-      val nameV = ValidationUtil.toValidation(ValidationUtil.refineName(raw.name, "mitigation.name"))
+      val nameV = ValidationUtil.toValidation(ValidationUtil.refineName(raw.name, ErrorLocation.requestField(FieldName.Name)))
       Validation
         .validateWith(idV, nameV) { (id, name) => (id, name) }
         .flatMap { case (id, name) =>
-          create(id, name, raw.target, raw.spec, MitigationPrecedence(raw.precedence),
-                 fieldPrefix = s"mitigation[id=${raw.id}]")
+          create(id, name, raw.target, raw.spec, MitigationPrecedence(raw.precedence))
         }
-        .toEither.left.map(_.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+        .toEither.left.map(_.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
     }
   )
 

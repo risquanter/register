@@ -5,7 +5,7 @@ import zio.config.magnolia.{DeriveConfig, deriveConfig}
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.iron.{ExternalTokenStr, PositiveInt, IronConstants, MeshServiceUrl}
 import com.risquanter.register.domain.data.iron.MeshServiceUrl.*
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 import com.risquanter.register.domain.data.iron.ValidationUtil
 
 // SpiceDbToken: redacted credential wrapping a config-loaded bearer token.
@@ -34,8 +34,8 @@ object SpiceDbToken:
     * Returns a ValidationError if the value is blank, exceeds 2048 chars,
     * or contains control characters / non-printable bytes (CRLF injection guard).
     */
-  def fromString(s: String, fieldPath: String = "token"): Either[List[ValidationError], SpiceDbToken] =
-    ValidationUtil.refineExternalToken(s, fieldPath).map(new SpiceDbToken(_))
+  def fromString(s: String, location: ErrorLocation): Either[List[ValidationError], SpiceDbToken] =
+    ValidationUtil.refineExternalToken(s, location).map(new SpiceDbToken(_))
 
 // Controls ZedToken cache freshness for SpiceDB authorization checks.
 //
@@ -93,10 +93,14 @@ object SpiceDbConfig:
   private def errorsToConfigError(errs: List[ValidationError]): Config.Error =
     Config.Error.InvalidData(message = errs.map(_.message).mkString("; "))
 
+  /** A configuration value is not a field of any request, and the descriptor
+    * above keeps only the message, so a narrower location would reach nothing. */
+  private val configLocation: ErrorLocation = ErrorLocation.Whole
+
   private val meshServiceUrlConfig: Config[MeshServiceUrl.MeshServiceUrl] =
     Config.string.mapOrFail { s =>
       MeshServiceUrl
-        .fromString(s, "url")
+        .fromString(s, configLocation)
         .left
         .map(errorsToConfigError)
     }
@@ -104,14 +108,14 @@ object SpiceDbConfig:
   private val tokenConfig: Config[SpiceDbToken] =
     Config.string.mapOrFail { s =>
       SpiceDbToken
-        .fromString(s, "token")
+        .fromString(s, configLocation)
         .left
         .map(errorsToConfigError)
     }
 
   private val positiveIntConfig: Config[PositiveInt] =
     deriveConfig[Int].mapOrFail { value =>
-      ValidationUtil.refinePositiveInt(value).left.map(errorsToConfigError)
+      ValidationUtil.refinePositiveInt(value, configLocation).left.map(errorsToConfigError)
     }
 
   given DeriveConfig[MeshServiceUrl.MeshServiceUrl] = DeriveConfig(meshServiceUrlConfig)

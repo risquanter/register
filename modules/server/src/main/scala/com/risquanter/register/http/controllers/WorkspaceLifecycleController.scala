@@ -6,7 +6,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Checked, Permission, UserContextExtractor }
 import com.risquanter.register.auth.ResourceRef.asResource
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode, ValidationFailed}
+import com.risquanter.register.domain.errors.{ErrorLocation, RequestHeaderName, ValidationError, ValidationErrorCode, ValidationFailed}
 import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, Revision}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
@@ -103,7 +103,7 @@ class WorkspaceLifecycleController private (
                       scenarioService.list(ws.id).flatMap { scenarios =>
                         ZIO.unless(scenarios.exists(_.name == name))(
                           ZIO.fail(ValidationFailed(List(ValidationError(
-                            field = "X-Branch",
+                            location = ErrorLocation.Header(RequestHeaderName.Branch),
                             code = ValidationErrorCode.NOT_FOUND,
                             message = s"Scenario '${name.value}' not found — create it via POST /scenarios before creating a tree on it"
                           ))))

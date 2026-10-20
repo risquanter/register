@@ -4,7 +4,7 @@ import zio.*
 
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.ValidationMessages
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode, ValidationFailed}
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode, ValidationFailed}
 import com.risquanter.register.http.requests.{DistributionPreviewResponse, DistributionPreviewPoint}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
 
@@ -58,7 +58,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
           upper       = None
         )
       ).mapError(_ => ValidationFailed(List(ValidationError(
-        field   = "request",
+        location = ErrorLocation.Whole,
         code    = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
         message = ValidationMessages.distributionFitFailed
       ))))
@@ -77,7 +77,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
     for
       lognormal <- ZIO.fromEither(LognormalHelper.fromLognormal90CI(minLoss, maxLoss))
         .mapError(ve => ValidationFailed(List(ValidationError(
-          field   = "request",
+          location = ErrorLocation.Whole,
           code    = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
           message = ve.message
         ))))

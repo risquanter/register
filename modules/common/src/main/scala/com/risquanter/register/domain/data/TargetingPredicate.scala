@@ -7,7 +7,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 
 import com.risquanter.register.domain.data.iron.TargetingSource
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 
 import parser.FOLParser
 import logic.{Formula, FOL, FOLUtil}
@@ -29,7 +29,7 @@ final case class TargetingPredicate private (source: TargetingSource)
 
 object TargetingPredicate:
 
-  private val field = "targetingPredicate.source"
+  private val location: ErrorLocation = ErrorLocation.requestField(FieldName.TargetingSource)
 
   /** Mitigation-state predicates a targeting predicate may not reference — a
     * mitigation targeting by its own effect would be self-referential. These
@@ -69,7 +69,7 @@ object TargetingPredicate:
     }
 
   private def err(code: ValidationErrorCode, message: String): ValidationError =
-    ValidationError(field = field, code = code, message = message)
+    ValidationError(location = location, code = code, message = message)
 
   private def checkFragment(formula: Formula[FOL]): Either[ValidationError, Unit] =
     FragmentCheck.check(formula, Fragment.Targeting)
@@ -117,7 +117,8 @@ object TargetingPredicate:
   /** Wire format is the source string; decode == create (boundary validation). */
   given JsonCodec[TargetingPredicate] =
     JsonCodec[String].transformOrFail(
-      s => create(s).toEither.left.map(errs => errs.map(e => s"[${e.field}] ${e.message}").mkString("; ")),
+      s => create(s).toEither.left.map(errs =>
+        errs.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")),
       _.source
     )
 

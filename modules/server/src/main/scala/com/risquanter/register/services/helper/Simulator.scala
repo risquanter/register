@@ -3,7 +3,7 @@ package com.risquanter.register.services.helper
 import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution, SeedDerivation}
 import com.risquanter.register.domain.data.{TrialId, Loss, RiskLeaf, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
-import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
 import io.github.iltotore.iron.constraint.numeric.{Greater, given}
@@ -126,14 +126,21 @@ object Simulator {
   private def createDistributionWithParams(leaf: RiskLeaf): IO[AppError, (Distribution, com.risquanter.register.domain.data.DistributionParams)] = {
     import io.github.iltotore.iron.*
     import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
-    
+
+    // The leaf is persisted, so every refusal here names it by identifier and
+    // the message carries only the reason.
+    def at(field: FieldName): ErrorLocation =
+      ErrorLocation.Field(ErrorSubject.ExistingNode(leaf.id), field)
+
     leaf.distributionType.toLowerCase match {
       // Expert opinion mode: fit from percentiles + quantiles
       case "expert" =>
         (leaf.percentiles, leaf.quantiles) match {
           case (Some(ps), Some(qs)) if ps.length == qs.length && ps.length >= 2 =>
             // Refine percentile values to Probability type (exclusive bounds (0,1) per QPFitter)
-            val percentileResults = ps.map(p => ValidationUtil.refineProbability(p, "percentiles"))
+            val percentileResults = ps.zipWithIndex.map { case (p, i) =>
+              ValidationUtil.refineProbability(p, at(FieldName.percentileAt(i)))
+            }
             val percentileErrors = percentileResults.collect { case Left(errors) => errors }.flatten
             
             if (percentileErrors.nonEmpty) {
@@ -156,18 +163,18 @@ object Simulator {
                   )
                   ZIO.succeed((metalog, params))
                 case Left(validationError) => ZIO.fail(ValidationFailed(List(ValidationError(
-                  field = s"riskLeaf.${leaf.id}.metalogFit",
+                  location = at(FieldName.DistributionType),
                   code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
-                  message = s"Failed to fit Metalog for '${leaf.id}': ${validationError.message}"
+                  message = s"Failed to fit Metalog: ${validationError.message}"
                 ))))
               }
             }
           
           case _ =>
             ZIO.fail(ValidationFailed(List(ValidationError(
-              field = s"riskLeaf.${leaf.id}.expertParams",
+              location = at(FieldName.DistributionType),
               code = ValidationErrorCode.INVALID_EXPERT_PARAMS,
-              message = s"Expert mode requires percentiles and quantiles arrays with same length (≥2) for '${leaf.id}'"
+              message = "Expert mode requires percentiles and quantiles arrays with same length (≥2)"
             ))))
         }
       
@@ -184,25 +191,25 @@ object Simulator {
                 )
                 ZIO.succeed((dist, params))
               case Left(err) => ZIO.fail(ValidationFailed(List(ValidationError(
-                field = s"riskLeaf.${leaf.id}.lognormalFit",
+                location = at(FieldName.DistributionType),
                 code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
-                message = s"Failed to create lognormal for '${leaf.id}': ${err.message}"
+                message = s"Failed to create lognormal: ${err.message}"
               ))))
             }
           
           case _ =>
             ZIO.fail(ValidationFailed(List(ValidationError(
-              field = s"riskLeaf.${leaf.id}.lognormalParams",
+              location = at(FieldName.DistributionType),
               code = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-              message = s"Lognormal mode requires minLoss > 0 and minLoss < maxLoss for '${leaf.id}'"
+              message = "Lognormal mode requires minLoss > 0 and minLoss < maxLoss"
             ))))
         }
       
       case other =>
         ZIO.fail(ValidationFailed(List(ValidationError(
-          field = s"riskLeaf.${leaf.id}.distributionType",
+          location = at(FieldName.DistributionType),
           code = ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE,
-          message = s"Unsupported distribution type: $other for '${leaf.id}'"
+          message = s"Unsupported distribution type: $other"
         ))))
     }
   }

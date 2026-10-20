@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.Match
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 import zio.json.{JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
 
 // Base refined type alias used for most short strings:
@@ -86,6 +86,14 @@ type PositiveLong = Long :| Greater[0L]
 
 // Non-negative integers (>= 0)
 type NonNegativeInt = Int :| GreaterEqual[0]
+
+// JSON codecs for NonNegativeInt. It crosses the wire inside
+// `DistributionFieldName`, naming which element of a submitted collection
+// failed, so a derived codec for that enum needs an instance for this type.
+// The refinement is re-checked on decode: the bound is the contract, and a
+// decoded value is as trustworthy as a constructed one (ADR-038).
+given JsonEncoder[NonNegativeInt] = JsonEncoder[Int].contramap(identity)
+given JsonDecoder[NonNegativeInt] = JsonDecoder[Int].mapOrFail(_.refineEither[GreaterEqual[0]])
 
 // Non-negative doubles (>= 0.0, e.g. scale factors)
 // LessEqual[1.7976931348623157e308] is Double.MaxValue as a literal type
@@ -192,7 +200,7 @@ object SeedEntityId:
 
   /** Convenience constructor from plain Long (range-validated). */
   def fromLong(v: Long): Either[List[ValidationError], SeedEntityId] =
-    ValidationUtil.refineSeedEntityId(v)
+    ValidationUtil.refineSeedEntityId(v, ErrorLocation.requestField(FieldName.SeedEntityId))
 
   // JSON codecs (companion object placement ensures implicit scope).
   // Wire format is a JSON number (ADR-001: primitives on the wire).
@@ -217,40 +225,38 @@ object SeedVarId:
 
   /** Convenience constructor from plain Long (range-validated). */
   def fromLong(v: Long): Either[List[ValidationError], SeedVarId] =
-    ValidationUtil.refineSeedVarId(v)
+    ValidationUtil.refineSeedVarId(v, ErrorLocation.requestField(FieldName.SeedVarId))
 
   /** The per-tree distinctness rule, defined once.
     *
-    * Both enforcement layers delegate here — the request boundary
-    * (RiskTreeRequests, field "request.seedVarIds", pre-assignment 400) and the
-    * RiskTree smart constructor (field "nodes.seedVarId", safety net for
-    * programmatic and store-loaded trees). One error per duplicated ID, naming
-    * every holder, sorted on both axes for deterministic messages.
+    * Both enforcement layers delegate here — the request boundary and the
+    * `RiskTree` smart constructor, which covers programmatic and store-loaded
+    * trees. One error per duplicated identifier, each naming every holder, so
+    * no caller can report a subset.
+    *
+    * A repeated seed identifier does not identify anything on its own, which is
+    * why each error carries the names of the leaves holding it.
+    *
+    * {{{
+    * // leaves Fire and Flood both declaring 42, Storm declaring 7
+    * requireDistinct(Seq(fire -> 42, flood -> 42, storm -> 7), loc)
+    * // one error: seedVarId 42 is used by multiple nodes: Fire, Flood
+    * }}}
     */
   def requireDistinct(
-    holders: Seq[(String, SeedVarId)],
-    field: String
-  ): zio.prelude.Validation[ValidationError, Unit] = {
-    import zio.prelude.Validation
-    val duplicates = holders
-      .groupBy { case (_, id) => id.value }
-      .filter { case (_, group) => group.size > 1 }
-      .toList
-      .sortBy { case (idValue, _) => idValue }
-    duplicates match {
-      case Nil => Validation.succeed(())
-      case head :: tail =>
-        def toError(idValue: Long, group: Seq[(String, SeedVarId)]) =
-          ValidationError(
-            field = field,
-            code = ValidationErrorCode.DUPLICATE_VALUE,
-            message = ValidationMessages.seedVarIdInUse(idValue, group.map(_._1).sorted)
-          )
-        Validation.failNonEmptyChunk(
-          zio.NonEmptyChunk.fromIterable(toError.tupled(head), tail.map(toError.tupled))
+    holders: Seq[(SafeName.SafeName, SeedVarId)],
+    location: ErrorLocation
+  ): zio.prelude.Validation[ValidationError, Unit] =
+    ValidationUtil.requireDistinctBy(
+      holders,
+      { case (_, id) => id.value },
+      (idValue, group) =>
+        ValidationError(
+          location = location,
+          code = ValidationErrorCode.DUPLICATE_VALUE,
+          message = ValidationMessages.seedVarIdInUse(idValue, group.map(_._1.value.toString).sorted)
         )
-    }
-  }
+    )
 
   // JSON codecs (companion object placement ensures implicit scope).
   // Wire format is a JSON number (ADR-001: primitives on the wire).
@@ -292,25 +298,42 @@ object SafeName:
   
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[ValidationError], SafeName] =
-    ValidationUtil.refineName(s)
+    ValidationUtil.refineName(s, ErrorLocation.requestField(FieldName.Name))
 
-  /** The names occurring more than once in `names`, ascending.
+  /** Node names are unique within one tree. One error per repeated name,
+    * carrying how many nodes carry it.
     *
-    * One definition of node-name uniqueness. The request boundary
-    * (`RiskTreeRequests.requireUniqueNames`), the domain constructor
-    * (`RiskTree.fromNodes`) and the scenario merge name scan
-    * (`ScenarioMergeService.duplicateNodeNames`) all read it, so the three
-    * cannot drift apart. Each caller contributes only its own field path and
-    * message. Mirrors the split `SeedVarId.requireDistinct` uses for the
-    * sibling rule.
+    * A repeated name identifies its own holders, because the name is what the
+    * holders are called, so the error needs no holder list — unlike the
+    * sibling rule on `SeedVarId`.
     *
     * Equality is the refined value's own, which is exact: `SafeName` admits no
     * character outside `A-Za-z0-9 /-`, so no Unicode normalisation can apply,
     * and a space is significant.
+    *
+    * A name is a reference — a child names its parent by name — so a repeated
+    * one makes that reference ambiguous rather than merely duplicated.
+    *
+    * {{{
+    * // four nodes named Fire, Flood, Fire, Fire
+    * requireDistinct(names, loc)
+    * // one error: duplicate node name: Fire — used by 3 nodes; …
+    * }}}
     */
-  def duplicates(names: Seq[SafeName]): List[SafeName] =
-    names.groupBy(identity).collect { case (n, group) if group.sizeIs > 1 => n }
-      .toList.sortBy(_.value)
+  def requireDistinct(
+    names: Seq[SafeName],
+    location: ErrorLocation
+  ): zio.prelude.Validation[ValidationError, Unit] =
+    ValidationUtil.requireDistinctBy(
+      names,
+      _.value,
+      (name, group) =>
+        ValidationError(
+          location = location,
+          code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
+          message = ValidationMessages.duplicateNodeNames(name.toString, group.size)
+        )
+    )
 
 // Opaque type for emails
 object Email:
@@ -325,7 +348,7 @@ object Email:
   
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[ValidationError], Email] = 
-    ValidationUtil.refineEmail(s)
+    ValidationUtil.refineEmail(s, ErrorLocation.requestField(FieldName.Email))
 
 // Opaque type for URLs (service endpoints, config, and domain URL fields)
 object Url:
@@ -343,8 +366,8 @@ object Url:
     fromString(s).left.map(_.map(_.message).mkString(", ")))
 
   // Convenience constructor from plain String
-  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], Url] =
-    ValidationUtil.refineUrl(s, fieldPath)
+  def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.Url)): Either[List[ValidationError], Url] =
+    ValidationUtil.refineUrl(s, location)
 
 // SecureUrl: HTTPS-only service endpoint URL (TLS enforced at the type level).
 // Use for any config-loaded external service URL where credentials are transmitted.
@@ -363,8 +386,8 @@ object SecureUrl:
   given JsonDecoder[SecureUrl] = JsonDecoder[String].mapOrFail(s =>
     fromString(s).left.map(_.map(_.message).mkString(", ")))
 
-  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], SecureUrl] =
-    ValidationUtil.refineSecureUrl(s, fieldPath)
+  def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.Url)): Either[List[ValidationError], SecureUrl] =
+    ValidationUtil.refineSecureUrl(s, location)
 
 // MeshServiceUrl: URL for service-to-service calls within a service mesh (Istio ambient mode or sidecar mTLS).
 //
@@ -393,8 +416,8 @@ object MeshServiceUrl:
   extension (u: MeshServiceUrl)
     def value: ValidUrl = u
 
-  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], MeshServiceUrl] =
-    Url.fromString(s, fieldPath).map(_.value)
+  def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.Url)): Either[List[ValidationError], MeshServiceUrl] =
+    Url.fromString(s, location).map(_.value)
 
 /** A branch name the store can be told to create, merge into, or delete.
   *
@@ -439,7 +462,7 @@ object BranchRef:
   def scenario(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Either[List[ValidationError], BranchRef] =
     fromString(s"${scenarioPrefix(wsId)}${name.value}")
 
-  def fromString(s: String, fieldPath: String = "branch"): Either[List[ValidationError], BranchRef] =
+  def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.Branch)): Either[List[ValidationError], BranchRef] =
     val sanitized = if s == null then "" else s.trim
     sanitized
       .refineEither[BranchRefConstraint]
@@ -447,7 +470,7 @@ object BranchRef:
       .map(err =>
         List(
           ValidationError(
-            field = fieldPath,
+            location = location,
             code = ValidationErrorCode.INVALID_FORMAT,
             message = s"Branch '$sanitized' is invalid: $err"
           )
@@ -496,7 +519,7 @@ object MergeStagingRef:
       .map(err =>
         List(
           ValidationError(
-            field = "branch",
+            location = ErrorLocation.requestField(FieldName.Branch),
             code = ValidationErrorCode.INVALID_FORMAT,
             message = s"Merge staging branch is invalid: $err"
           )
@@ -592,10 +615,10 @@ object ScenarioName:
   // a scenario named "main" (in any case — the slug lowercases) is rejected at
   // the boundary before it could collide with the main branch reference.
   def fromString(s: String): Either[List[ValidationError], ScenarioName] =
-    ValidationUtil.refineScenarioName(s).flatMap { name =>
+    ValidationUtil.refineScenarioName(s, ErrorLocation.requestField(FieldName.Name)).flatMap { name =>
       if name.value == "main" then
         Left(List(ValidationError(
-          field = "name",
+          location = ErrorLocation.requestField(FieldName.Name),
           code = ValidationErrorCode.INVALID_FORMAT,
           message = "'main' is reserved and cannot be used as a scenario name"
         )))
@@ -618,13 +641,13 @@ case class ContentHash(toContentHash: ContentHashStr):
   def value: String = toContentHash
 
 object ContentHash:
-  def fromString(s: String, fieldPath: String = "contentHash"): Either[List[ValidationError], ContentHash] =
+  def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.ContentHash)): Either[List[ValidationError], ContentHash] =
     s.refineEither[ContentHashConstraint]
       .left
       .map(err =>
         List(
           ValidationError(
-            field = fieldPath,
+            location = location,
             code = ValidationErrorCode.INVALID_FORMAT,
             message = s"Content hash is invalid: $err"
           )
@@ -645,13 +668,13 @@ case class CommitHash(toCommitHash: CommitHashStr):
   def value: String = toCommitHash
 
 object CommitHash:
-  def fromString(s: String, fieldPath: String = "commitHash"): Either[List[ValidationError], CommitHash] =
+  def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.CommitHash)): Either[List[ValidationError], CommitHash] =
     s.refineEither[CommitHashConstraint]
       .left
       .map(err =>
         List(
           ValidationError(
-            field = fieldPath,
+            location = location,
             code = ValidationErrorCode.INVALID_FORMAT,
             message = s"Commit hash is invalid: $err"
           )
@@ -689,7 +712,7 @@ object SafeId:
   
   // Convenience constructor from plain String (case-insensitive)
   def fromString(s: String): Either[List[ValidationError], SafeId] =
-    ValidationUtil.refineId(s)
+    ValidationUtil.refineId(s, ErrorLocation.requestField(FieldName.Id))
 
 // TreeId: Nominal case class wrapper over SafeId for tree identity (ADR-018).
 // Compiler-distinct from NodeId and raw SafeId. All validation delegates to SafeId.
@@ -779,7 +802,7 @@ object WorkspaceKeySecret:
 
   /** Smart constructor: validates base64url format, 22 chars. */
   def fromString(s: String): Either[List[ValidationError], WorkspaceKeySecret] =
-    ValidationUtil.refineWorkspaceKeySecret(s)
+    ValidationUtil.refineWorkspaceKeySecret(s, ErrorLocation.requestField(FieldName.WorkspaceKey))
 
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[WorkspaceKeySecret] = JsonEncoder[String].contramap(_.reveal)
@@ -806,7 +829,7 @@ object WorkspaceKeyHash:
   def apply(value: WorkspaceKeyHashStr): WorkspaceKeyHash = new WorkspaceKeyHash(value)
 
   def fromString(s: String): Either[List[ValidationError], WorkspaceKeyHash] =
-    ValidationUtil.refineWorkspaceKeyHash(s)
+    ValidationUtil.refineWorkspaceKeyHash(s, ErrorLocation.requestField(FieldName.WorkspaceKeyHash))
 
 // ============================================================================
 // Auth Identity Types (ADR-012, ADR-024)
@@ -863,7 +886,7 @@ object UserId:
     override def toString: String = "UserId.Anonymous"
 
   def fromString(s: String): Either[List[ValidationError], Authenticated] =
-    ValidationUtil.refineUserId(s).map(new Authenticated(_))
+    ValidationUtil.refineUserId(s, ErrorLocation.requestField(FieldName.UserId)).map(new Authenticated(_))
 
   // JSON codecs — Authenticated only; Anonymous is never serialised to JSON.
   given JsonEncoder[Authenticated] = JsonEncoder[String].contramap(_.value)
@@ -907,13 +930,13 @@ case class TraceId(toTraceIdStr: TraceIdStr):
   def value: String = toTraceIdStr
 
 object TraceId:
-  def fromString(s: String, fieldPath: String = "traceId"): Either[List[ValidationError], TraceId] =
+  def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.TraceId)): Either[List[ValidationError], TraceId] =
     s.refineEither[TraceIdConstraint]
       .left
       .map(err =>
         List(
           ValidationError(
-            field = fieldPath,
+            location = location,
             code = ValidationErrorCode.INVALID_FORMAT,
             message = s"Trace id is invalid: $err"
           )

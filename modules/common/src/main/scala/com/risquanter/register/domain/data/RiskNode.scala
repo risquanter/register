@@ -3,8 +3,9 @@ package com.risquanter.register.domain.data
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, PositiveLong, NodeId, PositiveInt, SeedVarId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, OccurrenceProbability, PositiveLong, NodeId, PositiveInt, SeedVarId}
 import com.risquanter.register.domain.data.iron.ValidationMessages
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
 
 /** Recursive ADT representing a risk hierarchy tree.
   * 
@@ -164,22 +165,21 @@ object RiskLeaf {
     minLoss: Option[Long] = None,
     maxLoss: Option[Long] = None,
     parentId: Option[NodeId] = None,
-    fieldPrefix: String = "root",
+    subject: ErrorSubject = ErrorSubject.Request,
     terms: Option[Int] = None,
     seedVarId: Long
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskLeaf] = {
     
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
     // Step 1: Validate all individual fields in parallel
-    val idV = toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
-    val nameV = toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
-    val probV = toValidation(ValidationUtil.refineOccurrenceProbability(probability, s"$fieldPrefix.probability"))
-    val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
-    val seedVarIdV = toValidation(ValidationUtil.refineSeedVarId(seedVarId, s"$fieldPrefix.seedVarId"))
+    val idV = toValidation(ValidationUtil.refineId(id, ErrorLocation.Field(subject, FieldName.Id)))
+    val nameV = toValidation(ValidationUtil.refineName(name, ErrorLocation.Field(subject, FieldName.Name)))
+    val probV = toValidation(ValidationUtil.refineOccurrenceProbability(probability, ErrorLocation.Field(subject, FieldName.Probability)))
+    val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, ErrorLocation.Field(subject, FieldName.DistributionType)))
+    val seedVarIdV = toValidation(ValidationUtil.refineSeedVarId(seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId)))
     val termsV: Validation[ValidationError, Option[PositiveInt]] = terms match {
-      case Some(v) => toValidation(ValidationUtil.refinePositiveInt(v, s"$fieldPrefix.terms")).map(Some(_))
+      case Some(v) => toValidation(ValidationUtil.refinePositiveInt(v, ErrorLocation.Field(subject, FieldName.Terms))).map(Some(_))
       case None    => Validation.succeed(None)
     }
     
@@ -188,18 +188,18 @@ object RiskLeaf {
     val crossFieldV = distTypeV.flatMap { dt =>
       dt.toString match {
         case "expert" =>
-          validateExpertMode(percentiles, quantiles, fieldPrefix).flatMap { result =>
+          validateExpertMode(percentiles, quantiles, subject).flatMap { result =>
             // The dependent terms-within-percentiles rule applies only when `terms`
             // itself refined successfully; when it did not, its error is already
             // carried by the outer validateWith, so skip it here (no double-report).
             termsV match {
               case Validation.Success(_, t) =>
-                requireTermsWithinPercentiles(t, percentiles, fieldPrefix).map(_ => result)
+                requireTermsWithinPercentiles(t, percentiles, subject).map(_ => result)
               case _ => Validation.succeed(result)
             }
           }
-        case "lognormal" => validateLognormalMode(minLoss, maxLoss, fieldPrefix)
-        case unknown => failOnUnknownDistributionType(unknown, fieldPrefix)
+        case "lognormal" => validateLognormalMode(minLoss, maxLoss, subject)
+        case unknown => failOnUnknownDistributionType(unknown, subject)
       }
     }
     
@@ -226,28 +226,27 @@ object RiskLeaf {
   private def validateExpertMode(
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
-    fieldPrefix: String
+    subject: ErrorSubject
   ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[PositiveLong], Option[PositiveLong])] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     
     (percentiles, quantiles) match {
       case (Some(p), Some(q)) if p.nonEmpty && q.nonEmpty =>
         (p.length, q.length) match {
           case (pl, ql) if pl != ql =>
             Validation.fail(ValidationError(
-              field = s"$fieldPrefix.distributionType",
+              location = ErrorLocation.Field(subject, FieldName.DistributionType),
               code = ValidationErrorCode.INVALID_COMBINATION,
               message = s"Expert mode: percentiles and quantiles must have same length (got $pl vs $ql)"
             ))
           case (pl, _) if pl < MinPercentiles =>
             Validation.fail(ValidationError(
-              field = s"$fieldPrefix.percentiles",
+              location = ErrorLocation.Field(subject, FieldName.Percentiles),
               code = ValidationErrorCode.CONSTRAINT_VIOLATION,
               message = s"Expert mode: requires at least $MinPercentiles percentile/quantile points (got $pl)"
             ))
           case (pl, _) if pl > MaxPercentiles =>
             Validation.fail(ValidationError(
-              field = s"$fieldPrefix.percentiles",
+              location = ErrorLocation.Field(subject, FieldName.Percentiles),
               code = ValidationErrorCode.CONSTRAINT_VIOLATION,
               message = s"Expert mode: at most $MaxPercentiles percentile/quantile points (got $pl)"
             ))
@@ -257,28 +256,28 @@ object RiskLeaf {
       
       case (None, None) =>
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.distributionType",
+          location = ErrorLocation.Field(subject, FieldName.DistributionType),
           code = ValidationErrorCode.REQUIRED_FIELD,
           message = "Expert mode requires both percentiles and quantiles"
         ))
       
       case (None, _) =>
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.percentiles",
+          location = ErrorLocation.Field(subject, FieldName.Percentiles),
           code = ValidationErrorCode.REQUIRED_FIELD,
           message = "Expert mode requires percentiles"
         ))
       
       case (_, None) =>
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.quantiles",
+          location = ErrorLocation.Field(subject, FieldName.Quantiles),
           code = ValidationErrorCode.REQUIRED_FIELD,
           message = "Expert mode requires quantiles"
         ))
       
       case _ =>
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.distributionType",
+          location = ErrorLocation.Field(subject, FieldName.DistributionType),
           code = ValidationErrorCode.INVALID_COMBINATION,
           message = "Expert mode: percentiles and quantiles cannot be empty"
         ))
@@ -289,25 +288,24 @@ object RiskLeaf {
   private def validateLognormalMode(
     minLoss: Option[Long],
     maxLoss: Option[Long],
-    fieldPrefix: String
+    subject: ErrorSubject
   ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[PositiveLong], Option[PositiveLong])] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
     (minLoss, maxLoss) match {
       case (Some(min), Some(max)) =>
-        val minV = toValidation(ValidationUtil.refinePositiveLong(min, s"$fieldPrefix.minLoss"))
-        val maxV = toValidation(ValidationUtil.refinePositiveLong(max, s"$fieldPrefix.maxLoss"))
+        val minV = toValidation(ValidationUtil.refinePositiveLong(min, ErrorLocation.Field(subject, FieldName.MinLoss)))
+        val maxV = toValidation(ValidationUtil.refinePositiveLong(max, ErrorLocation.Field(subject, FieldName.MaxLoss)))
 
         // Validate both, then check cross-field constraint
         Validation.validateWith(minV, maxV) { (validMin, validMax) =>
-          requireMinBelowMax(validMin, validMax, fieldPrefix)
+          requireMinBelowMax(validMin, validMax, subject)
             .map(_ => (Some(validMin), Some(validMax)))
         }.flatten
 
-      case (None, None) => lognormalBothBoundsMissing(fieldPrefix)
-      case (None, _)    => lognormalMinMissing(fieldPrefix)
-      case (_, None)    => lognormalMaxMissing(fieldPrefix)
+      case (None, None) => lognormalBothBoundsMissing(subject)
+      case (None, _)    => lognormalMinMissing(subject)
+      case (_, None)    => lognormalMaxMissing(subject)
     }
   }
 
@@ -318,13 +316,12 @@ object RiskLeaf {
   private def requireMinBelowMax(
     min: PositiveLong,
     max: PositiveLong,
-    fieldPrefix: String
+    subject: ErrorSubject
   ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     Validation
       .fromPredicateWith[ValidationError, (PositiveLong, PositiveLong)](
         ValidationError(
-          field = s"$fieldPrefix.minLoss",
+          location = ErrorLocation.Field(subject, FieldName.MinLoss),
           code = ValidationErrorCode.INVALID_RANGE,
           message = s"minLoss ($min) must be less than maxLoss ($max)"
         )
@@ -335,13 +332,12 @@ object RiskLeaf {
   private def requireTermsWithinPercentiles(
     terms: Option[PositiveInt],
     percentiles: Option[Array[Double]],
-    fieldPrefix: String
+    subject: ErrorSubject
   ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     terms match {
       case Some(t) if percentiles.exists(pct => t.toInt > pct.length) =>
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.terms",
+          location = ErrorLocation.Field(subject, FieldName.Terms),
           code = ValidationErrorCode.INVALID_COMBINATION,
           message = ValidationMessages.termsOutOfRange
         ))
@@ -349,28 +345,25 @@ object RiskLeaf {
     }
   }
 
-  private def lognormalBothBoundsMissing[A](fieldPrefix: String): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+  private def lognormalBothBoundsMissing[A](subject: ErrorSubject): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
     Validation.fail(ValidationError(
-      field = s"$fieldPrefix.distributionType",
+      location = ErrorLocation.Field(subject, FieldName.DistributionType),
       code = ValidationErrorCode.REQUIRED_FIELD,
       message = "Lognormal mode requires both minLoss and maxLoss"
     ))
   }
 
-  private def lognormalMinMissing[A](fieldPrefix: String): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+  private def lognormalMinMissing[A](subject: ErrorSubject): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
     Validation.fail(ValidationError(
-      field = s"$fieldPrefix.minLoss",
+      location = ErrorLocation.Field(subject, FieldName.MinLoss),
       code = ValidationErrorCode.REQUIRED_FIELD,
       message = "Lognormal mode requires minLoss"
     ))
   }
 
-  private def lognormalMaxMissing[A](fieldPrefix: String): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+  private def lognormalMaxMissing[A](subject: ErrorSubject): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
     Validation.fail(ValidationError(
-      field = s"$fieldPrefix.maxLoss",
+      location = ErrorLocation.Field(subject, FieldName.MaxLoss),
       code = ValidationErrorCode.REQUIRED_FIELD,
       message = "Lognormal mode requires maxLoss"
     ))
@@ -389,32 +382,31 @@ object RiskLeaf {
     minLoss: Option[PositiveLong],
     maxLoss: Option[PositiveLong],
     terms: Option[PositiveInt],
-    fieldPrefix: String
+    subject: ErrorSubject
   ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] =
     distributionType.toString match {
       case "expert" =>
-        validateExpertMode(percentiles, quantiles, fieldPrefix)
-          .flatMap(_ => requireTermsWithinPercentiles(terms, percentiles, fieldPrefix))
+        validateExpertMode(percentiles, quantiles, subject)
+          .flatMap(_ => requireTermsWithinPercentiles(terms, percentiles, subject))
       case "lognormal" =>
         (minLoss, maxLoss) match {
-          case (Some(min), Some(max)) => requireMinBelowMax(min, max, fieldPrefix)
-          case (None, None)           => lognormalBothBoundsMissing(fieldPrefix)
-          case (None, _)              => lognormalMinMissing(fieldPrefix)
-          case (_, None)              => lognormalMaxMissing(fieldPrefix)
+          case (Some(min), Some(max)) => requireMinBelowMax(min, max, subject)
+          case (None, None)           => lognormalBothBoundsMissing(subject)
+          case (None, _)              => lognormalMinMissing(subject)
+          case (_, None)              => lognormalMaxMissing(subject)
         }
       case unknown =>
-        failOnUnknownDistributionType(unknown, fieldPrefix).map(_ => ())
+        failOnUnknownDistributionType(unknown, subject).map(_ => ())
     }
 
   /** Defense in depth: Fail validation for unknown distribution types that bypass Iron constraint */
   private def failOnUnknownDistributionType(
     unknown: String,
-    fieldPrefix: String
+    subject: ErrorSubject
   ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[PositiveLong], Option[PositiveLong])] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     
     Validation.fail(ValidationError(
-      field = s"$fieldPrefix.distributionType",
+      location = ErrorLocation.Field(subject, FieldName.DistributionType),
       code = ValidationErrorCode.CONSTRAINT_VIOLATION,
       message = s"Invalid distribution type '$unknown' - expected 'expert' or 'lognormal'"
     ))
@@ -457,10 +449,10 @@ object RiskLeaf {
         raw.id, raw.name, raw.distributionType, raw.probability,
         raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss,
         parentId = validParentId,
-        fieldPrefix = s"riskLeaf[id=${raw.id}]",
+        subject = ErrorSubject.Request,
         terms = raw.terms,
         seedVarId = raw.seedVarId
-      ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+      ).toEither.left.map(errors => errors.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
     }
   }
   
@@ -542,32 +534,31 @@ object RiskPortfolio {
     name: String,
     childIds: Array[NodeId],
     parentId: Option[NodeId] = None,
-    fieldPrefix: String = "root"
+    subject: ErrorSubject = ErrorSubject.Request
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
     
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
     // Step 1: Validate ID (Iron refinement)
     val idValidation: Validation[ValidationError, SafeId.SafeId] = 
-      toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
+      toValidation(ValidationUtil.refineId(id, ErrorLocation.Field(subject, FieldName.Id)))
     
     // Step 2: Validate name (Iron refinement)
     val nameValidation: Validation[ValidationError, SafeName.SafeName] =
-      toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
+      toValidation(ValidationUtil.refineName(name, ErrorLocation.Field(subject, FieldName.Name)))
     
     // Step 3: Validate childIds array (business rule): non-empty AND count-bounded, accumulated
     val arr = Option(childIds).getOrElse(Array.empty[NodeId])
     val nonEmptyV = Validation.fromPredicateWith[ValidationError, Array[NodeId]](
       ValidationError(
-        field = s"$fieldPrefix.childIds",
+        location = ErrorLocation.Field(subject, FieldName.ChildIds),
         code = ValidationErrorCode.REQUIRED_FIELD,
         message = "childIds array must not be empty"
       )
     )(arr)(_.nonEmpty)
     val countV = Validation.fromPredicateWith[ValidationError, Array[NodeId]](
       ValidationError(
-        field = s"$fieldPrefix.childIds",
+        location = ErrorLocation.Field(subject, FieldName.ChildIds),
         code = ValidationErrorCode.CONSTRAINT_VIOLATION,
         message = s"too many children: ${arr.length} exceeds the limit of $MaxChildren"
       )
@@ -597,15 +588,14 @@ object RiskPortfolio {
     name: String,
     childIds: Array[String],
     parentId: Option[NodeId] = None,
-    fieldPrefix: String = "root"
+    subject: ErrorSubject = ErrorSubject.Request
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
-    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     
     // Convert string childIds to NodeIds
     val childIdResults = childIds.zipWithIndex.map { case (cid, idx) =>
       SafeId.fromString(cid).left.map { errors =>
         ValidationError(
-          field = s"$fieldPrefix.childIds[$idx]",
+          location = ErrorLocation.Field(subject, FieldName.childAt(idx)),
           code = ValidationErrorCode.CONSTRAINT_VIOLATION,
           message = errors.mkString(", ")
         )
@@ -620,7 +610,7 @@ object RiskPortfolio {
       Validation.failNonEmptyChunk(nonEmpty)
     } else {
       val validChildIds = childIdResults.collect { case Right(id) => NodeId(id) }
-      create(id, name, validChildIds, parentId, fieldPrefix)
+      create(id, name, validChildIds, parentId, subject)
     }
   }
   
@@ -647,8 +637,8 @@ object RiskPortfolio {
       case Some(pid) => SafeId.fromString(pid).map(sid => Some(NodeId(sid))).left.map(_.mkString(", "))
     }
     parentIdOpt.flatMap { validParentId =>
-      createFromStrings(raw.id, raw.name, raw.childIds, parentId = validParentId, fieldPrefix = s"riskPortfolio[id=${raw.id}]")
-        .toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+      createFromStrings(raw.id, raw.name, raw.childIds, parentId = validParentId, subject = ErrorSubject.Request)
+        .toEither.left.map(errors => errors.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
     }
   }
   

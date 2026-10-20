@@ -2,21 +2,22 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.{Validation, ForEach}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.frontend.TreeBuilderLogic
 
 final case class PortfolioDraft(
   name: SafeName.SafeName,
-  parent: Option[SafeName.SafeName],
+  parent: ParentRef,
   id: Option[NodeId] = None
 )
 final case class LeafDraft(
   name:         SafeName.SafeName,
-  parent:       Option[SafeName.SafeName],
+  parent:       ParentRef,
   distribution: Distribution,
   probability: OccurrenceProbability,
   id:           Option[NodeId] = None
@@ -109,8 +110,13 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   val resetFormFieldsBus: EventBus[Unit] = new EventBus[Unit]
 
   // ── Tree-name validation ──────────────────────────────────────
+  /** The tree's own name belongs to the request being assembled, not to any
+    * one draft node. */
+  private val treeNameLocation: ErrorLocation =
+    ErrorLocation.requestField(FieldName.Name)
+
   private val treeNameErrorRaw: Signal[Option[String]] = treeNameVar.signal.map { v =>
-    ValidationUtil.refineName(v, "tree.name") match
+    ValidationUtil.refineName(v, treeNameLocation) match
       case Right(_) => None
       case Left(errors) => Some(errors.head.message)
   }
@@ -139,7 +145,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     portfoliosVar.signal.combineWith(leavesVar.signal, excludeSelf).map { (ps, ls, excl) =>
       val others = ps.filterNot(p => excl.contains(p.name.value))
       val otherLeaves = ls.filterNot(l => excl.contains(l.name.value))
-      val rootTaken = others.exists(_.parent.isEmpty) || otherLeaves.exists(_.parent.isEmpty)
+      val rootTaken = (others.map(_.parent) ++ otherLeaves.map(_.parent)).contains(ParentRef.Root)
       val base = others.map(_.name.value)   // .value at UI-string boundary: parentSelect takes Signal[List[String]]
       if rootTaken then base else rootLabel :: base
     }
@@ -159,11 +165,11 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     */
   val allPortfolioNames: Signal[Set[String]] = portfoliosVar.signal.map(_.map(_.name.value).toSet)
 
-  def addPortfolio(name: SafeName.SafeName, parent: Option[SafeName.SafeName]): Validation[ValidationError, PortfolioDraft] =
+  def addPortfolio(name: SafeName.SafeName, parent: ParentRef): Validation[ValidationError, PortfolioDraft] =
     val draft = PortfolioDraft(name, parent)
     val result = TreeBuilderLogic.preValidateTopology(
-      (portfoliosVar.now() :+ draft).map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
-      leavesVar.now().map(l => l.name.value.toString -> l.parent.map(_.value.toString))
+      (portfoliosVar.now() :+ draft).map(p => p.name -> p.parent),
+      leavesVar.now().map(l => l.name -> l.parent)
     ).map(_ => draft)
     result match
       case Validation.Success(_, _) =>
@@ -172,18 +178,19 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case _ => ()
     result
 
-  def addLeaf(rawName: String, rawParent: Option[String], shape: Distribution, probability: OccurrenceProbability): Validation[ValidationError, LeafDraft] =
-    val result = for
-      name <- validateName(rawName, "leaf.name")
-      parent <- validateParentName(rawParent, "leaf.parentName")
-      draft = LeafDraft(name, parent, shape, probability)
-      _ <- TreeBuilderLogic.preValidateTopology(
-        portfoliosVar.now().map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
-        (leavesVar.now() :+ draft).map(l => l.name.value.toString -> l.parent.map(_.value.toString))
-      )
-    yield draft
+  def addLeaf(
+    name:        SafeName.SafeName,
+    parent:      ParentRef,
+    shape:       Distribution,
+    probability: OccurrenceProbability
+  ): Validation[ValidationError, LeafDraft] =
+    val draft = LeafDraft(name, parent, shape, probability)
+    val result = TreeBuilderLogic.preValidateTopology(
+      portfoliosVar.now().map(p => p.name -> p.parent),
+      (leavesVar.now() :+ draft).map(l => l.name -> l.parent)
+    ).map(_ => draft)
     result match
-      case Validation.Success(_, draft) =>
+      case Validation.Success(_, _) =>
         leavesVar.update(_ :+ draft)
         activeForm.set(FormMode.Locked(FormTarget.Leaf(draft.name)))
       case _ => ()
@@ -226,23 +233,19 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     */
   def updateLeaf(
     originalName: SafeName.SafeName,
-    rawName:      String,
-    rawParent:    Option[String],
+    name:         SafeName.SafeName,
+    parent:       ParentRef,
     shape:        Distribution,
     probability:  OccurrenceProbability
   ): Validation[ValidationError, LeafDraft] =
     val existing = leavesVar.now().find(_.name == originalName)
-    val result = for
-      name   <- validateName(rawName, "leaf.name")
-      parent <- validateParentName(rawParent, "leaf.parentName")
-      draft  = LeafDraft(name, parent, shape, probability, existing.flatMap(_.id))
-      _      <- TreeBuilderLogic.preValidateTopology(
-        portfoliosVar.now().map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
-        (leavesVar.now().filterNot(_.name == originalName) :+ draft).map(l => l.name.value.toString -> l.parent.map(_.value.toString))
-      )
-    yield draft
+    val draft = LeafDraft(name, parent, shape, probability, existing.flatMap(_.id))
+    val result = TreeBuilderLogic.preValidateTopology(
+      portfoliosVar.now().map(p => p.name -> p.parent),
+      (leavesVar.now().filterNot(_.name == originalName) :+ draft).map(l => l.name -> l.parent)
+    ).map(_ => draft)
     result match
-      case Validation.Success(_, draft) =>
+      case Validation.Success(_, _) =>
         leavesVar.update(_.map(l => if l.name == originalName then draft else l))
         activeForm.set(FormMode.Locked(FormTarget.Leaf(draft.name)))
       case _ => ()
@@ -257,22 +260,25 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   def updatePortfolio(
     originalName: SafeName.SafeName,
     newName:      SafeName.SafeName,
-    newParent:    Option[SafeName.SafeName]
+    newParent:    ParentRef
   ): Validation[ValidationError, PortfolioDraft] =
     val existing = portfoliosVar.now().find(_.name == originalName)
     val draft = PortfolioDraft(newName, newParent, existing.flatMap(_.id))
+    val renamedParent = ParentRef.Under(newName)
     val updatedPortfolios = portfoliosVar.now().map { p =>
-      if p.name == originalName then draft
-      else if p.parent == Some(originalName) then p.copy(parent = Some(newName))
-      else p
+      (p.name == originalName, p.parent) match
+        case (true, _)                                => draft
+        case (false, ParentRef.Under(`originalName`))  => p.copy(parent = renamedParent)
+        case _                                        => p
     }
     val updatedLeaves = leavesVar.now().map { l =>
-      if l.parent == Some(originalName) then l.copy(parent = Some(newName))
-      else l
+      l.parent match
+        case ParentRef.Under(`originalName`) => l.copy(parent = renamedParent)
+        case _                               => l
     }
     val result = TreeBuilderLogic.preValidateTopology(
-      updatedPortfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
-      updatedLeaves.map(l => l.name.value.toString -> l.parent.map(_.value.toString))
+      updatedPortfolios.map(p => p.name -> p.parent),
+      updatedLeaves.map(l => l.name -> l.parent)
     ).map(_ => draft)
     result match
       case Validation.Success(_, _) =>
@@ -283,25 +289,30 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     result
 
   /** Remove node by name; cascades removal of portfolio descendants and their leaves. */
-  def removeNode(name: String): Unit =
+  def removeNode(name: SafeName.SafeName): Unit =
     val portfolios = portfoliosVar.now()
     val leaves = leavesVar.now()
-    val toRemove = TreeBuilderLogic.collectCascade(Set(name), portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)))
-    portfoliosVar.set(portfolios.filterNot(p => toRemove.contains(p.name.value.toString)))
-    leavesVar.set(leaves.filterNot(l => toRemove.contains(l.name.value.toString) || l.parent.exists(n => toRemove.contains(n.value.toString))))
+    val toRemove = TreeBuilderLogic.collectCascade(Set(name), portfolios.map(p => p.name -> p.parent))
+    portfoliosVar.set(portfolios.filterNot(p => toRemove.contains(p.name)))
+    leavesVar.set(leaves.filterNot(l =>
+      toRemove.contains(l.name) || ParentRef.nameOf(l.parent).exists(toRemove.contains)
+    ))
     // Clear the active form if it was pointing at a removed node — otherwise it
     // stays locked/mid-edit on a ghost target pointing at a deleted leaf/portfolio.
-    if activeForm.now().currentTarget.exists(t => toRemove.contains(t.name.value.toString)) then
+    if activeForm.now().currentTarget.exists(t => toRemove.contains(t.name)) then
       activeForm.set(FormMode.Blank)
 
   /** Build backend request with client-side validation. */
   def toRequest(): Validation[ValidationError, RiskTreeDefinitionRequest] =
     val portfolios = portfoliosVar.now()
     val leaves = leavesVar.now()
-    val treeNameV = validateName(treeNameVar.now(), "tree.name")
+    val treeNameV = validateName(treeNameVar.now(), treeNameLocation)
     val portfoliosV = Validation.succeed(portfolios.map(toPortfolioRequest))
     val leavesV = Validation.succeed(leaves.map(toLeafRequest))
-    val topologyV = TreeBuilderLogic.fullValidateTopology(portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)), leaves.map(l => l.name.value.toString -> l.parent.map(_.value.toString)))
+    val topologyV = TreeBuilderLogic.fullValidateTopology(
+      portfolios.map(p => p.name -> p.parent),
+      leaves.map(l => l.name -> l.parent)
+    )
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
       RiskTreeDefinitionRequest(treeName.value, ports, leafs)
@@ -323,12 +334,12 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val existingLeaves: List[(NodeId, LeafDraft)]          = leaves.flatMap(d => d.id.map(_ -> d))
     val newLeafDrafts: List[LeafDraft]                     = leaves.filter(_.id.isEmpty)
 
-    val treeNameV = validateName(treeNameVar.now(), "tree.name")
+    val treeNameV = validateName(treeNameVar.now(), treeNameLocation)
     // Topology is validated over the full node set (existing + new), exactly as in the
     // create flow — correctness-by-construction is whole-graph, independent of bucketing.
     val topologyV = TreeBuilderLogic.fullValidateTopology(
-      portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
-      leaves.map(l => l.name.value.toString -> l.parent.map(_.value.toString))
+      portfolios.map(p => p.name -> p.parent),
+      leaves.map(l => l.name -> l.parent)
     )
     val headerV = Validation.validateWith(treeNameV, topologyV)((name, _) => name)
 
@@ -424,7 +435,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val portfolios = tree.nodes.collect { case p: RiskPortfolio => p }.map { p =>
       PortfolioDraft(
         name   = p.name,
-        parent = p.parentId.flatMap(id => tree.index.nodes.get(id).map(_.name)),
+        parent = parentRefOf(tree, p.parentId),
         id     = Some(p.id)
       )
     }.toList
@@ -432,7 +443,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val leaves = tree.nodes.collect { case l: RiskLeaf => l }.map { l =>
       LeafDraft(
         name         = l.name,
-        parent       = l.parentId.flatMap(id => tree.index.nodes.get(id).map(_.name)),
+        parent       = parentRefOf(tree, l.parentId),
         distribution = Distribution(
           distributionType = l.distributionType,
           minLoss          = l.minLoss,
@@ -464,26 +475,35 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   // Helpers
   // ------------------------------------------------------------
 
-  private def validateName(value: String, field: String): Validation[ValidationError, SafeName.SafeName] =
-    toValidation(ValidationUtil.refineName(value, field))
+  private def validateName(value: String, location: ErrorLocation): Validation[ValidationError, SafeName.SafeName] =
+    toValidation(ValidationUtil.refineName(value, location))
 
-  private def validateParentName(raw: Option[String], field: String): Validation[ValidationError, Option[SafeName.SafeName]] =
-    raw match
-      case Some(v) if v.trim.nonEmpty => validateName(v, field).map(Some(_))
-      case _ => Validation.succeed(None)
+  /** A loaded node's parent as the drafts hold it: the name of the node its
+    * `parentId` points at, or the root when it has no parent. An identifier
+    * the index does not resolve also reads as the root; a tree that passed
+    * `RiskTree.fromNodes` has none. */
+  private def parentRefOf(tree: RiskTree, parentId: Option[NodeId]): ParentRef =
+    parentId.flatMap(id => tree.index.nodes.get(id).map(_.name)) match
+      case Some(name) => ParentRef.Under(name)
+      case None       => ParentRef.Root
 
+
+  /** The parent as the wire carries it: an absent name means the root. The
+    * `Option` belongs to the request type and goes no further inward. */
+  private def parentNameOf(parent: ParentRef): Option[String] =
+    ParentRef.nameOf(parent).map(_.value.toString)
 
   // Total conversions: every field is already a refined domain type (`SafeName`,
   // `Distribution`, `Probability`), so construction cannot fail. Returning the plain
   // request type keeps totality visible; callers wrap the whole collection once with
   // `Validation.succeed` where a `Validation` is needed for `validateWith`.
   private def toPortfolioRequest(draft: PortfolioDraft): RiskPortfolioDefinitionRequest =
-    RiskPortfolioDefinitionRequest(draft.name.value, draft.parent.map(_.value))
+    RiskPortfolioDefinitionRequest(draft.name.value, parentNameOf(draft.parent))
 
   private def toLeafRequest(draft: LeafDraft): RiskLeafDefinitionRequest =
     RiskLeafDefinitionRequest(
       name              = draft.name.value,
-      parentName        = draft.parent.map(_.value),
+      parentName        = parentNameOf(draft.parent),
       probability       = draft.probability,
       distributionShape = DistributionShapeRequest(
         distributionType = draft.distribution.distributionType.toString,
@@ -500,14 +520,14 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   // Total for the same reason as the definition variants above.
   private def toPortfolioUpdateRequest(entry: (NodeId, PortfolioDraft)): RiskPortfolioUpdateRequest =
     val (id, draft) = entry
-    RiskPortfolioUpdateRequest(id.value, draft.name.value, draft.parent.map(_.value))
+    RiskPortfolioUpdateRequest(id.value, draft.name.value, parentNameOf(draft.parent))
 
   private def toLeafUpdateRequest(entry: (NodeId, LeafDraft)): RiskLeafUpdateRequest =
     val (id, draft) = entry
     RiskLeafUpdateRequest(
       id                = id.value,
       name              = draft.name.value,
-      parentName        = draft.parent.map(_.value),
+      parentName        = parentNameOf(draft.parent),
       probability       = draft.probability,
       distributionShape = DistributionShapeRequest(
         distributionType = draft.distribution.distributionType.toString,

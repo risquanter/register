@@ -8,7 +8,7 @@ import io.getquill.jdbczio.Quill
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.QuillMappings.given
 import com.risquanter.register.util.IdGenerators
 
@@ -78,7 +78,7 @@ final class WorkspaceStorePostgres private (
                ).unit.catchAll {
                  case RepositoryFailure(reason) if reason.contains("seed_entity_id") =>
                    ZIO.fail(ValidationFailed(List(ValidationError(
-                     field = "workspace.seedEntityId",
+                     location = ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
                      code = ValidationErrorCode.DUPLICATE_VALUE,
                      message = ValidationMessages.seedEntityIdInUse(entityId.value)
                    ))))

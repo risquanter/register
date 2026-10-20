@@ -6,6 +6,7 @@ import zio.Config
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
 
 import com.risquanter.register.domain.data.iron.Url
+import com.risquanter.register.domain.errors.ErrorLocation
 
 /** Where recorded metrics and traces are sent. This is a separate pipeline from
   * application logging, which always goes to standard output through Logback.
@@ -55,10 +56,14 @@ final case class TelemetryConfig(
 }
 
 object TelemetryConfig:
+  /** A configuration value is not a field of any request, and the descriptor
+    * keeps only the message, so a narrower location would reach nothing. */
+  private val configLocation: ErrorLocation = ErrorLocation.Whole
+
   private val urlConfig: Config[Url.Url] =
     Config.string.mapOrFail { s =>
       Url
-        .fromString(s, "otlpEndpoint")
+        .fromString(s, configLocation)
         .left
         .map(errs => Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
     }

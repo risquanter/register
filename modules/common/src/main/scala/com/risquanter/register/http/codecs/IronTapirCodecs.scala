@@ -3,7 +3,7 @@ package com.risquanter.register.http.codecs
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
 import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId}
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -49,6 +49,11 @@ object IronTapirCodecs {
     * the input was readable. Each refusal keeps the refinement's message and
     * none of the submitted value.
     */
+  /** A codec cannot name the input it decodes: Tapir reports that from the
+    * endpoint definition, and `refused` keeps only the message. So every
+    * refinement here reports at the request as a whole. */
+  private val codecLocation: ErrorLocation = ErrorLocation.Whole
+
   private def refused(errs: List[ValidationError]): DecodeResult.InvalidValue =
     DecodeResult.InvalidValue(
       errs.map(e => TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(e.message)))
@@ -57,7 +62,7 @@ object IronTapirCodecs {
   /** Codec for PositiveInt (Int > 0). */
   given Codec[String, PositiveInt, CodecFormat.TextPlain] =
     Codec.int.mapDecode[PositiveInt](raw =>
-      ValidationUtil.refinePositiveInt(raw, "value").fold(
+      ValidationUtil.refinePositiveInt(raw, codecLocation).fold(
         refused,
         DecodeResult.Value(_)
       )
@@ -66,7 +71,7 @@ object IronTapirCodecs {
   /** Codec for NonNegativeInt (Int >= 0). */
   given Codec[String, NonNegativeInt, CodecFormat.TextPlain] =
     Codec.int.mapDecode[NonNegativeInt](raw =>
-      ValidationUtil.refineNonNegativeInt(raw, "value").fold(
+      ValidationUtil.refineNonNegativeInt(raw, codecLocation).fold(
         refused,
         DecodeResult.Value(_)
       )
@@ -81,7 +86,7 @@ object IronTapirCodecs {
     */
   given Codec[String, NonNegativeLong, CodecFormat.TextPlain] =
     Codec.long.mapDecode[NonNegativeLong](raw =>
-      ValidationUtil.refineNonNegativeLong(raw, "id").fold(
+      ValidationUtil.refineNonNegativeLong(raw, codecLocation).fold(
         refused,
         DecodeResult.Value(_)
       )
@@ -257,37 +262,37 @@ object IronTapirCodecs {
 
   /** Schema for DistributionType for JSON body derivation. */
   given Schema[DistributionType] = Schema.string.map[DistributionType](
-    (s: String) => ValidationUtil.refineDistributionType(s).toOption
+    (s: String) => ValidationUtil.refineDistributionType(s, codecLocation).toOption
   )(identity)
 
   /** Schema for Probability for JSON body derivation. */
   given Schema[Probability] = Schema.schemaForDouble.map[Probability](
-    d => ValidationUtil.refineProbability(d).toOption
+    d => ValidationUtil.refineProbability(d, codecLocation).toOption
   )(identity)
 
   /** Schema for OccurrenceProbability for JSON body derivation. */
   given Schema[OccurrenceProbability] = Schema.schemaForDouble.map[OccurrenceProbability](
-    d => ValidationUtil.refineOccurrenceProbability(d).toOption
+    d => ValidationUtil.refineOccurrenceProbability(d, codecLocation).toOption
   )(identity)
 
   /** Schema for NonNegativeLong for JSON body derivation. */
   given Schema[NonNegativeLong] = Schema.schemaForLong.map[NonNegativeLong](
-    l => ValidationUtil.refineNonNegativeLong(l).toOption
+    l => ValidationUtil.refineNonNegativeLong(l, codecLocation).toOption
   )(identity)
 
   /** Schema for PositiveLong for JSON body derivation. */
   given Schema[PositiveLong] = Schema.schemaForLong.map[PositiveLong](
-    l => ValidationUtil.refinePositiveLong(l).toOption
+    l => ValidationUtil.refinePositiveLong(l, codecLocation).toOption
   )(identity)
 
   /** Schema for PositiveInt for JSON body derivation. */
   given Schema[PositiveInt] = Schema.schemaForInt.map[PositiveInt](
-    i => ValidationUtil.refinePositiveInt(i).toOption
+    i => ValidationUtil.refinePositiveInt(i, codecLocation).toOption
   )(identity)
 
   /** Schema for NonNegativeInt for JSON body derivation. */
   given Schema[NonNegativeInt] = Schema.schemaForInt.map[NonNegativeInt](
-    i => ValidationUtil.refineNonNegativeInt(i).toOption
+    i => ValidationUtil.refineNonNegativeInt(i, codecLocation).toOption
   )(identity)
 
   /** Schema for SeedVarId for JSON body derivation. */

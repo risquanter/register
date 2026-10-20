@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron.{PositiveInt, PositiveLong, ValidationUtil}
-import io.github.iltotore.iron.*
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
 
 /**
  * All inputs needed to reproduce one leaf's simulation: HDR seed hierarchy, distribution
@@ -55,7 +55,7 @@ object ExpertDistributionParams {
   given codec: JsonCodec[ExpertDistributionParams] = JsonCodec(
     JsonEncoder[Raw].contramap(p => Raw(p.percentiles, p.quantiles, p.terms.toInt)),
     Raw.rawCodec.decoder.mapOrFail { raw =>
-      ValidationUtil.refinePositiveInt(raw.terms, "terms")
+      ValidationUtil.refinePositiveInt(raw.terms, ErrorLocation.requestField(FieldName.Terms))
         .map(t => ExpertDistributionParams(raw.percentiles, raw.quantiles, t))
         .left.map(_.map(_.message).mkString("; "))
     }
@@ -69,8 +69,8 @@ object LognormalDistributionParams {
   given codec: JsonCodec[LognormalDistributionParams] = JsonCodec(
     JsonEncoder[Raw].contramap(p => Raw(p.minLoss, p.maxLoss, p.confidenceInterval)),
     Raw.rawCodec.decoder.mapOrFail { raw =>
-      (ValidationUtil.refinePositiveLong(raw.minLoss, "minLoss"),
-       ValidationUtil.refinePositiveLong(raw.maxLoss, "maxLoss")) match {
+      (ValidationUtil.refinePositiveLong(raw.minLoss, ErrorLocation.requestField(FieldName.MinLoss)),
+       ValidationUtil.refinePositiveLong(raw.maxLoss, ErrorLocation.requestField(FieldName.MaxLoss))) match {
         case (Right(min), Right(max)) => Right(LognormalDistributionParams(min, max, raw.confidenceInterval))
         case (Left(e1), Left(e2))     => Left((e1 ++ e2).map(_.message).mkString("; "))
         case (Left(e), _)             => Left(e.map(_.message).mkString("; "))

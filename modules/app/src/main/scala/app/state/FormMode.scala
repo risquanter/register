@@ -143,7 +143,7 @@ object FormMode:
       case other => throw new IllegalStateException(s"Unrecognised DistributionType: $other — update leafDraftToFieldSnapshot")
     FieldSnapshot.LeafFields(
       name        = leaf.name.value,
-      parent      = ParentSelection.fromSaved(leaf.parent.map(_.value)),
+      parent      = ParentSelection.fromSaved(leaf.parent),
       probability = RiskLeafFormState.domainToDisplayPct(leaf.probability, 2),
       mode        = mode,
       percentiles = leaf.distribution.percentiles.fold("")(arr => arr.map(RiskLeafFormState.domainToDisplayPct(_, 0)).mkString(", ")),
@@ -157,7 +157,7 @@ object FormMode:
     * values — reused by both `populatePortfolioForm` and `isFormDirty`.
     */
   def portfolioDraftToFieldSnapshot(portfolio: PortfolioDraft): FieldSnapshot.PortfolioFields =
-    FieldSnapshot.PortfolioFields(portfolio.name.value, ParentSelection.fromSaved(portfolio.parent.map(_.value)))
+    FieldSnapshot.PortfolioFields(portfolio.name.value, ParentSelection.fromSaved(portfolio.parent))
 
   /** Whether the currently-active form has unsaved content — i.e. whether
     * Clear Form has anything to revert, and whether navigating away should

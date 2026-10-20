@@ -2,33 +2,31 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import app.state.FormState
-import com.risquanter.register.domain.errors.ValidationError
-import com.risquanter.register.frontend.TreeBuilderLogic
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
-/** Shared utilities for form submit error routing.
+/** Shared routing of submit-time validation errors into a form.
   *
-  * Routes topology validation errors to per-field red borders via
-  * `TreeBuilderLogic.formFieldFor`. Errors that don't map to a form field
-  * (structural errors like "tree.portfolios" empty-collection) are returned
-  * as unrouted and typically displayed in the submit-error banner.
+  * Both forms show a refusal the same two ways: under the input it belongs to,
+  * or in the submit banner when it belongs to none. This holds that split; each
+  * form supplies the mapping from a location to its own inputs.
   */
 object FormSubmitUtil:
 
-  /** Route topology errors: field-bound errors go to per-field submit errors,
-    * unrouted (structural) errors go to the submit-error banner.
+  /** Show each error under the input its location names, and the first error
+    * that names no input in the banner.
     *
-    * @param fieldMapping converts the `String` returned by `formFieldFor`
-    *                     to the form's typed field enum `F`. Returns `None`
-    *                     for field names that don't apply to this form.
+    * @param fieldMapping the form's own location-to-input mapping. `None` means
+    *                     this form has no input for that location, which sends
+    *                     the error to the banner.
     */
-  def routeTopologyErrors[F](
+  def routeErrors[F](
     form: FormState[F],
     errors: List[ValidationError],
     submitError: Var[Option[String]],
-    fieldMapping: String => Option[F]
+    fieldMapping: ErrorLocation => Option[F]
   ): Unit =
     val unrouted = errors.filterNot { err =>
-      TreeBuilderLogic.formFieldFor(err.field).flatMap(fieldMapping) match
+      fieldMapping(err.location) match
         case Some(field) =>
           form.setSubmitFieldError(field, err.message)
           true

@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash}
-import com.risquanter.register.domain.errors.{AppError, DataConflict, ScenarioHeadStale, ValidationFailed, ValidationError, ValidationErrorCode, BranchAlreadyExists, BranchHeadStale}
+import com.risquanter.register.domain.errors.{AppError, DataConflict, ErrorLocation, FieldName, ScenarioHeadStale, ValidationFailed, ValidationError, ValidationErrorCode, BranchAlreadyExists, BranchHeadStale}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminBranch
 
@@ -62,7 +62,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
           case Some(IrminBranch(_, Some(commit))) => refineCommitHash(commit.hash)
           case _ =>
             ZIO.fail(ValidationFailed(List(ValidationError(
-              field = "source",
+              location = ErrorLocation.requestField(FieldName.Source),
               code = ValidationErrorCode.NOT_FOUND,
               message = "Workspace has no content yet — nothing to fork a scenario from"
             ))))
@@ -75,7 +75,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                            case Some(commit) => refineCommitHash(commit.hash)
                            case None =>
                              ZIO.fail(ValidationFailed(List(ValidationError(
-                               field = "source",
+                               location = ErrorLocation.requestField(FieldName.Source),
                                code = ValidationErrorCode.NOT_FOUND,
                                message = s"Scenario not found: ${scenario.value}"
                              ))))
@@ -87,7 +87,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
           case Some(_) => ZIO.succeed(commit)
           case None =>
             ZIO.fail(ValidationFailed(List(ValidationError(
-              field = "source",
+              location = ErrorLocation.requestField(FieldName.Source),
               code = ValidationErrorCode.NOT_FOUND,
               message = s"Commit not found: ${commit.value}"
             ))))

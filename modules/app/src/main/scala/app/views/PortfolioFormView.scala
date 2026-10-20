@@ -7,7 +7,8 @@ import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
  * Portfolio sub-form wired to TreeBuilderState.
@@ -197,7 +198,7 @@ object PortfolioFormView:
         case FormMode.Templating(FormTarget.Portfolio(n)) =>
           builderState.portfoliosVar.now().find(_.name == n).foreach { source =>
             builderState.populatePortfolioForm(form, source)
-            if source.parent.isEmpty then form.parentVar.set(ParentSelection.Unset)
+            if source.parent == ParentRef.Root then form.parentVar.set(ParentSelection.Unset)
           }
         case _ =>
           form.reset()
@@ -283,13 +284,9 @@ object PortfolioFormView:
             // values for viewing.
             submitError.set(None)
           case Validation.Failure(_, errs) =>
-            FormSubmitUtil.routeTopologyErrors(form, errs.toList, submitError, {
-              case "name"   => Some(PortfolioField.Name)
-              case "parent" => Some(PortfolioField.Parent)
-              case _        => None
-            })
+            routePortfolioErrors(form, errs.toList, submitError)
       case Validation.Failure(_, errs) =>
-        routePortfolioDraftErrors(form, errs.toList, submitError)
+        routePortfolioErrors(form, errs.toList, submitError)
 
   private def handleUpdate(
     form: PortfolioFormState,
@@ -306,29 +303,27 @@ object PortfolioFormView:
             // `Locked(t)`, locking these same, just-saved values for viewing.
             submitError.set(None)
           case Validation.Failure(_, errs) =>
-            FormSubmitUtil.routeTopologyErrors(form, errs.toList, submitError, {
-              case "name"   => Some(PortfolioField.Name)
-              case "parent" => Some(PortfolioField.Parent)
-              case _        => None
-            })
+            routePortfolioErrors(form, errs.toList, submitError)
       case Validation.Failure(_, errs) =>
-        routePortfolioDraftErrors(form, errs.toList, submitError)
+        routePortfolioErrors(form, errs.toList, submitError)
 
-  /** Route toDraft validation errors to their per-field inline slots.
-    * Errors with no matching field fall back to the banner with their real message. */
-  private def routePortfolioDraftErrors(
+  /** Show every refusal under the input it belongs to, whichever check produced
+    * it — this form's own field refinement or the tree-wide topology rules. */
+  private def routePortfolioErrors(
     form: PortfolioFormState,
     errors: List[ValidationError],
     submitError: Var[Option[String]]
   ): Unit =
-    val unrouted = errors.filterNot { err =>
-      fieldForDraftError(err.field) match
-        case Some(field) => form.setSubmitFieldError(field, err.message); true
-        case None        => false
-    }
-    submitError.set(unrouted.headOption.map(_.message))
+    FormSubmitUtil.routeErrors(form, errors, submitError, inputFor)
 
-  private def fieldForDraftError(field: String): Option[PortfolioField] =
-    if field.contains("name") then Some(PortfolioField.Name)
-    else if field.contains("parent") then Some(PortfolioField.Parent)
-    else None
+  /** The input a refusal belongs under. This form has two, so a location naming
+    * anything else goes to the banner.
+    *
+    * Visible to the package so the mapping is testable without rendering the
+    * form.
+    */
+  private[views] def inputFor(location: ErrorLocation): Option[PortfolioField] =
+    location match
+      case ErrorLocation.Field(_, FieldName.Name)       => Some(PortfolioField.Name)
+      case ErrorLocation.Field(_, FieldName.ParentName) => Some(PortfolioField.Parent)
+      case _                                            => None

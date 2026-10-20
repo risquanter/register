@@ -140,6 +140,23 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       assertFailsWith(result)("not found in portfolios")
     },
 
+    test("resolveCreate fails when a portfolio parent is not one of the submitted portfolios") {
+      // Every leaf here names a valid parent, so requirePortfolioParents is the
+      // only guard that can produce this message.
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(
+          RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
+          RiskPortfolioDefinitionRequest(name = "Child", parentName = Some("Missing"))
+        ),
+        leaves = Seq(validLeafDef("Leaf", Some("Root")))
+      )
+
+      val result = resolveCreate(req, () => safeId("generated"))
+
+      assertFailsWith(result)("not found in portfolios")
+    },
+
     test("resolveCreate fails when multiple roots are provided") {
       val req = RiskTreeDefinitionRequest(
         name = "Tree",
@@ -291,7 +308,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       assertFailsWith(result)("reserved query symbol")
     },
 
-    // ── Seed identity boundary rules (PLAN-SEED-IDENTITY §5.1/§5.3/§7, Layer 3) ──
+    // ── Seed identity boundary rules ──
 
     test("resolveCreate carries provided seedVarIds keyed by refined leaf name") {
       val req = RiskTreeDefinitionRequest(

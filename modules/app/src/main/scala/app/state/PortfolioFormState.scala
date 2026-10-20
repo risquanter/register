@@ -5,7 +5,8 @@ import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.ValidationUtil
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /** Type-safe field identifiers for the portfolio form. */
 enum PortfolioField:
@@ -22,9 +23,13 @@ final class PortfolioFormState extends FormState[PortfolioField]:
   val nameVar: Var[String] = Var("")
   val parentVar: Var[ParentSelection] = Var(ParentSelection.Unset)
 
+  /** Every refusal this form produces is about a node with no identifier yet. */
+  private val nameLocation: ErrorLocation =
+    ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.Name)
+
   // Raw validation
   private val nameErrorRaw: Signal[Option[String]] = nameVar.signal.map { v =>
-    toValidation(ValidationUtil.refineName(v, "portfolio.name")) match
+    toValidation(ValidationUtil.refineName(v, nameLocation)) match
       case Validation.Success(_, refined) => None
       case Validation.Failure(_, errs) => Some(errs.head.message)
   }
@@ -46,15 +51,11 @@ final class PortfolioFormState extends FormState[PortfolioField]:
   /** Build validated inputs for submission. `Unset` fails validation exactly
     * like an empty name would — there is no silent default to fall back to.
     */
-  def toDraft: Validation[ValidationError, (SafeName.SafeName, Option[SafeName.SafeName])] =
+  def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef)] =
     val nameV: Validation[ValidationError, SafeName.SafeName] =
-      toValidation(ValidationUtil.refineName(nameVar.now(), "portfolio.name"))
-    val parentV: Validation[ValidationError, Option[SafeName.SafeName]] =
-      parentVar.now() match
-        case ParentSelection.Root         => Validation.succeed(None)
-        case ParentSelection.Portfolio(v) => toValidation(ValidationUtil.refineName(v, "portfolio.parentName")).map(Some(_))
-        case ParentSelection.Unset        =>
-          Validation.fail(ValidationError("portfolio.parentName", ValidationErrorCode.REQUIRED_FIELD, "Parent is required"))
+      toValidation(ValidationUtil.refineName(nameVar.now(), nameLocation))
+    val parentV: Validation[ValidationError, ParentRef] =
+      ParentSelection.toParentRef(parentVar.now())
     Validation.validateWith(nameV, parentV)((name, parent) => (name, parent))
 
   /** Reset form fields and error display state after successful submit.

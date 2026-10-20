@@ -12,7 +12,7 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTre
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice, ScenarioName}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
@@ -45,9 +45,9 @@ class RiskTreeServiceLive private (
       case Some(loaded) => ZIO.succeed(loaded)
       case None =>
         ZIO.fail(ValidationFailed(List(ValidationError(
-          field = "treeId",
+          location = ErrorLocation.requestField(FieldName.TreeId),
           code = ValidationErrorCode.NOT_FOUND,
-          message = s"Tree not found: $treeId"
+          message = s"Tree not found: ${treeId.value}"
         ))))
     }
 
@@ -57,9 +57,9 @@ class RiskTreeServiceLive private (
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
-        field = "nodeId",
+        location = ErrorLocation.nodeField(nodeId, FieldName.Id),
         code = ValidationErrorCode.NOT_FOUND,
-        message = s"Node ${nodeId.value} not found in tree ${tree.id}"
+        message = "Node not found in tree"
       ))))
     yield (tree, commit, node)
 
@@ -72,9 +72,9 @@ class RiskTreeServiceLive private (
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
       _ <- if missing.isEmpty || omitAbsent then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
-        field = "nodeIds",
+        location = ErrorLocation.nodeField(id, FieldName.Id),
         code = ValidationErrorCode.NOT_FOUND,
-        message = s"Node ${id.value} not found in tree ${tree.id}"
+        message = "Node not found in tree"
       ))))
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, commit, nodes)
@@ -86,14 +86,14 @@ class RiskTreeServiceLive private (
       val errors = List(
         Option.when(candidates.exists(_.id == treeId))(
           ValidationError(
-            field = "id",
+            location = ErrorLocation.requestField(FieldName.Id),
             code = ValidationErrorCode.DUPLICATE_VALUE,
             message = s"Tree ID '${treeId.value}' already exists"
           )
         ),
         Option.when(candidates.exists(_.name == treeName))(
           ValidationError(
-            field = "name",
+            location = ErrorLocation.requestField(FieldName.Name),
             code = ValidationErrorCode.DUPLICATE_VALUE,
             message = s"Tree name '${treeName.value}' already exists"
           )
@@ -168,12 +168,12 @@ class RiskTreeServiceLive private (
     case ValidationFailed(errors) =>
       // Use first error for primary context (could extend to aggregate all)
       val primaryError = errors.headOption.getOrElse(
-        ValidationError("unknown", ValidationErrorCode.INTERNAL_ERROR, "Unknown validation error")
+        ValidationError(ErrorLocation.Whole, ValidationErrorCode.INTERNAL_ERROR, "Unknown validation error")
       )
       ErrorContext(
         errorType = "ValidationFailed",
         errorCode = primaryError.code.code,
-        errorField = Some(primaryError.field)
+        errorField = Some(ErrorLocation.describe(primaryError.location))
       )
     
     case RepositoryFailure(_) =>
@@ -257,11 +257,11 @@ class RiskTreeServiceLive private (
     seedVarIdByLeafName: Map[SafeName.SafeName, SeedVarId.SeedVarId]
   ): IO[AppError,(Seq[RiskNode], NodeId)] = ZIO.attempt {
     val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap
-    val childrenByParent: Map[Option[SafeName.SafeName], List[SafeName.SafeName]] =
-      nodesByName.values.groupBy(_.parentName).view.mapValues(_.toList.map(_.name)).toMap
+    val childrenByParent: Map[RiskTreeRequests.ParentRef, List[SafeName.SafeName]] =
+      nodesByName.values.groupBy(_.parent).view.mapValues(_.toList.map(_.name)).toMap
 
     def parentIdFor(node: RiskTreeRequests.ResolvedNode): Option[NodeId] =
-      node.parentName.flatMap(nameToId.get)
+      RiskTreeRequests.ParentRef.nameOf(node.parent).flatMap(nameToId.get)
 
     val domainNodes: Seq[RiskNode] = nodesByName.values.toSeq.map { node =>
       node.kind match {
@@ -282,7 +282,8 @@ class RiskTreeServiceLive private (
           )
 
         case RiskTreeRequests.NodeKind.Portfolio =>
-          val childIds: Array[NodeId] = childrenByParent.get(Some(node.name)).toList.flatten.flatMap(nameToId.get).toArray
+          val childIds: Array[NodeId] =
+            childrenByParent.get(RiskTreeRequests.ParentRef.Under(node.name)).toList.flatten.flatMap(nameToId.get).toArray
           RiskPortfolio.fromValidated(
             id = node.id,
             name = node.name,
@@ -355,10 +356,16 @@ class RiskTreeServiceLive private (
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
       allLeafOccurrenceAndShape = resolved.existingLeafOccurrenceAndShape ++ resolved.addedLeafOccurrenceAndShape
-      // Carried-over IDs (existing leaves, matched by node id) + caller-provided IDs
-      // (new leaves). A provided ID clashing with a carried one survives the merge as
-      // two names → one value and is rejected by RiskTree.fromNodes' distinctness
-      // check with the "already used by" message.
+      // Every leaf's seedVarId, from two sources. A leaf the update keeps carries
+      // its stored seedVarId over, matched by node id, because a seedVarId is
+      // immutable once assigned. A new leaf's is whatever the client supplied, or
+      // absent so the server assigns one.
+      //
+      // A supplied seedVarId equal to a carried-over one survives this merge as two
+      // leaf names mapping to one value: the map is keyed by name, so neither entry
+      // displaces the other. Nothing here rejects that, and nothing needs to —
+      // RiskTree.fromNodes runs the per-tree seedVarId distinctness check and is
+      // where the collision is refused.
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(
           leafNamesOf(allNodes),
@@ -472,7 +479,7 @@ class RiskTreeServiceLive private (
         // Validate inputs and fetch requested tree + nodes
         treeWithNodes <- if (nodeIds.isEmpty) {
           ZIO.fail(ValidationFailed(List(ValidationError(
-            field = "nodeIds",
+            location = ErrorLocation.requestField(FieldName.Nodes),
             code = ValidationErrorCode.EMPTY_COLLECTION,
             message = "nodeIds set is empty"
           ))))

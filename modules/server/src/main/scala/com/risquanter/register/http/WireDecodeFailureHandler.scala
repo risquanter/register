@@ -10,7 +10,7 @@ import sttp.tapir.server.interceptor.DecodeFailureContext
 import sttp.tapir.server.interceptor.decodefailure.{DecodeFailureHandler, DefaultDecodeFailureHandler}
 import sttp.tapir.server.model.ValuedEndpointOutput
 
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, RequestHeaderName, ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.telemetry.ActiveTrace
@@ -78,7 +78,7 @@ object WireDecodeFailureHandler:
   private def logRejection(error: ValidationError, status: StatusCode): UIO[Unit] =
     ZIO.logInfo(
       s"Request rejected before any handler ran, answered $status: " +
-        s"${error.field} ${error.message} (${error.code.code})"
+        s"${ErrorLocation.describe(error.location)} ${error.message} (${error.code.code})"
     )
 
   /** Records a `401` as a configuration defect of this service.
@@ -109,6 +109,10 @@ object WireDecodeFailureHandler:
     * `TYPE_MISMATCH`, and a value it read and then refused is `INVALID_FORMAT` —
     * which is what every Iron refinement produces.
     *
+    * The message opens with the input's own description, because only a
+    * declared header has a location that names it — every other input reports
+    * at the request as a whole, so the name has to travel in the sentence.
+    *
     * Visible to the package, so the mapping is testable without driving a
     * request through the whole stack.
     */
@@ -116,7 +120,7 @@ object WireDecodeFailureHandler:
     failure: DecodeResult.Failure,
     input:   EndpointInput[?]
   ): ValidationError =
-    val (code, message) = failure match
+    val (code, reason) = failure match
       case DecodeResult.Missing =>
         (ValidationErrorCode.REQUIRED_FIELD, "is required")
       case DecodeResult.Multiple(vs) =>
@@ -128,7 +132,7 @@ object WireDecodeFailureHandler:
       case DecodeResult.Error(_, _) =>
         (ValidationErrorCode.TYPE_MISMATCH, "could not be read")
 
-    ValidationError(fieldName(input), code, message)
+    ValidationError(locationOf(input), code, s"${inputName(input)} $reason")
 
   /** What the refused value broke, in the words of whatever refused it.
     *
@@ -144,16 +148,32 @@ object WireDecodeFailureHandler:
       case Nil      => "is not valid"
       case messages => messages.mkString("; ")
 
+  /** Where the rejected input is, as a location the browser can match on.
+    *
+    * A header this application declares is the one input with a case of its
+    * own, and it is the case worth having: the branch header and the user
+    * header are the two inputs a client most often gets wrong. Every other
+    * input — a query parameter, a path segment, the body — has no closed set to
+    * draw a name from, so it reports at the request as a whole and
+    * `inputName` puts Tapir's description in the message.
+    */
+  private def locationOf(input: EndpointInput[?]): ErrorLocation =
+    headerNameOf(input).flatMap(RequestHeaderName.fromWireName) match
+      case Some(header) => ErrorLocation.Header(header)
+      case None         => ErrorLocation.Whole
+
   /** The name a client would recognise for the input that was rejected.
     *
-    * A header carries its own name, which is the case worth naming exactly: the
-    * branch header and the user header are the two inputs a client most often
-    * gets wrong. Anything else is described by Tapir's own rendering of the
-    * input, which names its kind and its name together — "query parameter q",
-    * "body" — and is stable across input shapes this does not enumerate.
+    * A header carries its own name. Anything else is described by Tapir's own
+    * rendering of the input, which names its kind and its name together —
+    * "query parameter q", "body" — and is stable across input shapes this does
+    * not enumerate.
     */
-  private def fieldName(input: EndpointInput[?]): String =
+  private def inputName(input: EndpointInput[?]): String =
+    headerNameOf(input).getOrElse(input.show)
+
+  private def headerNameOf(input: EndpointInput[?]): Option[String] =
     input match
-      case EndpointIO.Header(name, _, _)        => name
-      case EndpointIO.FixedHeader(header, _, _) => header.name
-      case other                                => other.show
+      case EndpointIO.Header(name, _, _)        => Some(name)
+      case EndpointIO.FixedHeader(header, _, _) => Some(header.name)
+      case _                                    => None

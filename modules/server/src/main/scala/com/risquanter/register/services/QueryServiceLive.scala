@@ -7,7 +7,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
-import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.http.responses.QueryResponse
@@ -80,7 +80,7 @@ class QueryServiceLive private (
                          case Some(tc) => ZIO.succeed(tc)
                          case None =>
                            ZIO.fail(ValidationFailed(List(ValidationError(
-                             field = "treeId",
+                             location = ErrorLocation.requestField(FieldName.TreeId),
                              code = ValidationErrorCode.NOT_FOUND,
                              message = s"Tree not found: ${treeId.value}"
                            ))))

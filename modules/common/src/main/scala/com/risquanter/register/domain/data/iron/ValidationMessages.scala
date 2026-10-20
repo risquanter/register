@@ -26,6 +26,68 @@ object ValidationMessages:
   // ══════════════════════════════════════════════════════════════════
   val reservedNodeName: String  = "Node name must not be a reserved query symbol (e.g. 'leaf', 'p95')"
 
+  def reservedNodeNames(names: Seq[String]): String =
+    s"$reservedNodeName: ${names.mkString(", ")}"
+
+  // ══════════════════════════════════════════════════════════════════
+  // Tree topology — the rules a submitted or stored node set must satisfy
+  // ══════════════════════════════════════════════════════════════════
+  /** Why a name was refused as repeated, with how many nodes carry it and what
+    * resolves it.
+    *
+    * The count is there so a user resolving one of several repetitions sees it
+    * fall rather than an unchanged sentence. The last clause is there because no
+    * holder of the name is more at fault than its twins — any of them may be
+    * the one renamed, and the error names none of them individually.
+    *
+    * {{{
+    * duplicateNodeNames("Fire", 3)
+    * // duplicate node name: Fire — used by 3 nodes; names must be unique
+    * // within a tree. Rename all but one of them.
+    * }}}
+    */
+  def duplicateNodeNames(name: String, occurrences: Int): String =
+    s"duplicate node name: $name — used by $occurrences nodes; names must be unique within a tree. " +
+    "Rename all but one of them."
+
+  val exactlyOneRootRequired: String = "Exactly one root is required"
+  val multipleRootsFound: String     = "Multiple roots found"
+  val leafNeedsPortfolioParent: String = "leaf must have a parent portfolio"
+
+  /** A form submitted with nothing chosen in its parent control. Distinct from
+    * `leafNeedsPortfolioParent`, which refuses a parent that was chosen and is
+    * the wrong kind of node. */
+  val parentRequired: String = "Parent is required"
+
+  def parentNameIsLeaf(parent: String): String =
+    s"parentName '$parent' refers to a leaf; must reference a portfolio"
+
+  def parentNameNotFound(parent: String): String =
+    s"parentName '$parent' not found in portfolios"
+
+  def cycleDetected(node: String): String =
+    s"Cycle detected at node '$node'"
+
+  def portfoliosWithoutChildren(names: Seq[String]): String =
+    s"Every portfolio must have at least one child: ${names.mkString(", ")}"
+
+  def tooManyNodes(count: Int, limit: Int): String =
+    s"too many nodes: $count exceeds the limit of $limit"
+
+  def tooManyMitigations(count: Int, limit: Int): String =
+    s"too many mitigations: $count exceeds the limit of $limit"
+
+  def rootIdNotFound(rootId: String): String =
+    s"rootId '$rootId' not found in nodes"
+
+  def duplicateMitigationIds(id: String, occurrences: Int): String =
+    s"duplicate mitigation id: $id — carried by $occurrences mitigations; identifiers must be unique within a tree. " +
+    s"Remove all but one of them, or give each its own identifier."
+
+  def duplicateMitigationNames(name: String, occurrences: Int): String =
+    s"duplicate mitigation name: $name — used by $occurrences mitigations; names must be unique within a tree. " +
+    s"Rename all but one of them."
+
   // ══════════════════════════════════════════════════════════════════
   // ULID identifiers (SafeId and the nominal wrappers over it)
   // ══════════════════════════════════════════════════════════════════
@@ -162,8 +224,8 @@ object ValidationMessages:
     "seedVarId must be between 1 and 49999999"
 
   def seedVarIdInUse(id: Long, holders: Seq[String]): String =
-    s"seedVarId $id is used by multiple nodes: ${holders.mkString(", ")} — " +
-    "choose distinct values or omit to auto-assign"
+    s"seedVarId $id is used by multiple nodes: ${holders.mkString(", ")}. Only one may keep it. " +
+    "A seedVarId cannot be changed once it is assigned, so change or omit the one you supplied."
 
   def seedEntityIdInUse(id: Long): String =
     s"seedEntityId $id is already used by another workspace — " +
@@ -176,3 +238,12 @@ object ValidationMessages:
   val seedVarIdImmutable: String =
     "seedVarId is immutable once assigned — omit it for existing nodes; " +
     "to change a risk's stream, delete the leaf and recreate it"
+
+  def seedVarIdAssignmentExhausted(next: Long): String =
+    s"seedVarId assignment space exhausted: next value $next exceeds the valid range"
+
+  def seedVarHighWaterBelowMax(highWater: Long, maxAssigned: Long): String =
+    s"seedVarHighWater $highWater is below the highest assigned seedVarId $maxAssigned"
+
+  val seedVarHighWaterNotDerivable: String =
+    "tree has no leaves — seedVarHighWater cannot be derived"

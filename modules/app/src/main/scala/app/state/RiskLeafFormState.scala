@@ -2,8 +2,9 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{ValidationUtil, ValidationMessages, OccurrenceProbability}
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, ValidationMessages, OccurrenceProbability}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import zio.prelude.Validation
 
 /** Type-safe field identifiers for the risk leaf form. */
@@ -110,9 +111,14 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // Raw Validation Signals (using ValidationUtil from common)
   // ============================================================
   
+  /** Every refusal this form produces is about a node with no identifier yet,
+    * so they all name the draft node and differ only in the field. */
+  private def at(field: FieldName): ErrorLocation =
+    ErrorLocation.Field(ErrorSubject.DraftNode, field)
+
   /** Name validation using Iron SafeName rules */
   private val nameErrorRaw: Signal[Option[String]] = nameVar.signal.map { v =>
-    ValidationUtil.refineName(v) match
+    ValidationUtil.refineName(v, at(FieldName.Name)) match
       case Right(_) => None
       case Left(errors) => Some(errors.head.message)
   }
@@ -126,7 +132,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     else this.parseDouble(v) match
       case None => Some(ValidationMessages.probabilityNotANumber)
       case Some(pct) =>
-        ValidationUtil.refineOccurrenceProbability(RiskLeafFormState.pctToDomain(pct)) match
+        ValidationUtil.refineOccurrenceProbability(RiskLeafFormState.pctToDomain(pct), at(FieldName.Probability)) match
           case Right(_) => None
           case Left(_)  => Some("Probability must be between 0 and 100 (inclusive)")
   }
@@ -184,7 +190,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         else parseLong(v) match
           case None => Some(ValidationMessages.lossMustBeWholeNumber("Minimum loss"))
           case Some(n) => 
-            ValidationUtil.refinePositiveLong(n, "minLoss") match
+            ValidationUtil.refinePositiveLong(n, at(FieldName.MinLoss)) match
               case Right(_) => None
               case Left(errors) => Some(errors.head.message)
       case _ => None
@@ -198,7 +204,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         else parseLong(v) match
           case None => Some(ValidationMessages.lossMustBeWholeNumber("Maximum loss"))
           case Some(n) =>
-            ValidationUtil.refinePositiveLong(n, "maxLoss") match
+            ValidationUtil.refinePositiveLong(n, at(FieldName.MaxLoss)) match
               case Right(_) => None
               case Left(errors) => Some(errors.head.message)
       case _ => None
@@ -400,7 +406,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       maxLoss          = maxLossOpt,
       percentiles      = pcts,
       quantiles        = quants,
-      fieldPrefix      = "leaf",
+      subject          = ErrorSubject.DraftNode,
       terms            = termsOpt
     )
 
@@ -409,25 +415,36 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       case Validation.Success(_, dist) => Some(dist)
       case _                           => None
 
-  /** Refined occurrence probability from the current form value, or None if invalid.
+  /** Every value a submission needs, refined, with every field's refusal
+    * accumulated rather than only the first.
     *
-    * Called by [[app.views.RiskLeafFormView]] at submit time to pass a typed
-    * `OccurrenceProbability` to [[TreeBuilderState.addLeaf]] alongside the shape `Distribution`.
+    * This is the form's one refinement boundary: the `Var`s above hold what the
+    * user is typing, and everything past this point is a refined type. Each
+    * failure names the field it came from, so the view routes it to that
+    * field's inline slot and the banner stays empty.
     */
-  def refinedProbability: Option[OccurrenceProbability] =
-    probabilityVar.now().toDoubleOption.flatMap { pct =>
-      // Field is entered on the 0–100 (percent) scale; convert to 0–1 before refining.
-      ValidationUtil.refineOccurrenceProbability(RiskLeafFormState.pctToDomain(pct)).toOption
+  def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, Distribution)] =
+    val nameV = ValidationUtil.toValidation(
+      ValidationUtil.refineName(nameVar.now(), at(FieldName.Name))
+    )
+    val parentV = ParentSelection.toParentRef(parentVar.now())
+    val probabilityV = probabilityVar.now().toDoubleOption match
+      case None =>
+        Validation.fail(ValidationError(
+          at(FieldName.Probability),
+          ValidationErrorCode.INVALID_FORMAT,
+          ValidationMessages.probabilityNotANumber
+        ))
+      case Some(pct) =>
+        // The field is entered on the 0–100 scale; convert before refining.
+        ValidationUtil.toValidation(
+          ValidationUtil.refineOccurrenceProbability(
+            RiskLeafFormState.pctToDomain(pct), at(FieldName.Probability)
+          )
+        )
+    Validation.validateWith(nameV, parentV, probabilityV, currentShapeValidation()) {
+      (name, parent, probability, shape) => (name, parent, probability, shape)
     }
-
-  /** The current parent selection resolved to the domain shape, or `None` if
-    * still `ParentSelection.Unset` — mirrors `refinedProbability`'s
-    * Option-based shape (this form's fields are checked as a tuple of
-    * Options at submit time, not composed via `Validation`, see
-    * `RiskLeafFormView.handleSubmit`). `Unset` blocks submission exactly like
-    * an unrefined probability does, via `ParentSelection.toSaved`.
-    */
-  def parentDraft: Option[Option[String]] = ParentSelection.toSaved(parentVar.now())
 
   /** Reactive signal of the current shape-only distribution draft.
     *

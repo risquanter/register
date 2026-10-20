@@ -10,7 +10,7 @@ import app.core.RequestFailure
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
 
 /** Chart selection and LEC curve data state, separated from tree navigation.
@@ -197,8 +197,10 @@ final class LECChartState(
     if current.contains(nodeId) then
       userSelectedNodeIds.update(_ - nodeId)
     else if current.size >= 13 then
+      // A limit on the selection as a whole, raised and shown in the browser;
+      // no field of any request carries it.
       globalError.set(Some(GlobalError.ValidationFailed(List(
-        ValidationError("chartSelection", ValidationErrorCode.CONSTRAINT_VIOLATION,
+        ValidationError(ErrorLocation.Whole, ValidationErrorCode.CONSTRAINT_VIOLATION,
           "Maximum 13 user-selected curves. Remove a selection before adding more.")
       ))))
     else

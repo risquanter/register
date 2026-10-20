@@ -2,7 +2,7 @@ package com.risquanter.register.mitigation
 
 import zio.prelude.*
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationMessages}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 import com.risquanter.register.simulation.TrialOutcomes
 
 /**
@@ -208,7 +208,7 @@ object RiskResultTransform {
       )
     else
       Validation.fail(ValidationError(
-        field = "insurancePolicy.cap",
+        location = ErrorLocation.requestField(FieldName.Cap),
         code = ValidationErrorCode.INVALID_COMBINATION,
         message = ValidationMessages.capMustExceedDeductible
       ))

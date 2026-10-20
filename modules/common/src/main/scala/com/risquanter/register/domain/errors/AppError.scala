@@ -69,7 +69,7 @@ sealed trait IrminError extends AppError
   * failed and why, and that is the whole content of this type.
   */
 case class ValidationError(
-  field: String,
+  location: ErrorLocation,
   code: ValidationErrorCode,
   message: String
 )
@@ -80,7 +80,8 @@ object ValidationError:
 
 /** Validation failure with accumulated structured errors */
 case class ValidationFailed(errors: List[ValidationError]) extends SimError {
-  override def logMessage: String = errors.map(e => s"[${e.field}] ${e.message}").mkString("; ")
+  override def logMessage: String =
+    errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 
@@ -273,9 +274,18 @@ case class IrminMergeConflict(reason: String) extends IrminError {
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 
-/** Optimistic locking conflict - client should refresh and retry */
-case class VersionConflict(nodeId: String, expected: String, actual: String) extends SimError {
-  override def logMessage: String = s"Version conflict on node $nodeId: expected $expected, found $actual"
+/** A tree write refused because the branch head is not the commit the client
+  * read, so the submitted body was composed against a tree that has since
+  * changed.
+  *
+  * The conflict is about a tree at a revision, so it names a `TreeId` and two
+  * commits rather than a node: the precondition is on the branch head, which
+  * no single node owns. Attributed to the caller, who resolves it by re-reading
+  * and resubmitting.
+  */
+case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash) extends SimError {
+  override def logMessage: String =
+    s"Version conflict on tree ${treeId.value}: expected ${expected.value}, found ${actual.value}"
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 
@@ -394,7 +404,7 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable]) exte
 /** Errors originating from fol-engine interaction or query preconditions.
   * The `Fol` prefix identifies types mapped from `vql.error.QueryError`
   * (the library's error algebra); the `Failure` suffix follows the
-  * `RepositoryFailure` / `SimulationFailure` naming convention (D13).
+  * `RepositoryFailure` / `SimulationFailure` naming convention.
   *
   * @see ADR-028 §4 — Query Validation Before Evaluation
   */
