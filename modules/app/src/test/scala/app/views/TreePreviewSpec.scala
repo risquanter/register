@@ -4,6 +4,7 @@ import zio.test.*
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{SafeName, IronConstants, OccurrenceProbability}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import io.github.iltotore.iron.*
 
 /** Structural tests for TreePreview rendering logic.
@@ -15,9 +16,6 @@ import io.github.iltotore.iron.*
   *
   *   - Row count = 1 (root) + #portfolios + #leaves.
   *   - Parent-child grouping produces the right child count per parent.
-  *
-  * These mirror the plan's B3 requirement: "confirm that portfoliosVar
-  * and leavesVar produce a matching number of row elements."
   */
 object TreePreviewSpec extends ZIOSpecDefault:
 
@@ -52,7 +50,8 @@ object TreePreviewSpec extends ZIOSpecDefault:
     leaves: List[LeafDraft]
   ): Map[Option[String], Int] =
     val allParents: List[Option[String]] =
-      portfolios.map(_.parent.map(_.value)) ++ leaves.map(_.parent.map(_.value))
+      portfolios.map(p => ParentRef.nameOf(p.parent).map(_.value)) ++
+        leaves.map(l => ParentRef.nameOf(l.parent).map(_.value))
     allParents.groupBy(identity).view.mapValues(_.size).toMap
 
   def spec = suite("TreePreviewSpec")(
@@ -65,24 +64,24 @@ object TreePreviewSpec extends ZIOSpecDefault:
       },
 
       test("lone-leaf: 0 portfolios, 1 leaf → 1 child row (+ root = 2 total)") {
-        val leaf = LeafDraft(sn("Cyber Risk"), None, lognormalShape, lognormalProb)
+        val leaf = LeafDraft(sn("Cyber Risk"), ParentRef.Root, lognormalShape, lognormalProb)
         val state = makeState("My Tree", Nil, List(leaf))
         val totalNodes = 1 + state.portfoliosVar.now().size + state.leavesVar.now().size
         assertTrue(totalNodes == 2)
       },
 
       test("root portfolio + leaf: 1 portfolio, 1 leaf → 3 rows total") {
-        val portfolio = PortfolioDraft(sn("Operational Risk"), None)
-        val leaf      = LeafDraft(sn("Cyber Risk"), Some(sn("Operational Risk")), lognormalShape, lognormalProb)
+        val portfolio = PortfolioDraft(sn("Operational Risk"), ParentRef.Root)
+        val leaf      = LeafDraft(sn("Cyber Risk"), ParentRef.Under(sn("Operational Risk")), lognormalShape, lognormalProb)
         val state     = makeState("My Tree", List(portfolio), List(leaf))
         val totalNodes = 1 + state.portfoliosVar.now().size + state.leavesVar.now().size
         assertTrue(totalNodes == 3)
       },
 
       test("nested portfolios + leaf: 2 portfolios, 1 leaf → 4 rows total") {
-        val root  = PortfolioDraft(sn("Root"), None)
-        val child = PortfolioDraft(sn("IT Risk"), Some(sn("Root")))
-        val leaf  = LeafDraft(sn("Hardware Failure"), Some(sn("IT Risk")), lognormalShape, lognormalProb)
+        val root  = PortfolioDraft(sn("Root"), ParentRef.Root)
+        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")))
+        val leaf  = LeafDraft(sn("Hardware Failure"), ParentRef.Under(sn("IT Risk")), lognormalShape, lognormalProb)
         val state = makeState("My Tree", List(root, child), List(leaf))
         val totalNodes = 1 + state.portfoliosVar.now().size + state.leavesVar.now().size
         assertTrue(totalNodes == 4)
@@ -93,15 +92,15 @@ object TreePreviewSpec extends ZIOSpecDefault:
     suite("parent-child grouping")(
 
       test("root portfolio has no parent → grouped under None key") {
-        val portfolio = PortfolioDraft(sn("Operational Risk"), None)
+        val portfolio = PortfolioDraft(sn("Operational Risk"), ParentRef.Root)
         val state     = makeState("My Tree", List(portfolio), Nil)
         val grouping  = expectedGrouping(state.portfoliosVar.now(), state.leavesVar.now())
         assertTrue(grouping.getOrElse(None, 0) == 1)
       },
 
       test("child portfolio has parent → grouped under parent-name key") {
-        val root  = PortfolioDraft(sn("Root"), None)
-        val child = PortfolioDraft(sn("IT Risk"), Some(sn("Root")))
+        val root  = PortfolioDraft(sn("Root"), ParentRef.Root)
+        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")))
         val state = makeState("My Tree", List(root, child), Nil)
         val grouping = expectedGrouping(state.portfoliosVar.now(), state.leavesVar.now())
         assertTrue(grouping.getOrElse(Some("Root"), 0) == 1) &&
@@ -109,9 +108,9 @@ object TreePreviewSpec extends ZIOSpecDefault:
       },
 
       test("leaf under child portfolio → correct parent group") {
-        val root  = PortfolioDraft(sn("Root"), None)
-        val child = PortfolioDraft(sn("IT Risk"), Some(sn("Root")))
-        val leaf  = LeafDraft(sn("Hardware Failure"), Some(sn("IT Risk")), lognormalShape, lognormalProb)
+        val root  = PortfolioDraft(sn("Root"), ParentRef.Root)
+        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")))
+        val leaf  = LeafDraft(sn("Hardware Failure"), ParentRef.Under(sn("IT Risk")), lognormalShape, lognormalProb)
         val state = makeState("My Tree", List(root, child), List(leaf))
         val grouping = expectedGrouping(state.portfoliosVar.now(), state.leavesVar.now())
         assertTrue(grouping.getOrElse(Some("IT Risk"), 0) == 1) &&

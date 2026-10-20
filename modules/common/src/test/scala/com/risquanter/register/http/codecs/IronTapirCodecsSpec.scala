@@ -19,6 +19,7 @@ import com.risquanter.register.domain.data.iron.{
   ValidationUtil,
   WorkspaceKeySecret
 }
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
 
 /** The contract every Iron codec in this file keeps at the HTTP boundary.
   *
@@ -39,6 +40,12 @@ import com.risquanter.register.domain.data.iron.{
 object IronTapirCodecsSpec extends ZIOSpecDefault:
 
   import IronTapirCodecs.given
+
+  /** The location these refinements are called with. A codec supplies its own
+    * when it runs; here the refinement is called directly, only to obtain the
+    * sentence it produces, so the location is immaterial and one stands for
+    * all. */
+  private val canaryAt: ErrorLocation = ErrorLocation.requestField(FieldName.Id)
 
   /** A string a client could submit that no refinement accepts and that is
     * recognisable in any output. Long enough to break every length bound here,
@@ -82,21 +89,21 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
       "PositiveInt",
       codecFor[PositiveInt],
       NumberCanary.toInt.toString,
-      messagesOf(ValidationUtil.refinePositiveInt(NumberCanary.toInt, "value").left.getOrElse(Nil)),
+      messagesOf(ValidationUtil.refinePositiveInt(NumberCanary.toInt, canaryAt).left.getOrElse(Nil)),
       NumberCanary.abs.toString
     ),
     Refusal(
       "NonNegativeInt",
       codecFor[NonNegativeInt],
       NumberCanary.toInt.toString,
-      messagesOf(ValidationUtil.refineNonNegativeInt(NumberCanary.toInt, "value").left.getOrElse(Nil)),
+      messagesOf(ValidationUtil.refineNonNegativeInt(NumberCanary.toInt, canaryAt).left.getOrElse(Nil)),
       NumberCanary.abs.toString
     ),
     Refusal(
       "NonNegativeLong",
       codecFor[NonNegativeLong],
       NumberCanary.toString,
-      messagesOf(ValidationUtil.refineNonNegativeLong(NumberCanary, "id").left.getOrElse(Nil)),
+      messagesOf(ValidationUtil.refineNonNegativeLong(NumberCanary, canaryAt).left.getOrElse(Nil)),
       NumberCanary.abs.toString
     ),
     Refusal(

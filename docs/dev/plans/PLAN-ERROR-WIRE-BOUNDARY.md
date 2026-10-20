@@ -352,7 +352,19 @@ enum RejectionDetail:
 
 object RejectionDetail:
   given codec: JsonCodec[RejectionDetail] = DeriveJsonCodec.gen[RejectionDetail]
+
+  /** Declared here rather than left to automatic derivation at the use site:
+    * `jsonBody` needs a schema as well as a codec, and putting it in the
+    * companion is what makes one derivation serve every endpoint that carries
+    * this payload (ADR-001 §2).
+    */
+  given schema: Schema[RejectionDetail] = Schema.derived
 ```
+
+The file imports `com.risquanter.register.http.codecs.IronTapirCodecs.given`
+alongside the two above. `ValidationError` names Iron types inside its location,
+and a JSON body needs a schema for each of them as well as a codec, which is how
+`BaseEndpoint` already obtains them.
 
 This is the shape `Conflict` already has. `Conflict(conflict: ConflictKind, trace)`
 is one case at one status whose payload is a discriminated enum, and
@@ -389,15 +401,15 @@ After:
 val baseEndpoint = endpoint
   .errorOut(
     oneOf[WireError](
-      oneOfVariant(StatusCode.BadRequest,          jsonBody[WireError.RequestRejected]),
-      oneOfVariant(StatusCode.UnprocessableEntity, jsonBody[WireError.ValidationRejected]),
+      oneOfVariant(BaseEndpoint.requestRejectedOut),
+      oneOfVariant(BaseEndpoint.validationRejectedOut),
       oneOfVariant(StatusCode.Forbidden,           jsonBody[WireError.AccessDenied]),
       oneOfVariant(StatusCode.NotFound,            jsonBody[WireError.NotFound]),
       oneOfVariant(StatusCode.Gone,                jsonBody[WireError.WorkspaceExpired]),
       oneOfVariant(StatusCode.Conflict,            jsonBody[WireError.Conflict]),
       oneOfVariant(StatusCode.NotImplemented,      jsonBody[WireError.NotSupported]),
       oneOfVariant(StatusCode.ServiceUnavailable,  jsonBody[WireError.DependencyUnavailable]),
-      oneOfVariant(StatusCode.InternalServerError,  jsonBody[WireError.InternalFault])
+      oneOfVariant(BaseEndpoint.internalFaultOut)
     )
   )
 ```
@@ -862,8 +874,10 @@ than sending a failure with no identifier. New file
 beside the two interceptors:
 
 ```scala
-/** Answers a request the decoders rejected with `WireError.ValidationRejected`,
-  * so every failure this service sends has one declared shape.
+/** Answers a request the decoders rejected with `WireError.RequestRejected`, so
+  * every failure this service sends has one declared shape. The handler runs
+  * before any handler does, so it never has a tree to name and always answers
+  * the request-level case (§5.1).
   *
   * `Tracing` is a parameter rather than an environment requirement because a
   * Tapir handler's effect type is `Task`, whose environment is `Any`.
@@ -1275,7 +1289,13 @@ This is the largest mechanical item in the plan and the reason it is its own
 phase rather than part of the boundary work.
 
 **`ErrorLocation`**, new file
-`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`:
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`.
+
+`EWB-D-30` ruled the shape: a location is a **subject** and a **field**, two
+components that vary independently, rather than one spelled-out path. The same
+field can fail under any subject, so a five-case enumeration that paired each
+subject with its own field set repeated the field vocabulary once per subject.
+Three cases carry it instead.
 
 ```scala
 /** Where an error is. A closed set, because every location this system points
@@ -1285,31 +1305,27 @@ phase rather than part of the boundary work.
   */
 @jsonDiscriminator("kind")
 enum ErrorLocation:
-  /** A field of the request body. */
-  case RequestField(field: RequestFieldName)
-
-  /** A field of a submitted distribution. The same field names occur under two
-    * contexts — a form's draft leaf and a request body — so the context is a
-    * component rather than a prefix spelled into a name. */
-  case DistributionField(context: DistributionContext, field: DistributionFieldName)
+  /** A field of some subject. */
+  case Field(subject: ErrorSubject, field: FieldName)
 
   /** An HTTP request header. A closed set rather than a name, so no spelling
     * a client never supplied can reach the wire as free text. */
-  case RequestHeader(header: RequestHeaderName)
+  case Header(header: RequestHeaderName)
 
-  /** A node of the tree the request is about, and which aspect of it failed. It
-    * carries no `TreeId`: the tree is named once on
-    * `WireError.ValidationRejected`, and on the creation path no tree
-    * identifier exists yet — the request body carries none and
-    * `ResolvedCreate` produces none, so one here would be unsatisfiable
-    * (`EWB-D-28`). */
-  case Node(nodeId: NodeId, aspect: NodeAspect)
-
-  /** The failure is about the request as a whole, with no narrower location. */
-  case Request
+  /** The failure is about the whole of whatever was being validated, with no
+    * narrower location. A request body with no field to blame, or a tree built
+    * from a store read or a merge, where no field of a request exists at all. */
+  case Whole
 
 object ErrorLocation:
   given codec: JsonCodec[ErrorLocation] = DeriveJsonCodec.gen[ErrorLocation]
+
+  /** A field of the request body, which is the common case. */
+  def requestField(field: FieldName): ErrorLocation = Field(ErrorSubject.Request, field)
+
+  /** A field of a node of the tree. */
+  def nodeField(nodeId: NodeId, field: FieldName): ErrorLocation =
+    Field(ErrorSubject.ExistingNode(nodeId), field)
 ```
 
 The `kind` discriminator is this plan's own rule for a payload carried inside a
@@ -1367,82 +1383,108 @@ falls through to a generic banner when none matches.
 `RiskLeafField` and `PortfolioField` are already enums, so the location was the
 one untyped link in a chain typed at both ends. A refinement bounds the
 alphabet and leaves that function exactly as it is. An enum deletes it: each
-case maps to its control, and a location added later is a compile error at the
-form instead of an error silently shown as a banner. The set is fixed and
-known, so it is an enum in its owner's companion (ADR-037 §1).
+form matches the locations it renders and sends the rest to its submit banner,
+and the substring tests go. The set is fixed and known, so it is an enum in its
+owner's companion (ADR-037 §1).
 
-All three enums are declared in `ErrorLocation.scala`, because `ErrorLocation`
-is the type that owns the sets.
+A typed location does **not** make a new case a compile error at the form. Both
+routers end in a wildcard that answers the banner, which is what lets a form
+render only the controls it has. A case added here reaches the banner until a
+form is given an arm for it.
+
+Both enums are declared in `ErrorLocation.scala`, because `ErrorLocation` is
+the type that owns the sets.
 
 ```scala
-/** A field of the request body, named rather than spelled. */
+/** Which submitted collection a node came from. A tree update submits four
+  * collections, each indexed from zero independently, so a position alone
+  * names four different rows. */
 @jsonDiscriminator("kind")
-enum RequestFieldName:
-  case Name, Id, Branch, Scenario, TreeId, At, Source, ToCommit, Request
-  case Mitigations, NodeId, NodeIds, Nodes, RootId, SeedVarHighWater
-  case NodeName, NodeSeedVarId, TreeNames
-  case WorkspaceTrees, WorkspaceSeedEntityId
-  case InsurancePolicyCap, TargetingPredicateSource
+enum SubmittedCollection:
+  case Portfolios, Leaves, NewPortfolios, NewLeaves
 
-/** Which submitted distribution a field belongs to. The same field names occur
-  * under both, which is why this is a component and not a name prefix. */
+/** What a failure is about. None of these cases can hold a value that must not
+  * cross the client boundary (ADR-036). */
 @jsonDiscriminator("kind")
-enum DistributionContext:
-  case Leaf, Request
+enum ErrorSubject:
+  case Request
+  case DraftNode
+  case NodeAtIndex(collection: SubmittedCollection, index: NonNegativeInt)
+  case ExistingNode(nodeId: NodeId)
+  case Mitigation(mitigationId: MitigationId)
+  case Workspace
 
-/** A field of a submitted distribution. `PercentileAt` and `QuantileAt` carry
-  * the element index as an `Int` rather than as `[3]` inside text, and their
-  * index-less siblings are the whole-collection failures — a monotonicity
-  * violation names the collection, not an element. */
+/** Which field or computed aspect failed. One vocabulary for every subject,
+  * because a field that can fail on a submitted request can equally fail on a
+  * stored node. `PercentileAt` and `QuantileAt` carry the element index as a
+  * number rather than as `[3]` inside text; their index-less siblings are the
+  * whole-collection failures, since a monotonicity violation names the
+  * collection and not an element. */
 @jsonDiscriminator("kind")
-enum DistributionFieldName:
-  case DistributionType, MinLoss, MaxLoss, Terms
-  case ExpertParams, LognormalParams, MetalogFit, LognormalFit
+enum FieldName:
+  case Id, Name, ParentId, ParentName, ChildIds, RootId, Nodes, Trees
+  case SeedVarHighWater, Limit
+  case Probability, SeedVarId, SeedEntityId
+  case DistributionType, Terms, MinLoss, MaxLoss, Spec
   case Percentiles, Quantiles
   case PercentileAt(index: NonNegativeInt)
   case QuantileAt(index: NonNegativeInt)
-
-/** Which aspect of a node failed. Not confined to a submitted field: an
-  * aggregated loss, a content hash and a mitigated result are computed, and
-  * naming them is what tells a reader where to look. */
-@jsonDiscriminator("kind")
-enum NodeAspect:
-  case ParentId, ChildIds, SeedVarId
-  case AggregatedLoss, ContentHash, MitigatedResult
+  case ChildAt(index: NonNegativeInt)
+  case Mitigations, Cap, Factor, OverrideParams, TargetingSource
+  case Deductible, Threshold
+  case Branch, Scenario, TreeId, At, Source, ToCommit, CommitHash, ContentHash
+  case WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, Token, TraceId
+  case AggregatedLoss, MitigatedResult
+  case Unknown
 ```
 
 `NonNegativeInt` is `Int :| GreaterEqual[0]` and already exists in
 `OpaqueTypes.scala`. No upper bound is stated, because the index names an
 element of a collection the request already bounds.
 
-**Where the node identifier goes.** Thirteen sites spell a node identifier into
-the path today. The identifier moves into `Node`'s own `nodeId` and what remains
-is the aspect, so no location carries an identifier as text.
+`ErrorSubject.nodeAtIndex`, `FieldName.percentileAt`, `FieldName.quantileAt`
+and `FieldName.childAt` take an `Int` and fold a negative one onto the
+collection-level case, because an index is produced by iterating a collection
+and a negative one would mean the caller passed something that is not a
+position.
 
-| Today | `nodeId` | `aspect` |
+`ExistingNode` covers a node the tree holds and a node a lookup asked for and
+did not find. It carries no `TreeId`: the tree is named once on
+`WireError.ValidationRejected`, and on the creation path no tree identifier
+exists yet — the request body carries none and `ResolvedCreate` produces none,
+so one here would be unsatisfiable (`EWB-D-28`).
+
+**Where the node identifier goes.** Thirteen sites spell a node identifier into
+the path today. The identifier moves into `ErrorSubject.ExistingNode` and what
+remains is the field, so no location carries an identifier as text.
+
+| Today | `subject` | `field` |
 |---|---|---|
-| `nodes[<id>].parentId` | that node | `ParentId` |
-| `nodes[<id>].childIds` | that node | `ChildIds` |
-| `riskLeaf.<id>.metalogFit` | the leaf | `MetalogFit` |
-| `riskLeaf.<id>.lognormalFit` | the leaf | `LognormalFit` |
-| `riskLeaf.<id>.expertParams` | the leaf | `ExpertParams` |
-| `riskLeaf.<id>.lognormalParams` | the leaf | `LognormalParams` |
-| `riskLeaf.<id>.distributionType` | the leaf | `DistributionType` |
-| `riskPortfolio.<id>.childIds` | the portfolio | `ChildIds` |
-| `riskPortfolio.<id>` | the portfolio | `AggregatedLoss` |
-| `riskLeaf.<id>` | the leaf | `ContentHash` |
-| `mitigatedResult.<id>` | that node | `MitigatedResult` |
+| `nodes[<id>].parentId` | `ExistingNode` | `ParentId` |
+| `nodes[<id>].childIds` | `ExistingNode` | `ChildIds` |
+| `riskLeaf.<id>.distributionType` | `ExistingNode` | `DistributionType` |
+| `riskPortfolio.<id>.childIds` | `ExistingNode` | `ChildIds` |
+| `riskPortfolio.<id>` | `ExistingNode` | `AggregatedLoss` |
+| `riskLeaf.<id>` | `ExistingNode` | `ContentHash` |
+| `mitigatedResult.<id>` | `ExistingNode` | `MitigatedResult` |
 
 `riskLeaf` and `riskPortfolio` leave the location because the node's own type
-says which it is. `mitigatedResult` moves from prefix to aspect, because it
+says which it is. `mitigatedResult` moves from prefix to field, because it
 names what failed rather than what it failed on. `AggregatedLoss` and
 `ContentHash` are named here for the first time: each is taken from the message
 beside it, which already says "aggregated loss overflow" and "no content hash".
 
-Four `DistributionFieldName` cases take their names from the same path under
-either context, so `leaf.percentiles[3]` and `request.percentiles[3]` become
-`DistributionField(Leaf, PercentileAt(3))` and
-`DistributionField(Request, PercentileAt(3))`.
+The four fit-and-params cases an earlier draft listed — `MetalogFit`,
+`LognormalFit`, `ExpertParams`, `LognormalParams` — are not in `FieldName`. A
+fit failure reports at the collection the caller submitted, which is
+`Percentiles` or `Quantiles`, and a parameter failure reports at `MinLoss`,
+`MaxLoss` or `Terms`. Naming the fitter named the implementation rather than
+the field a client could correct.
+
+Because the field vocabulary is shared, one spelled path under two contexts
+needs no second enumeration: `leaf.percentiles[3]` and `request.percentiles[3]`
+become `Field(DraftNode, PercentileAt(3))` and
+`Field(Request, PercentileAt(3))`.
 
 **A missing case is corrected without asking.** This enumeration is derived
 from the locations the code names today, and a first pass over thirty-odd cases
@@ -1459,29 +1501,33 @@ that holds such a path as a raw `String` is `MergeConflictPath`, which Phase 6
 step 2 already opens (`EWB-D-24`).
 
 **The decode-failure handler's mapping.** `WireDecodeFailureHandler.fieldName`
-returns an `ErrorLocation` instead of a `String`. It matches on three kinds of
-endpoint input today:
+is replaced by `locationOf`, which returns an `ErrorLocation`:
 
 ```scala
-  private def fieldName(input: EndpointInput[?]): String =
+  private def locationOf(input: EndpointInput[?]): ErrorLocation =
+    headerNameOf(input).flatMap(RequestHeaderName.fromWireName) match
+      case Some(header) => ErrorLocation.Header(header)
+      case None         => ErrorLocation.Whole
+
+  private def headerNameOf(input: EndpointInput[?]): Option[String] =
     input match
-      case EndpointIO.Header(name, _, _)        => name
-      case EndpointIO.FixedHeader(header, _, _) => header.name
-      case other                                => other.show
+      case EndpointIO.Header(name, _, _)        => Some(name)
+      case EndpointIO.FixedHeader(header, _, _) => Some(header.name)
+      case _                                    => None
 ```
 
-Each branch takes a different destination:
+`RequestHeaderName.fromWireName` is what closes the set, matching without
+regard to case because HTTP header names are case-insensitive while these
+spellings are fixed text. A header this application declares reaches `Header`.
+Everything else reaches `Whole`: a header Tapir pins itself (`Content-Type`
+being the realistic one), a query parameter, a path segment, the body.
 
-- `EndpointIO.Header` is a header this application declared, so it maps to
-  `RequestHeader` with the matching `RequestHeaderName` case.
-- `EndpointIO.FixedHeader` is a header Tapir pins itself rather than one this
-  application declares, `Content-Type` being the realistic one. Its name is
-  outside the enum, and its failure is about the request as a whole rather than
-  a field a client can correct, so it maps to `Request`.
-- Anything else maps to the `RequestFieldName` case for the input's own name,
-  and to `Request` when the input is not one the enum names. Tapir's `show`
-  rendering is no longer used, because a rendering like `query parameter q` is
-  a sentence about an input rather than a name for one.
+**The name is said once.** A declared header is named by its location, so the
+message carries the reason alone. Every other input reports at `Whole`, where
+the sentence is the only place the name can travel, so the message there opens
+with `inputName(input)` — the header's own name if it had one, otherwise
+Tapir's rendering of the input. Putting the name in both places would print
+`X-Branch` twice in one refusal.
 
 ### 6.5 Deletions from `AppError.scala`
 
@@ -2112,8 +2158,8 @@ same trace the response names. The two store-spec cases that pinned the old
 store-level line are removed, because the behaviour moved rather than going away.
 
 **Phase 3 — typed locations and the content-rejection split.** `ErrorLocation`,
-`RequestFieldName`, `DistributionContext`, `DistributionFieldName`, `NodeAspect`
-and `RequestHeaderName` (§6.4); `ValidationError.location`; the two wire cases
+`ErrorSubject`, `FieldName`, `SubmittedCollection` and `RequestHeaderName`
+(§6.4); `ValidationError.location`; the two wire cases
 `RequestRejected` and `ValidationRejected` with `RejectionDetail` absorbing
 `QueryRejected` (§3.5, `EWB-D-28`), and the `oneOf` statuses that go with them.
 Every construction site of `ValidationError`, which is not confined to
@@ -2471,6 +2517,14 @@ requires.
 ruled. An unreachable authorization service now answers as a dependency outage
 rather than as a denial, so what the dropped reason makes indistinguishable is
 one denial from another. Dropping it is still required, for that reason.
+
+**Extended by `EWB-D-28`.** The list above names three changes because, when it
+was ruled, `422` was reached only by a refused query. Splitting the rejection in
+two put every content failure of a known tree at that status, so there is a
+fourth: a request body refused on a tree-addressed route answers `422` where it
+answered `400`. It follows from the same rule as the first — one status per wire
+case — and is accepted on the same grounds. The creation path is unaffected,
+because no tree exists to name there and the answer stays `400`.
 
 *Cost:* three observable changes at once. There is one first-party consumer and no
 external API contract, so the cost is one coordinated change in a repository you
@@ -5007,6 +5061,40 @@ after a failure.
 
 **Version.** A PATCH bump per landed phase, mirrored from `build.sbt` into `.env`
 and `.env.irmin`.
+
+### The last step — the browser module's wildcard Laminar import
+
+This runs after every other phase is green, because it touches more files than
+the rest of the plan put together and touching them earlier would make each
+earlier phase harder to read.
+
+**What is there now.** Fifty-one files in `modules/app/src/main/scala` open with
+`import com.raquo.laminar.api.L.{*, given}`. Laminar is the browser user
+interface library this module is built on; `L` is the object holding its whole
+public surface, the `*` imports every name in it, and the `given` imports its
+implicit instances. The compiler reports the `given` selector as unused in
+eleven of those files, all of which this plan touched.
+
+**What was measured, and when.** On 2026-10-20 the selector was deleted from
+`app/state/AnalyzeQueryState.scala` and `app/views/ErrorBanner.scala`, and
+`sbt 'commonJS/clean; commonJS/compile; app/clean; app/Test/compile'` was run.
+The module compiled and both warnings disappeared, so in those two files the
+selector is genuinely unused. The measurement was then reverted. It settles
+those two files and nothing else: another file may use a Laminar given, and
+only its own compile says so.
+
+**The step.** Replace the wildcard in every one of the fifty-one files with the
+names that file actually uses — `div`, `span`, `onClick`, `child.text`,
+`Signal`, and so on — keeping `given` only where removing it fails to compile.
+The import is then specific rather than a wildcard, which is what ADR-011 asks
+for and what stops a wildcard widening implicit scope in ways no reader can
+see.
+
+**Verification.** `sbt 'commonJS/clean; commonJS/compile; app/clean;
+app/Test/compile'` compiles with no unused-symbol warning naming any file in
+`modules/app/src/main`, and `sbt app/test` is green. The clean is required: an
+incremental compile reports nothing for a module it did not rebuild, which
+reads as zero warnings.
 
 ---
 

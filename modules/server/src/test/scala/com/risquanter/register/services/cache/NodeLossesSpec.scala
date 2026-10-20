@@ -1,16 +1,13 @@
 package com.risquanter.register.services.cache
 
 import zio.test.*
-import zio.test.Assertion.*
-import zio.prelude.Ord
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.{
   LognormalDistributionParams, MitigationApplicationRecord, MitigationPrecedence,
   MitigationSpec, NodeProvenance, ResultTransformSpec, TransformPipeline
 }
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
@@ -25,11 +22,15 @@ import io.github.iltotore.iron.refineUnsafe
   */
 object NodeLossesSpec extends ZIOSpecDefault {
 
+  /** A transform parameter built as a fixture: the refinement succeeds, so
+    * where a refusal would report is immaterial here. */
+  private val paramAt: ErrorLocation = ErrorLocation.requestField(FieldName.Mitigations)
+
   private def capRecord(label: String, cap: Long): MitigationApplicationRecord =
     MitigationApplicationRecord(
       mitigationId(label),
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)))),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -129,7 +130,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
           case Left(errors) =>
             assertTrue(
               errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
-              errors.head.field == s"riskPortfolio.${parentId.value}"
+              errors.head.location == ErrorLocation.nodeField(parentId, FieldName.AggregatedLoss)
             )
           case Right(_) => assertTrue(false)
         }
@@ -143,7 +144,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
           case Left(errors) =>
             assertTrue(
               errors.head.code == ValidationErrorCode.EMPTY_COLLECTION,
-              errors.head.field == s"riskPortfolio.${parentId.value}.childIds"
+              errors.head.location == ErrorLocation.nodeField(parentId, FieldName.ChildIds)
             )
           case Right(_) => assertTrue(false)
         }

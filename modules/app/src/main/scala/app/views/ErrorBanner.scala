@@ -1,6 +1,6 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import app.state.GlobalError
 import com.risquanter.register.domain.data.iron.TraceId
 
@@ -45,7 +45,7 @@ object ErrorBanner:
     case GlobalError.NetworkError(message) =>
       Presentation("⚡", message, None, ErrorStyling)
 
-    case GlobalError.RequestRejected(message) =>
+    case GlobalError.InputRejected(message) =>
       Presentation("⚠", message, None, ErrorStyling)
 
     case GlobalError.Conflict(message) =>

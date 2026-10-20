@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
 
 /** Defense-in-depth layer for seed identity:
@@ -49,7 +49,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       assertTrue(
         errs.exists(e =>
           e.code == ValidationErrorCode.DUPLICATE_VALUE &&
-          e.field == "nodes.seedVarId" &&
+          e.location == ErrorLocation.Whole &&
           e.message == ValidationMessages.seedVarIdInUse(5L, Seq("Cyber Attack", "Flood Risk"))
         )
       )
@@ -102,7 +102,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         assertTrue(
           errs.exists(e =>
             e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-            e.field == "seedVarHighWater" &&
+            e.location == ErrorLocation.requestField(FieldName.SeedVarHighWater) &&
             e.message.contains("below the highest assigned seedVarId 5")
           )
         )

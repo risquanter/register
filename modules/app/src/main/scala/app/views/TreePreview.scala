@@ -5,7 +5,6 @@ import org.scalajs.dom.MouseEvent
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, FormMode, FormTarget, currentTarget}
 import app.components.{Icons, TreeNodeRow}
 import app.components.ConfirmGuard.proceedOrConfirm
-import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, DistributionType}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 

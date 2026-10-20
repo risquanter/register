@@ -2,7 +2,6 @@ package com.risquanter.register.auth
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.testing.SttpBackendStub
 import sttp.model.StatusCode
@@ -10,7 +9,7 @@ import sttp.monad.MonadError
 import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId, IronConstants, MeshServiceUrl}
-import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, AuthServiceUnavailable}
+import com.risquanter.register.domain.errors.{AuthForbidden, AuthServiceUnavailable, ErrorLocation}
 import com.risquanter.register.telemetry.TelemetryLive
 
 /** Unit tests for AuthorizationServiceSpiceDB HTTP adapter (T-U1 through T-U7).
@@ -34,7 +33,7 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
 
   private val testConfig: SpiceDbConfig = SpiceDbConfig(
     url         = MeshServiceUrl.fromString("http://spicedb-test:50051").toOption.get,
-    token       = SpiceDbToken.fromString("test-bearer-token").toOption.get,
+    token       = SpiceDbToken.fromString("test-bearer-token", ErrorLocation.Whole).toOption.get,
     consistency = SpiceDbConsistency.MinimizeLatency,
     timeoutSeconds = IronConstants.Ten
   )

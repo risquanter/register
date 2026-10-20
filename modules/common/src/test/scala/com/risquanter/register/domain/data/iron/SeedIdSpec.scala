@@ -1,8 +1,8 @@
 package com.risquanter.register.domain.data.iron
 
 import zio.test.*
-import zio.json.{JsonEncoder, JsonDecoder, EncoderOps, DecoderOps}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import zio.json.{EncoderOps, DecoderOps}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationErrorCode}
 
 object SeedIdSpec extends ZIOSpecDefault:
 
@@ -42,19 +42,21 @@ object SeedIdSpec extends ZIOSpecDefault:
       }
     ),
     suite("refinement errors")(
-      test("refineSeedEntityId reports INVALID_RANGE with the given field path") {
-        val errs = ValidationUtil.refineSeedEntityId(0L, "workspace.seedEntityId").swap.toOption.get
+      test("refineSeedEntityId reports INVALID_RANGE at the location the caller passed") {
+        val at = ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId)
+        val errs = ValidationUtil.refineSeedEntityId(0L, at).swap.toOption.get
         assertTrue(
           errs.head.code == ValidationErrorCode.INVALID_RANGE,
-          errs.head.field == "workspace.seedEntityId",
+          errs.head.location == at,
           errs.head.message == ValidationMessages.seedEntityIdOutOfRange
         )
       },
-      test("refineSeedVarId reports INVALID_RANGE with the given field path") {
-        val errs = ValidationUtil.refineSeedVarId(50000000L, "leaf.seedVarId").swap.toOption.get
+      test("refineSeedVarId reports INVALID_RANGE at the location the caller passed") {
+        val at = ErrorLocation.requestField(FieldName.SeedVarId)
+        val errs = ValidationUtil.refineSeedVarId(50000000L, at).swap.toOption.get
         assertTrue(
           errs.head.code == ValidationErrorCode.INVALID_RANGE,
-          errs.head.field == "leaf.seedVarId",
+          errs.head.location == at,
           errs.head.message == ValidationMessages.seedVarIdOutOfRange
         )
       }

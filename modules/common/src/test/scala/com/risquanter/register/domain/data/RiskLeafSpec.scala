@@ -3,10 +3,25 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.RiskLeaf
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import zio.prelude.Validation
+
+import com.risquanter.register.domain.errors.{
+  ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError, ValidationErrorCode
+}
 import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, unsafeGet}
 
 object RiskLeafSpec extends ZIOSpecDefault {
+
+  /** The node a caller names when the leaf came from a submitted collection
+    * rather than from the request body as a whole. */
+  private val submittedLeaf: ErrorSubject =
+    ErrorSubject.nodeAtIndex(SubmittedCollection.Leaves, 0)
+
+  /** Every location the refusal reported, in the order the errors accumulated. */
+  private def locationsOf[A](
+    result: Validation[ValidationError, A]
+  ): List[ErrorLocation] =
+    result.toEither.swap.toOption.toList.flatMap(_.toList).map(_.location)
 
   def spec = suite("RiskLeaf Smart Constructor")(
     suite("Valid RiskLeaf Creation")(
@@ -333,7 +348,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(
           result.toEither.swap.toOption.get.exists(e =>
-            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field.endsWith("percentiles"))
+            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
+            e.location == ErrorLocation.requestField(FieldName.Percentiles))
         )
       },
       test("rejects expert mode with 1 point (below the fitter minimum of 2)") {
@@ -348,7 +364,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(
           result.toEither.swap.toOption.get.exists(e =>
-            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field.endsWith("percentiles"))
+            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
+            e.location == ErrorLocation.requestField(FieldName.Percentiles))
         )
       },
       test("accepts expert mode with 2 points (lower bound)") {
@@ -643,8 +660,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
       }
     ),
-    suite("Field Path Context in Errors")(
-      test("invalid id includes field path") {
+    suite("Error Location Context in Errors")(
+      test("an invalid id reports at the id field") {
         val result = RiskLeaf.create(
           id = "x",  // Too short (< 3)
           name = "Test",
@@ -654,13 +671,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           seedVarId = 38L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("root.id")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.Id))
         )
       },
-      test("invalid name includes field path") {
+      test("an invalid name reports at the name field") {
         val result = RiskLeaf.create(
           id = idStr("test-id"),
           name = "",  // Blank
@@ -670,13 +686,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           seedVarId = 39L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("root.name")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.Name))
         )
       },
-      test("invalid probability includes field path") {
+      test("an out-of-range probability reports at the probability field") {
         val result = RiskLeaf.create(
           id = idStr("test-id"),
           name = "Test",
@@ -686,13 +701,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           seedVarId = 40L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("root.probability")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.Probability))
         )
       },
-      test("invalid distributionType includes field path") {
+      test("an unrecognised distribution type reports at the distribution-type field") {
         val result = RiskLeaf.create(
           id = idStr("test-id"),
           name = "Test",
@@ -702,13 +716,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           seedVarId = 41L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("root.distributionType")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.DistributionType))
         )
       },
-      test("minLoss >= maxLoss includes field path") {
+      test("minLoss at or above maxLoss reports at the minLoss field") {
         val result = RiskLeaf.create(
           id = idStr("test-id"),
           name = "Test",
@@ -718,13 +731,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           maxLoss = Some(100L),  // maxLoss < minLoss
           seedVarId = 42L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("root.minLoss")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.MinLoss))
         )
       },
-      test("missing expert mode fields includes field path") {
+      test("expert mode with neither collection reports at the distribution-type field") {
         val result = RiskLeaf.create(
           id = idStr("test-id"),
           name = "Test",
@@ -733,13 +745,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           // Missing percentiles and quantiles
           seedVarId = 43L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("root.distributionType")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.DistributionType))
         )
       },
-      test("custom field prefix propagates to errors") {
+      test("a caller-supplied subject propagates to errors") {
         val result = RiskLeaf.create(
           id = "x",  // Too short
           name = "Test",
@@ -747,13 +758,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          fieldPrefix = "children[0]",
+          subject = submittedLeaf,
           seedVarId = 44L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("children[0].id")
+          locationsOf(result).contains(ErrorLocation.Field(submittedLeaf, FieldName.Id))
         )
       }
     ),
@@ -866,15 +876,14 @@ object RiskLeafSpec extends ZIOSpecDefault {
           terms = Some(5),
           seedVarId = 52L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("terms")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.Terms))
         )
       }
     ),
     suite("SeedVarId Validation")(
-      test("rejects seedVarId = 0 with field path") {
+      test("rejects seedVarId = 0, reporting at the seedVarId field") {
         val result = RiskLeaf.create(
           id = idStr("seed-zero"),
           name = "Seed Zero",
@@ -884,10 +893,9 @@ object RiskLeafSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           seedVarId = 0L
         )
-        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("root.seedVarId")
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.SeedVarId))
         )
       },
       test("rejects seedVarId = 50000000 (stream doubling budget)") {
@@ -935,11 +943,11 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         result.toEither match {
           case Left(errors) =>
-            val errorStr = errors.mkString("; ")
+            val locations = errors.map(_.location)
             assertTrue(
               errors.length >= 2,
-              errorStr.contains("root.id"),
-              errorStr.contains("root.seedVarId")
+              locations.contains(ErrorLocation.requestField(FieldName.Id)),
+              locations.contains(ErrorLocation.requestField(FieldName.SeedVarId))
             )
           case Right(_) => assertTrue(false)
         }

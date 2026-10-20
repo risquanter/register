@@ -7,7 +7,7 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
-import com.risquanter.register.http.errors.{QueryProblem, WireError}
+import com.risquanter.register.http.errors.{QueryProblem, RejectionDetail, WireError}
 import zio.json.*
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
@@ -132,17 +132,18 @@ object QueryEndpointSpec extends ZIOSpecDefault:
             .response(asStringAlways)
             .send(client.backend)
           rawBody    = queryResp.body
-          // A refused query is a `QueryRejected`, not a field-validation
-          // failure: the problem carries a parse position, which a validation
-          // error has nowhere to put.
+          // The query names a tree, so its content is refused against that
+          // tree and the detail says which kind of refusal it was. A query
+          // problem carries a parse position, which a field error has nowhere
+          // to put.
           refusal   <- ZIO.fromEither(
-            rawBody.fromJson[WireError.QueryRejected]
+            rawBody.fromJson[WireError.ValidationRejected]
               .left.map(err => s"Failed to decode a query rejection: $err\nBody was: $rawBody")
           )
         yield assertTrue(queryResp.code.code == 422) &&
-          assertTrue(refusal.problem match
-            case QueryProblem.Unparseable(_, _) => true
-            case _                              => false) &&
+          assertTrue(refusal.detail match
+            case RejectionDetail.Query(QueryProblem.Unparseable(_, _)) => true
+            case _                                                     => false) &&
           // ADR-022 §4/§6: error body must not contain the workspace key
           assertTrue(!rawBody.contains(key))
       },
@@ -166,13 +167,13 @@ object QueryEndpointSpec extends ZIOSpecDefault:
             .send(client.backend)
           rawBody    = queryResp.body
           refusal   <- ZIO.fromEither(
-            rawBody.fromJson[WireError.QueryRejected]
+            rawBody.fromJson[WireError.ValidationRejected]
               .left.map(err => s"Failed to decode a query rejection: $err\nBody was: $rawBody")
           )
         yield assertTrue(queryResp.code.code == 422) &&
           // The unresolved name is listed, so the client can say which one.
-          assertTrue(refusal.problem match
-            case QueryProblem.UnknownReferences(messages) =>
+          assertTrue(refusal.detail match
+            case RejectionDetail.Query(QueryProblem.UnknownReferences(messages)) =>
               messages.exists(_.contains("NonExistentNode"))
             case _ => false)
       }

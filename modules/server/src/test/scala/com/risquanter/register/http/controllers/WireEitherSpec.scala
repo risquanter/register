@@ -24,7 +24,7 @@ import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, 
 import com.risquanter.register.domain.errors.{AppError, AuthServiceUnavailable, RepositoryFailure, WorkspaceExpired}
 import com.risquanter.register.http.RequestSpanInterceptor
 import com.risquanter.register.http.endpoints.BaseEndpoint
-import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.http.errors.{TreeScope, WireError}
 import com.risquanter.register.telemetry.TelemetryLive
 
 /** Two properties of the boundary where a domain failure becomes a response: the
@@ -89,7 +89,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
   /** The wire failure the boundary projects `error` onto. This is also where a
     * test reads the trace the response would carry. */
   private def wireFailure(error: AppError)(using Tracing): UIO[Option[WireError]] =
-    ZIO.fail(error).wireEither.map(_.left.toOption)
+    ZIO.fail(error).wireEither(TreeScope.NoTree).map(_.left.toOption)
 
   /** The boundary's log line for `error` under `trace`, or `None` if it wrote
     * none.
@@ -119,7 +119,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
     baseEndpoint.get
       .in(RequestPath)
       .out(stringBody)
-      .serverLogic[Task](_ => ZIO.fail(error).wireEither)
+      .serverLogic[Task](_ => ZIO.fail(error).wireEither(TreeScope.NoTree))
 
   /** Serves one request to that endpoint through the span interceptor, so the
     * projection runs where it runs in production: inside the request's span. */
@@ -145,7 +145,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
         tracing.span(SpanName, SpanKind.SERVER) {
           for
             context   <- tracing.getCurrentSpanContextUnsafe
-            projected <- failing.wireEither
+            projected <- failing.wireEither(TreeScope.NoTree)
           yield assertTrue(
             projected.left.toOption.map(_.trace.value).contains(context.getTraceId)
           )
@@ -158,7 +158,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
         given Tracing = tracing
 
         tracing.span(SpanName, SpanKind.SERVER) {
-          failing.wireEither.map { projected =>
+          failing.wireEither(TreeScope.NoTree).map { projected =>
             assertTrue(
               projected.left.toOption.exists(_.trace != TelemetryPlaceholders.UnlinkedTrace)
             )
@@ -171,7 +171,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
       ZIO.serviceWithZIO[Tracing] { tracing =>
         given Tracing = tracing
 
-        failing.wireEither.map { projected =>
+        failing.wireEither(TreeScope.NoTree).map { projected =>
           assertTrue(
             projected.left.toOption.map(_.trace).contains(TelemetryPlaceholders.UnlinkedTrace)
           )

@@ -5,7 +5,7 @@ import zio.test.*
 
 import sttp.tapir.SchemaType.SProduct
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 
 object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
@@ -51,15 +51,17 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
   private def failsOnField(
     v:     Validation[?, ?],
-    field: String,
+    field: FieldName,
     code:  ValidationErrorCode
-  ): Boolean = v match
-    case Validation.Failure(_, errs) =>
-      errs.exists {
-        case e: com.risquanter.register.domain.errors.ValidationError => e.field == field && e.code == code
-        case _                                                          => false
-      }
-    case _ => false
+  ): Boolean =
+    val at = ErrorLocation.requestField(field)
+    v match
+      case Validation.Failure(_, errs) =>
+        errs.exists {
+          case e: ValidationError => e.location == at && e.code == code
+          case _                  => false
+        }
+      case _ => false
 
   // ── spec ───────────────────────────────────────────────────────────────────
 
@@ -236,21 +238,21 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
         val result = DistributionShapeRequest.validate(
           expertReq(quantiles = Array(25_000.0, 5_000.0, 1_000.0))
         )
-        assertTrue(failsOnField(result, "request.quantiles", ValidationErrorCode.INVALID_COMBINATION))
+        assertTrue(failsOnField(result, FieldName.Quantiles, ValidationErrorCode.INVALID_COMBINATION))
       },
 
       test("rejects expert when quantiles are non-monotone (valley)") {
         val result = DistributionShapeRequest.validate(
           expertReq(quantiles = Array(1_000.0, 25_000.0, 5_000.0))
         )
-        assertTrue(failsOnField(result, "request.quantiles", ValidationErrorCode.INVALID_COMBINATION))
+        assertTrue(failsOnField(result, FieldName.Quantiles, ValidationErrorCode.INVALID_COMBINATION))
       },
 
       test("rejects expert when quantiles contain a repeated value (not strictly increasing)") {
         val result = DistributionShapeRequest.validate(
           expertReq(quantiles = Array(1_000.0, 1_000.0, 25_000.0))
         )
-        assertTrue(failsOnField(result, "request.quantiles", ValidationErrorCode.INVALID_COMBINATION))
+        assertTrue(failsOnField(result, FieldName.Quantiles, ValidationErrorCode.INVALID_COMBINATION))
       },
 
       test("accepts expert when quantiles are strictly increasing") {
@@ -267,14 +269,14 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
         val result = DistributionShapeRequest.validate(
           expertReq(percentiles = Array(0.9, 0.1, 0.5))
         )
-        assertTrue(failsOnField(result, "request.percentiles", ValidationErrorCode.INVALID_COMBINATION))
+        assertTrue(failsOnField(result, FieldName.Percentiles, ValidationErrorCode.INVALID_COMBINATION))
       },
 
       test("rejects expert when percentiles contain a repeated value") {
         val result = DistributionShapeRequest.validate(
           expertReq(percentiles = Array(0.05, 0.05, 0.95))
         )
-        assertTrue(failsOnField(result, "request.percentiles", ValidationErrorCode.INVALID_COMBINATION))
+        assertTrue(failsOnField(result, FieldName.Percentiles, ValidationErrorCode.INVALID_COMBINATION))
       },
 
       test("both non-monotone percentiles and quantiles accumulate independently") {
@@ -286,11 +288,14 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
         )
         result match
           case Validation.Failure(_, errs) =>
-            val fields = errs.map(_.field).toList
+            val locations = errs.toList.collect { case e: ValidationError => e.location }
             assertTrue(
-              fields.exists(_.contains("percentiles")),
-              fields.exists(_.contains("quantiles"))
-            ).label(s"Expected errors on both percentiles and quantiles, got: $fields")
+              locations.contains(ErrorLocation.requestField(FieldName.Percentiles)),
+              locations.contains(ErrorLocation.requestField(FieldName.Quantiles))
+            ).label(
+              "Expected errors on both percentiles and quantiles, got: " +
+                locations.map(ErrorLocation.describe).mkString(", ")
+            )
           case Validation.Success(_, _) =>
             assertTrue(false).label("Expected failure but got Success")
       },

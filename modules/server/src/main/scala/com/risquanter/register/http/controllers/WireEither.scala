@@ -6,7 +6,7 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 import com.risquanter.register.domain.data.iron.TraceId
 import com.risquanter.register.domain.errors.{AppError, FailureOrigin}
 import com.risquanter.register.http.RequestSpanInterceptor
-import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.http.errors.{TreeScope, WireError}
 import com.risquanter.register.telemetry.ActiveTrace
 
 /** Write one log line for a failure that is about to become a response.
@@ -45,12 +45,16 @@ extension [R, A](effect: ZIO[R, AppError, A])
     * and a failure value constructed in pure code deep in a service cannot
     * carry one. A trace identifier is constant across a request's whole span
     * tree, so the value read here is the same one the failing work ran under.
+    *
+    * `scope` names the tree the failure is about, and the caller supplies it
+    * for the same reason: an `AppError` carries no tree, while the handler
+    * calling this has one in hand whenever the route named it.
     */
-  def wireEither(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
+  def wireEither(scope: TreeScope)(using tracing: Tracing): ZIO[R, Nothing, Either[WireError, A]] =
     effect
       .map(Right(_))
       .catchAll(error =>
         ActiveTrace.id.flatMap(trace =>
-          logProjectedFailure(error, trace).as(Left(WireError.fromAppError(error, trace)))
+          logProjectedFailure(error, trace).as(Left(WireError.fromAppError(error, trace, scope)))
         )
       )

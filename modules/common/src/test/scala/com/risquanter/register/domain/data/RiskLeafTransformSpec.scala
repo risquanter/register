@@ -4,7 +4,7 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import com.risquanter.register.domain.data.iron.{RetentionFactor, ValidationUtil}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, unsafeGet}
 
 /**
@@ -13,6 +13,12 @@ import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, unsafeGet}
  * OverrideDistributionParams mode invariant (shared with RiskLeaf).
  */
 object RiskLeafTransformSpec extends ZIOSpecDefault {
+
+  /** A mitigation's override parameters are what these refinements are reached
+    * through, so that is the subject and field each refusal names. */
+  private val overrideSubject: ErrorSubject = ErrorSubject.Request
+  private val overrideAt: ErrorLocation =
+    ErrorLocation.Field(overrideSubject, FieldName.OverrideParams)
 
   private def lognormalLeaf(prob: Double = 0.4, min: Long = 1000L, max: Long = 100000L): RiskLeaf =
     unsafeGet(RiskLeaf.create(
@@ -35,10 +41,11 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
 
   private val expertOverride: OverrideDistributionParams =
     OverrideDistributionParams.create(
-      distributionType = ValidationUtil.refineDistributionType("expert").toOption.get,
+      distributionType = ValidationUtil.refineDistributionType("expert", overrideAt).toOption.get,
       percentiles = Some(Array(0.1, 0.9)),
       quantiles = Some(Array(500.0, 8000.0)),
-      minLoss = None, maxLoss = None, terms = Some(2)
+      minLoss = None, maxLoss = None, terms = Some(2),
+      subject = overrideSubject
     ).toEither.toOption.get
 
   def spec = suite("RiskLeafTransformSpec")(
@@ -73,12 +80,12 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
         assertTrue(math.abs(out.probability - 0.2) < 1e-9)
       },
       test("a factor above 1 is rejected at the boundary, so no clamp is needed") {
-        assertTrue(ValidationUtil.refineRetentionFactor(4.0).isLeft)
+        assertTrue(ValidationUtil.refineRetentionFactor(4.0, overrideAt).isLeft)
       },
       test("Override cannot state a probability of zero — no mitigation eliminates a risk") {
         assertTrue(
-          ValidationUtil.refineResidualProbability(0.0).isLeft,
-          ValidationUtil.refineResidualProbability(0.05).isRight
+          ValidationUtil.refineResidualProbability(0.0, overrideAt).isLeft,
+          ValidationUtil.refineResidualProbability(0.05, overrideAt).isRight
         )
       },
       test("Override replaces the probability") {
@@ -162,27 +169,30 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
     suite("OverrideDistributionParams mode invariant (shared with RiskLeaf)")(
       test("expert without quantiles is rejected") {
         val result = OverrideDistributionParams.create(
-          ValidationUtil.refineDistributionType("expert").toOption.get,
+          ValidationUtil.refineDistributionType("expert", overrideAt).toOption.get,
           percentiles = Some(Array(0.1, 0.9)), quantiles = None,
-          minLoss = None, maxLoss = None, terms = None
+          minLoss = None, maxLoss = None, terms = None,
+          subject = overrideSubject
         )
         assertTrue(result.toEither.isLeft)
       },
       test("lognormal with min >= max is rejected") {
         val result = OverrideDistributionParams.create(
-          ValidationUtil.refineDistributionType("lognormal").toOption.get,
+          ValidationUtil.refineDistributionType("lognormal", overrideAt).toOption.get,
           percentiles = None, quantiles = None,
-          minLoss = Some(5000L), maxLoss = Some(5000L), terms = None
+          minLoss = Some(5000L), maxLoss = Some(5000L), terms = None,
+          subject = overrideSubject
         )
         assertTrue(result.toEither.isLeft)
       },
       test("content-based equality on array fields") {
         val a = expertOverride
         val b = OverrideDistributionParams.create(
-          ValidationUtil.refineDistributionType("expert").toOption.get,
+          ValidationUtil.refineDistributionType("expert", overrideAt).toOption.get,
           percentiles = Some(Array(0.1, 0.9)),
           quantiles = Some(Array(500.0, 8000.0)),
-          minLoss = None, maxLoss = None, terms = Some(2)
+          minLoss = None, maxLoss = None, terms = Some(2),
+          subject = overrideSubject
         ).toEither.toOption.get
         assertTrue(a == b)
       }

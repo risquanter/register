@@ -15,8 +15,8 @@ import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.telemetry.ActiveTrace
 
-/** Answers a request the decoders rejected with `WireError.ValidationRejected`,
-  * so every failure this service sends has a declared shape.
+/** Answers a request the decoders rejected with `WireError.RequestRejected`, so
+  * every failure this service sends has a declared shape.
   *
   * Validation happens in the Tapir codecs and happens once (ADR-001), which
   * means a body, header or path segment an Iron smart constructor refuses is
@@ -59,8 +59,10 @@ object WireDecodeFailureHandler:
             logIfChallengeAdvertised(status) *>
               logRejection(error, status) *>
               ActiveTrace.id(using tracing).map { trace =>
-                val rejected: WireError.ValidationRejected =
-                  WireError.ValidationRejected(List(error), trace)
+                // This handler runs before any handler does, so it never has a
+                // tree to name and always answers the request-level case.
+                val rejected: WireError.RequestRejected =
+                  WireError.RequestRejected(List(error), trace)
                 Some(ValuedEndpointOutput(BaseEndpoint.rejectionOut, (status, headers, rejected)))
               }
 
@@ -109,9 +111,9 @@ object WireDecodeFailureHandler:
     * `TYPE_MISMATCH`, and a value it read and then refused is `INVALID_FORMAT` —
     * which is what every Iron refinement produces.
     *
-    * The message opens with the input's own description, because only a
-    * declared header has a location that names it — every other input reports
-    * at the request as a whole, so the name has to travel in the sentence.
+    * Only a declared header has a location that names the input. Every other
+    * input reports at the request as a whole, so for those the message opens
+    * with the input's own description and the name travels in the sentence.
     *
     * Visible to the package, so the mapping is testable without driving a
     * request through the whole stack.
@@ -132,7 +134,15 @@ object WireDecodeFailureHandler:
       case DecodeResult.Error(_, _) =>
         (ValidationErrorCode.TYPE_MISMATCH, "could not be read")
 
-    ValidationError(locationOf(input), code, s"${inputName(input)} $reason")
+    val location = locationOf(input)
+    // The name is said once. A declared header is named by the location, so
+    // repeating it in the sentence would say it twice; everything else reports
+    // at the request as a whole, where the sentence is the only place left.
+    val message = location match
+      case ErrorLocation.Header(_) => reason
+      case _                       => s"${inputName(input)} $reason"
+
+    ValidationError(location, code, message)
 
   /** What the refused value broke, in the words of whatever refused it.
     *
@@ -153,9 +163,10 @@ object WireDecodeFailureHandler:
     * A header this application declares is the one input with a case of its
     * own, and it is the case worth having: the branch header and the user
     * header are the two inputs a client most often gets wrong. Every other
-    * input — a query parameter, a path segment, the body — has no closed set to
-    * draw a name from, so it reports at the request as a whole and
-    * `inputName` puts Tapir's description in the message.
+    * input — a query parameter, a path segment, the body, and a header this
+    * application does not declare — has no closed set to draw a name from, so
+    * it reports at the request as a whole and `inputName` puts Tapir's
+    * description in the message.
     */
   private def locationOf(input: EndpointInput[?]): ErrorLocation =
     headerNameOf(input).flatMap(RequestHeaderName.fromWireName) match

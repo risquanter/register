@@ -15,7 +15,7 @@ import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{ScenarioName, TelemetryPlaceholders}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, RequestHeaderName, ValidationErrorCode}
 import com.risquanter.register.http.codecs.IronTapirCodecs
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
@@ -92,8 +92,10 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
 
   /** The rejection body, decoded. A `Left` body is the error output, which on
     * this path must be a `ValidationRejected` rather than text. */
-  private def rejection(response: Response[Either[String, String]]): Option[WireError.ValidationRejected] =
-    response.body.left.toOption.flatMap(_.fromJson[WireError.ValidationRejected].toOption)
+  // The handler runs before any handler does, so it never has a tree and
+  // always answers the request-level case.
+  private def rejection(response: Response[Either[String, String]]): Option[WireError.RequestRejected] =
+    response.body.left.toOption.flatMap(_.fromJson[WireError.RequestRejected].toOption)
 
   override def spec = suite("WireDecodeFailureHandler")(
 
@@ -101,7 +103,7 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
       test("an absent input is required") {
         val error = WireDecodeFailureHandler.toValidationError(DecodeResult.Missing, branchInput)
         assertTrue(
-          error.field == "X-Branch",
+          error.location == ErrorLocation.Header(RequestHeaderName.Branch),
           error.code == ValidationErrorCode.REQUIRED_FIELD
         )
       },
@@ -184,7 +186,7 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
         yield assertTrue(
           response.code.code == 400,
           body.isDefined,
-          body.exists(_.errors.exists(_.field == "X-Branch")),
+          body.exists(_.errors.exists(_.location == ErrorLocation.Header(RequestHeaderName.Branch))),
           body.exists(_.errors.exists(_.code == ValidationErrorCode.REQUIRED_FIELD))
         )
       },

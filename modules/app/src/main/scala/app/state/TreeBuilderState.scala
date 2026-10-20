@@ -1,8 +1,8 @@
 package app.state
 
 import com.raquo.laminar.api.L.{*, given}
-import zio.prelude.{Validation, ForEach}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
+import zio.prelude.Validation
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
 import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation

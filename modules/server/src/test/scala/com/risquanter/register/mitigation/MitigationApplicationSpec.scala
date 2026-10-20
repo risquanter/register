@@ -8,6 +8,7 @@ import com.risquanter.register.domain.data.{
   RiskPortfolio, RiskTree, TargetingPredicate, TransformPipeline
 }
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
 import com.risquanter.register.simulation.TrialOutcomes
 import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId, unsafeGet}
 
@@ -22,6 +23,11 @@ import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId
  * resolver would produce — rather than reading node ids off the mitigation.
  */
 object MitigationApplicationSpec extends ZIOSpecDefault {
+
+  /** Transform parameters are built here only as fixtures, so one location
+    * stands for all of them: each refinement succeeds, and nothing in this
+    * suite reads where a refusal would have reported. */
+  private val paramAt: ErrorLocation = ErrorLocation.requestField(FieldName.Mitigations)
 
   private def name(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
   private val stamp: ContentHash = ContentHash.fromString("b" * 64).toOption.get
@@ -58,7 +64,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       mitigationId(label), name(label), pred,
       MitigationSpec.LeafStage(
         RiskLeafTransform(LikelihoodTransform.Keep,
-          DistributionTransform.ScaleSeverity(com.risquanter.register.domain.data.iron.ValidationUtil.refineRetentionFactor(factor).toOption.get)),
+          DistributionTransform.ScaleSeverity(com.risquanter.register.domain.data.iron.ValidationUtil.refineRetentionFactor(factor, paramAt).toOption.get)),
         None, None),
       precedence).toEither.toOption.get
 
@@ -68,7 +74,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       mitigationId(label), name(label), pred,
       MitigationSpec.LeafStage(
         RiskLeafTransform(
-          LikelihoodTransform.Override(com.risquanter.register.domain.data.iron.ValidationUtil.refineResidualProbability(prob).toOption.get),
+          LikelihoodTransform.Override(com.risquanter.register.domain.data.iron.ValidationUtil.refineResidualProbability(prob, paramAt).toOption.get),
           DistributionTransform.Keep),
         Some(stamp), Some(nodeId(anchor))),
       precedence).toEither.toOption.get
@@ -78,7 +84,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
     Mitigation.create(
       mitigationId(label), name(label), pred,
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(com.risquanter.register.domain.data.iron.ValidationUtil.refineLossCap(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(com.risquanter.register.domain.data.iron.ValidationUtil.refineLossCap(cap, paramAt).toOption.get)))),
       precedence).toEither.toOption.get
 
   private def resultDeductible(label: String, d: Long,
@@ -86,7 +92,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
     Mitigation.create(
       mitigationId(label), name(label), pred,
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.ApplyDeductible(com.risquanter.register.domain.data.iron.ValidationUtil.refineNonNegativeLong(d).toOption.get)))),
+        ResultTransformSpec.ApplyDeductible(com.risquanter.register.domain.data.iron.ValidationUtil.refineNonNegativeLong(d, paramAt).toOption.get)))),
       precedence).toEither.toOption.get
 
   private def minOf(t: RiskTree, label: String): Long =

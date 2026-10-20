@@ -4,6 +4,8 @@ import zio.test.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode}
+
 object OpaqueTypesSpec extends ZIOSpecDefault {
 
   def spec = suite("OpaqueTypes")(
@@ -292,47 +294,66 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("SafeName.duplicates — the one definition of node-name uniqueness")(
-      test("no repeated name yields an empty list") {
-        assertTrue(SafeName.duplicates(names("Outage", "Breach", "Fire")).isEmpty)
+    suite("SafeName.requireDistinct — the one definition of node-name uniqueness")(
+      test("no repeated name is accepted") {
+        assertTrue(SafeName.requireDistinct(names("Outage", "Breach", "Fire"), at).isSuccess)
       },
 
-      test("a name appearing twice is reported once") {
-        assertTrue(
-          SafeName.duplicates(names("Outage", "Breach", "Outage")).map(_.value) == List("Outage")
-        )
+      test("a name appearing twice produces one refusal naming both occurrences") {
+        assertTrue(refusalsOf("Outage", "Breach", "Outage") == List(duplicateName("Outage", 2)))
       },
 
-      test("a name appearing three times is still reported once") {
-        assertTrue(
-          SafeName.duplicates(names("Outage", "Outage", "Outage")).map(_.value) == List("Outage")
-        )
+      test("a name appearing three times is still one refusal, counting all three") {
+        assertTrue(refusalsOf("Outage", "Outage", "Outage") == List(duplicateName("Outage", 3)))
       },
 
       test("several repeated names come back ascending, whatever order they occurred in") {
         assertTrue(
-          SafeName.duplicates(
-            names("Zeta", "Alpha", "Zeta", "Mid", "Alpha", "Mid")
-          ).map(_.value) == List("Alpha", "Mid", "Zeta")
+          refusalsOf("Zeta", "Alpha", "Zeta", "Mid", "Alpha", "Mid") == List(
+            duplicateName("Alpha", 2),
+            duplicateName("Mid", 2),
+            duplicateName("Zeta", 2)
+          )
         )
       },
 
-      test("an empty input yields an empty list") {
-        assertTrue(SafeName.duplicates(Seq.empty).isEmpty)
+      test("an empty input is accepted") {
+        assertTrue(SafeName.requireDistinct(Seq.empty, at).isSuccess)
       },
 
       test("equality is exact, so a doubled inner space makes two distinct names") {
         // SafeName permits a space and normalises nothing, so these do not
         // collide. Hypertext collapses the repeated space when rendering, which
         // is why the property is pinned rather than assumed.
-        assertTrue(SafeName.duplicates(names("Server Outage", "Server  Outage")).isEmpty)
+        assertTrue(SafeName.requireDistinct(names("Server Outage", "Server  Outage"), at).isSuccess)
       },
 
       test("equality is case-sensitive, so differing case makes two distinct names") {
-        assertTrue(SafeName.duplicates(names("Outage", "outage")).isEmpty)
+        assertTrue(SafeName.requireDistinct(names("Outage", "outage"), at).isSuccess)
       }
     )
   )
+
+  /** The location these tests pass in, so each refusal can be compared whole. */
+  private val at: ErrorLocation = ErrorLocation.Whole
+
+  /** The refusals `requireDistinct` produced, in the order it produced them. */
+  private def refusalsOf(values: String*): List[ValidationError] =
+    SafeName
+      .requireDistinct(names(values*), at)
+      .toEither
+      .swap
+      .toOption
+      .toList
+      .flatMap(_.toList)
+
+  /** The refusal one repeated name produces. */
+  private def duplicateName(name: String, occurrences: Int): ValidationError =
+    ValidationError(
+      location = at,
+      code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
+      message = ValidationMessages.duplicateNodeNames(name, occurrences)
+    )
 
   /** Refines each literal, failing the test immediately on one that does not —
     * every literal here is inside SafeName's whitelist. */

@@ -2,7 +2,6 @@ package com.risquanter.register.configs
 
 import zio.Config
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
-import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.iron.{ExternalTokenStr, PositiveInt, IronConstants, MeshServiceUrl}
 import com.risquanter.register.domain.data.iron.MeshServiceUrl.*
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}

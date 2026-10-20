@@ -7,13 +7,15 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
+import com.risquanter.register.domain.data.iron.{SafeName, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.domain.errors.{AppError, ValidationFailed, ValidationErrorCode, RepositoryFailure, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{
+  AppError, ErrorLocation, FieldName, RepositoryFailure, TreeLoadFailure,
+  ValidationError, ValidationErrorCode, ValidationFailed
+}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, unsafeGet}
-import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
 
@@ -307,12 +309,23 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     }
   )
 
+  /** Whether a refusal is about this field, whichever node it names. The
+    * subject varies with the submitted position, and these tests are about the
+    * field that failed rather than about which row carried it. */
+  private def mentions(field: FieldName)(error: ValidationError): Boolean =
+    error.location match
+      case ErrorLocation.Field(_, actual) => actual == field
+      case _                              => false
+
   private def isDuplicateName(exit: Exit[AppError, Any]): Boolean =
     exit match
       case Exit.Failure(cause) =>
         cause.failureOption.exists {
           case ValidationFailed(errors) =>
-            errors.exists(e => e.field == "name" && e.code == ValidationErrorCode.DUPLICATE_VALUE)
+            errors.exists(e =>
+              e.location == ErrorLocation.requestField(FieldName.Name) &&
+              e.code == ValidationErrorCode.DUPLICATE_VALUE
+            )
           case _ => false
         }
       case Exit.Success(_) => false
@@ -396,7 +409,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = service(_.create(stubWsId, invalidRequest, BranchRef.Main)).flip
 
         program.assert {
-          case ValidationFailed(errors) => errors.exists(e => e.field.toLowerCase.contains("name"))
+          case ValidationFailed(errors) => errors.exists(mentions(FieldName.Name))
           case _                        => false
         }
       },
@@ -408,7 +421,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = service(_.create(stubWsId, invalidRequest, BranchRef.Main)).flip
 
         program.assert {
-          case ValidationFailed(errors) => errors.exists(_.field.contains("probability"))
+          case ValidationFailed(errors) => errors.exists(mentions(FieldName.Probability))
           case _ => false
         }
       },

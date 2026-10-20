@@ -52,8 +52,16 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
       },
       test("input the form rejected here shows every entry, not only the first") {
         val errors = List(
-          E.ValidationError("name", E.ValidationErrorCode.REQUIRED_FIELD, "must not be empty"),
-          E.ValidationError("probability", E.ValidationErrorCode.INVALID_FORMAT, "must be between 0 and 1")
+          E.ValidationError(
+            E.ErrorLocation.requestField(E.FieldName.Name),
+            E.ValidationErrorCode.REQUIRED_FIELD,
+            "must not be empty"
+          ),
+          E.ValidationError(
+            E.ErrorLocation.requestField(E.FieldName.Probability),
+            E.ValidationErrorCode.INVALID_FORMAT,
+            "must be between 0 and 1"
+          )
         )
         val sentence = ErrorMessages.viewFailed(LocalProblem.FormInvalid(errors))
         assertTrue(

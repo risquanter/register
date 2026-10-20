@@ -11,6 +11,7 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, Validati
 import com.risquanter.register.http.responses.{SimulationResponse, ChangedNodesResponse, NodeChangeEntry, TreeHistoryResponse}
 import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, ChangedNodesResult, TreeHistoryService}
 import com.risquanter.register.services.workspace.WorkspaceStore
+import com.risquanter.register.http.errors.TreeScope
 
 /** Workspace tree controller.
   *
@@ -49,7 +50,7 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.getById(ws.id, treeId, Revision.Head(branch))
                     .map(_.map { case (tree, _) => SimulationResponse.fromRiskTree(tree) })
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
@@ -61,7 +62,7 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
         result <- riskTreeService.getById(ws.id, treeId, rev).map(_.map { case (tree, _) => tree })
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   val getChangedNodes: ServerEndpoint[Any, Task] = getChangedNodesEndpoint.serverLogic {
@@ -81,7 +82,7 @@ class WorkspaceTreeController private (
         case ChangedNodesResult.MissingOnA    => ChangedNodesResponse("missing-on-a", Nil)
         case ChangedNodesResult.MissingOnB    => ChangedNodesResponse("missing-on-b", Nil)
         case ChangedNodesResult.MissingOnBoth => ChangedNodesResponse("missing-on-both", Nil)
-      ).wireEither
+      ).wireEither(TreeScope.InTree(treeId))
   }
 
   val getTreeHistory: ServerEndpoint[Any, Task] = getTreeHistoryEndpoint.serverLogic {
@@ -94,7 +95,7 @@ class WorkspaceTreeController private (
         limit  <- ZIO.fromEither(ValidationUtil.refinePositiveInt(n, ErrorLocation.requestField(FieldName.Limit)))
                     .mapError(ValidationFailed(_))
         entries <- treeHistoryService.history(ws.id, treeId, branch, limit)
-      yield TreeHistoryResponse(entries)).wireEither
+      yield TreeHistoryResponse(entries)).wireEither(TreeScope.InTree(treeId))
   }
 
   val updateTree: ServerEndpoint[Any, Task] = updateWorkspaceTreeEndpoint.serverLogic {
@@ -105,7 +106,7 @@ class WorkspaceTreeController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.update(ws.id, treeId, req, branch).map(SimulationResponse.fromRiskTree)
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   val revertTree: ServerEndpoint[Any, Task] = revertTreeEndpoint.serverLogic {
@@ -116,7 +117,7 @@ class WorkspaceTreeController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.revertTree(ws.id, treeId, req.toCommit, branch).map(SimulationResponse.fromRiskTree)
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   val deleteTree: ServerEndpoint[Any, Task] = deleteWorkspaceTreeEndpoint.serverLogic {
@@ -135,7 +136,7 @@ class WorkspaceTreeController private (
         result <- riskTreeService.delete(ws.id, treeId, branch)
                       .tap(_ => ZIO.when(branch == BranchRef.Main)(workspaceStore.removeTree(key, treeId)))
                       .map(SimulationResponse.fromRiskTree)
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

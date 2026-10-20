@@ -9,6 +9,7 @@ import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
 import com.risquanter.register.domain.data.iron.Revision
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.workspace.WorkspaceStore
+import com.risquanter.register.http.errors.TreeScope
 
 /** Workspace analysis controller.
   *
@@ -48,7 +49,7 @@ class WorkspaceAnalysisController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
         result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance, rev)
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   val getLECCurvesMulti: ServerEndpoint[Any, Task] = getWorkspaceLECCurvesMultiEndpoint.serverLogic {
@@ -60,7 +61,7 @@ class WorkspaceAnalysisController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
         result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, rev, omitAbsent)
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

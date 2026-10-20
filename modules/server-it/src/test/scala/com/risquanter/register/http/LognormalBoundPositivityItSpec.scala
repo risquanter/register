@@ -87,15 +87,19 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
 
   /** The validation codes a rejected request's body carries.
     *
-    * The body is decoded as `WireError.ValidationRejected` rather than as the
+    * The body is decoded as `WireError.RequestRejected` rather than as the
     * enclosing type: each status maps to exactly one wire case, so a 400 from
     * the decoder is that case and nothing else. A body that does not decode as
     * it is a failure of this helper, which is what makes the status-to-case
     * relation part of what these tests check.
+    *
+    * The request creates a workspace, so no tree exists to name yet and the
+    * rejection is the request-level one. Content refused inside a known tree
+    * answers `WireError.ValidationRejected` at 422 instead.
     */
   private def rangeErrorCodes(rawBody: String): Task[List[ValidationErrorCode]] =
     ZIO.fromEither(
-      rawBody.fromJson[WireError.ValidationRejected]
+      rawBody.fromJson[WireError.RequestRejected]
         .map(_.errors.map(_.code))
         .left.map(err => s"Failed to decode a validation rejection: $err\nBody was: $rawBody")
     ).mapError(new RuntimeException(_))

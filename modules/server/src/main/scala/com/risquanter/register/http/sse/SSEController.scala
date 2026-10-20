@@ -12,7 +12,8 @@ import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.http.controllers.wireEither
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStore
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, UserId}
+import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.http.errors.TreeScope
 
 /**
   * Controller for SSE endpoints.
@@ -66,7 +67,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
         byteStream: Stream[Throwable, Byte] = withConnect
           .flatMap(s => ZStream.fromIterable(s.getBytes("UTF-8")))
           .mapError(_ => new RuntimeException("SSE stream error"))
-      yield byteStream).wireEither
+      yield byteStream).wireEither(TreeScope.InTree(treeId))
     }
 
   /**

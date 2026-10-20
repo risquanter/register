@@ -7,9 +7,11 @@ import sttp.model.StatusCode
 import app.core.RequestFailure
 import app.views.ErrorMessages
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId}
+import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
-import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProblem, WireError}
+import com.risquanter.register.http.errors.{
+  Capability, ConflictKind, QueryProblem, RejectionDetail, WireError
+}
 
 /** Which banner treatment each failure gets.
   *
@@ -22,6 +24,9 @@ object GlobalErrorSpec extends ZIOSpecDefault:
 
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
 
+  private val treeId: TreeId =
+    TreeId.fromString("01HX9ABCDE0000000000000001").toOption.get
+
   private def wire(error: WireError): GlobalError =
     GlobalError.from(RequestFailure.Wire(error))
 
@@ -29,16 +34,32 @@ object GlobalErrorSpec extends ZIOSpecDefault:
     suite("GlobalError.from")(
       test("a rejected body keeps its validation entries") {
         val errors = List(
-          E.ValidationError("name", E.ValidationErrorCode.INTERNAL_ERROR, "must not be empty")
+          E.ValidationError(
+            E.ErrorLocation.requestField(E.FieldName.Name),
+            E.ValidationErrorCode.INTERNAL_ERROR,
+            "must not be empty"
+          )
         )
-        wire(WireError.ValidationRejected(errors, trace)) match
+        wire(WireError.RequestRejected(errors, trace)) match
           case GlobalError.ValidationFailed(got) => assertTrue(got == errors)
           case other                             => throw MatchError(other)
       },
-      test("a refused query is a rejected request, not a server fault") {
+      test("a tree's own field failures keep their entries too") {
+        val errors = List(
+          E.ValidationError(
+            E.ErrorLocation.requestField(E.FieldName.Name),
+            E.ValidationErrorCode.INTERNAL_ERROR,
+            "must not be empty"
+          )
+        )
+        wire(WireError.ValidationRejected(treeId, RejectionDetail.Fields(errors), trace)) match
+          case GlobalError.ValidationFailed(got) => assertTrue(got == errors)
+          case other                             => throw MatchError(other)
+      },
+      test("a refused query is rejected input, not a server fault") {
         val problem = QueryProblem.Unparseable("unexpected token", Some(7))
-        wire(WireError.QueryRejected(problem, trace)) match
-          case GlobalError.RequestRejected(message) =>
+        wire(WireError.ValidationRejected(treeId, RejectionDetail.Query(problem), trace)) match
+          case GlobalError.InputRejected(message) =>
             assertTrue(message.contains("unexpected token")) && assertTrue(message.contains("7"))
           case other => throw MatchError(other)
       },

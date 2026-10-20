@@ -9,7 +9,7 @@ import sttp.monad.MonadError
 import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl, UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.AuthServiceUnavailable
+import com.risquanter.register.domain.errors.{AuthServiceUnavailable, ErrorLocation}
 
 /** Unit tests for the BootstrapProvisionerSpiceDB WriteRelationships adapter.
   *
@@ -32,7 +32,7 @@ object BootstrapProvisionerSpiceDBSpec extends ZIOSpecDefault:
 
   private val testConfig: SpiceDbConfig = SpiceDbConfig(
     url            = MeshServiceUrl.fromString("http://spicedb-test:50051").toOption.get,
-    token          = SpiceDbToken.fromString("test-bearer-token").toOption.get,
+    token          = SpiceDbToken.fromString("test-bearer-token", ErrorLocation.Whole).toOption.get,
     consistency    = SpiceDbConsistency.MinimizeLatency,
     timeoutSeconds = IronConstants.Ten
   )

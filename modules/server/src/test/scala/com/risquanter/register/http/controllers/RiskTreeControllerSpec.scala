@@ -9,12 +9,10 @@ import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.* // For .assert extension method
-import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeId, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
-import io.github.iltotore.iron.*
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.testutil.TestHelpers.{safeId}
-import io.github.iltotore.iron.constraint.numeric.*
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
 object RiskTreeControllerSpec extends ZIOSpecDefault {
@@ -184,7 +182,10 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         program.assert {
           case ValidationFailed(errors) =>
-            errors.exists(e => e.field == "name" && e.code == ValidationErrorCode.DUPLICATE_VALUE)
+            errors.exists(e =>
+              e.location == ErrorLocation.requestField(FieldName.Name) &&
+              e.code == ValidationErrorCode.DUPLICATE_VALUE
+            )
           case _ => false
         }.provide(serviceLayer)
       }

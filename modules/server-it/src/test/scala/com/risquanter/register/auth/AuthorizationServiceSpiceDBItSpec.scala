@@ -5,7 +5,7 @@ import zio.test.*
 
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl, TreeId, UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthForbidden, AuthServiceUnavailable}
+import com.risquanter.register.domain.errors.{AuthForbidden, AuthServiceUnavailable, ErrorLocation}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.SpiceDbCompose
 import com.risquanter.register.auth.ResourceRef.asResource
@@ -111,7 +111,7 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
     test("T-S5 — unreachable SpiceDB returns AuthServiceUnavailable (fail-closed)") {
       val deadConfig = SpiceDbConfig(
         url            = MeshServiceUrl.fromString("http://localhost:1").toOption.get,
-        token          = SpiceDbToken.fromString("any-token").toOption.get,
+        token          = SpiceDbToken.fromString("any-token", ErrorLocation.Whole).toOption.get,
         consistency    = SpiceDbConsistency.MinimizeLatency,
         timeoutSeconds = IronConstants.One   // 1 s — fail fast
       )
@@ -130,7 +130,7 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
       ZIO.service[SpiceDbCompose.Resource].flatMap { res =>
         val wrongTokenConfig = SpiceDbConfig(
           url            = MeshServiceUrl.fromString(res.baseUrl).toOption.get,
-          token          = SpiceDbToken.fromString("wrong-token-rejected").toOption.get,
+          token          = SpiceDbToken.fromString("wrong-token-rejected", ErrorLocation.Whole).toOption.get,
           consistency    = SpiceDbConsistency.MinimizeLatency,
           timeoutSeconds = IronConstants.Ten
         )

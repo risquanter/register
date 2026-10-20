@@ -6,7 +6,7 @@ import app.core.{LocalProblem, RequestFailure, ViewFailure}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.ScenarioName
 import com.risquanter.register.domain.errors.MergeRefusal
-import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProblem, WireError}
+import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProblem, RejectionDetail, WireError}
 
 /** Every sentence the browser shows for a failure.
   *
@@ -107,8 +107,10 @@ object ErrorMessages:
     * compile error here until it has a sentence.
     */
   def wire(error: WireError): String = error match
-    case WireError.ValidationRejected(errors, _)      => errors.map(_.message).mkString("; ")
-    case WireError.QueryRejected(problem, _)          => query(problem)
+    case WireError.RequestRejected(errors, _)         => errors.map(_.message).mkString("; ")
+    case WireError.ValidationRejected(_, detail, _)   => detail match
+      case RejectionDetail.Fields(errors)             => errors.map(_.message).mkString("; ")
+      case RejectionDetail.Query(problem)             => query(problem)
     case WireError.NotFound(_)                        => NotFound
     case WireError.WorkspaceExpired(c, life, idle, _) => workspaceExpired(c, life, idle)
     case WireError.AccessDenied(_)                    => Forbidden

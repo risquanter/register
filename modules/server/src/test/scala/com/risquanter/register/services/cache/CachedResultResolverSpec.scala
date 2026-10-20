@@ -2,19 +2,22 @@ package com.risquanter.register.services.cache
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, TransformPipeline, ResultTransformSpec, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.LossDistribution
-import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /** Content-addressed resolver: cache-aside, per-workspace isolation, leaf-only caching, orphan semantics, and the ADR-034 F mitigation fold. */
 object CachedResultResolverSpec extends ZIOSpecDefault {
+
+  /** Transform parameters are fixtures here, so one location stands for all:
+    * each refinement succeeds and no test reads where a refusal would report. */
+  private val paramAt: ErrorLocation = ErrorLocation.requestField(FieldName.Mitigations)
 
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
@@ -101,7 +104,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     Mitigation.create(
       mitigationId(label), mitName(label), pred,
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)))),
       precedence).toEither.toOption.get
 
   private def leafScaleSeverity(label: String, factor: Double): Mitigation =
@@ -109,7 +112,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       mitigationId(label), mitName(label), pred,
       MitigationSpec.LeafStage(
         RiskLeafTransform(LikelihoodTransform.Keep,
-          DistributionTransform.ScaleSeverity(ValidationUtil.refineRetentionFactor(factor).toOption.get)),
+          DistributionTransform.ScaleSeverity(ValidationUtil.refineRetentionFactor(factor, paramAt).toOption.get)),
         None, None),
       MitigationPrecedence.default).toEither.toOption.get
 

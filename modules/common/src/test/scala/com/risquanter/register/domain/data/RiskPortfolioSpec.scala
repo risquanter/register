@@ -1,9 +1,8 @@
 package com.risquanter.register.domain.data
 
 import zio.test.*
-import zio.test.Assertion.*
 import com.risquanter.register.domain.data.iron.NodeId
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
 
 object RiskPortfolioSpec extends ZIOSpecDefault {
@@ -248,7 +247,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
         assertTrue(
           result.toEither.swap.toOption.get.exists(e =>
-            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field.endsWith("childIds"))
+            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
+            e.location == ErrorLocation.requestField(FieldName.ChildIds))
         )
       }
     ),

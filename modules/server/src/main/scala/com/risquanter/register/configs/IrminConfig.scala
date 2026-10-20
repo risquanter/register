@@ -1,8 +1,7 @@
 package com.risquanter.register.configs
 
 import zio.*
-import zio.config.*
-import zio.config.magnolia.{DeriveConfig, deriveConfig}
+import zio.config.magnolia.DeriveConfig
 import java.time.Duration
 import com.risquanter.register.domain.data.iron.{BranchRef, Url}
 import com.risquanter.register.domain.data.iron.Url.*

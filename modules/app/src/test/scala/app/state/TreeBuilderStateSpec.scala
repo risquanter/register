@@ -6,10 +6,16 @@ import zio.prelude.Validation
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Distribution}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, OccurrenceProbability, SeedVarId}
 import io.github.iltotore.iron.*
-import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.testutil.TestHelpers.unsafeGet
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
+
+  private def n(value: String): SafeName.SafeName =
+    SafeName.fromString(value).getOrElse(throw new AssertionError(s"not a SafeName: $value"))
+
+  /** The parent a node sitting under the named portfolio carries. */
+  private def under(parent: String): ParentRef = ParentRef.Under(n(parent))
 
   // ── Valid Crockford-base32 ULID constants (26 chars, no I/L/O/U) ──────
   private val rootUlid  = "01HX9ABCDE0000000000000001"
@@ -103,7 +109,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         assertTrue(state.portfoliosVar.now().isEmpty) &&
         assertTrue(state.leavesVar.now().length == 1) &&
-        assertTrue(state.leavesVar.now().head.parent.isEmpty) &&
+        assertTrue(state.leavesVar.now().head.parent == ParentRef.Root) &&
         assertTrue(state.leavesVar.now().head.name.value == "Cyber Risk") &&
         assertTrue(state.treeNameVar.now() == "My Tree") &&
         assertTrue(state.editingTreeId.now().isDefined)
@@ -114,7 +120,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         assertTrue(state.leavesVar.now().length == 1) &&
-        assertTrue(state.leavesVar.now().head.parent.isEmpty) &&
+        assertTrue(state.leavesVar.now().head.parent == ParentRef.Root) &&
         assertTrue(state.leavesVar.now().head.distribution.terms.contains(3)) &&
         assertTrue(state.leavesVar.now().head.distribution.distributionType == IronConstants.Expert)
       },
@@ -134,9 +140,9 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         assertTrue(state.portfoliosVar.now().length == 1) &&
-        assertTrue(state.portfoliosVar.now().head.parent.isEmpty) &&
+        assertTrue(state.portfoliosVar.now().head.parent == ParentRef.Root) &&
         assertTrue(state.leavesVar.now().length == 1) &&
-        assertTrue(state.leavesVar.now().head.parent.map(_.value) == Some("Operational Risk"))
+        assertTrue(state.leavesVar.now().head.parent == under("Operational Risk"))
       },
 
       test("root portfolio + child portfolio + leaf under child: hierarchy resolved") {
@@ -148,10 +154,10 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         assertTrue(state.portfoliosVar.now().length == 2) &&
-        assertTrue(state.portfoliosVar.now().exists(p => p.name.value == "Operational Risk" && p.parent.isEmpty)) &&
-        assertTrue(state.portfoliosVar.now().exists(p => p.name.value == "IT Risk" && p.parent.map(_.value) == Some("Operational Risk"))) &&
+        assertTrue(state.portfoliosVar.now().exists(p => p.name.value == "Operational Risk" && p.parent == ParentRef.Root)) &&
+        assertTrue(state.portfoliosVar.now().exists(p => p.name.value == "IT Risk" && p.parent == under("Operational Risk"))) &&
         assertTrue(state.leavesVar.now().length == 1) &&
-        assertTrue(state.leavesVar.now().head.parent.map(_.value) == Some("IT Risk"))
+        assertTrue(state.leavesVar.now().head.parent == under("IT Risk"))
       },
 
       test("round-trip: after loadFromTree, toUpdateRequest() succeeds") {
@@ -230,7 +236,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         // and spuriously reports true for a tree the server already saved.
         val state = new TreeBuilderState()
         state.treeNameVar.set("New Tree")
-        state.addPortfolio(SafeName.fromString("Root").toOption.get, None)
+        state.addPortfolio(n("Root"), ParentRef.Root)
         val dirtyBeforeSave = state.isDirty
         state.markJustSaved()
         val dirtyAfterSave = state.isDirty
@@ -290,7 +296,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           terms            = None
         )
         val newProb: OccurrenceProbability = 0.15
-        val added = state.addLeaf("Fraud Risk", Some("Operational Risk"), newShape, newProb)
+        val added = state.addLeaf(n("Fraud Risk"), under("Operational Risk"), newShape, newProb)
 
         state.toUpdateRequest() match
           case Validation.Success(_, req) =>
@@ -352,7 +358,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val originalName = state.leavesVar.now().head.name
         val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(80000L), None, None, None)
         val newProb: OccurrenceProbability = 0.5
-        state.updateLeaf(originalName, "Renamed Risk", Some("Operational Risk"), newShape, newProb) match
+        state.updateLeaf(originalName, n("Renamed Risk"), under("Operational Risk"), newShape, newProb) match
           case Validation.Success(_, _) =>
             assertTrue(
               state.leavesVar.now().length == 1,
@@ -379,7 +385,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val originalName = state.leavesVar.now().head.name
         val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(8000L), None, None, None)
-        state.updateLeaf(originalName, "Renamed Risk", Some("Operational Risk"), newShape, 0.3) match
+        state.updateLeaf(originalName, n("Renamed Risk"), under("Operational Risk"), newShape, 0.3) match
           case Validation.Success(_, _) =>
             assertTrue(state.leavesVar.now().head.id.map(_.value.toString).contains(leafUlid))
           case Validation.Failure(_, errs) =>
@@ -396,7 +402,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val nameA    = state.leavesVar.now().find(_.name.value == "LeafA").get.name
         val newShape = Distribution(IronConstants.Lognormal, Some(100L), Some(1000L), None, None, None)
-        assertTrue(state.updateLeaf(nameA, "LeafB", Some("Operational Risk"), newShape, 0.1).isFailure)
+        assertTrue(state.updateLeaf(nameA, n("LeafB"), under("Operational Risk"), newShape, 0.1).isFailure)
       }
 
     ),
@@ -419,11 +425,11 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val originalName     = state.portfoliosVar.now().head.name
         val newPortfolioName = SafeName.fromString("RenamedPortfolio").toOption.get
-        state.updatePortfolio(originalName, newPortfolioName, None) match
+        state.updatePortfolio(originalName, newPortfolioName, ParentRef.Root) match
           case Validation.Success(_, _) =>
             assertTrue(
               state.portfoliosVar.now().head.name == newPortfolioName,
-              state.leavesVar.now().head.parent.map(_.value).contains("RenamedPortfolio")
+              state.leavesVar.now().head.parent == under("RenamedPortfolio")
             )
           case Validation.Failure(_, errs) =>
             assertTrue(false).label(errs.map(_.message).mkString("; "))
@@ -445,7 +451,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val originalName     = state.portfoliosVar.now().head.name
         val newPortfolioName = SafeName.fromString("RenamedPortfolio").toOption.get
-        state.updatePortfolio(originalName, newPortfolioName, None) match
+        state.updatePortfolio(originalName, newPortfolioName, ParentRef.Root) match
           case Validation.Success(_, _) =>
             assertTrue(state.portfoliosVar.now().head.id.map(_.value.toString).contains(rootUlid))
           case Validation.Failure(_, errs) =>
@@ -459,7 +465,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       test("addLeaf: activeForm becomes Locked(Leaf(name)) on success") {
         val state = new TreeBuilderState()
         val shape = Distribution(IronConstants.Lognormal, Some(1000L), Some(5000L), None, None, None)
-        val added = state.addLeaf("Fraud Risk", None, shape, 0.2)
+        val added = state.addLeaf(n("Fraud Risk"), ParentRef.Root, shape, 0.2)
         assertTrue(
           added.isSuccess,
           state.activeForm.now() == FormMode.Locked(FormTarget.Leaf(state.leavesVar.now().head.name))
@@ -468,7 +474,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("addPortfolio: activeForm becomes Locked(Portfolio(name)) on success") {
         val state = new TreeBuilderState()
-        val added = state.addPortfolio(SafeName.fromString("Operational Risk").toOption.get, None)
+        val added = state.addPortfolio(n("Operational Risk"), ParentRef.Root)
         assertTrue(
           added.isSuccess,
           state.activeForm.now() == FormMode.Locked(FormTarget.Portfolio(state.portfoliosVar.now().head.name))
@@ -492,7 +498,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val originalName = state.leavesVar.now().head.name
         state.activeForm.set(FormMode.Editing(FormTarget.Leaf(originalName)))
         val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(8000L), None, None, None)
-        val result = state.updateLeaf(originalName, "Renamed", Some("Operational Risk"), newShape, 0.3)
+        val result = state.updateLeaf(originalName, n("Renamed"), under("Operational Risk"), newShape, 0.3)
         assertTrue(
           result.isSuccess,
           state.activeForm.now() == FormMode.Locked(FormTarget.Leaf(SafeName.fromString("Renamed").toOption.get))
@@ -501,11 +507,11 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("updatePortfolio: activeForm becomes Locked(Portfolio(newName)) on success") {
         val state = new TreeBuilderState()
-        val added = state.addPortfolio(SafeName.fromString("Operational Risk").toOption.get, None)
+        val added = state.addPortfolio(n("Operational Risk"), ParentRef.Root)
         val originalName = state.portfoliosVar.now().head.name
         state.activeForm.set(FormMode.Editing(FormTarget.Portfolio(originalName)))
         val newName = SafeName.fromString("Renamed Portfolio").toOption.get
-        val result = state.updatePortfolio(originalName, newName, None)
+        val result = state.updatePortfolio(originalName, newName, ParentRef.Root)
         assertTrue(
           added.isSuccess,
           result.isSuccess,
@@ -529,7 +535,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val leafName = state.leavesVar.now().head.name
         state.activeForm.set(FormMode.Locked(FormTarget.Leaf(leafName)))
-        state.removeNode(leafName.value.toString)
+        state.removeNode(leafName)
         assertTrue(state.activeForm.now() == FormMode.Blank)
       },
 
@@ -561,7 +567,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val cyberName  = state.leavesVar.now().find(_.name.value == "Cyber Risk").get.name
         val marketName = state.leavesVar.now().find(_.name.value == "Market Risk").get.name
         state.activeForm.set(FormMode.Locked(FormTarget.Leaf(cyberName)))
-        state.removeNode(marketName.value.toString)
+        state.removeNode(marketName)
         assertTrue(state.activeForm.now() == FormMode.Locked(FormTarget.Leaf(cyberName)))
       },
 

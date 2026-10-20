@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
 
 /** Tree-level collection bounds enforced in `RiskTree.fromNodes`:
@@ -49,15 +49,16 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val result = RiskTree.fromNodes(treeId("bounds-dup"), name("Bounds Dup"), Seq(root, l1, l2), root.id, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
-          e.code == ValidationErrorCode.AMBIGUOUS_REFERENCE && e.field == "nodes.name")
+          e.code == ValidationErrorCode.AMBIGUOUS_REFERENCE && e.location == ErrorLocation.Whole)
       )
     },
 
-    test("accepts two names differing only by an inner space, agreeing with SafeName.duplicates") {
-      // fromNodes decides repetition through SafeName.duplicates, which the
-      // scenario merge name scan also reads. This pins the two to one answer on
-      // the input where a looser notion of "the same name" would diverge: the
-      // doubled space renders away in hypertext but is significant here.
+    test("accepts two names differing only by an inner space, agreeing with SafeName.requireDistinct") {
+      // fromNodes decides repetition through SafeName.requireDistinct, which
+      // the scenario merge name scan also reads. This pins the two to one
+      // answer on the input where a looser notion of "the same name" would
+      // diverge: the doubled space renders away in hypertext but is
+      // significant here.
       val l1 = leaf("space-a", "Server Outage", 1L, "root-pf")
       val l2 = leaf("space-b", "Server  Outage", 2L, "root-pf")
       val root = unsafeGet(RiskPortfolio.createFromStrings(
@@ -65,7 +66,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
         childIds = Array(l1.id.value, l2.id.value)), "portfolio")
       val result = RiskTree.fromNodes(treeId("bounds-space"), name("Bounds Space"), Seq(root, l1, l2), root.id, mitigations = Nil)
       assertTrue(
-        SafeName.duplicates(Seq(l1.name, l2.name)).isEmpty,
+        SafeName.requireDistinct(Seq(l1.name, l2.name), ErrorLocation.Whole).isSuccess,
         result.isSuccess
       )
     },
@@ -95,7 +96,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val result = RiskTree.fromNodes(treeId("bounds-many"), name("Bounds Many"), allNodes, root.id, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
-          e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field == "nodes")
+          e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == ErrorLocation.Whole)
       )
     }
   )

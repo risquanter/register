@@ -3,7 +3,7 @@ package com.risquanter.register.http.errors
 import java.time.Duration
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.TraceId
+import com.risquanter.register.domain.data.iron.{TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 // Two internal error names collide with the wire case that carries them. The
@@ -37,13 +37,16 @@ import com.risquanter.register.domain.errors.{
 enum WireError:
   def trace: TraceId
 
-  /** A request body the decoders rejected. Carries one entry per independent
-    * failure, so a form shows every problem at once.
+  /** A request the decoders rejected before any tree was in hand. Carries one
+    * entry per independent failure, so a form shows every problem at once.
     */
-  case ValidationRejected(errors: List[ValidationError], trace: TraceId)
+  case RequestRejected(errors: List[ValidationError], trace: TraceId)
 
-  /** A well-formed request whose query the engine refused. */
-  case QueryRejected(problem: QueryProblem, trace: TraceId)
+  /** The content of a known tree broke its own rules. The tree is always
+    * present, which is what separates this case from `RequestRejected`. What
+    * broke is in `detail`: submitted fields, or a query the engine refused.
+    */
+  case ValidationRejected(tree: TreeId, detail: RejectionDetail, trace: TraceId)
 
   /** No such resource, or one the caller may not see. The two are one response
     * so that neither is an existence oracle (ADR-035 §3).
@@ -100,8 +103,8 @@ object WireError:
     * codec for the enum as a whole: the status names the case, so a body carries
     * the case's own fields and no discriminator field.
     */
+  given requestRejectedCodec:       JsonCodec[RequestRejected]       = DeriveJsonCodec.gen[RequestRejected]
   given validationRejectedCodec:    JsonCodec[ValidationRejected]    = DeriveJsonCodec.gen[ValidationRejected]
-  given queryRejectedCodec:         JsonCodec[QueryRejected]         = DeriveJsonCodec.gen[QueryRejected]
   given notFoundCodec:              JsonCodec[NotFound]              = DeriveJsonCodec.gen[NotFound]
   given workspaceExpiredCodec:      JsonCodec[WorkspaceExpired]      = DeriveJsonCodec.gen[WorkspaceExpired]
   given accessDeniedCodec:          JsonCodec[AccessDenied]          = DeriveJsonCodec.gen[AccessDenied]
@@ -118,22 +121,38 @@ object WireError:
     * `-Wconf:msg=match may not be exhaustive:error` makes a new error type a
     * compile error here until an arm is written for it.
     */
-  def fromAppError(e: AppError, trace: TraceId): WireError =
+  def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError =
     // A short local name, so the 31 arms below stay one line each and their
     // wire cases line up. The trace is not a field of the error: it is read
     // from the active span at the boundary that calls this, which is the only
-    // place an effect exists to read it.
+    // place an effect exists to read it. `scope` arrives the same way and for
+    // the same reason.
     val t = trace
 
+    // A content rejection names its tree; a request-level one has none to name.
+    def rejected(detail: RejectionDetail, fallback: List[ValidationError]): WireError =
+      scope match
+        case TreeScope.InTree(tree) => ValidationRejected(tree, detail, t)
+        case TreeScope.NoTree       => RequestRejected(fallback, t)
+
+    // A query runs only on a route carrying `path[TreeId]("treeId")`, so
+    // `NoTree` cannot occur here. It is this service's defect rather than the
+    // caller's, so it answers the opaque fault and the boundary log line
+    // records it.
+    def queryRejected(problem: QueryProblem): WireError =
+      scope match
+        case TreeScope.InTree(tree) => ValidationRejected(tree, RejectionDetail.Query(problem), t)
+        case TreeScope.NoTree       => InternalFault(t)
+
     e match
-      // Request rejected
-      case ValidationFailed(errors)            => WireError.ValidationRejected(errors, t)
+      // Content of a known tree, or a request that named none
+      case ValidationFailed(errors)            => rejected(RejectionDetail.Fields(errors), errors)
 
       // Query refused
-      case FolParseFailure(message, position)  => WireError.QueryRejected(QueryProblem.Unparseable(message, position), t)
-      case FolUnknownReference(messages)       => WireError.QueryRejected(QueryProblem.UnknownReferences(messages), t)
-      case FolBindFailure(errors)              => WireError.QueryRejected(QueryProblem.TypeCheckFailed(errors), t)
-      case FolDomainNotQuantifiable(message)   => WireError.QueryRejected(QueryProblem.NotQuantifiable(message), t)
+      case FolParseFailure(message, position)  => queryRejected(QueryProblem.Unparseable(message, position))
+      case FolUnknownReference(messages)       => queryRejected(QueryProblem.UnknownReferences(messages))
+      case FolBindFailure(errors)              => queryRejected(QueryProblem.TypeCheckFailed(errors))
+      case FolDomainNotQuantifiable(message)   => queryRejected(QueryProblem.NotQuantifiable(message))
 
       // Absent, or not the caller's. One shape for both, so neither is an
       // existence oracle. The workspace identifier may not cross (ADR-036), and

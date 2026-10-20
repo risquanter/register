@@ -46,6 +46,10 @@ object WireErrorSpec extends ZIOSpecDefault:
     * lookahead excludes an all-digit run, so the all-zeros placeholder trace
     * every case carries is not read as a leaked identifier; a real ULID carries
     * letters from its timestamp prefix and still matches.
+    *
+    * A client-facing identifier takes the same shape, so a match is a value to
+    * identify rather than a leak on its own. The test below names which case
+    * may carry one and which identifier it has to be.
     */
   private val UlidShape = "(?![0-9]{26})[0-9A-HJKMNP-TV-Z]{26}".r
 
@@ -53,12 +57,22 @@ object WireErrorSpec extends ZIOSpecDefault:
 
   // Each is annotated with its own case type, because that is the type its
   // codec is declared for — there is deliberately no codec for the enum.
-  private val validationRejected: WireError.ValidationRejected = WireError.ValidationRejected(
-    List(ValidationError("name", ValidationErrorCode.REQUIRED_FIELD, "Name is required")),
-    trace
+  private val fieldFailure = ValidationError(
+    ErrorLocation.requestField(FieldName.Name),
+    ValidationErrorCode.REQUIRED_FIELD,
+    "Name is required"
   )
-  private val queryRejected: WireError.QueryRejected =
-    WireError.QueryRejected(QueryProblem.Unparseable("bad syntax", Some(4)), trace)
+
+  private val requestRejected: WireError.RequestRejected =
+    WireError.RequestRejected(List(fieldFailure), trace)
+  private val validationRejected: WireError.ValidationRejected =
+    WireError.ValidationRejected(treeId, RejectionDetail.Fields(List(fieldFailure)), trace)
+  private val queryRejected: WireError.ValidationRejected =
+    WireError.ValidationRejected(
+      treeId,
+      RejectionDetail.Query(QueryProblem.Unparseable("bad syntax", Some(4))),
+      trace
+    )
   private val notFound: WireError.NotFound = WireError.NotFound(trace)
   private val workspaceExpired: WireError.WorkspaceExpired = WireError.WorkspaceExpired(
     ExpiryCause.Inactivity,
@@ -78,8 +92,8 @@ object WireErrorSpec extends ZIOSpecDefault:
     * carries the case's own fields and no discriminator.
     */
   private val encodedCases: List[(String, String)] = List(
+    "RequestRejected"       -> requestRejected.toJson,
     "ValidationRejected"    -> validationRejected.toJson,
-    "QueryRejected"         -> queryRejected.toJson,
     "NotFound"              -> notFound.toJson,
     "WorkspaceExpired"      -> workspaceExpired.toJson,
     "AccessDenied"          -> accessDenied.toJson,
@@ -126,12 +140,22 @@ object WireErrorSpec extends ZIOSpecDefault:
         }
       ),
       suite("no case carries a confidential identifier")(
-        test("no serialised case contains a ULID-shaped value") {
-          val offenders = encodedCases.filter((_, json) => UlidShape.findFirstIn(json).isDefined)
-          assertTrue(offenders.isEmpty)
+        test("only the case that names a tree carries a ULID-shaped value, and it is that tree") {
+          // A `TreeId` is not confidential: a client already supplies one in
+          // the path of every tree-addressed route, so a rejection naming the
+          // tree it is about discloses nothing the caller did not send
+          // (ADR-036 §4). `WorkspaceId` is the identifier that may never cross,
+          // and the case below pins that separately.
+          val carryingUlid = encodedCases.collect {
+            case (name, json) if UlidShape.findFirstIn(json).isDefined => name
+          }
+          assertTrue(
+            carryingUlid == List("ValidationRejected"),
+            UlidShape.findFirstIn(validationRejected.toJson).contains(treeId.value.toString)
+          )
         },
         test("an error built from a workspace identifier does not carry it onto the wire") {
-          val projected = WireError.fromAppError(TreeNotInWorkspace(wsId, treeId), trace)
+          val projected = WireError.fromAppError(TreeNotInWorkspace(wsId, treeId), trace, TreeScope.NoTree)
           val json      = projected match
             case nf: WireError.NotFound => nf.toJson
             case other                  => throw MatchError(other)
@@ -141,13 +165,17 @@ object WireErrorSpec extends ZIOSpecDefault:
       suite("fromAppError maps every internal leaf type")(
         test("each of the 31 leaves reaches the case this plan assigns it") {
           val mapping: List[(AppError, String)] = List(
-            // Rejected request
-            ValidationFailed(Nil)                                  -> "ValidationRejected",
-            // Refused query
-            FolParseFailure("bad", None)                           -> "QueryRejected",
-            FolUnknownReference(List("x"))                         -> "QueryRejected",
-            FolBindFailure(List("x"))                              -> "QueryRejected",
-            FolDomainNotQuantifiable("x")                          -> "QueryRejected",
+            // Rejected request. Read with no tree in scope, so the content
+            // failures answer at the request level; the suite below reads the
+            // same five with a tree in scope.
+            ValidationFailed(Nil)                                  -> "RequestRejected",
+            // Refused query. A query route always names a tree, so reaching
+            // here without one is this service's defect rather than the
+            // caller's and answers the opaque fault.
+            FolParseFailure("bad", None)                           -> "InternalFault",
+            FolUnknownReference(List("x"))                         -> "InternalFault",
+            FolBindFailure(List("x"))                              -> "InternalFault",
+            FolDomainNotQuantifiable("x")                          -> "InternalFault",
             // Absent, or not the caller's
             WorkspaceNotFound()                                    -> "NotFound",
             TreeNotInWorkspace(wsId, treeId)                       -> "NotFound",
@@ -185,9 +213,43 @@ object WireErrorSpec extends ZIOSpecDefault:
           )
 
           val wrong = mapping.filter { (error, expected) =>
-            WireError.fromAppError(error, trace).productPrefix != expected
+            WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
           assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 31)
+        },
+        test("with a tree in scope, the five content failures name that tree instead") {
+          // The same five leaves the table above reads with no tree. The scope
+          // is the only thing that differs, so this is what it decides.
+          val inTree: List[AppError] = List(
+            ValidationFailed(Nil),
+            FolParseFailure("bad", None),
+            FolUnknownReference(List("x")),
+            FolBindFailure(List("x")),
+            FolDomainNotQuantifiable("x")
+          )
+          val projected = inTree.map(e => WireError.fromAppError(e, trace, TreeScope.InTree(treeId)))
+          assertTrue(
+            projected.forall {
+              case WireError.ValidationRejected(t, _, _) => t == treeId
+              case _                                     => false
+            }
+          )
+        },
+        test("the detail says which kind of content was refused") {
+          val fields = WireError.fromAppError(
+            ValidationFailed(List(fieldFailure)), trace, TreeScope.InTree(treeId)
+          )
+          val query = WireError.fromAppError(
+            FolParseFailure("bad", Some(4)), trace, TreeScope.InTree(treeId)
+          )
+          assertTrue(
+            fields == WireError.ValidationRejected(
+              treeId, RejectionDetail.Fields(List(fieldFailure)), trace
+            ),
+            query == WireError.ValidationRejected(
+              treeId, RejectionDetail.Query(QueryProblem.Unparseable("bad", Some(4))), trace
+            )
+          )
         }
       ),
       suite("every case round-trips through its own codec")(
@@ -195,7 +257,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           assertTrue(validationRejected.toJson.fromJson[WireError.ValidationRejected] == Right(validationRejected))
         },
         test("a refused query keeps its problem") {
-          assertTrue(queryRejected.toJson.fromJson[WireError.QueryRejected] == Right(queryRejected))
+          assertTrue(queryRejected.toJson.fromJson[WireError.ValidationRejected] == Right(queryRejected))
         },
         test("an absent resource keeps its trace") {
           assertTrue(notFound.toJson.fromJson[WireError.NotFound] == Right(notFound))
@@ -221,8 +283,8 @@ object WireErrorSpec extends ZIOSpecDefault:
       ),
       suite("indistinguishable outcomes really are identical")(
         test("both refusal paths serialise to the same bytes") {
-          val explicit  = WireError.fromAppError(AccessDenied("policy says no"), trace)
-          val forbidden = WireError.fromAppError(AuthForbidden("u", "read", "tree", "t1"), trace)
+          val explicit  = WireError.fromAppError(AccessDenied("policy says no"), trace, TreeScope.NoTree)
+          val forbidden = WireError.fromAppError(AuthForbidden("u", "read", "tree", "t1"), trace, TreeScope.NoTree)
 
           val encoded = List(explicit, forbidden).map {
             case denied: WireError.AccessDenied => denied.toJson
@@ -235,8 +297,8 @@ object WireErrorSpec extends ZIOSpecDefault:
         // were distinguishable from an Irmin outage, the answer would disclose
         // that the authorization stack is the part that is down.
         test("an authorization outage is indistinguishable from any other dependency outage") {
-          val authDown  = WireError.fromAppError(AuthServiceUnavailable("SpiceDB unreachable", None), trace)
-          val storeDown = WireError.fromAppError(IrminUnavailable("connection refused"), trace)
+          val authDown  = WireError.fromAppError(AuthServiceUnavailable("SpiceDB unreachable", None), trace, TreeScope.NoTree)
+          val storeDown = WireError.fromAppError(IrminUnavailable("connection refused"), trace, TreeScope.NoTree)
 
           val encoded = List(authDown, storeDown).map {
             case down: WireError.DependencyUnavailable => down.toJson
@@ -245,8 +307,8 @@ object WireErrorSpec extends ZIOSpecDefault:
           assertTrue(encoded.distinct.size == 1)
         },
         test("an absent workspace and a tree outside it serialise to the same bytes") {
-          val absentWorkspace = WireError.fromAppError(WorkspaceNotFound(), trace)
-          val treeElsewhere   = WireError.fromAppError(TreeNotInWorkspace(wsId, treeId), trace)
+          val absentWorkspace = WireError.fromAppError(WorkspaceNotFound(), trace, TreeScope.NoTree)
+          val treeElsewhere   = WireError.fromAppError(TreeNotInWorkspace(wsId, treeId), trace, TreeScope.NoTree)
 
           val encoded = List(absentWorkspace, treeElsewhere).map {
             case nf: WireError.NotFound => nf.toJson

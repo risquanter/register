@@ -6,8 +6,10 @@ import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.model.StatusCode
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, ScenarioSourceDto}
+import zio.json.*
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, ScenarioResponse}
+import com.risquanter.register.http.errors.{RejectionDetail, WireError}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
 import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice}
 import com.risquanter.register.http.support.SttpClientFixture
@@ -190,6 +192,51 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         yield assertTrue(summaryResp.code.isSuccess) &&
           assertTrue(summary.exists(_.id == treeId)) &&
           assertTrue(summary.exists(_.name == request.name))
+      },
+      /** The route names a tree, so content it refuses is that tree's content
+        * rather than an unreadable request, and the two answer different
+        * statuses. The body names the tree because the caller put it in the
+        * path of this same request (ADR-036 §4).
+        */
+      test("content refused on a tree-addressed route answers 422 naming that tree") {
+        val emptyUpdate = RiskTreeUpdateRequest(
+          name = "Tree with nothing in it",
+          portfolios = Seq.empty,
+          leaves = Seq.empty,
+          newPortfolios = Seq.empty,
+          newLeaves = Seq.empty
+        )
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(sampleRequest())
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+          treeId     = bootstrap.tree.id
+
+          // A tree with no nodes has no root, which the topology rule refuses
+          // after the request has decoded — so it is content, not shape.
+          updateResp <- basicRequest.header("X-Branch", "main")
+            .put(uri"${client.baseUrl}/w/$key/risk-trees/${treeId.value}")
+            .body(emptyUpdate)
+            .response(asStringAlways)
+            .send(client.backend)
+          rawBody    = updateResp.body
+          refusal   <- ZIO.fromEither(
+            rawBody.fromJson[WireError.ValidationRejected]
+              .left.map(err => s"Failed to decode a content rejection: $err\nBody was: $rawBody")
+          )
+        yield assertTrue(
+          updateResp.code.code == 422,
+          refusal.tree == treeId,
+          refusal.detail match
+            case RejectionDetail.Fields(errors) => errors.nonEmpty
+            case RejectionDetail.Query(_)       => false
+        ) && assertTrue(!rawBody.contains(key))
       },
       test("tree-name uniqueness is checked against the write branch, honouring fork inheritance (§C1)") {
         val treeName     = "Shared Risk Tree"

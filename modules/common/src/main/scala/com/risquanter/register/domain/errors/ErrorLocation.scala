@@ -143,8 +143,9 @@ object FieldName:
 /** Where an error is.
   *
   * The browser matches on these cases to route an error to the control that
-  * failed, so a case added here is a compile error at the form until it has
-  * somewhere to go.
+  * failed. Each form maps only the locations it renders and sends everything
+  * else to its submit banner, so a case added here reaches the banner until a
+  * form is given an arm for it.
   */
 @jsonDiscriminator("kind")
 enum ErrorLocation:

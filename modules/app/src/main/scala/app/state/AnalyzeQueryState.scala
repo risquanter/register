@@ -1,13 +1,13 @@
 package app.state
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import app.core.ZJS.*
 import app.core.RequestFailure
 import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
-import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.http.errors.{RejectionDetail, WireError}
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.http.responses.QueryResponse
 import vql.error.QueryError
@@ -175,9 +175,11 @@ final class AnalyzeQueryState(
         case Right(resp) => Outcome.Loaded(resp)
         // A refused query is the one failure this pane renders itself. The
         // wire already separates it from a wiring fault: only a problem with
-        // the query text arrives as `QueryRejected`, while a model-validation
-        // or evaluation fault arrives as `InternalFault`.
-        case Left(RequestFailure.Wire(WireError.QueryRejected(problem, _))) =>
+        // the query text arrives as a rejection carrying a query detail, while
+        // a model-validation or evaluation fault arrives as `InternalFault`.
+        case Left(RequestFailure.Wire(
+          WireError.ValidationRejected(_, RejectionDetail.Query(problem), _)
+        )) =>
           Outcome.DomainError(ErrorMessages.query(problem))
         // Any other failure: the global observer has already reported it, so
         // this stream only needs to resolve back out of Loading.

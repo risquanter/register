@@ -4,7 +4,7 @@ import app.core.RequestFailure
 import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.TraceId
 import com.risquanter.register.domain.errors.ValidationError
-import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.http.errors.{RejectionDetail, WireError}
 
 /** A failure the global banner shows, classified into the treatment it gets.
   *
@@ -35,7 +35,7 @@ enum GlobalError:
     * query is the case this exists for: the problem is in what the user typed,
     * so it gets the user-input treatment rather than the server-fault one.
     */
-  case RequestRejected(message: String)
+  case InputRejected(message: String)
 
   /** The request conflicts with current state. The rendering site decides which
     * refresh action to offer, because that depends on what the view holds.
@@ -102,8 +102,10 @@ object GlobalError:
     * browser console whether or not the banner shows it.
     */
   def fromWireError(e: WireError): GlobalError = e match
-    case WireError.ValidationRejected(errors, _)       => ValidationFailed(errors)
-    case WireError.QueryRejected(problem, _)           => RequestRejected(ErrorMessages.query(problem))
+    case WireError.RequestRejected(errors, _)          => ValidationFailed(errors)
+    case WireError.ValidationRejected(_, detail, _)    => detail match
+      case RejectionDetail.Fields(errors)              => ValidationFailed(errors)
+      case RejectionDetail.Query(problem)              => InputRejected(ErrorMessages.query(problem))
     case WireError.NotFound(_)                         => NotFound
     case WireError.WorkspaceExpired(c, life, idle, _)  => WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle))
     case WireError.AccessDenied(t)                     => ServerError(ErrorMessages.Forbidden, Some(t))

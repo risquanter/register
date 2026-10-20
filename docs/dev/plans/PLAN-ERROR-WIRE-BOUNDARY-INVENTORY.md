@@ -212,3 +212,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/configs/IrminConfig.scala
 - modules/server/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala
 - modules/app/src/main/scala/app/views/TreePreview.scala
+- modules/server-it/src/test/scala/com/risquanter/register/testcontainers/SpiceDbCompose.scala

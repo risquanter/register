@@ -7,13 +7,17 @@ import com.risquanter.register.domain.data.{
   MitigationApplicationRecord, MitigationPrecedence, MitigationSpec,
   ResultTransformSpec, TransformPipeline
 }
-import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, PositiveInt, PositiveLong, RetentionFactor, ValidationUtil}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveInt, PositiveLong, RetentionFactor, ValidationUtil}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
 
 /** `Identity` laws, `nTrials` preservation, and all result-stage transform strategies. */
 object RiskResultTransformSpec extends ZIOSpecDefault {
+
+  /** The bound each of these refinements defends is what the test asserts, not
+    * where a refusal reports, so one location stands for all of them. */
+  private val paramAt: ErrorLocation = ErrorLocation.requestField(FieldName.Mitigations)
 
 
   // ══════════════════════════════════════════════════════════════════
@@ -215,11 +219,11 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
       },
 
       test("a factor of 0.0 is rejected at the boundary — no transform may eliminate a risk") {
-        assertTrue(ValidationUtil.refineRetentionFactor(0.0).isLeft)
+        assertTrue(ValidationUtil.refineRetentionFactor(0.0, paramAt).isLeft)
       },
 
       test("a factor above 1.0 is rejected at the boundary") {
-        assertTrue(ValidationUtil.refineRetentionFactor(2.0).isLeft)
+        assertTrue(ValidationUtil.refineRetentionFactor(2.0, paramAt).isLeft)
       },
 
       test("scaling rounds to nearest rather than toward zero") {
@@ -281,7 +285,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
           case Left(errors) =>
             assertTrue(
               errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
-              errors.head.field == s"mitigatedResult.${id.value}"
+              errors.head.location == ErrorLocation.nodeField(id, FieldName.MitigatedResult)
             )
           case Right(_) => assertTrue(false)
         }
@@ -343,24 +347,24 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
     suite("Parameter Refinement Boundary")(
       test("refineNonNegativeLong rejects negative values") {
         assertTrue(
-          ValidationUtil.refineNonNegativeLong(-1000L).isLeft,
-          ValidationUtil.refineNonNegativeLong(0L).isRight
+          ValidationUtil.refineNonNegativeLong(-1000L, paramAt).isLeft,
+          ValidationUtil.refineNonNegativeLong(0L, paramAt).isRight
         )
       },
 
       test("refineNonNegativeDouble rejects negative values") {
         assertTrue(
-          ValidationUtil.refineNonNegativeDouble(-0.5).isLeft,
-          ValidationUtil.refineNonNegativeDouble(0.0).isRight,
-          ValidationUtil.refineNonNegativeDouble(2.5).isRight
+          ValidationUtil.refineNonNegativeDouble(-0.5, paramAt).isLeft,
+          ValidationUtil.refineNonNegativeDouble(0.0, paramAt).isRight,
+          ValidationUtil.refineNonNegativeDouble(2.5, paramAt).isRight
         )
       },
 
       test("refineNonNegativeDouble rejects non-finite values") {
         assertTrue(
-          ValidationUtil.refineNonNegativeDouble(Double.PositiveInfinity).isLeft,
-          ValidationUtil.refineNonNegativeDouble(Double.NegativeInfinity).isLeft,
-          ValidationUtil.refineNonNegativeDouble(Double.NaN).isLeft
+          ValidationUtil.refineNonNegativeDouble(Double.PositiveInfinity, paramAt).isLeft,
+          ValidationUtil.refineNonNegativeDouble(Double.NegativeInfinity, paramAt).isLeft,
+          ValidationUtil.refineNonNegativeDouble(Double.NaN, paramAt).isLeft
         )
       }
     ),

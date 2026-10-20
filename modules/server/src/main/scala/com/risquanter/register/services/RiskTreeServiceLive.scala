@@ -1,21 +1,16 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.Validation
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.{Meter, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice, ScenarioName}
-import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.services.helper.SeedVarIdAssigner

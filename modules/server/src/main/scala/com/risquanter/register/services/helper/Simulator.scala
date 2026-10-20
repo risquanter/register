@@ -125,7 +125,7 @@ object Simulator {
    */
   private def createDistributionWithParams(leaf: RiskLeaf): IO[AppError, (Distribution, com.risquanter.register.domain.data.DistributionParams)] = {
     import io.github.iltotore.iron.*
-    import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
+    import com.risquanter.register.domain.data.iron.PositiveInt
 
     // The leaf is persisted, so every refusal here names it by identifier and
     // the message carries only the reason.

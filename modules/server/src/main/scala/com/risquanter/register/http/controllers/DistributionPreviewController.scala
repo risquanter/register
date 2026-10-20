@@ -9,6 +9,7 @@ import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.http.endpoints.DistributionPreviewEndpoints
 import com.risquanter.register.http.requests.DistributionShapeRequest
 import com.risquanter.register.services.DistributionPreviewService
+import com.risquanter.register.http.errors.TreeScope
 
 /** Distribution preview controller.
   *
@@ -48,7 +49,7 @@ class DistributionPreviewController private (
           _      <- userCtx.extract(maybeUserId)
           result <- DistributionShapeRequest.validate(req).toZIOValidation
                       .flatMap(previewService.preview)
-        yield result).wireEither
+        yield result).wireEither(TreeScope.NoTree)
     }
 
   override val routes: List[ServerEndpoint[Any, Task]] = List(distributionPreview)

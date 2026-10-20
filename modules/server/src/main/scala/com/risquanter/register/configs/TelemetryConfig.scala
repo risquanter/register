@@ -3,7 +3,7 @@ package com.risquanter.register.configs
 import java.time.Duration
 
 import zio.Config
-import zio.config.magnolia.{DeriveConfig, deriveConfig}
+import zio.config.magnolia.DeriveConfig
 
 import com.risquanter.register.domain.data.iron.Url
 import com.risquanter.register.domain.errors.ErrorLocation

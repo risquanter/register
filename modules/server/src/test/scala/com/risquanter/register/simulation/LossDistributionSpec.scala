@@ -1,7 +1,6 @@
 package com.risquanter.register.simulation
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.prelude.*
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{
@@ -9,7 +8,7 @@ import com.risquanter.register.domain.data.{
   MitigationSpec, NodeProvenance, ResultTransformSpec, TransformPipeline
 }
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -23,13 +22,17 @@ import io.github.iltotore.iron.refineUnsafe
   */
 object LossDistributionSpec extends ZIOSpecDefault {
 
+  /** Transform parameters are fixtures here: each refinement succeeds, so one
+    * location stands for all of them. */
+  private val paramAt: ErrorLocation = ErrorLocation.requestField(FieldName.Mitigations)
+
   /** A result-stage layer record capping every trial's loss. `resolvedScope` is
     * empty because nothing here reads it — the layer is what is under test. */
   private def capRecord(label: String, cap: Long): MitigationApplicationRecord =
     MitigationApplicationRecord(
       mitigationId(label),
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)))),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -47,7 +50,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     MitigationApplicationRecord(
       mitigationId(label),
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(deductible).toOption.get)))),
+        ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(deductible, paramAt).toOption.get)))),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -56,7 +59,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     MitigationApplicationRecord(
       mitigationId(label),
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.FilterBelowThreshold(ValidationUtil.refineNonNegativeLong(threshold).toOption.get)))),
+        ResultTransformSpec.FilterBelowThreshold(ValidationUtil.refineNonNegativeLong(threshold, paramAt).toOption.get)))),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -236,7 +239,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
           case Left(errors) =>
             assertTrue(
               errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
-              errors.head.field == s"mitigatedResult.${id.value}"
+              errors.head.location == ErrorLocation.nodeField(id, FieldName.MitigatedResult)
             )
           case Right(_) => assertTrue(false)
         }
@@ -254,7 +257,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
           case Left(errors) =>
             assertTrue(
               errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
-              errors.head.field == s"mitigatedResult.${id.value}",
+              errors.head.location == ErrorLocation.nodeField(id, FieldName.MitigatedResult),
               errors.head.message.contains("residual of exactly zero")
             )
           case Right(_) => assertTrue(false)

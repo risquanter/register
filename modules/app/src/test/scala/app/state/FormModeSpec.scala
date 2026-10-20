@@ -4,6 +4,7 @@ import zio.test.*
 
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{SafeName, IronConstants, OccurrenceProbability}
+import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import io.github.iltotore.iron.*
 
 object FormModeSpec extends ZIOSpecDefault:
@@ -23,8 +24,8 @@ object FormModeSpec extends ZIOSpecDefault:
   )
   private val savedProbability: OccurrenceProbability = 0.3
 
-  private val savedLeaf = LeafDraft(leafName, None, lognormalDistribution, savedProbability)
-  private val savedPortfolio = PortfolioDraft(portName, None)
+  private val savedLeaf = LeafDraft(leafName, ParentRef.Root, lognormalDistribution, savedProbability)
+  private val savedPortfolio = PortfolioDraft(portName, ParentRef.Root)
 
   private val savedLeafSnapshot: FieldSnapshot.LeafFields = FormMode.leafDraftToFieldSnapshot(savedLeaf)
   private val savedPortfolioSnapshot: FieldSnapshot.PortfolioFields = FormMode.portfolioDraftToFieldSnapshot(savedPortfolio)
@@ -107,7 +108,7 @@ object FormModeSpec extends ZIOSpecDefault:
       },
       test("true once parent moves away from Unset, to root or to a named portfolio") {
         assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyLeafSnapshot.copy(parent = ParentSelection.Root), Nil, List(savedPortfolio))) &&
-        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(parent = ParentSelection.Portfolio("Some Other Portfolio")), Nil, List(savedPortfolio)))
+        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(parent = ParentSelection.Under("Some Other Portfolio")), Nil, List(savedPortfolio)))
       }
     ),
 
@@ -134,7 +135,7 @@ object FormModeSpec extends ZIOSpecDefault:
       },
       test("true when the portfolio's parent has been changed") {
         val target = FormTarget.Portfolio(portName)
-        val edited = savedPortfolioSnapshot.copy(parent = ParentSelection.Portfolio("Other Root"))
+        val edited = savedPortfolioSnapshot.copy(parent = ParentSelection.Under("Other Root"))
         assertTrue(FormMode.isFormDirty(FormMode.Editing(target), edited, Nil, List(savedPortfolio)))
       },
       test("false when the target no longer exists in the saved list (defensive default)") {
@@ -167,7 +168,7 @@ object FormModeSpec extends ZIOSpecDefault:
       },
       test("true when templating a root portfolio and the parent is deliberately changed to something else") {
         val source = FormTarget.Portfolio(portName)
-        val edited = savedPortfolioSnapshot.copy(parent = ParentSelection.Portfolio("Some Other Portfolio"))
+        val edited = savedPortfolioSnapshot.copy(parent = ParentSelection.Under("Some Other Portfolio"))
         assertTrue(FormMode.isFormDirty(FormMode.Templating(source), edited, Nil, List(savedPortfolio)))
       }
     ),

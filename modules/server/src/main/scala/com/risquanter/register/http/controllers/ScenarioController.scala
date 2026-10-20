@@ -12,6 +12,7 @@ import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummary
 import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergeConflictPath, MergePreviewResult}
 import com.risquanter.register.services.workspace.WorkspaceStore
+import com.risquanter.register.http.errors.TreeScope
 
 /** Scenario lifecycle controller.
   *
@@ -47,7 +48,7 @@ class ScenarioController private (
                     case ScenarioSourceDto.Branch(BranchChoice.Scenario(name)) => ScenarioSource.ForkOf(name)
                     case ScenarioSourceDto.Commit(hash)                        => ScenarioSource.AtCommit(hash)
         _      <- scenarioService.create(ws.id, req.name, source)
-      yield ScenarioResponse(req.name)).wireEither
+      yield ScenarioResponse(req.name)).wireEither(TreeScope.NoTree)
   }
 
   val listScenarios: ServerEndpoint[Any, Task] = listScenariosEndpoint.serverLogic {
@@ -57,7 +58,7 @@ class ScenarioController private (
         ws      <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         summaries <- scenarioService.list(ws.id)
-      yield summaries.map(s => ScenarioSummaryResponse(s.name, s.head))).wireEither
+      yield summaries.map(s => ScenarioSummaryResponse(s.name, s.head))).wireEither(TreeScope.NoTree)
   }
 
   val previewScenarioMerge: ServerEndpoint[Any, Task] = previewScenarioMergeEndpoint.serverLogic {
@@ -67,7 +68,7 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         result <- scenarioMergeService.preview(ws.id, name)
-      yield toPreviewResponse(result)).wireEither
+      yield toPreviewResponse(result)).wireEither(TreeScope.NoTree)
   }
 
   val mergeScenario: ServerEndpoint[Any, Task] = mergeScenarioEndpoint.serverLogic {
@@ -77,7 +78,7 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
         head   <- scenarioMergeService.merge(ws.id, name)
-      yield MergeScenarioResponse(head)).wireEither
+      yield MergeScenarioResponse(head)).wireEither(TreeScope.NoTree)
   }
 
   /** Wire mapping colocated with the routes (mirrors `NodeDiffStatus.toWire`'s
@@ -100,7 +101,7 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
         _      <- scenarioService.delete(ws.id, name, expectedHead)
-      yield ()).wireEither
+      yield ()).wireEither(TreeScope.NoTree)
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

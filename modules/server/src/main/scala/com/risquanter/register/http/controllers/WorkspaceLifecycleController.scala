@@ -12,6 +12,7 @@ import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
 import com.risquanter.register.services.workspace.WorkspaceStore
+import com.risquanter.register.http.errors.TreeScope
 
 /** Workspace lifecycle controller.
   *
@@ -62,7 +63,7 @@ class WorkspaceLifecycleController private (
         tree = SimulationResponse.fromRiskTree(tree),
         expiresAt = ws.expiresAt,
         seedEntityId = ws.seedEntityId
-      )).wireEither
+      )).wireEither(TreeScope.NoTree)
   }
 
   val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.serverLogic {
@@ -75,7 +76,7 @@ class WorkspaceLifecycleController private (
         ids      <- workspaceStore.listTrees(key)
         trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, Revision.Head(branch)))
         existing  = trees.collect { case Some((tree, _)) => SimulationResponse.fromRiskTree(tree) }
-      yield existing).wireEither
+      yield existing).wireEither(TreeScope.NoTree)
   }
 
   val createWorkspaceTree: ServerEndpoint[Any, Task] = createWorkspaceTreeEndpoint.serverLogic {
@@ -115,7 +116,7 @@ class WorkspaceLifecycleController private (
         // which is correct no matter which branch it lives on. Unlike deleteTree's
         // removeTree (main-only), there is no asymmetric bookkeeping risk here.
         _      <- workspaceStore.addTree(key, tree.id)
-      yield SimulationResponse.fromRiskTree(tree)).wireEither
+      yield SimulationResponse.fromRiskTree(tree)).wireEither(TreeScope.NoTree)
   }
 
   val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeySecretEndpoint.serverLogic { case (maybeUserId, key) =>
@@ -125,7 +126,7 @@ class WorkspaceLifecycleController private (
       given Checked[Permission] <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       newKey <- workspaceStore.rotate(key)
       newWs  <- workspaceStore.resolve(newKey)
-    yield WorkspaceRotateResponse(newKey, newWs.expiresAt)).wireEither
+    yield WorkspaceRotateResponse(newKey, newWs.expiresAt)).wireEither(TreeScope.NoTree)
   }
 
   val deleteWorkspace: ServerEndpoint[Any, Task] = deleteWorkspaceEndpoint.serverLogic { case (maybeUserId, key) =>
@@ -136,7 +137,7 @@ class WorkspaceLifecycleController private (
       ids    <- workspaceStore.listTrees(key)
       _      <- CascadeDelete.workspace(ws.id, ids, riskTreeService, scenarioService)
       _      <- workspaceStore.delete(key)
-    yield ()).wireEither
+    yield ()).wireEither(TreeScope.NoTree)
   }
 
   val evictExpired: ServerEndpoint[Any, Task] = evictExpiredEndpoint.serverLogic { _ =>
@@ -150,7 +151,7 @@ class WorkspaceLifecycleController private (
                    ZIO.foreachParDiscard(evicted)(ws =>
                      CascadeDelete.workspace(ws.id, ws.trees, riskTreeService, scenarioService))
                  }
-    yield Map("evicted" -> evicted.size)).wireEither
+    yield Map("evicted" -> evicted.size)).wireEither(TreeScope.NoTree)
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

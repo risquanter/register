@@ -110,7 +110,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveCreate(req, () => safeId("generated"))
 
-      assertFailsWith(result)("Duplicate names")
+      assertFailsWith(result)("duplicate node name")
     },
 
     test("resolveCreate fails when leaf parent points to a leaf") {
@@ -265,7 +265,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveUpdate(req, () => safeId("generated"))
 
-      assertFailsWith(result)("Duplicate names")
+      assertFailsWith(result)("duplicate node name")
     },
 
     test("resolveUpdate fails when new leaf parent is a leaf") {

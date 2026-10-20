@@ -30,8 +30,15 @@ object BaseEndpoint {
     * output whose status is a value; this is the fixed-status form, and `400`
     * is the only status the endpoint itself declares for the body.
     */
+  val requestRejectedOut: EndpointOutput[WireError.RequestRejected] =
+    statusCode(StatusCode.BadRequest).and(jsonBody[WireError.RequestRejected])
+
+  /** The content of a known tree broke its own rules, which is a different
+    * answer from a request that could not be read at all: the request was well
+    * formed and the server understood it. That is `422`.
+    */
   val validationRejectedOut: EndpointOutput[WireError.ValidationRejected] =
-    statusCode(StatusCode.BadRequest).and(jsonBody[WireError.ValidationRejected])
+    statusCode(StatusCode.UnprocessableEntity).and(jsonBody[WireError.ValidationRejected])
 
   /** The same body with the status as a value, for the decode-failure handler.
     *
@@ -44,8 +51,8 @@ object BaseEndpoint {
     * Declared beside the fixed-status form rather than in the handler so that
     * one body is described once, which is the reason the two above are here.
     */
-  val rejectionOut: EndpointOutput[(StatusCode, List[Header], WireError.ValidationRejected)] =
-    statusCode.and(headers).and(jsonBody[WireError.ValidationRejected])
+  val rejectionOut: EndpointOutput[(StatusCode, List[Header], WireError.RequestRejected)] =
+    statusCode.and(headers).and(jsonBody[WireError.RequestRejected])
 }
 
 /** Base endpoint. Every endpoint trait builds from one of the two values in this
@@ -62,9 +69,11 @@ trait BaseEndpoint {
     * The status is declared beside the case it belongs to, so a case cannot be
     * sent with the wrong status, and the generated OpenAPI document gains one
     * schema per status instead of a single envelope for all of them. A browser
-    * selects the variant by status alone, so no two variants share one. Two
+    * selects the variant by status alone, so no two variants share one. Three
     * variants read their status and body from a named output in the companion,
-    * because something other than an endpoint also sends those two.
+    * which keeps one description of a body that two senders share: the
+    * decode-failure handler also sends a request rejection, and the catch-all
+    * also sends an internal fault.
     *
     * Every variant names a concrete case rather than the enum, which is what
     * keeps a body free of a discriminator field. There is deliberately no
@@ -77,8 +86,8 @@ trait BaseEndpoint {
   val baseEndpoint = endpoint
     .errorOut(
       oneOf[WireError](
+        oneOfVariant(BaseEndpoint.requestRejectedOut),
         oneOfVariant(BaseEndpoint.validationRejectedOut),
-        oneOfVariant(StatusCode.UnprocessableEntity, jsonBody[WireError.QueryRejected]),
         oneOfVariant(StatusCode.Forbidden,           jsonBody[WireError.AccessDenied]),
         oneOfVariant(StatusCode.NotFound,            jsonBody[WireError.NotFound]),
         oneOfVariant(StatusCode.Gone,                jsonBody[WireError.WorkspaceExpired]),

@@ -5,12 +5,12 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
-import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.services.QueryService
 import com.risquanter.register.services.workspace.WorkspaceStore
+import com.risquanter.register.http.errors.TreeScope
 
 /** Query controller — wires `QueryRequest.resolve()` to `QueryService.evaluate()`.
   *
@@ -52,7 +52,7 @@ class QueryController private (
         parsed <- ZIO.fromEither(QueryRequest.resolve(req))
                     .mapError(e => FolQueryFailure.fromQueryError(e))
         result <- queryService.evaluate(ws.id, treeId, parsed, ws.seedEntityId, branch)
-      yield result).wireEither
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] = List(queryTree)
