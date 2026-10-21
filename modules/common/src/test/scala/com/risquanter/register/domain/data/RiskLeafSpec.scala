@@ -721,7 +721,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
           locationsOf(result).contains(ErrorLocation.requestField(FieldName.DistributionType))
         )
       },
-      test("minLoss at or above maxLoss reports at the minLoss field") {
+      test("minLoss at or above maxLoss reports at the loss range, not at either field") {
         val result = RiskLeaf.create(
           id = idStr("test-id"),
           name = "Test",
@@ -733,7 +733,9 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(
           result.isFailure,
-          locationsOf(result).contains(ErrorLocation.requestField(FieldName.MinLoss))
+          locationsOf(result).contains(ErrorLocation.requestField(FieldName.LossRange)),
+          !locationsOf(result).contains(ErrorLocation.requestField(FieldName.MinLoss)),
+          !locationsOf(result).contains(ErrorLocation.requestField(FieldName.MaxLoss))
         )
       },
       test("expert mode with neither collection reports at the distribution-type field") {

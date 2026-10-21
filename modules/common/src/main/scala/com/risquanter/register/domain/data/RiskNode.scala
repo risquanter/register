@@ -309,10 +309,22 @@ object RiskLeaf {
     }
   }
 
-  // ── Mode-rule building blocks — single definition per rule, shared between
-  //    RiskLeaf.create's raw-input path and validateModeFields' refined-input
-  //    path (OverrideDistributionParams) ──
+  // ── Mode-rule building blocks, shared between RiskLeaf.create's raw-input
+  //    path and validateModeFields' refined-input path
+  //    (OverrideDistributionParams).
+  //
+  //    These are one definition per rule within this file and not within the
+  //    module: `Distribution.create` holds a second implementation of the same
+  //    mode rules, because `Distribution` declares the same six shape fields
+  //    that `RiskLeaf` declares. The two agree on every refusal's location and
+  //    differ in error code and message text. ──
 
+  /** Refuses when the minimum is not below the maximum.
+    *
+    * Reports at `FieldName.LossRange` rather than at either bound: neither value
+    * is at fault on its own, and editing either one can satisfy the rule, so the
+    * pair is what the refusal is about.
+    */
   private def requireMinBelowMax(
     min: PositiveLong,
     max: PositiveLong,
@@ -321,7 +333,7 @@ object RiskLeaf {
     Validation
       .fromPredicateWith[ValidationError, (PositiveLong, PositiveLong)](
         ValidationError(
-          location = ErrorLocation.Field(subject, FieldName.MinLoss),
+          location = ErrorLocation.Field(subject, FieldName.LossRange),
           code = ValidationErrorCode.INVALID_RANGE,
           message = s"minLoss ($min) must be less than maxLoss ($max)"
         )

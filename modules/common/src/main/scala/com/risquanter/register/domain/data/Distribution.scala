@@ -88,7 +88,7 @@ object Distribution {
             Validation.validateWith(elementV, monotonicPctCheck, monotonicQtCheck, termsCheck)((_, _, _, _) => ())
           case (Some(_), Some(q)) if q.isEmpty => Validation.fail(ValidationError(at(FieldName.Quantiles), ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires quantiles"))
           case (Some(pct), Some(q)) if pct.length != q.length =>
-            Validation.fail(ValidationError(at(FieldName.DistributionType), ValidationErrorCode.INVALID_COMBINATION, s"percentiles and quantiles length mismatch (${pct.length} vs ${q.length})"))
+            Validation.fail(ValidationError(at(FieldName.PercentileQuantilePairing), ValidationErrorCode.INVALID_COMBINATION, s"percentiles and quantiles length mismatch (${pct.length} vs ${q.length})"))
           case (None, _) => Validation.fail(ValidationError(at(FieldName.Percentiles), ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires percentiles"))
           case (_, None) => Validation.fail(ValidationError(at(FieldName.Quantiles), ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires quantiles"))
           case _ => Validation.fail(ValidationError(at(FieldName.DistributionType), ValidationErrorCode.INVALID_COMBINATION, "Expert mode requires percentiles and quantiles"))
@@ -97,7 +97,7 @@ object Distribution {
         (minV, maxV) match {
           case (Validation.Success(_, Some(minv)), Validation.Success(_, Some(maxv))) if minv < maxv => Validation.succeed(())
           case (Validation.Success(_, Some(_)), Validation.Success(_, Some(_))) =>
-            Validation.fail(ValidationError(at(FieldName.MinLoss), ValidationErrorCode.INVALID_LOGNORMAL_PARAMS, "minLoss must be < maxLoss"))
+            Validation.fail(ValidationError(at(FieldName.LossRange), ValidationErrorCode.INVALID_LOGNORMAL_PARAMS, "minLoss must be < maxLoss"))
           case _ => Validation.fail(ValidationError(at(FieldName.DistributionType), ValidationErrorCode.REQUIRED_FIELD, "Lognormal mode requires minLoss and maxLoss"))
         }
       case other => Validation.fail(ValidationError(at(FieldName.DistributionType), ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE, s"Unsupported distribution type: $other"))

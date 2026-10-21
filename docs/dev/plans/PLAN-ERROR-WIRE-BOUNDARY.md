@@ -2,19 +2,31 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Thirty-eight of the thirty-nine decisions, `EWB-D-1` to `EWB-D-38`,
-are ruled and recorded in §10. `EWB-D-39` is open and blocks Phase 3a alone.
-Approval is in place: the token names this document and the file inventory exists
-beside it. Phases 1, 1a, 1b, 2, 2b, 2c and 3 have landed, and `EWB-D-27`'s
+**Status.** All forty decisions, `EWB-D-1` to `EWB-D-40`, are ruled and recorded
+in §10. Nothing is open. Approval is in place: the token names this document and
+the file inventory exists beside it. Phases 1, 1a, 1b, 2, 2b, 2c and 3 have landed, and `EWB-D-27`'s
 projection change landed with them. What remains is Phase 3a, then Phase 3b, then
 Phases 4 to 7.
 
-Phase 3a and `EWB-P-3` were added on 2026-10-21. Phase 3 typed the location a
-refusal carries; Phase 3a makes that location arrive from one declaration per
-side instead of from each call site, and makes one total function decide where a
-refusal is displayed. §15 holds its design. It runs before Phase 3b because it
-reduces the number of `ValidationError` construction sites Phase 3b then has to
-convert.
+Phase 3a and `EWB-P-3` were added on 2026-10-21, and Phase 3a's scope was
+narrowed the same day. Phase 3 typed the location a refusal carries; Phase 3a
+makes that location arrive from one declaration on the browser side instead of
+from each browser call site, and makes one total function decide where a refusal
+is displayed. §15 holds its design.
+
+The narrowing: `Located[A]` is declared in `modules/app`, and the twenty-six
+refinements in `ValidationUtil` keep their `(value, location)` parameters. The
+shared module and the server are therefore untouched by this phase. Two facts
+decide it. The defect the design was asked to fix is a browser one — the request
+that opened the design names the form fields' `.now()` accessors, and `.now()`
+is a Laminar reader that exists in no module but `app`. And the location already
+crosses the wire, because `ValidationError` carries `location: ErrorLocation`
+with a derived codec, so nothing shared has to change for a server refusal to
+arrive at a location the browser can route.
+
+Phase 3a still runs before Phase 3b, because it routes the browser's refusals
+through one `reject` method and so collapses browser construction sites Phase 3b
+would otherwise convert one by one.
 
 `EWB-D-21`'s location was revised on 2026-10-15 and `EWB-D-25` was added the same
 day. Phase 2b is the phase both bear on, and both are implemented: the defect
@@ -155,17 +167,21 @@ the browser names the node it is editing, the server names the row it was
 iterating. What within the node failed is one vocabulary, `FieldName`, shared by
 both because the module is cross-compiled.
 
-**2. A value and the location a refusal about it names travel together.** From
-the point a value is read to the point it is refined, the two are one argument.
-No refinement takes a value and a location as two parameters, so no caller can
-pair the probability value with the name field.
+**2. A value and the location a refusal about it names travel together on the
+browser side.** From the point a form field is read to the point it is refined,
+the two are one value. The refinement itself keeps its two parameters, because
+the server derives its location by iterating a submitted collection and so has
+to supply it. What the browser hands over is the pair it already holds, so no
+browser caller can pair the probability value with the name field.
 
-**3. The field a value belongs to is named once per side, where the value is
-read.** The browser's located accessor and the server's request projection are
-the two places, and no refinement call site names a field at all. The naming
-itself is still a free assertion — nothing relates a `FieldName` case to the
-value beside it — so one behavioural test per field pins it, which is the
-project's own doctrine that an unenforced rule is not a rule.
+**3. The field a value belongs to is named once on the browser side, where the
+value is read.** The browser's located accessor is that place, and no browser
+refinement call site names a field. The server names it in its request
+projection, beside the subject it derives by iteration, which is one assertion
+per submitted field and is already what the code does. The naming is a free
+assertion on either side — nothing relates a `FieldName` case to the value
+beside it — so one behavioural test per field pins it, which is the project's
+own doctrine that an unenforced rule is not a rule.
 
 **4. A request carries values; a response carries locations.** The request body
 does not carry a location, because the server derives a better one than the
@@ -174,17 +190,22 @@ submitted batch. The response does carry one, because there the location is the
 server telling the browser where to display a refusal, and `ValidationError`
 already serialises it.
 
-**5. One mapping per form decides where a refusal is displayed, and it is
-explicit about every location.** The per-form display enum is the set of display
-targets the form owns, and it gains a case for the form's own line so that a
-refusal about a combination of inputs has a named target rather than falling
-through. No code path displays a refusal without passing through the mapping.
+**5. One mapping per form decides where a refusal is displayed, it is explicit
+about every location, and it may name more than one control.** The per-form
+display enum is the set of display targets the form owns, and it gains a case for
+the form's own line so that a refusal about a combination of inputs has a named
+target rather than falling through. The mapping is set-valued, because a
+constraint over a pair of inputs belongs under both of them — which is what the
+browser already does for the minimum-and-maximum rule at
+`RiskLeafFormState.scala:321-324`. No code path displays a refusal without
+passing through the mapping.
 
 **6. A refusal no view claims goes to the banner, and that is a decision rather
 than an absence.** The banner is not a target any form owns, so it is not a case
-of a form's enum; it is what remains when no view's mapping claims a location.
-The conflation it replaces is today's, where an absent result means both "no
-control for that location" and "nobody decided".
+of a form's enum; it is what remains when no view's mapping claims a location —
+the empty set rather than a fall-through. The conflation it replaces is today's,
+where an absent result means both "no control for that location" and "nobody
+decided".
 
 **7. Nothing is discarded, because nothing is routed.** Each control selects the
 refusals that belong to it from the refusals in force, and the banner selects
@@ -198,9 +219,11 @@ the browser's own check and from the server's check both reach that arm, because
 both stamp the same `FieldName` case. What is **not** delivered is a single
 declaration across both sides — the browser's probability is text on a 0–100
 scale in a `Var` and the server's is a `Double` on a 0–1 scale in a request
-field, so no one declaration can produce both located values. The reachable
-ceiling is one declaration per side, both referring to one shared rule, down
-from six independent assertions today.
+field, so no one declaration can produce both located values. Counted on the
+probability field, which has more call sites than any other: five of its six
+sites name `FieldName.Probability` today, and after this phase one browser
+declaration replaces the two browser sites while the three shared sites keep
+theirs. The sixth is a Tapir codec and names no field either way.
 
 ---
 
@@ -2268,22 +2291,28 @@ the render arm in `ErrorBanner.scala` and the assertion in
 keep their names and their renamed imports, for the reason §5.1 records.
 
 **Phase 3a — the located value and the single rooting.** `EWB-P-3`, designed in
-§15. One new type, `Located[A]`, in `ErrorLocation.scala`, carrying a value with
-the location a refusal about it names and a `map` that preserves the location
-through a transformation; the twenty-six refinements in `ValidationUtil` changed
-to take it; `Located.atCodec` and `Located.atConfig` replacing `codecLocation`
-and the three copies of `configLocation`; located accessors and the form's
-subject in both form states, with the leaf form's subject corrected on the edit
-path; a `FormLevel` case added to `RiskLeafField` and `PortfolioField` and every
-`case _ => None` arm of both mappings made explicit; the push inverted to a pull,
-which deletes `FormSubmitUtil.scala` together with `submitFieldErrors` and its
-three methods in `FormState.scala` and renames that trait's type parameter from
-`F` to `Field`; and `GlobalError.ValidationFailed` delivered into the open
-form's own state rather than flattened in `ErrorBanner`. Seventy-four refinement
-call sites across seventeen files,
-enumerated by the compiler once the signatures change, as §13 states. **Gated on
-`EWB-D-39`**, which decides where a cross-field rule's choice of field lives;
-nothing starts before it is ruled.
+§15. One new type, `Located[A]`, in its own file under `modules/app`, carrying a
+value with the location a refusal about it names, a `map` that preserves the
+location through a transformation, a `reject` that builds a refusal at it and a
+`refine` that hands the pair to a shared refinement; located accessors and the
+form's subject in both form states, with the leaf form's subject corrected on the
+edit path; a `FormLevel` case added to `RiskLeafField` and `PortfolioField` and
+every `case _ => None` arm of both mappings made explicit; the push inverted to a
+pull, which deletes `FormSubmitUtil.scala` together with `submitFieldErrors` and
+its three methods in `FormState.scala` and renames that trait's type parameter
+from `F` to `Field`; and `GlobalError.ValidationFailed` delivered into the open
+form's own state rather than flattened in `ErrorBanner`. Eleven refinement call
+sites in four files, all under `modules/app`, listed in §15.7. `ValidationUtil`'s
+twenty-six refinements keep their `(value, location)` parameters, and the call
+sites outside `modules/app` are unchanged.
+
+Three shared files are touched, all for `EWB-D-39`'s ruling and nothing else:
+`ErrorLocation.scala` gains the `FieldName` cases `LossRange` and
+`PercentileQuantilePairing`, `Distribution.scala` stamps them at lines 100 and 91
+in place of `MinLoss` and `DistributionType`, and `RiskNode.scala:324` stamps
+`LossRange` because it holds a second implementation of the same rule
+(`EWB-D-40`). Each form's display mapping is set-valued as a consequence, so one
+location can claim several controls.
 
 **Phase 3b — the refusal itself becomes a typed case.** `EWB-D-38`. `FieldProblem`
 replaces `ValidationError.message: String`, declared in `ErrorLocation.scala`
@@ -2293,9 +2322,9 @@ by `FieldProblem.code`; `ValidationMessages` becomes the single `render`
 function over the cases. 152 construction sites and 65 message templates, and a
 change to the wire shape of a validation error, so ADR-017 and ADR-038 are both
 re-reviewed for it. **Gated on Phase 3a being green**, because Phase 3a routes
-every refinement through a rule declaration and so removes construction sites
-this phase would otherwise convert, and because both phases rewrite the same
-argument list. No work on it starts before then.
+the browser's refusals through `Located.reject` and so collapses the browser's
+construction sites onto one method this phase then changes once, and because both
+phases rewrite the same argument list. No work on it starts before then.
 
 **Phase 4 — typed load problems and the rename.** `TreeLoadProblem` replacing
 `TreeLoadFailure.reason: String`; `SimError` renamed to `DomainError`.
@@ -4829,7 +4858,7 @@ done.
 
 ---
 
-### EWB-D-39 — where a cross-field rule's choice of field lives — OPEN
+### EWB-D-39 — where a cross-field rule's choice of field lives — RULED 2026-10-21
 
 **What has to be decided.** A rule over two fields produces one refusal and has
 to name one field for it. The minimum-and-maximum-loss rule does this today:
@@ -4896,14 +4925,161 @@ for it, so they reach the banner today through the `case _ => None` fallback.
 Under `EWB-P-3` statement 6 they need a destination named on purpose, and
 form-level is the likely one rather than the application banner.
 
-**My recommendation: Option A.** The condition it rests on is the count above —
-two arbitrary choices, so the presentation decision sitting in `modules/common`
-is two lines rather than a pattern. It also keeps the two sides unable to
-disagree, which is the property `EWB-P-3` exists for. If cross-field rules
-multiply, Option B becomes the better answer and the migration is one arm per
-rule.
+**Ruled: Option B.** The rule publishes the aspect that failed; the display
+layer resolves that aspect to one or more controls.
 
-**Decision needed:** A or B.
+**Why, from what each party knows.** A validation rule knows the logical subject
+of its own constraint. "The minimum must be below the maximum" is about the
+relationship between two numbers. It does not know that this form renders those
+numbers as two boxes, that another surface might render them as one range
+control, or that a batch import has no controls at all. The display layer knows
+all of that and nothing about the constraint. Option A asks the shared rule to
+answer a question it holds no information to answer: `Distribution.scala:100`
+names the minimum not because the minimum is the wrong value — the maximum may
+equally be the typo — but because one field had to be written there.
+
+**Option A is also not consistently applicable, which is what decided it.**
+Applied as a principle, "the rule names the field" would have single-field
+refinements name their own field too. They cannot:
+`ValidationUtil.refineOccurrenceProbability` is called with three different
+locations — a submitted row at `RiskTreeRequests.scala:171`, a form's draft node
+at `RiskLeafFormState.scala:135`, and `codecLocation` at
+`IronTapirCodecs.scala:275`, which names no field at all. For every single-field
+rule in this codebase the field is already declared by the reader of the value
+and not by the rule. Option B is the same cut applied to cross-field rules;
+Option A is a second, opposite cut for one class of rule.
+
+**What the current code already does, which Option A cannot express.** The
+browser renders the minimum-under-maximum message under **both** fields.
+`RiskLeafFormState.scala:321-324` attaches one raw cross-field check to each of
+the two controls through `crossFieldGated`, and `RiskLeafFormState.scala:339-348`
+merges each into that field's own error signal. While the user types, the gate
+pins the message to whichever field was edited last; after submit, `showAll`
+makes it appear under both at once. Under Option A the rule has already collapsed
+the pair to one field before the browser sees it, so there is nothing for the
+browser to render twice — Option A would regress this behaviour.
+
+**What Option B adds.** Two cases on `FieldName`, one per arbitrary choice this
+decision governs:
+
+```scala
+  /** The minimum and maximum loss as a pair, for a rule about their
+    * relationship rather than about either value. */
+  case LossRange
+
+  /** The percentiles and quantiles as paired sequences, for a rule about the
+    * pairing rather than about either sequence. */
+  case PercentileQuantilePairing
+```
+
+`Distribution.scala:100` stamps `LossRange` in place of `MinLoss`, and
+`Distribution.scala:91` stamps `PercentileQuantilePairing` in place of
+`DistributionType`. `FieldName` is serialised with a derived codec, so both cases
+are wire-visible additions; that cost was stated when the option was chosen.
+
+The other seven multi-field refusals in `Distribution.create` are unchanged. Each
+already names the field the rule is about — "Expert mode requires quantiles" names
+`Quantiles` because the quantiles are what is absent — so none of them has an
+arbitrary choice for this decision to relocate.
+
+**The consequence for the display mapping, ruled with it.** Each form's mapping
+becomes set-valued, so one location can claim several controls:
+
+```scala
+  private[views] def inputsFor(location: ErrorLocation): Set[RiskLeafField]
+```
+
+`LossRange` maps to `Set(MinLoss, MaxLoss)`, a single-field location maps to a
+one-element set, and a location this form does not render maps to the empty set.
+§15.5 and §15.5a hold the mechanism. Without this the planned design would show a
+pair constraint under one control and lose the behaviour the paragraph above
+describes.
+
+---
+
+### EWB-D-40 — the loss-distribution shape is declared three times — RULED 2026-10-21
+
+**How it surfaced.** Implementing `EWB-D-39` turned `RiskLeafSpec` red.
+`RiskLeaf.create` does not reach `Distribution.scala:100`, because the
+minimum-under-maximum rule is implemented twice and the leaf's own path runs the
+other copy at `RiskNode.scala:316-330`.
+
+**What the search then established.** Three types in
+`modules/common/.../domain/data/` declare the same six fields —
+`distributionType`, `percentiles`, `quantiles`, `minLoss`, `maxLoss`, `terms`:
+
+| Type | Declared at | Its rules live in |
+|---|---|---|
+| `Distribution` | `Distribution.scala:12-19` | `Distribution.create` |
+| `RiskLeaf`, as its shape half | `RiskNode.scala:88-94` | `RiskNode.validateLognormalMode`, `validateExpertMode`, `requireMinBelowMax`, `requireTermsWithinPercentiles` |
+| `OverrideDistributionParams` | `RiskLeafTransform.scala:60-66` | reuses `RiskNode.validateModeFields` |
+
+`RiskLeaf` was designed to hold the first of these rather than re-declare its
+fields. Both files say so: `RiskLeaf.fromValidated`'s comment reads "Use when
+domain types are already refined (e.g., from Distribution in buildNodes)", and
+`Distribution`'s own documentation opens "Validated loss distribution parameters
+used by RiskLeaf". Neither holds in the code — `RiskLeaf` has no `Distribution`
+field and no accessor returning one.
+
+**Why the rules duplicate rather than merely repeat.** Four of the six rules are
+statements that a particular `Option` is populated: expert requires percentiles,
+expert requires quantiles, lognormal requires both bounds, collections must not
+be empty. They exist only because the type admits combinations that are not
+valid. A fourth type in the same package already shows the shape that removes
+them — `DistributionParams` at `Provenance.scala:35-49`, a sealed trait whose two
+cases, `ExpertDistributionParams` and `LognormalDistributionParams`, each carry
+exactly their own fields with no `Option` anywhere. Under that shape those four
+rules cannot be written, because there is no absent field to check for. The two
+that survive — the minimum below the maximum, and percentiles matching quantiles
+in length — are each inside a single case, so one smart constructor per case
+holds them with no second type to duplicate them into.
+
+**Why `RiskLeaf` cannot simply absorb `Distribution`.** A validated shape has to
+exist with no leaf around it. `DistributionPreviewService.preview(dist:
+Distribution)` at `DistributionPreviewService.scala:17` takes a shape and nothing
+else, because the preview endpoint draws a curve before any leaf is created, and
+the browser's `DistributionChartState` and `DistributionSpecBuilder` have the
+same need. A `RiskLeaf` cannot be constructed at those sites without inventing an
+identifier and a name.
+
+**Ruled, in three parts.**
+
+1. **This phase stamps the third site and nothing more.**
+   `RiskNode.scala:324` reports `FieldName.LossRange` in place of
+   `FieldName.MinLoss`, so a minimum-under-maximum refusal carries one location
+   whichever path validated it. Its message and error code are untouched here.
+   This is an extension of §15.8 step 2 beyond the two sites that step names,
+   and the step records it.
+2. **Routing `RiskLeaf.create` through `Distribution.create` is not done.** It
+   would spend real work on a structure part 3 removes.
+3. **The shape change becomes its own plan.** It alters a persisted shape and the
+   leaf's wire representation, so it is a guarded modification and larger than
+   this plan's scope.
+
+**What the separate plan owes, and this is the part that is not derivable from
+the finding.** The user requires the replacement type to be derived rather than
+chosen, from the algebraic foundation already written for this subject area:
+`docs/scratch/MITIGATION-PORTFOLIO-CATEGORY-THEORY.md`. That document derives the
+mitigation and portfolio structures from the monoid and catamorphism laws, and
+its closing section records what it left unplaced. The derivation is to be
+extended to cover the distribution shape, and the plan built from it, with the
+emphasis on the **construction surface** — which factory and `create` methods
+exist, what each one guarantees on return, and which of them a caller can reach.
+
+The same second look covers every type the distribution-override perspective
+introduced, not only the three above: `OverrideDistributionParams` and
+`DistributionTransform` in `RiskLeafTransform.scala`, and `DistributionParams`
+with its two cases in `Provenance.scala`. These were added for the mitigation
+work — `validateModeFields` names its reason for existing as "the single entry
+point for callers outside the leaf's own raw-input constructor
+(`OverrideDistributionParams.create`)" at `RiskNode.scala:373-377` — so they are
+the set the derivation has to account for together.
+
+One item from that document bears on the method and is still open: its closing
+section records a standing directive the user proposed and that was never placed
+in `~/.claude/CLAUDE.md`, requiring every design assessment to name the algebraic
+structure in play and show the operation preserves its laws. Placing it is the
+user's, and the document carries the proposed wording.
 
 ---
 
@@ -4915,8 +5091,8 @@ rule.
 | ADR-035 (error leakage prevention) | the boundary, the encoders, the failure's own message member | **Compliant, and strengthened.** **Its naming amendment is made.** ADR-035 named the member as `getMessage` in its leakage-vector list, in its §3 heading, in §3's first sentence and in its ADR-036 cross-reference. `EWB-D-15` removes `extends Throwable`, so `AppError` has no `getMessage` and the member is `logMessage` (§6.1). All four now read `logMessage`, and §3's opening states why: the name carries the destination, and an `AppError` is plain data with no exception apparatus behind its text. The discipline the section states is unchanged and still binds. §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. **Phase 2b closes two paths that bypassed §2 entirely:** a defect reached the wire as `cause.squash.getMessage` in a plain-text body, and a request the codecs rejected reached it as Tapir's own plain-text `400`. After `EWB-D-21` and `EWB-D-23` every response this service sends is a declared output, which is what §2's exhaustive-encoding rule asks for. |
 | ADR-036 (confidential internal identifiers) | `TreeNotInWorkspace`, `WorkspaceExpired`, the log line | Compliant. No wire case declares a `WorkspaceId`, so the output half holds structurally rather than by discipline. The input half is untouched. §6.2's log annotation is explicitly permitted: a confidential identifier may appear in a server log. |
 | ADR-022 (secret handling) | the three workspace errors | Compliant and unchanged. None carries a credential, so R1's `final class` rule has nothing to be violated at the container. |
-| ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention, and in Phase 3a the refinement entry points | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. Phase 3a strengthens ADR-001's "smart constructors are the only valid construction path": making the two-argument refinements private to `ValidationUtil` means a refined value cannot be built without going through the one rule declared for its field, so the single entry point is enforced by visibility rather than by convention. No amendment is needed — the record already states the rule this makes true. |
-| ADR-019 (frontend component architecture) | `GlobalError`, `ErrorBanner`, and in Phase 3a the form states and the per-form mapping | Compliant, and Phase 3a closes a smell — **with one staleness in the record to rule on.** Decision 7's two tiers are unchanged, and Phase 3a's reading of them is what decides §15.5: a control and the form's own line are both the inline tier the owning view renders, so both are cases of the form's display enum, and the banner is the unowned tier, so it is not. Routing before rendering is what makes decision 7's "an error belongs to exactly one tier" true, because today a refusal about a field the open form owns is rendered in the banner by `ErrorBanner.scala:42-43` regardless — the mirror of the record's own "Duplicating a Per-View Error into the Global Banner" smell. The classifier's input type changes and a `NotFound` display case is added. **The staleness:** the record's "Validation via `.now()` on Submit" smell gives a GOOD example that calls `ValidationUtil.refineName(v)` with one argument. Phase 3 already made that two arguments and Phase 3a makes it one again, of a different type — `ValidationUtil.refineName(input: Located[String])` — so the example has been wrong since Phase 3 landed and Phase 3a moves it again. The record is an accepted ADR, so this plan does not edit it: the amendment is presented and waits. Separately, that smell's heading reads as banning a snapshot read on submit while its example is an imperative check; the located submit accessor of §15.4 reads a snapshot to compose a submission and performs no check, which is what `toDraft` already does at `RiskLeafFormState.scala:428-431`. Two further points of the record bear on §15.5a and both are satisfied: "Signals Down, Callbacks Up" forbids mutating a `Var` you do not own, which is what `routeErrors` does to the view's `submitError` and what the inversion removes; and the "Self-Correcting Reactive Var" smell is why the form's own derived checks are not written into `serverErrors` but combined with it at the point of reading. |
+| ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention, and in Phase 3a the browser's refinement entry points | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. Phase 3a strengthens ADR-001's "smart constructors are the only valid construction path" on the browser side: a form's live checks and its submission both read a located accessor, so the value a refinement sees was built where the field is declared rather than assembled at the call site. The refinements keep their `(value, location)` parameters and stay public, because the server supplies a location it derives by iterating a submitted collection, so on that side the entry point is enforced by convention exactly as it is today. No amendment is needed — the record already states the rule this makes true. |
+| ADR-019 (frontend component architecture) | `GlobalError`, `ErrorBanner`, and in Phase 3a the form states and the per-form mapping | Compliant, and Phase 3a closes a smell — **with one staleness in the record to rule on.** Decision 7's two tiers are unchanged, and Phase 3a's reading of them is what decides §15.5: a control and the form's own line are both the inline tier the owning view renders, so both are cases of the form's display enum, and the banner is the unowned tier, so it is not. Routing before rendering is what makes decision 7's "an error belongs to exactly one tier" true, because today a refusal about a field the open form owns is rendered in the banner by `ErrorBanner.scala:42-43` regardless — the mirror of the record's own "Duplicating a Per-View Error into the Global Banner" smell. The classifier's input type changes and a `NotFound` display case is added. **The staleness:** the record's "Validation via `.now()` on Submit" smell gives a GOOD example that calls `ValidationUtil.refineName(v)` with one argument. Phase 3 already made that two arguments, so the example has been wrong since Phase 3 landed; Phase 3a leaves that signature alone and so does not move it again. The record is an accepted ADR, so this plan does not edit it: the amendment is presented and waits. Separately, that smell's heading reads as banning a snapshot read on submit while its example is an imperative check; the located submit accessor of §15.4 reads a snapshot to compose a submission and performs no check, which is what `toDraft` already does at `RiskLeafFormState.scala:428-431`. Two further points of the record bear on §15.5a and both are satisfied: "Signals Down, Callbacks Up" forbids mutating a `Var` you do not own, which is what `routeErrors` does to the view's `submitError` and what the inversion removes; and the "Self-Correcting Reactive Var" smell is why the form's own derived checks are not written into `serverErrors` but combined with it at the point of reading. |
 | ADR-028 (vague quantifier query pane) | `QueryProblem` | Compliant. The engine's rendered messages still reach the pane. `FolModelValidationFailure` and `FolEvaluationFailure` stop reaching it, which matches the ADR's own description of them as wiring faults rather than query errors. |
 | ADR-039 (trust-boundary ingress validation) | the Irmin and Postgres borders, the ingress rejection type | **Currently violated, fixed in Phase 7.** The record states that a value entering process memory from outside is refined at the border and that an ingress rejection is a typed failure distinct from a transport fault. Today `handleIrmin` collapses seven typed Irmin cases into `RepositoryFailure(String)`, the repository's four stored-value decoders interpolate an accumulated `ValidationError` list into a sentence, and `WorkspaceStorePostgres` recovers a branch from that sentence with `reason.contains`. Phase 7 closes all three and records the one exemption the record requires, on the branch listing. No amendment to the record is needed: it was written against these findings. |
 | ADR-002 (observability) | the correlation identifier, the failure log line | **Currently violated, fixed here, and the record is amended.** A correlation identifier that never reaches a client cannot correlate anything; `EWB-D-8` decides the fix. The resolve-failure line annotated a redacted constant and so identified no workspace; `EWB-D-26` replaces it with one line per failed request, written where the trace is in scope, so every line carries the identifier the response carries. **The amendment:** the record's code-smell section demands differentiated log levels, which `EWB-D-26` satisfies by origin, but its one example put a validation failure at `logWarning`. That example now shows a caller-caused failure at `logInfo`. The section's decision is unchanged and binds more concretely than before. |
@@ -5102,33 +5278,36 @@ is listed.
 
 **Added by Phase 3a — the located value and the routing destination**
 
-Two paths the approved inventory does not yet carry. Both exist.
+Two paths the approved inventory does not yet carry. One exists; the other is
+created by this phase.
 
 - `modules/app/src/main/scala/app/state/FormState.scala`
-- `modules/server/src/main/scala/com/risquanter/register/configs/SimulationConfig.scala`
+- `new: modules/app/src/main/scala/app/state/Located.scala`
 
 `FormState.scala` is where the type parameter is renamed to `Field`, where
 `submitFieldErrors` and its three methods are deleted, and where the form's
 subject is declared, per §15.4 and §15.5a; it is the shared form infrastructure
 both form states extend, and the inventory carries both of those and not it.
-`FormSubmitUtil.scala` is deleted whole and is already listed. `SimulationConfig.scala` holds the one
-refinement call site among the configuration files that the inventory does not
-already name, and it is reached by step 3's `Located.atConfig` conversion.
+`Located.scala` is the new type's own file, in `app/state` beside the form states
+that are its only callers; it does not exist yet.
+`FormSubmitUtil.scala` is deleted whole and is already listed.
 
-Every other file Phase 3a edits is already named: `ErrorLocation.scala`,
-`ValidationUtil.scala`, `OpaqueTypes.scala`, `IronTapirCodecs.scala`,
-`RiskNode.scala`, `RiskTreeRequests.scala`, `Distribution.scala`,
-`Mitigation.scala`, `RiskLeafTransform.scala`, `ResultTransformSpec.scala`,
-`Provenance.scala`, `SpiceDbConfig.scala`, `IrminConfig.scala`,
-`TelemetryConfig.scala`, `Simulator.scala`, `WorkspaceTreeController.scala`,
+Every other file Phase 3a edits is already named. Under `modules/app`:
 `RiskLeafFormState.scala`, `PortfolioFormState.scala`, `TreeBuilderState.scala`,
 `ParentSelection.scala`, `RiskLeafFormView.scala`, `PortfolioFormView.scala`,
 `FormSubmitUtil.scala`, `FormInputs.scala`, `ErrorBanner.scala` and
-`GlobalError.scala`. `ValidationUtilSpec.scala` and
-`FormErrorRoutingSpec.scala` are reached by the standing authorization for a
-module's own tests, since both `common`'s and `app`'s `src/main` are listed.
-`FormErrorRoutingSpec` is the suite that already pins both forms' `inputFor`
-mappings, so it is where the total-mapping assertions go rather than a new file.
+`GlobalError.scala`. Under `modules/common`, for `EWB-D-39`'s ruling and nothing
+else: `ErrorLocation.scala` for the two new `FieldName` cases, and
+`Distribution.scala` for the two sites that stamp them.
+
+`RiskLeafFormStateSpec.scala` and `FormErrorRoutingSpec.scala` are reached by the
+standing authorization for a module's own tests, since `app`'s `src/main` is
+listed. `RiskLeafFormStateSpec` is where the per-field accessor assertions go,
+because the accessor under test is a member of `RiskLeafFormState`.
+`FormErrorRoutingSpec` is the suite that already pins both forms' mappings, so it
+is where the total-mapping assertions go rather than a new file. Any
+`commonJVM` suite that asserts on the two relocated `FieldName` cases is reached
+the same way, since `common`'s `src/main` is listed.
 
 ---
 
@@ -5249,22 +5428,25 @@ driver's `SQLState` reaching `classify`.
 In `WireErrorSpec`, `IngressRejected` projects to `InternalFault`, added to the
 existing exhaustive case-to-wire assertion rather than as a separate test.
 
-**Phase 3a, the located value.** The compiler produces the migration list, as in
-Phase 1 and for the same reason. Changing the twenty-six refinements in
-`ValidationUtil` to take `Located[A]` turns every caller into a type error naming
-its own site, so step 2 of §15.8 starts by compiling and reading the list. No
-site is found by grep and none is assembled by hand.
+**Phase 3a, the located value.** The scope is enumerated rather than discovered,
+because no shared signature changes: eleven refinement call sites in four files,
+all under `modules/app`, listed in §15.7 and counted on 2026-10-21. The compiler
+produces no migration list for this phase, unlike Phase 1 — a browser file that
+still reads a raw `Var` where a located accessor is expected is a type error, but
+nothing outside `modules/app` is touched at all.
 
 Four properties, each pinning one thing the design claims.
 
-**One behavioural test per field, in `ValidationUtilSpec`.** For each located
-accessor, refine a value the field must reject and assert the resulting
-`ValidationError.location` equals `ErrorLocation.Field(subject, <the expected
-field>)` for a subject supplied by the test. This is the only thing that catches
-a wrong field name in an accessor, because nothing relates a `FieldName` case to
-the value beside it. Asserting the accessor's own `FieldName` against itself
-would prove nothing and is not the test; the assertion runs a real refusal
-through the same path production uses.
+**One behavioural test per field, in `RiskLeafFormStateSpec` and the portfolio
+form's own spec.** For each located accessor, refine a value the field must
+reject and assert the resulting `ValidationError.location` equals
+`ErrorLocation.Field(subject, <the expected field>)` for a subject the test sets
+on `subjectVar`. The spec lives in the app module because the accessor under test
+is a member of a form state. This is the only thing that catches a wrong field
+name in an accessor, because nothing relates a `FieldName` case to the value
+beside it. Asserting the accessor's own `FieldName` against itself would prove
+nothing and is not the test; the assertion runs a real refusal through the same
+path production uses.
 
 **The location survives the transformation.** `Located.map` preserves the
 location: a probability read as text, parsed and rescaled, and then refused,
@@ -5279,10 +5461,19 @@ produces two `ValidationError`s whose locations differ only in their subject and
 name the same `FieldName`. That is `EWB-P-3` statement 1 as an assertion, and it
 fails if either side's accessor moves without the other.
 
+**A pair constraint reaches both of its controls.** `inputsFor` yields
+`Set(MinLoss, MaxLoss)` for `FieldName.LossRange` and
+`Set(Percentiles, Quantiles)` for `FieldName.PercentileQuantilePairing`, and
+`errorsFor` therefore returns the same refusal for both members of each pair.
+This pins the behaviour the browser has today at
+`RiskLeafFormState.scala:321-324`, now for a server refusal as well as for the
+form's own check, and it is the assertion that fails if the mapping is narrowed
+back to a single destination.
+
 **Every location has a named destination and nothing is discarded.** For every
 `FieldName` case and both non-field `ErrorLocation` cases, each form's mapping
-yields either a case of that form's display enum or the absent result, and no
-arm reaches the absent result by falling through a wildcard. Separately, over
+yields a set of that form's display enum, possibly empty, and no arm reaches the
+empty set by falling through a wildcard. Separately, over
 `errorsFor` and `unclaimed`: a refusal carrying three errors that all belong to
 the form's own line yields three, two errors naming the same field yield two,
 and the three together partition — every error is in exactly one reader's
@@ -5369,21 +5560,37 @@ workspace responses. `ErrorDetail` is deleted and nothing reads a domain tag.
 `EWB-P-3` states the seven properties this section delivers. What follows is the
 mechanism, the exact signatures, the measured scope, and the steps in order.
 
+**The scope is `modules/app` only.** `Located[A]` is declared there, and the
+twenty-six refinements in `ValidationUtil` keep their `(value, location)`
+parameters. The status paragraph at the top of this document states the two facts
+that decide it. The consequence for this section: §15.1's first defect is
+narrowed rather than closed, and the rest are closed in full.
+
 ### 15.1 What is wrong today, in one place
 
 Phase 3 landed a typed location and left its supply at the call site. Three
 consequences, each verifiable in the code as it stands.
 
-**The pairing of a field to a rule is asserted six times for one field.**
+**The pairing of a field to a rule is asserted at every call site.**
 `ValidationUtil.refineOccurrenceProbability` is called from six production sites
-across five files. Four of them write `FieldName.Probability` by hand —
-`RiskNode.scala:178`, `RiskTreeRequests.scala:171`, `RiskTreeRequests.scala:215`
-and, through the `at` helper, `RiskLeafFormState.scala:135` and
-`RiskLeafFormState.scala:441`. The sixth, `IronTapirCodecs.scala:275`, passes
-`codecLocation` instead, which is correct for a codec and is the reason a single
-rule cannot simply hard-code one location. Nothing relates the function to the
-field name, so any of those six could name any of `FieldName`'s forty-eight
-cases and compile.
+across five files, counted on 2026-10-21. Five of them write
+`FieldName.Probability` by hand — `RiskNode.scala:178`,
+`RiskTreeRequests.scala:171`, `RiskTreeRequests.scala:215` and, through the `at`
+helper, `RiskLeafFormState.scala:135` and `RiskLeafFormState.scala:441`. The
+sixth, `IronTapirCodecs.scala:275`, passes `codecLocation` instead, which is
+correct for a codec and is the reason a single rule cannot hard-code one
+location. Nothing relates the function to the field name, so any of those six
+could name any of `FieldName`'s forty-eight cases and compile.
+
+**What this phase does about it, and what it leaves.** The two browser sites
+collapse into one declaration in the form state's located accessor, so the
+browser names the field once. The three shared sites keep naming it, because the
+server's location is derived by iterating a submitted collection —
+`RiskTreeRequests.scala:166` builds
+`ErrorSubject.nodeAtIndex(collection, idx)` from the loop variable — so there is
+no earlier point at which the pair could have been formed. Narrowing a defect
+rather than closing it is stated here so that the phase is not read as having
+removed it.
 
 **The browser roots the same field twice, by two unrelated mechanisms.** The
 live check computes a location and discards it:
@@ -5422,8 +5629,10 @@ location.
 
 ### 15.2 `Located[A]` — the value and its location as one thing
 
-Declared in `ErrorLocation.scala`, beside the other closed sets a
-`ValidationError` is made of, which is where `EWB-D-38` also puts `FieldProblem`.
+Declared in `modules/app/src/main/scala/app/state/Located.scala`, beside the form
+states that are its only callers. It is not in the shared module, because nothing
+in the shared module reads one: the server's refinements keep their two
+parameters and the server never holds a located value.
 
 `ErrorLocation` is an address: `Field(DraftNode, Probability)` names the
 probability field of the node being edited. `Located[A]` is a value bound to
@@ -5455,20 +5664,30 @@ specialised transform is written.
 case class Located[+A](value: A, location: ErrorLocation):
   def map[B](f: A => B): Located[B] = Located(f(value), location)
 
+  /** `map`'s constant form, for the step where the replacement value is already
+    * in hand — a parse result, for instance, which was computed to decide
+    * whether the step failed at all. */
+  def as[B](b: B): Located[B] = Located(b, location)
+
   /** A refusal about this value, at its own location. The location is not a
     * parameter, so a refusal about a located value cannot name a different
     * place than the value came from. */
   def reject(code: ValidationErrorCode, message: String): ValidationError =
     ValidationError(location, code, message)
 
-object Located:
-  /** A value a Tapir codec is decoding. A codec cannot name the input it
-    * decodes — Tapir reports that from the endpoint definition — so the
-    * location is the request as a whole. */
-  def atCodec[A](value: A): Located[A] = Located(value, ErrorLocation.Whole)
-
-  /** A configuration value, which no request and no control is behind. */
-  def atConfig[A](value: A): Located[A] = Located(value, ErrorLocation.Whole)
+  /** Hand the pair to a refinement that takes a value and a location
+    * separately, which is every method in `ValidationUtil`. The two arguments
+    * come from one value, so a caller cannot pass one field's location beside
+    * another field's value.
+    *
+    * {{{
+    * probabilityLocated.map(pctToDomain)
+    *   .refine(ValidationUtil.refineOccurrenceProbability)
+    * }}}
+    */
+  def refine[B](
+    rule: (A, ErrorLocation) => Either[List[ValidationError], B]
+  ): Either[List[ValidationError], B] = rule(value, location)
 ```
 
 `reject` is what the browser's parse failures need. Today they produce a bare
@@ -5478,35 +5697,48 @@ string with no location at all — `RiskLeafFormState.scala:131-132` yields
 `ValidationError` and neither of which can be routed. Through `reject` they
 become refusals at the field the value came from.
 
-`atCodec` and `atConfig` replace four existing constants that say the same thing
-in four places: `codecLocation` in `IronTapirCodecs.scala:47`, and
+`refine` is what keeps the shared refinements unchanged while still removing the
+browser's second naming. The eleven browser call sites pass one value through it
+instead of writing a location argument, and `ValidationUtil`'s signatures are
+untouched.
+
+There is no `atCodec` and no `atConfig`. Both were there to convert the shared
+module's codec and configuration call sites, which this phase no longer touches,
+so `codecLocation` in `IronTapirCodecs.scala:47` and the three copies of
 `configLocation` in `SpiceDbConfig.scala:97`, `IrminConfig.scala:39` and
-`TelemetryConfig.scala:61`.
+`TelemetryConfig.scala:61` stay as they are. That duplication is real and is left
+standing: it is four constants naming `ErrorLocation.Whole`, it is not a
+browser-side defect, and collapsing it is a separate change with its own scope.
 
-### 15.3 The refinements take the pair
+### 15.3 The refinements are unchanged, and why
 
-No new type holds the rule. Each refinement in `ValidationUtil` changes its two
-parameters for one:
+Each refinement in `ValidationUtil` keeps the signature Phase 3 gave it:
 
 ```scala
-  def refineOccurrenceProbability(input: Located[Double]): Either[List[ValidationError], OccurrenceProbability]
+  def refineOccurrenceProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], OccurrenceProbability]
 
-  def refineName(input: Located[String]): Either[List[ValidationError], SafeName.SafeName]
+  def refineName(value: String, location: ErrorLocation): Either[List[ValidationError], SafeName.SafeName]
 ```
 
-The body is otherwise unchanged: where it reads `location` today it reads
-`input.location`, and where it reads `value` it reads `input.value`. There are
-twenty-six such methods in `ValidationUtil`.
+**Why not `Located[A]` here.** The location would have to be formed before the
+refinement is called, and on the server there is no earlier point at which it
+exists: `refineLeafDefs` derives the subject from its loop variable at
+`RiskTreeRequests.scala:166`, so a `Located` would be constructed at the same
+call site that writes the location today. The type would move the construction,
+not remove it, and it would cost the signature change at every call site outside
+the browser to do so. The browser is different because it has a field accessor
+that owns both components already, which is what makes one declaration possible
+there and nowhere else.
 
-**What this closes.** The location stops being a parameter a caller supplies, so
-the six sites §15.1 lists stop naming a field. The site that could pair a
-probability with the name field is gone, because the call takes one argument and
-that argument was built where the value was read.
+**What the browser closes.** No browser call site names a field. The site that
+could pair a probability value with the name field is gone, because the pair is
+formed in the accessor and handed over whole through `refine`.
 
 **What it does not close.** The accessor that builds the pair still names the
-field, and that naming is a free assertion — it is the one declaration per side
-that `EWB-P-3` statement 3 describes, and it is pinned by a test per field
-rather than by the compiler, per §13.
+field, and that naming is a free assertion — it is the one declaration that
+`EWB-P-3` statement 3 describes, and it is pinned by a test per field rather than
+by the compiler, per §13. The three shared sites keep their own assertion, per
+§15.1.
 
 No separate rule type is introduced. A type holding a `FieldName` beside a
 refinement adds a layer with nothing behind it: the pairing it would declare is
@@ -5551,10 +5783,16 @@ The live check then reads:
       else this.parseDouble(input.value) match
         case None => Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.probabilityNotANumber))
         case Some(pct) =>
-          ValidationUtil.refineOccurrenceProbability(input.map(_ => RiskLeafFormState.pctToDomain(pct)))
+          input.as(RiskLeafFormState.pctToDomain(pct))
+            .refine(ValidationUtil.refineOccurrenceProbability)
             .fold(errors => Some(errors.head), _ => None)
     }
 ```
+
+`as` is `map`'s constant form, for the step where the new value is already in
+hand: `def as[B](b: B): Located[B] = Located(b, location)`. It is on `Located`
+beside `map` for the same reason `map` is — the location is carried rather than
+rebuilt.
 
 The signal's type changes from `Signal[Option[String]]` to
 `Signal[Option[ValidationError]]`, which is the change that lets the live
@@ -5593,37 +5831,54 @@ accessor and not for the submit one.
 
 It is set at the call sites that open or clear the form, which is how
 `parentVar` is already handled — `RiskLeafFormState.scala:41-46` records that it
-is "not reset by `resetFields`" and is set explicitly by the view instead.
+is "not reset by `resetFields`" and is set explicitly by the view instead. A new
+leaf sets `ErrorSubject.DraftNode` and an edit of an existing leaf sets
+`ErrorSubject.ExistingNode(nodeId)`.
 
-Today the form hard-codes `DraftNode` at
-`RiskLeafFormState.scala:116-117` with a comment stating that every refusal it
-produces is about a node with no identifier yet, which is false on the edit
-path. That is invisible today because `inputFor` discards the subject; it becomes
-a defect the moment the subject is read, so Phase 3a corrects it and the comment
-with it.
-
-`FormState` gains the subject, because a form's refusals are all about one node:
+**`FormState` declares the `Var`, not a signal.** Every form has a subject, so
+the member belongs on the trait:
 
 ```scala
   /** The node this form's refusals are about. */
-  def subject: Signal[ErrorSubject]
+  def subjectVar: Var[ErrorSubject]
 ```
 
-`RiskLeafFormState` implements it from the active form mode: a new leaf is
-`ErrorSubject.DraftNode`, and an edit of an existing leaf is
-`ErrorSubject.ExistingNode(nodeId)`. Today the form hard-codes `DraftNode` at
-`RiskLeafFormState.scala:116-117` with a comment stating that every refusal it
-produces is about a node with no identifier yet, which is false on the edit
-path. That is invisible today because `inputFor` discards the subject; it becomes
-a defect the moment the subject is read, so Phase 3a corrects it and the comment
-with it.
+The declared type is the `Var` rather than `Signal[ErrorSubject]`, because the
+submit accessor reads a snapshot and `.now()` is not available on a plain
+`Signal`. A trait member typed as a signal would compile and then force each form
+state to hold a second, `Var`-typed copy for the submit read, which is the two
+sources of truth this phase exists to remove.
 
-### 15.5 The mapping keeps its shape; the display enums gain one case
+Today the form hard-codes `DraftNode` at `RiskLeafFormState.scala:116-117` with a
+comment stating that every refusal it produces is about a node with no identifier
+yet, which is false on the edit path. That is invisible today because `inputFor`
+discards the subject; it becomes a defect the moment the subject is read, so
+Phase 3a corrects it and the comment with it.
 
-No destination type is introduced, and the mapping stays
-`ErrorLocation => Option[RiskLeafField]` in the leaf form and
-`ErrorLocation => Option[PortfolioField]` in the portfolio form. What changes is
-what `None` means.
+### 15.5 The mapping becomes set-valued; the display enums gain one case
+
+No destination type is introduced. The mapping keeps its direction — a shared
+location in, this form's own display targets out — and changes its result from at
+most one target to a set of them:
+
+```scala
+  private[views] def inputsFor(location: ErrorLocation): Set[RiskLeafField]
+  private[views] def inputsFor(location: ErrorLocation): Set[PortfolioField]
+```
+
+**Why a set rather than an `Option`.** A constraint over a pair of inputs belongs
+under both of them, and the browser already renders it that way.
+`RiskLeafFormState.scala:321-324` attaches one minimum-under-maximum check to the
+minimum control and to the maximum control, and
+`RiskLeafFormState.scala:339-348` merges each into that field's own error signal.
+An `Option` result would pick one of the two and lose the other, so the design
+would regress behaviour the product has today. `EWB-D-39` rules the location of
+such a refusal to be the pair itself — `FieldName.LossRange` — and this is the
+half of that ruling that lives in the browser: `LossRange` maps to
+`Set(MinLoss, MaxLoss)`.
+
+The empty set replaces `None`, and the rest of this section is about what it
+means.
 
 **The type parameter gets a name.** `trait FormState[F]` at `FormState.scala:21`
 is generic over the form's own field enum, and the single letter says nothing
@@ -5636,13 +5891,17 @@ has no control for that location", and "nobody decided where this goes". Five of
 the nine multi-field refusals in `Distribution.create` name
 `FieldName.DistributionType`, which `inputFor` has no arm for, so they reach the
 banner through `case _ => None` rather than by a decision anyone made.
+`EWB-D-39` removes one of those five — the length mismatch at
+`Distribution.scala:91` now names `PercentileQuantilePairing` and maps to
+`Set(Percentiles, Quantiles)` — and leaves four that are genuinely about the
+chosen distribution type rather than about any input.
 
 **What removes the conflation.** The per-form display enum is the set of display
 targets the form owns, onto which several conceptual locations collapse — that is
 why it exists and is not replaceable by `FieldName`, as §15.6 states. A form's
 own line is such a target: it is a place inside the form where a message renders,
-and the five `DistributionType` refusals all belong on it. So each per-form enum
-gains one case for it:
+and the four remaining `DistributionType` refusals all belong on it. So each
+per-form enum gains one case for it:
 
 ```scala
 enum RiskLeafField:
@@ -5659,17 +5918,17 @@ enum PortfolioField:
 
 The banner is not such a target. Nothing the form renders is the banner —
 `ErrorBanner` renders above the layout, and ADR-019 decision 7 reserves it for
-"failures no view owns". So the banner is not a case of a form's enum, and
-`None` is left meaning one thing that is true and complete: **no display target
-of this form.** The banner is where that goes, which is what decision 7 already
-says it is for. Every `case _ => None` arm in both mappings becomes an explicit
-arm, and what remains in `None` is there by decision.
+"failures no view owns". So the banner is not a case of a form's enum, and the
+empty set is left meaning one thing that is true and complete: **no display
+target of this form.** The banner is where that goes, which is what decision 7
+already says it is for. Every `case _ => None` arm in both mappings becomes an
+explicit arm returning a named set, and what remains empty is empty by decision.
 
-What `None` does **not** mean is "the banner". It means no target of *this*
-form, and which surface then renders the refusal depends on which view issued
-the request. `TreeBuilderView` owns the tree submit and renders its failure on
-its own line at `TreeBuilderView.scala:165`; the banner takes what no view
-claims, which is decision 7's rule rather than a new one.
+What the empty set does **not** mean is "the banner". It means no target of
+*this* form, and which surface then renders the refusal depends on which view
+issued the request. `TreeBuilderView` owns the tree submit and renders its
+failure on its own line at `TreeBuilderView.scala:165`; the banner takes what no
+view claims, which is decision 7's rule rather than a new one.
 
 ### 15.5a Each control selects its own refusals; nothing is routed into it
 
@@ -5721,22 +5980,30 @@ each reader selects its own:
   private val serverErrors: Var[List[ValidationError]] = Var(Nil)
 
   /** Every refusal for one input: this form's own check first, then the
-    * server's for the same input. */
+    * server's for the same input. A refusal whose location names several
+    * controls is selected by each of them, which is how a constraint over a
+    * pair of inputs appears under both. */
   def errorsFor(field: RiskLeafField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]] =
     live.combineWith(serverErrors.signal).map { (own, fromServer) =>
-      own.toList ++ fromServer.filter(e => inputFor(e.location).contains(field))
+      own.toList ++ fromServer.filter(e => inputsFor(e.location).contains(field))
     }
 
   /** The server's refusals no input of this form claimed. */
   def unclaimed: Signal[List[ValidationError]] =
-    serverErrors.signal.map(_.filter(e => inputFor(e.location).isEmpty))
+    serverErrors.signal.map(_.filter(e => inputsFor(e.location).isEmpty))
 ```
 
-`inputFor` is consulted in those two methods and nowhere else, which is what
+`inputsFor` is consulted in those two methods and nowhere else, which is what
 makes the mapping central: a control passes its own display key, and the
 translation from the shared vocabulary happens inside `errorsFor`. `unclaimed`
 is only expressible this way — asking whether any input claimed a location needs
 the whole mapping in one place.
+
+The two call shapes are unchanged by the set-valued result: `contains` tests
+membership of a set as readily as of an `Option`, and `isEmpty` is true of the
+empty set as it was of `None`. What changes is that `contains` can now be true
+for two different `field` arguments on the same refusal, which is the behaviour
+`EWB-D-39` preserves.
 
 **What this deletes.** `FormSubmitUtil.scala` holds one object with one method,
 so the file goes with `routeErrors`. `submitFieldErrors`, `setSubmitFieldError`,
@@ -5771,6 +6038,12 @@ both `FieldName.Percentiles` and `FieldName.PercentileAt(index)` to
 comma-separated input. `FieldName` cannot express that collapse; the per-form
 enum is where it lives.
 
+The relation runs the other way as well, which is why §15.5's mapping is
+set-valued. One location can stand for several controls: `FieldName.LossRange`
+names a constraint over the pair, and the form renders it under the minimum and
+the maximum both. So the mapping is many-to-many, and neither vocabulary can be
+derived from the other.
+
 And `FieldName` has forty-eight cases while the leaf form renders eight.
 `FormState[F]` keyed on the form's own enum is what stops `markTouched` being
 handed a field the form has no control for.
@@ -5781,57 +6054,69 @@ the line becomes a case and the banner stays outside. The enum is modified
 rather than a third concept being introduced, and the argument for that is the
 enum's own definition rather than a preference for fewer types.
 
-What the per-form enum does **not** do is decide that a minimum-over-maximum
-refusal is reported on the maximum. That is the `FieldName` the rule stamps —
-`FieldName.MinLoss` at `Distribution.scala:100` today — and the mapping only
-follows it. Which of the two places that choice belongs in is `EWB-D-39`.
+What the per-form enum does **not** do is decide what a refusal is *about*. That
+is the `FieldName` the rule stamps, and `EWB-D-39` rules what a cross-field rule
+stamps: the aspect, not a winner. `Distribution.scala:100` stamps
+`FieldName.LossRange` rather than `MinLoss`, and the mapping decides that the
+aspect renders under two controls. The two vocabularies answer two questions —
+what failed, and where it shows — and this is the division that makes both
+answerable by the party that holds the information.
 
 ### 15.7 The measured scope
 
-`ValidationUtil`'s refinements are called from seventy-four sites in seventeen
-files under `src/main`, counted on 2026-10-21:
+This phase's scope is the browser's refinement call sites: **eleven sites in four
+files**, all under `modules/app/src/main`, counted on 2026-10-21.
 
 | Sites | File |
 |---|---|
-| 12 | `domain/data/iron/OpaqueTypes.scala` |
-| 10 | `http/codecs/IronTapirCodecs.scala` |
-| 10 | `domain/data/RiskNode.scala` |
-| 7 | `http/requests/RiskTreeRequests.scala` |
-| 6 | `domain/data/RiskLeafTransform.scala` |
-| 6 | `domain/data/ResultTransformSpec.scala` |
 | 6 | `app/state/RiskLeafFormState.scala` |
-| 4 | `domain/data/Distribution.scala` |
-| 3 | `domain/data/Provenance.scala` |
-| 2 | `configs/SpiceDbConfig.scala` |
 | 2 | `app/state/TreeBuilderState.scala` |
 | 2 | `app/state/PortfolioFormState.scala` |
-| 1 each | `services/helper/Simulator.scala`, `http/controllers/WorkspaceTreeController.scala`, `domain/data/Mitigation.scala`, `configs/SimulationConfig.scala`, `app/state/ParentSelection.scala` |
+| 1 | `app/state/ParentSelection.scala` |
 
-Not all seventy-four are field refusals. The codec sites take `atCodec`, the
-four configuration sites take `atConfig`, and `OpaqueTypes.scala`'s twelve are
-inside smart constructors that receive a location from their own caller. The
-compiler enumerates the list once the two-argument forms are private, so §13
-produces it rather than this table being maintained by hand.
+Each one changes from passing a value and a location to handing over a located
+value through `refine`.
+
+**What is out of scope, and its size.** `ValidationUtil`'s refinements are called
+from seventy-five sites in seventeen files under `src/main` in total, so
+sixty-four sites outside `modules/app` are untouched. The largest groups are
+`domain/data/iron/OpaqueTypes.scala` with twelve, `http/codecs/IronTapirCodecs.scala`
+and `domain/data/RiskNode.scala` with ten each, and
+`http/requests/RiskTreeRequests.scala` with seven. They are listed here so the
+narrowing is visible as a number rather than inferred: this phase leaves six
+sevenths of the refinement call sites exactly as they are.
 
 ### 15.8 The steps, in order
 
-Each step ends with all four tiers green.
+Each step ends with all four tiers green. Step 2 is the only one that reaches
+outside `modules/app`.
 
-1. **`Located[A]` with `map`, `reject`, `atCodec` and `atConfig`** in
-   `ErrorLocation.scala`, with no caller yet. Nothing compiles differently. The
-   step exists on its own so one type is reviewable before seventy-four sites
-   move.
-2. **Change the twenty-six refinements in `ValidationUtil` to take
-   `Located[A]`.** The compiler then names every caller, and that list is the
-   migration list — nothing is found by grep. Convert them, including the ten
-   codec sites to `atCodec` and the four configuration sites to `atConfig`,
-   which deletes the four duplicated location constants.
+1. **`Located[A]` with `map`, `as`, `reject` and `refine`** in the new
+   `app/state/Located.scala`, with no caller yet. Nothing compiles differently.
+   The step exists on its own so one type is reviewable before any call site
+   moves.
+2. **`EWB-D-39`'s two `FieldName` cases.** `LossRange` and
+   `PercentileQuantilePairing` added in `ErrorLocation.scala`, and
+   `Distribution.scala` stamping them at lines 100 and 91 in place of `MinLoss`
+   and `DistributionType`. A third site stamps `LossRange` as well —
+   `RiskNode.scala:324`, which is the second implementation of the
+   minimum-under-maximum rule and the path `RiskLeaf.create` takes; `EWB-D-40`
+   records why it exists and rules that this step stamps it rather than
+   collapsing it. Nothing in the browser reads either case yet, so the only
+   visible change is which case those refusals carry; `inputFor` has no arm for
+   either, so both reach the banner until step 4 — the same place the length
+   mismatch reaches today.
 3. **The form's subject and the located accessors** in both form states,
-   including the edit-path subject correction of §15.4. The live checks move to
-   `Signal[Option[ValidationError]]` and stop discarding their location.
-4. **`FormLevel` added to both display enums, and both mappings made explicit.**
-   Every `case _ => None` arm is replaced by named arms. `FormState`'s type
-   parameter is renamed from `F` to `Field` in the same pass.
+   including the edit-path subject correction of §15.4, and `subjectVar` declared
+   on `FormState`. The eleven call sites of §15.7 move to `refine`. The live
+   checks move to `Signal[Option[ValidationError]]` and stop discarding their
+   location.
+4. **The mapping becomes set-valued, `FormLevel` is added to both display enums,
+   and both mappings are made explicit.** `inputFor` becomes `inputsFor` with a
+   `Set` result; `LossRange` maps to `Set(MinLoss, MaxLoss)` and
+   `PercentileQuantilePairing` to `Set(Percentiles, Quantiles)`; every
+   `case _ => None` arm is replaced by a named arm returning a named set.
+   `FormState`'s type parameter is renamed from `F` to `Field` in the same pass.
 5. **The push inverted to a pull.** `serverErrors`, `errorsFor` and `unclaimed`
    in both form states; `FormSubmitUtil.scala` deleted; `submitFieldErrors`,
    `setSubmitFieldError`, `clearSubmitFieldError` and `withSubmitErrors` deleted
@@ -5840,7 +6125,15 @@ Each step ends with all four tiers green.
    into the open form's `serverErrors`, and `ErrorBanner` renders `unclaimed` as
    a list.
 
-Steps 1 and 2 are the shared module and do not touch the browser. Steps 3 to 5
-are the browser and do not touch the shared module. The split is deliberate:
-step 2 is where the scope is large and the compiler is doing the enumeration,
-and it is verifiable on its own before any display behaviour changes.
+Steps 1 and 2 each add something nothing reads yet, so each is reviewable alone.
+Steps 3 to 5 are sequential because each depends on the one before: the accessors
+need the type, the mapping change needs the located refusals to route, and the
+inversion needs the mapping to be total.
+
+The browser's own cross-field checks at `RiskLeafFormState.scala:227-348` are not
+rewritten by this phase. They already produce one message rendered under both
+controls, which is the behaviour `EWB-D-39` and step 4 make expressible for a
+server refusal as well. Their raw signals become
+`Signal[Option[ValidationError]]` in step 3 like every other check, stamped at
+`LossRange` and `PercentileQuantilePairing` so that the browser's own refusal and
+the server's carry the same location.

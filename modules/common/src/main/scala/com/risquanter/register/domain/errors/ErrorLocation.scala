@@ -79,6 +79,12 @@ object ErrorSubject:
   * `QuantileAt` carry the element index as a number rather than as `[3]` inside
   * text; their index-less siblings are the whole-collection failures, since a
   * monotonicity violation names the collection and not an element.
+  *
+  * A case names what a refusal is about, which is not always a single field. A
+  * rule over two fields is about the pair — `LossRange` and
+  * `PercentileQuantilePairing` are those cases — because neither field is at
+  * fault alone and either one can be edited to satisfy the rule. Which controls
+  * display such a refusal is decided where the display is, not here.
   */
 @jsonDiscriminator("kind")
 enum FieldName:
@@ -99,6 +105,18 @@ enum FieldName:
   case PercentileAt(index: NonNegativeInt)
   case QuantileAt(index: NonNegativeInt)
   case ChildAt(index: NonNegativeInt)
+
+  /** The minimum and maximum loss as a pair, for a rule about the relationship
+    * between them rather than about either value. Neither field is at fault on
+    * its own when the minimum is not below the maximum, and either one can be
+    * edited to satisfy the rule, so the pair is what the refusal is about. */
+  case LossRange
+
+  /** The percentiles and quantiles as paired sequences, for a rule about the
+    * pairing rather than about either sequence. A length mismatch leaves some
+    * percentile without a quantile, and either sequence can be edited to
+    * satisfy the rule. */
+  case PercentileQuantilePairing
 
   // Mitigations and the transform parameters a mitigation spec carries
   case Mitigations, Cap, Factor, OverrideParams, TargetingSource

@@ -221,3 +221,5 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/http/RequestBodyLimitItSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala
+- modules/app/src/main/scala/app/state/FormState.scala
+- modules/app/src/main/scala/app/state/Located.scala
