@@ -68,18 +68,20 @@ buys a full rebuild for nothing. Clean the module the error names, which is not
 always the one being compiled: a `serverIt` or `app` compile fails this way on
 `commonJVM` or `commonJS` state, because those are what it depends on.
 
-Observed four times on 2026-10-20 while deriving schemas in `common`, on both
-platforms, and cleared every time by the corresponding line above.
+It occurs while deriving schemas in `common`, on both platforms, and a clean
+compile of the module the error names clears it.
 
 ### A warning category is enforced by the compiler or it is not a rule
 
-The project required zero warnings in two places — a phase-completion list and
-the code-quality-review skill's compiler-hygiene section — and a measurement on 2026-10-07 found 197 unused imports across the
-four modules. A rule that depends on someone reading warning output does not
-hold. So:
+Two documents required zero compiler warnings: a phase-completion list, and the
+code-quality-review skill's compiler-hygiene section. Neither requirement was
+enforced by anything. A clean build then reported 197 unused imports across the
+four modules. A requirement that nothing can fail does not change what gets
+written. So:
 
-**A warning category this project cares about is escalated to a compile error.
-If it is not escalated, it is not a rule and must not be written as one.**
+**A warning category becomes a rule by being escalated to a compile error in
+`build.sbt`. Until it is escalated, the project has no rule about it, and no
+document may state one.**
 
 Escalation uses the pattern already in `build.sbt`, which matches on the
 warning text:

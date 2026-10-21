@@ -2722,3 +2722,55 @@ that repository carries the matching entry. The settled boundary note in
 `register-infra/docs/TODO.md` states that this repository owns only its own
 instrumentation and carries no requirement for cluster observability, so this
 entry is about what the application emits and not about what a cluster collects.
+
+---
+
+## 60. The tree's structural rules are implemented twice, and nothing holds the two in step
+
+**What exists.** Two implementations of the same rules, both in `modules/common`
+and therefore both cross-compiled to each platform. The browser's is
+`TreeBuilderLogic.preValidateTopology` and
+`TreeBuilderLogic.fullValidateTopology` in
+`modules/common/src/main/scala/com/risquanter/register/frontend/TreeBuilderLogic.scala`.
+The server's is `RiskTreeRequests.validateTopologyCreate` and
+`RiskTreeRequests.validateTopologyUpdate` in
+`modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`.
+Each decides whether a submitted node set has exactly one root, no cycle, and no
+childless portfolio.
+
+**What is not duplicated, for contrast.** Every field-level rule has one
+definition that both sides call. A leaf's occurrence probability is refined by
+`ValidationUtil.refineOccurrenceProbability`, which carries the single
+`GreaterEqual[0.0] & LessEqual[1.0]` constraint in the codebase, so that rule
+cannot drift between the two sides. The duplication is confined to the rules over
+the assembled node set.
+
+**Why it matters.** A structural rule tightened on one side and not the other
+produces no failure. The browser accepts a tree the server then refuses, or
+refuses one the server would have accepted, and nothing reports the
+disagreement — not a compile, not a test. The browser's refusals are informative
+rather than authoritative, so a divergence is not a security defect. It is a
+defect in what the person using the application is told.
+
+**The duplication is a choice rather than a constraint.** Both files compile for
+both platforms, so the browser can call the server's validators. What stands
+between them today is their input types: the server's take the
+`SubmittedPortfolio` and `SubmittedLeaf` values built from the request types, and
+`TreeBuilderState.toUpdateRequest` already assembles those at submit time before
+running the browser's own check.
+
+**What the task is.** Align the rules along the whole path: the form's
+incremental check during editing, the submit-time check over the assembled tree,
+and the server's resolution of the request. The incremental check is a genuine
+subset of the other two, because a tree under construction has not reached one
+root yet, so alignment does not mean one function serving all three points.
+
+**Options, with no preferred answer recorded.** One shared implementation both
+sides call at submit time, with the incremental check declared as a named subset
+of it. Two implementations kept, with a property test that feeds one generated
+node set to both and asserts the same error set. Two implementations kept, with a
+test asserting only that the browser's refusals are a subset of the server's,
+which is the weaker claim matching what the browser is for.
+
+**Status.** Deliberately not routed to a plan. This entry records the facts so
+the work can be scoped when it is taken up.

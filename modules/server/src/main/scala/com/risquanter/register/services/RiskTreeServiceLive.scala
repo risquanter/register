@@ -74,7 +74,7 @@ class RiskTreeServiceLive private (
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, commit, nodes)
 
-  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId] = None): IO[AppError,Unit] =
+  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId]): IO[AppError,Unit] =
     collectAllTrees(wsId, branch).flatMap { trees =>
       val candidates = trees.filterNot(t => excludeId.contains(t.id))
 
@@ -319,7 +319,7 @@ class RiskTreeServiceLive private (
       treeId <- IdGenerators.nextTreeId.orDie
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
       resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
-      _ <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch)
+      _ <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch, excludeId = None)
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(leafNamesOf(resolved.nodes), resolved.providedSeedVarIds, highWater = 0L))
         .mapError(e => ValidationFailed(List(e)))

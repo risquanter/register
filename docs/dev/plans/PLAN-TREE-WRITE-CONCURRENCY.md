@@ -407,7 +407,7 @@ Three things that ruling deliberately did not decide, and that belong here:
 whether a tree-level conflict should also name the node that diverged; whether
 the client needs both commits or only the current head; and whether the token is
 a commit hash at all. A different answer here overrides the shape without
-reopening `EWB-D-29`.
+reopening that ruling.
 
 One further point the echo must settle: `op: RiskTree => RiskTree` remains a
 constant function at its only call site. Whether to keep the higher-order shape
@@ -501,7 +501,8 @@ This document confers **no** G3 coverage. To build it:
 1. Rule Decisions 1–5.
 2. Rewrite §3 against those rulings and present it as a Signature Echo,
    settling the two points §3 names: `VersionConflict`'s field shape, which
-   `EWB-D-29` typed as a guess for this plan to validate, and whether
+   `PLAN-ERROR-WIRE-BOUNDARY.md`'s `EWB-D-29` typed as a guess for this plan to
+   validate, and whether
    `repo.update` keeps `op: RiskTree => RiskTree`.
 3. Re-derive the `## File inventory` by grep, per the discovery-first practice —
    the app-side entries are provisional pending Decision 4.

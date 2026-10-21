@@ -1,8 +1,11 @@
 package app.views
 
 import zio.test.*
+import zio.prelude.Validation
 
-import app.state.{PortfolioField, RiskLeafField}
+import com.raquo.laminar.api.L.Var
+
+import app.state.{DistributionMode, ParentSelection, PortfolioField, RiskLeafField, RiskLeafFormState}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, RequestHeaderName}
 
@@ -80,6 +83,40 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         val nodeId = NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get
         assertTrue(
           RiskLeafFormView.inputFor(ErrorLocation.nodeField(nodeId, FieldName.MinLoss)) == Some(RiskLeafField.MinLoss)
+        )
+      }
+    ),
+
+    /** Two refusals from two different checks, routed together.
+      *
+      * The parent is the one input with no reactive error of its own, so it is
+      * the field that would surface in the banner if the leaf form still sent
+      * its distribution refusals through a router that did not know it.
+      */
+    suite("a leaf submitted with two bad fields")(
+      test("shows both under their own inputs and leaves the banner empty") {
+        val state = new RiskLeafFormState
+        state.nameVar.set("Server outage")
+        state.probabilityVar.set("10")
+        state.parentVar.set(ParentSelection.Unset)
+        state.distributionModeVar.set(DistributionMode.Expert)
+        // Descending, so the strictly-increasing rule refuses the collection.
+        state.percentilesVar.set("90, 50, 10")
+        state.quantilesVar.set("1000, 5000, 25000")
+
+        val errors = state.toDraft match
+          case Validation.Failure(_, es) => es.toList
+          case Validation.Success(_, _)  => Nil
+
+        val banner: Var[Option[String]] = Var(None)
+        FormSubmitUtil.routeErrors(state, errors, banner, RiskLeafFormView.inputFor)
+
+        assertTrue(
+          errors.map(_.location).toSet == Set(
+            ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.ParentName),
+            ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.Percentiles)
+          ),
+          banner.now().isEmpty
         )
       }
     )

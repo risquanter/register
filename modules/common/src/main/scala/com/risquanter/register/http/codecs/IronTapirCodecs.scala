@@ -41,6 +41,11 @@ object IronTapirCodecs {
   private val NoTapirValidator: Validator.Custom[String] =
     Validator.Custom(_ => ValidationResult.Invalid())
 
+  /** A codec cannot name the input it decodes: Tapir reports that from the
+    * endpoint definition, and `refused` keeps only the message. So every
+    * refinement here reports at the request as a whole. */
+  private val codecLocation: ErrorLocation = ErrorLocation.Whole
+
   /** One `DecodeResult.InvalidValue` for a value a refinement read and refused.
     *
     * `InvalidValue` rather than `Error` because the two mean different things to
@@ -49,11 +54,6 @@ object IronTapirCodecs {
     * the input was readable. Each refusal keeps the refinement's message and
     * none of the submitted value.
     */
-  /** A codec cannot name the input it decodes: Tapir reports that from the
-    * endpoint definition, and `refused` keeps only the message. So every
-    * refinement here reports at the request as a whole. */
-  private val codecLocation: ErrorLocation = ErrorLocation.Whole
-
   private def refused(errs: List[ValidationError]): DecodeResult.InvalidValue =
     DecodeResult.InvalidValue(
       errs.map(e => TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(e.message)))

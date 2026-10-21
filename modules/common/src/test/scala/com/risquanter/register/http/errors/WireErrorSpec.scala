@@ -253,6 +253,9 @@ object WireErrorSpec extends ZIOSpecDefault:
         }
       ),
       suite("every case round-trips through its own codec")(
+        test("a rejected request keeps its entries") {
+          assertTrue(requestRejected.toJson.fromJson[WireError.RequestRejected] == Right(requestRejected))
+        },
         test("a rejected body keeps its entries") {
           assertTrue(validationRejected.toJson.fromJson[WireError.ValidationRejected] == Right(validationRejected))
         },

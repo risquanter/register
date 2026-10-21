@@ -154,6 +154,49 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
       }
     ),
 
+    /** The mapping from a Tapir input to a `RequestHeaderName` case, and from
+      * that case to the spelling a client sends.
+      *
+      * Neither half is reached by the enum's own exhaustiveness: a wrong
+      * pairing of input to case compiles, and a renamed case would silently
+      * move the spelling if the spelling were derived from the name rather
+      * than declared (ADR-037).
+      */
+    suite("a declared header reports at its own case")(
+      test("each declared header maps to the case that names it") {
+        def caseFor(name: String): ErrorLocation =
+          WireDecodeFailureHandler.toValidationError(DecodeResult.Missing, header[String](name)).location
+        assertTrue(
+          caseFor("x-user-id") == ErrorLocation.Header(RequestHeaderName.UserId),
+          caseFor("X-Branch") == ErrorLocation.Header(RequestHeaderName.Branch),
+          caseFor("If-Match") == ErrorLocation.Header(RequestHeaderName.IfMatch)
+        )
+      },
+      test("each case carries the spelling its endpoint declares") {
+        assertTrue(
+          RequestHeaderName.UserId.wireName == "x-user-id",
+          RequestHeaderName.Branch.wireName == "X-Branch",
+          RequestHeaderName.IfMatch.wireName == "If-Match"
+        )
+      },
+      test("a header this application does not declare reports at the whole request") {
+        val error = WireDecodeFailureHandler.toValidationError(
+          DecodeResult.Missing,
+          header[String]("X-Not-Declared")
+        )
+        assertTrue(error.location == ErrorLocation.Whole)
+      },
+      /** `Content-Type` is the realistic instance: Tapir pins it itself, so it
+        * arrives as a `FixedHeader` rather than as a declared input of ours. */
+      test("a header Tapir pins itself reports at the whole request") {
+        val error = WireDecodeFailureHandler.toValidationError(
+          DecodeResult.Missing,
+          header(sttp.model.Header.contentType(sttp.model.MediaType.ApplicationJson))
+        )
+        assertTrue(error.location == ErrorLocation.Whole)
+      }
+    ),
+
     suite("a refusal that a real Iron codec produced")(
 
       /** The cases above hand `toValidationError` a `DecodeResult` built by

@@ -213,3 +213,11 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala
 - modules/app/src/main/scala/app/views/TreePreview.scala
 - modules/server-it/src/test/scala/com/risquanter/register/testcontainers/SpiceDbCompose.scala
+- modules/common/src/test/scala/com/risquanter/register/http/requests/RiskTreeDefinitionRequestsSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/AggregateFreshnessAfterLeafMoveSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/RequestBodyLimitItSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala

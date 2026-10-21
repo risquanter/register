@@ -6,7 +6,7 @@ import com.risquanter.register.domain.data.{TrialId, Loss, RiskLeaf, NodeProvena
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
-import io.github.iltotore.iron.constraint.numeric.{Greater, given}
+import io.github.iltotore.iron.constraint.numeric.Greater
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
 import zio.{IO, ZIO}
