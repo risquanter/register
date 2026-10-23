@@ -47,7 +47,7 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
 
   private def root(childIds: NodeId*): RiskPortfolio =
     unsafeGet(RiskPortfolio.create(
-      id = rootId.value, name = "Root", childIds = childIds.toArray, parentId = None), "portfolio")
+      id = rootId.value, name = "Root", childIds = childIds.toVector, parentId = None), "portfolio")
 
   private def mkTree(root: RiskPortfolio, leaves: Seq[RiskLeaf], mits: Mitigation*): RiskTree =
     val all: Map[NodeId, RiskNode] = (root +: leaves).map(n => n.id -> n).toMap

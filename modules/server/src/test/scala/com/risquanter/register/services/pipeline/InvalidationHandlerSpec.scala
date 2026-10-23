@@ -57,14 +57,14 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   val itPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = idStr("it-risk"),
     name = "IT Risk",
-    childIds = Array(idStr("hardware"), idStr("software")),
+    childIds = Vector(idStr("hardware"), idStr("software")),
     parentId = Some(nodeId("ops-risk"))
   ), "portfolio")
 
   val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = idStr("ops-risk"),
     name = "Operational Risk",
-    childIds = Array(idStr("cyber"), idStr("it-risk")),
+    childIds = Vector(idStr("cyber"), idStr("it-risk")),
     parentId = None
   ), "portfolio")
 
@@ -139,13 +139,13 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("it-risk"),
         name = "IT Risk",
-        childIds = Array(idStr("software")),
+        childIds = Vector(idStr("software")),
         parentId = Some(nodeId("ops-risk"))
       ), "portfolio")
       val newRoot = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("ops-risk"),
         name = "Operational Risk",
-        childIds = Array(idStr("cyber"), idStr("it-risk"), idStr("hardware")),
+        childIds = Vector(idStr("cyber"), idStr("it-risk"), idStr("hardware")),
         parentId = None
       ), "portfolio")
       val newTree = treeWith(Seq(newRoot, cyberLeaf, newItPortfolio, movedChangedHardware, softwareLeaf))
@@ -181,7 +181,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("ops-risk"),
           name = "Operational Risk",
-          childIds = Array(idStr("cyber"), idStr("expert-leaf")),
+          childIds = Vector(idStr("cyber"), idStr("expert-leaf")),
           parentId = None
         ), "portfolio"),
         cyberLeaf,
@@ -216,7 +216,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("it-risk"),
           name = "IT Risk",
-          childIds = Array(idStr("hardware"), idStr("software"), idStr("expert-leaf")),
+          childIds = Vector(idStr("hardware"), idStr("software"), idStr("expert-leaf")),
           parentId = Some(nodeId("ops-risk"))
         ), "portfolio"),
         hardwareLeaf,
@@ -240,7 +240,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("it-risk"),
         name = "IT Risk",
-        childIds = Array(idStr("software")),
+        childIds = Vector(idStr("software")),
         parentId = Some(nodeId("ops-risk"))
       ), "portfolio")
       val newTree = treeWith(Seq(rootPortfolio, cyberLeaf, newItPortfolio, softwareLeaf))

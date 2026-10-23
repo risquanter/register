@@ -12,7 +12,7 @@ import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{
   RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest,
-  RiskLeafDefinitionRequest, DistributionShapeRequest
+  RiskLeafDefinitionRequest, ExpertShapeRequest, LognormalShapeRequest
 }
 import com.risquanter.register.http.responses.WorkspaceBootstrapResponse
 import com.risquanter.register.http.support.SttpClientFixture
@@ -23,8 +23,10 @@ import com.risquanter.register.http.support.SttpClientFixture
   * means a tree carrying a zero is rejected with a 400 before any handler runs
   * and nothing is stored.
   *
-  * The rules live in `Distribution.create` and in the `PositiveLong`
-  * refinement, so these cases prove the chain holds end to end: the JSON body
+  * The rules live in `DistributionShape.Lognormal.fromPrimitives`, in
+  * `QuantileAnchors.fromPairedSequences`, and in the `PositiveLong` and
+  * `PositiveDouble` refinements each calls, so these cases prove the chain
+  * holds end to end: the JSON body
   * reaches the decoder, the decoder refines, and the refinement failure becomes
   * the HTTP error the client sees.
   */
@@ -37,24 +39,18 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
       name = "Cyber",
       parentName = Some("Root"),
       probability = 0.25,
-      distributionShape = DistributionShapeRequest(
-        distributionType = "lognormal",
-        percentiles = None, quantiles = None, terms = None,
-        minLoss = Some(min), maxLoss = Some(max)
-      )
+      distributionShape = LognormalShapeRequest(minLoss = min, maxLoss = max)
     )
 
-  private def expertLeaf(quantiles: Array[Double]): RiskLeafDefinitionRequest =
+  private def expertLeaf(quantiles: Vector[Double]): RiskLeafDefinitionRequest =
     RiskLeafDefinitionRequest(
       name = "Outage",
       parentName = Some("Root"),
       probability = 0.25,
-      distributionShape = DistributionShapeRequest(
-        distributionType = "expert",
-        percentiles = Some(Array(0.05, 0.50, 0.95)),
-        quantiles = Some(quantiles),
-        terms = Some(3),
-        minLoss = None, maxLoss = None
+      distributionShape = ExpertShapeRequest(
+        percentiles = Vector(0.05, 0.50, 0.95),
+        quantiles = quantiles,
+        terms = Some(3)
       )
     )
 
@@ -134,7 +130,7 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
       test("an expert leaf with a zero quantile is rejected with 400 INVALID_RANGE") {
         withServer { client =>
           for
-            (code, body) <- postTree(client, treeWith(expertLeaf(Array(0.0, 5000.0, 25000.0))))
+            (code, body) <- postTree(client, treeWith(expertLeaf(Vector(0.0, 5000.0, 25000.0))))
             codes        <- rangeErrorCodes(body)
           yield assertTrue(
             code == 400,

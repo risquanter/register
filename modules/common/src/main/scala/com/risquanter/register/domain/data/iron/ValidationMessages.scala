@@ -77,6 +77,18 @@ object ValidationMessages:
   def tooManyMitigations(count: Int, limit: Int): String =
     s"too many mitigations: $count exceeds the limit of $limit"
 
+  /** Why a portfolio's direct child count was refused, with the count and the
+    * limit. The limit is the caller's, so the sentence cannot state one the
+    * caller does not enforce.
+    *
+    * {{{
+    * tooManyChildren(1001, 1000)
+    * // too many children: 1001 exceeds the limit of 1000
+    * }}}
+    */
+  def tooManyChildren(count: Int, limit: Int): String =
+    s"too many children: $count exceeds the limit of $limit"
+
   def rootIdNotFound(rootId: String): String =
     s"rootId '$rootId' not found in nodes"
 

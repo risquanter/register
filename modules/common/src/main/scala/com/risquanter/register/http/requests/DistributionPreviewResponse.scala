@@ -3,6 +3,9 @@ package com.risquanter.register.http.requests
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import sttp.tapir.Schema
 
+import com.risquanter.register.domain.data.iron.DistributionType
+import com.risquanter.register.domain.data.iron.given
+
 /** One sample point on a distribution preview curve.
   *
   * @param x   Loss value (same units as the user's input, e.g. $M)
@@ -20,7 +23,13 @@ object DistributionPreviewPoint:
   * Contains 200 uniformly-spaced sample points sufficient for both PDF and CDF
   * chart views; the view switch is a pure client-side transform — no second fetch.
   *
-  * @param distributionType  `"expert"` or `"lognormal"`, echoed from the request
+  * The points are held in an immutable sequence, so two responses describing the
+  * same curve are equal. An `Array` field would make the derived `equals`
+  * compare by reference and report two identical responses as different.
+  *
+  * @param distributionType  The mode the curve was fitted in, echoed from the
+  *                          request. A refined type rather than a raw string,
+  *                          so only the two modes that exist are representable.
   * @param resolvedTerms     Metalog terms value actually used; `None` for lognormal
   * @param anchorCount       Number of input anchor points; `None` for lognormal.
   *                          Together with `resolvedTerms` this drives the coherence
@@ -28,12 +37,17 @@ object DistributionPreviewPoint:
   * @param points            200-point sampled curve, ordered by ascending `cdf`
   */
 final case class DistributionPreviewResponse(
-  distributionType: String,
+  distributionType: DistributionType,
   resolvedTerms:    Option[Int],
   anchorCount:      Option[Int],
-  points:           Array[DistributionPreviewPoint]
+  points:           Vector[DistributionPreviewPoint]
 )
 
 object DistributionPreviewResponse:
-  given schema: Schema[DistributionPreviewResponse] = Schema.any[DistributionPreviewResponse]
+  // The mode field's schema comes from `IronTapirCodecs`, which is where every
+  // refined type's Tapir schema lives, so the derivation describes this response
+  // as the record it is rather than as an unconstrained object.
+  given schema: Schema[DistributionPreviewResponse] =
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[DistributionPreviewResponse]
   given codec: JsonCodec[DistributionPreviewResponse] = DeriveJsonCodec.gen[DistributionPreviewResponse]

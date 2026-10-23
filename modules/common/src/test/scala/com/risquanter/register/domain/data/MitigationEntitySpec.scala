@@ -62,7 +62,7 @@ object MitigationEntitySpec extends ZIOSpecDefault {
     val l2 = leaf("flood", 2L)
     val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr("root-pf"), name = "Root Portfolio",
-      childIds = Array(l1.id.value, l2.id.value), parentId = None), "portfolio")
+      childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
     RiskTree.fromNodes(treeId("mit-tree"), name("Mit Tree"), Seq(root, l1, l2), root.id,
       mitigations = mitigations.toList)
   }

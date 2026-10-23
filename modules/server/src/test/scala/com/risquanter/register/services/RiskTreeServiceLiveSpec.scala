@@ -197,7 +197,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = revertRootId.value.toString,
       name = "Restored Root",
-      childIds = Array(revertLeafId.value.toString),
+      childIds = Vector(revertLeafId.value.toString),
       parentId = None
     ), "revert root")
     unsafeGet(RiskTree.fromNodes(

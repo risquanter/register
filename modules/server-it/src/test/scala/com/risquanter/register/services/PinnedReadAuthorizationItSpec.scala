@@ -8,7 +8,7 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.testcontainers.IrminCompose
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, lognormalShape}
 
 /** Commit-pinned reads are scoped to the authenticated workspace's Irmin paths,
   * NOT to the commit's provenance. All workspaces share one Irmin store,
@@ -21,9 +21,9 @@ object PinnedReadAuthorizationItSpec extends ZIOSpecDefault:
 
   private def oneLeafTree(tid: TreeId): RiskTree =
     val rootId = nodeId("root"); val leafId = nodeId("leaf-1")
-    val root = RiskPortfolio.create(rootId.value, "Root", Array(leafId), None).toEither.toOption.get
-    val leaf = RiskLeaf.create(id = leafId.value, name = "Leaf 1", distributionType = "lognormal",
-      probability = 0.1, minLoss = Some(1000L), maxLoss = Some(2000L), parentId = Some(rootId), seedVarId = 1L).toEither.toOption.get
+    val root = RiskPortfolio.create(rootId.value, "Root", Vector(leafId), None).toEither.toOption.get
+    val leaf = RiskLeaf.create(id = leafId.value, name = "Leaf 1", probability = 0.1,
+      shape = lognormalShape(1000L, 2000L), parentId = Some(rootId), seedVarId = 1L).toEither.toOption.get
     RiskTree.fromNodesUnsafe(tid, SafeName.fromString("Pinned Tree").toOption.get, Seq(root, leaf), rootId,
       Some(SeedVarId.fromLong(1L).toOption.get), mitigations = Nil)
 

@@ -100,5 +100,9 @@ object NodeProvenance {
   import sttp.tapir.Schema
 
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
+  // `Schema.derived` cannot be used here: no `Schema` exists for the sealed
+  // `DistributionParams`, and the only route to one is a wildcard
+  // auto-derivation import that would widen implicit scope across the file. The
+  // published description is an unconstrained object as a result.
   given schema: Schema[NodeProvenance] = Schema.any[NodeProvenance]
 }

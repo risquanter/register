@@ -7,20 +7,20 @@ import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, Mitigation,
   MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  RiskLeafTransform, LikelihoodTransform, DistributionTransform
+  AbsoluteReplacement
 }
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceId, SafeName, ContentHash, BranchRef, Revision}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.testcontainers.IrminCompose
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, lognormalShape}
 
 /**
   * Integration tests for mitigation persistence through `RiskTreeRepositoryIrmin`
   * against a real Irmin container: a tree's mitigations are stored as per-id
-  * blobs beside its nodes (§7.2.1) and round-trip through create/update/read with
-  * their `overrideBaseStamp` intact. Omitting a previously-stored mitigation
-  * deletes it (DD-7 subtree replace).
+  * blobs beside its nodes and round-trip through create/update/read with their
+  * authoring-time anchor and base stamp intact. Omitting a previously-stored
+  * mitigation deletes it, because a write replaces the whole subtree.
   *
   * Run: sbt "serverIt/testOnly *MitigationPersistenceItSpec"
   */
@@ -43,20 +43,18 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
   private def overrideMit(label: String, anchor: NodeId): Mitigation =
     Mitigation.create(
       mitigationId(label), sname(label), pred,
-      MitigationSpec.LeafStage(
-        RiskLeafTransform(LikelihoodTransform.Override(0.05), DistributionTransform.Keep),
-        Some(stamp), Some(anchor)),
+      MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), anchor, stamp),
       MitigationPrecedence.overrideFinal
     ).toEither.toOption.get
 
   /** root-pf → {cyber}, carrying `mits`. */
   private def treeWith(tid: TreeId, mits: Mitigation*): RiskTree =
     val root = RiskPortfolio.create(
-      id = rootId.value, name = "Root", childIds = Array(cyberId), parentId = None
+      id = rootId.value, name = "Root", childIds = Vector(cyberId), parentId = None
     ).toEither.toOption.get
     val cyber = RiskLeaf.create(
-      id = cyberId.value, name = "Cyber", distributionType = "lognormal",
-      probability = 0.2, minLoss = Some(1000L), maxLoss = Some(100000L),
+      id = cyberId.value, name = "Cyber", probability = 0.2,
+      shape = lognormalShape(1000L, 100000L),
       parentId = Some(rootId), seedVarId = 1L
     ).toEither.toOption.get
     RiskTree.fromNodes(tid, sname("Mit Persist"), Seq(root, cyber), rootId, mitigations = mits.toList)

@@ -5,7 +5,7 @@ import zio.*
 import com.risquanter.register.domain.data.{
   DistributionShape, ExpertDistributionParams, LognormalDistributionParams
 }
-import com.risquanter.register.domain.data.iron.ValidationMessages
+import com.risquanter.register.domain.data.iron.{IronConstants, ValidationMessages}
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode, ValidationFailed}
 import com.risquanter.register.http.requests.{DistributionPreviewResponse, DistributionPreviewPoint}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
@@ -70,7 +70,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
       ))))
       points = sampleMetalog(metalog)
     yield DistributionPreviewResponse(
-      distributionType = "expert",
+      distributionType = IronConstants.Expert,
       resolvedTerms    = Some(resolvedTerms),
       anchorCount      = Some(percentiles.length),
       points           = points
@@ -90,16 +90,16 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
       points = pGrid.map { p =>
         val x = lognormal.quantile(p)
         DistributionPreviewPoint(x = x, pdf = lognormal.density(x), cdf = p)
-      }.toArray
+      }.toVector
     yield DistributionPreviewResponse(
-      distributionType = "lognormal",
+      distributionType = IronConstants.Lognormal,
       resolvedTerms    = None,
       anchorCount      = None,
       points           = points
     )
 
-  private def sampleMetalog(metalog: MetalogDistribution): Array[DistributionPreviewPoint] =
+  private def sampleMetalog(metalog: MetalogDistribution): Vector[DistributionPreviewPoint] =
     pGrid.map { p =>
       val x = metalog.quantile(p)
       DistributionPreviewPoint(x = x, pdf = metalog.pdf(p), cdf = p)
-    }.toArray
+    }.toVector

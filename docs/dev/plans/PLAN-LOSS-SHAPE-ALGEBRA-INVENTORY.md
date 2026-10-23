@@ -62,3 +62,5 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceItSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/DistributionPreviewResponse.scala
+- modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala

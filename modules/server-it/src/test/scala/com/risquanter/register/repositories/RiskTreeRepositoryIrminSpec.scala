@@ -12,7 +12,7 @@ import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.domain.data.RiskPortfolio
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.testcontainers.IrminCompose
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, lognormalShape}
 import io.github.iltotore.iron.*
 
 /**
@@ -35,17 +35,15 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val portfolio = RiskPortfolio.create(
       id = rootId.value,
       name = "Root",
-      childIds = Array(leaf1Id, leaf2Id),
+      childIds = Vector(leaf1Id, leaf2Id),
       parentId = None
     ).toEither.toOption.get
 
     val leaf1 = RiskLeaf.create(
       id = leaf1Id.value,
       name = "Leaf 1",
-      distributionType = "lognormal",
       probability = 0.1,
-      minLoss = Some(1000L),
-      maxLoss = Some(2000L),
+      shape = lognormalShape(1000L, 2000L),
       parentId = Some(rootId),
       seedVarId = 1L
     ).toEither.toOption.get
@@ -53,10 +51,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val leaf2 = RiskLeaf.create(
       id = leaf2Id.value,
       name = "Leaf 2",
-      distributionType = "lognormal",
       probability = 0.2,
-      minLoss = Some(1500L),
-      maxLoss = Some(3000L),
+      shape = lognormalShape(1500L, 3000L),
       parentId = Some(rootId),
       seedVarId = 2L
     ).toEither.toOption.get
@@ -78,7 +74,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val newRoot = RiskPortfolio.create(
       id = root.id.value,
       name = root.name.value,
-      childIds = Array(leaf1Id),
+      childIds = Vector(leaf1Id),
       parentId = None
     ).toEither.toOption.get
     RiskTree.fromNodesUnsafe(
@@ -102,10 +98,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val newLeaf1 = RiskLeaf.create(
       id = leaf1Id.value,          // SAME id → same path nodes/{leaf-1}
       name = "Leaf 1",
-      distributionType = "lognormal",
       probability = 0.1,
-      minLoss = Some(newMin),
-      maxLoss = Some(2000L),
+      shape = lognormalShape(newMin, 2000L),
       parentId = Some(rootId),
       seedVarId = 1L               // identity-preserving: same leaf keeps its stream
     ).toEither.toOption.get

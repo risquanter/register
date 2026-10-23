@@ -44,7 +44,7 @@ object CacheTransparencySpec extends ZIOSpecDefault {
     unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr(id),
       name = s"Portfolio $id",
-      childIds = children.map(idStr).toArray,
+      childIds = children.map(idStr).toVector,
       parentId = parent.map(nodeId)
     ), "portfolio")
 

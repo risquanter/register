@@ -394,9 +394,10 @@ object RiskTreeRequests {
     * trivially succeeds. Any exemption based on `totalNodes == 1` would
     * incorrectly allow a single childless portfolio through.
     *
-    * '''Defence-in-depth:''' `RiskPortfolio` has a `require(childIds.nonEmpty)`
-    * invariant (ADR-033 §5) that catches this at construction time. This guard
-    * catches it earlier with a typed `ValidationError`.
+    * '''Defence-in-depth:''' `RiskPortfolio.create` refuses an empty child list
+    * at construction time, accumulated with its other field refusals. This
+    * guard catches the same condition earlier, against the submitted names,
+    * so the refusal can say which portfolio is childless.
     *
     * @see ADR-017 §Topology validation
     */

@@ -53,7 +53,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
   private val flood = leaf("flood", 2L)
   private val root = unsafeGet(RiskPortfolio.createFromStrings(
     id = idStr("root-pf"), name = "Root Portfolio",
-    childIds = Array(cyber.id.value, flood.id.value), parentId = None), "portfolio")
+    childIds = Vector(cyber.id.value, flood.id.value), parentId = None), "portfolio")
 
   private def mkTree(mitigations: Mitigation*): RiskTree =
     RiskTree.fromNodes(treeId("act-tree"), name("Action Tree"), Seq(root, cyber, flood), root.id,

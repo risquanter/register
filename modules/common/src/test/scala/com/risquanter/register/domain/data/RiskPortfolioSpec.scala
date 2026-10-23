@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
-import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
+import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, unsafeGet}
 
 object RiskPortfolioSpec extends ZIOSpecDefault {
 
@@ -15,7 +15,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -26,7 +26,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
       },
 
       test("accept valid portfolio with multiple childIds") {
-        val childIds: Array[NodeId] = Array(
+        val childIds: Vector[NodeId] = Vector(
           nodeId("leaf-1"),
           nodeId("leaf-2"),
           nodeId("leaf-3")
@@ -47,7 +47,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("parent-port"),
           name = "Parent Portfolio",
-          childIds = Array[NodeId](nodeId("child-port")),
+          childIds = Vector[NodeId](nodeId("child-port")),
           parentId = None
         )
 
@@ -61,7 +61,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("mixed-port"),
           name = "Mixed Portfolio",
-          childIds = Array[NodeId](nodeId("leaf-1"), nodeId("child-port")),
+          childIds = Vector[NodeId](nodeId("leaf-1"), nodeId("child-port")),
           parentId = None
         )
 
@@ -73,7 +73,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("abc"),
           name = "Short ID",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -84,7 +84,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("long-id"),
           name = "Long ID",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -95,7 +95,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("ops-risk_2024"),
           name = "Ops Risk",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -106,7 +106,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("child-portfolio"),
           name = "Child Portfolio",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = Some(nodeId("parent-portfolio"))
         )
 
@@ -121,7 +121,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -132,7 +132,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "   ",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -143,7 +143,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ab",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -155,7 +155,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = longId,
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -166,7 +166,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ops risk",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -177,7 +177,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ops.risk/2024",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -191,7 +191,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -202,7 +202,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "   ",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -214,7 +214,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = longName,
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -224,22 +224,11 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
     suite("Invalid ChildIds Validation")(
       
-      test("reject null childIds array") {
+      test("reject empty childIds") {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "Valid Name",
-          childIds = null,
-          parentId = None
-        )
-
-        assertTrue(result.isFailure)
-      },
-
-      test("reject empty childIds array") {
-        val result = RiskPortfolio.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          childIds = Array.empty[NodeId],
+          childIds = Vector.empty[NodeId],
           parentId = None
         )
 
@@ -250,7 +239,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "Valid Name",
-          childIds = Array.tabulate(1000)(i => nodeId(s"leaf-$i")),
+          childIds = Vector.tabulate(1000)(i => nodeId(s"leaf-$i")),
           parentId = None
         )
 
@@ -261,7 +250,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "Valid Name",
-          childIds = Array.tabulate(1001)(i => nodeId(s"leaf-$i")),
+          childIds = Vector.tabulate(1001)(i => nodeId(s"leaf-$i")),
           parentId = None
         )
 
@@ -279,7 +268,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ab",  // Too short
           name = "",  // Empty
-          childIds = Array.empty[NodeId],  // Empty array
+          childIds = Vector.empty[NodeId],  // Empty array
           parentId = None
         )
 
@@ -290,7 +279,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "x",                    // Too short (< 3 chars)
           name = "",                   // Empty
-          childIds = Array.empty[NodeId],  // Empty - invalid
+          childIds = Vector.empty[NodeId],  // Empty - invalid
           parentId = None
         )
         
@@ -312,17 +301,17 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "this-id-is-way-too-long-and-exceeds-thirty-characters",  // > 30 chars
           name = "Valid Name",
-          childIds = null,  // Null - invalid
+          childIds = Vector.empty[NodeId],  // Empty - invalid
           parentId = None
         )
-        
+
         result.toEither match {
           case Left(errors) =>
             val errorStr = errors.mkString("; ")
             assertTrue(
               errors.length >= 2,
               errorStr.toLowerCase.contains("id") || errorStr.contains("30"),
-              errorStr.toLowerCase.contains("childids") || errorStr.toLowerCase.contains("null") || errorStr.contains("empty")
+              errorStr.toLowerCase.contains("child")
             )
           case Right(_) =>
             assertTrue(false)
@@ -333,7 +322,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "invalid id!",          // Contains spaces and special chars
           name = "a" * 51,              // > 50 chars
-          childIds = Array.empty[NodeId],
+          childIds = Vector.empty[NodeId],
           parentId = None
         )
         
@@ -358,7 +347,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -370,7 +359,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -378,8 +367,28 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         assertTrue(result.toEither.toOption.get.name.value == "Test Name")
       },
 
-      test("preserve childIds array correctly") {
-        val childIds: Array[NodeId] = Array(
+      test("two structurally identical portfolios are equal and hash alike") {
+        // The children are held in an immutable sequence, so the derived
+        // `equals` compares them by value. With an `Array` field this assertion
+        // was false for every pair of separately-built portfolios, because
+        // `Array.==` is reference identity.
+        def build(): RiskPortfolio =
+          unsafeGet(
+            RiskPortfolio.create(
+              id = idStr("same-portfolio"),
+              name = "Same Portfolio",
+              childIds = Vector(nodeId("leaf-1"), nodeId("leaf-2")),
+              parentId = None
+            ),
+            "portfolio"
+          )
+
+        assertTrue(build() == build()) &&
+        assertTrue(build().hashCode == build().hashCode)
+      },
+
+      test("preserve childIds correctly") {
+        val childIds: Vector[NodeId] = Vector(
           nodeId("leaf-1"),
           nodeId("leaf-2")
         )
@@ -400,7 +409,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",
-          childIds = Array[NodeId](nodeId("leaf-1")),
+          childIds = Vector[NodeId](nodeId("leaf-1")),
           parentId = None
         )
 
@@ -415,7 +424,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.createFromStrings(
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
-          childIds = Array(idStr("leaf-1"), idStr("leaf-2")),
+          childIds = Vector(idStr("leaf-1"), idStr("leaf-2")),
           parentId = None
         )
 
@@ -427,7 +436,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.createFromStrings(
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
-          childIds = Array("ab", idStr("valid-id")),  // "ab" is not a valid ULID
+          childIds = Vector("ab", idStr("valid-id")),  // "ab" is not a valid ULID
           parentId = None
         )
 

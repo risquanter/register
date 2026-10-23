@@ -38,10 +38,10 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
 
   private val servers = unsafeGet(RiskPortfolio.create(
     id = serversId.value, name = "Servers",
-    childIds = Array(appTierId, edgeId), parentId = None), "portfolio")
+    childIds = Vector(appTierId, edgeId), parentId = None), "portfolio")
   private val appTier = unsafeGet(RiskPortfolio.create(
     id = appTierId.value, name = "AppTier",
-    childIds = Array(webId, dbId), parentId = Some(serversId)), "portfolio")
+    childIds = Vector(webId, dbId), parentId = Some(serversId)), "portfolio")
   private def leaf(id: NodeId, nm: String, seed: Long, parent: NodeId): RiskLeaf =
     unsafeGet(RiskLeaf.create(
       id = id.value, name = nm, probability = 0.2,

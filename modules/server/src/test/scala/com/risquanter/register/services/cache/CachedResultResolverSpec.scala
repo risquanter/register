@@ -47,7 +47,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
   val rootNode: RiskNode = unsafeGet(RiskPortfolio.createFromStrings(
     id = rootIdStr,
     name = "Root Portfolio",
-    childIds = Array(risk1IdStr, risk2IdStr),
+    childIds = Vector(risk1IdStr, risk2IdStr),
     parentId = None
   ), "portfolio")
 
@@ -254,7 +254,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
               unsafeGet(RiskPortfolio.createFromStrings(
                 id = rootIdStr,
                 name = "Other Root",
-                childIds = Array(risk1IdStr),
+                childIds = Vector(risk1IdStr),
                 parentId = None
               ), "portfolio"),
               risk1Leaf

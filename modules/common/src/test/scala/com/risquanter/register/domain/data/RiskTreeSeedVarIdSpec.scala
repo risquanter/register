@@ -31,7 +31,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
     val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr("root-pf"),
       name = "Root Portfolio",
-      childIds = leaves.map(_.id.value).toArray,
+      childIds = leaves.map(_.id.value).toVector,
       parentId = None
     ), "portfolio")
     RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, mitigations = Nil)
@@ -79,7 +79,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 2L))
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
-          childIds = leaves.map(_.id.value).toArray,
+          childIds = leaves.map(_.id.value).toVector,
           parentId = None
         ), "portfolio")
         val hw = SeedVarId.fromLong(9L).toOption.get
@@ -92,7 +92,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 5L))
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
-          childIds = leaves.map(_.id.value).toArray,
+          childIds = leaves.map(_.id.value).toVector,
           parentId = None
         ), "portfolio")
         val hw = SeedVarId.fromLong(3L).toOption.get
@@ -112,7 +112,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 2L))
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
-          childIds = leaves.map(_.id.value).toArray,
+          childIds = leaves.map(_.id.value).toVector,
           parentId = None
         ), "portfolio")
         val hw = SeedVarId.fromLong(42L).toOption.get

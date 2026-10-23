@@ -284,6 +284,10 @@ object Mitigation {
     }
   )
 
+  // `Schema.derived` cannot be used here: no `Schema` exists for `MitigationId`,
+  // the nominal wrapper over the Iron identifier, and the only route to one is a
+  // wildcard auto-derivation import that would widen implicit scope across the
+  // file. The published description is an unconstrained object as a result.
   given schema: Schema[Mitigation] = Schema.any[Mitigation]
 }
 
@@ -300,5 +304,6 @@ final case class MitigationApplicationRecord(
 
 object MitigationApplicationRecord {
   given codec: JsonCodec[MitigationApplicationRecord] = DeriveJsonCodec.gen[MitigationApplicationRecord]
+  // Same reason as `Mitigation`'s: `MitigationId` has no `Schema`.
   given schema: Schema[MitigationApplicationRecord] = Schema.any[MitigationApplicationRecord]
 }

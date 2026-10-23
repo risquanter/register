@@ -124,7 +124,7 @@ object DistributionSpecBuilder:
 
   // ── Data helpers ──────────────────────────────────────────────
 
-  private def makeDataValues(points: Array[DistributionPreviewPoint]): js.Array[js.Any] =
+  private def makeDataValues(points: Vector[DistributionPreviewPoint]): js.Array[js.Any] =
     val arr = js.Array[js.Any]()
     points.foreach { pt =>
       arr.push(js.Dynamic.literal("x" -> pt.x, "pdf" -> pt.pdf, "cdf" -> pt.cdf))

@@ -141,12 +141,34 @@ object ProvenanceSpec extends ZIOSpecDefault {
           confidenceInterval = 0.90
         )
         
-        // Both should serialize without error
-        val expertJson = expert.toJsonAST
-        val lognormalJson = lognormal.toJsonAST
-        
-        assertTrue(expertJson.isRight) &&
-        assertTrue(lognormalJson.isRight)
+        // Each case carries its own discriminator tag, and decodes back to the
+        // same case rather than to its sibling. Asserting the tag is what makes
+        // this a test of the discriminated form: a codec that encoded both
+        // cases identically would still serialize without error.
+        assertTrue(
+          expert.toJson.contains("\"distributionType\":\"expert\""),
+          lognormal.toJson.contains("\"distributionType\":\"lognormal\""),
+          expert.toJson.fromJson[DistributionParams] == Right(expert),
+          lognormal.toJson.fromJson[DistributionParams] == Right(lognormal)
+        )
+      },
+
+      test("a malformed expert record reports the expert decoder's own complaint") {
+        // The term count is below `MetalogTermCount`'s floor, so the expert
+        // decoder refuses it. The discriminator sends the body to that decoder
+        // alone, so the failure names the term count rather than reporting a
+        // missing lognormal field from a fall-through to the sibling case.
+        val malformed =
+          """{"distributionType":"expert","percentiles":[0.1,0.9],"quantiles":[1000.0,5000.0],"terms":1}"""
+
+        malformed.fromJson[DistributionParams] match
+          case Left(message) =>
+            assertTrue(
+              message.toLowerCase.contains("terms"),
+              !message.toLowerCase.contains("minloss")
+            )
+          case Right(_) =>
+            assertTrue(false)
       }
     ),
     
@@ -305,7 +327,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val portfolio = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("portfolio"),
           name = "Test Portfolio",
-          childIds = Array(idStr("risk1"), idStr("risk2")),
+          childIds = Vector(idStr("risk1"), idStr("risk2")),
           parentId = None
         ), "portfolio")
         

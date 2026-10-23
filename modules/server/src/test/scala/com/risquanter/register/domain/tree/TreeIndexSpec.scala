@@ -55,14 +55,14 @@ object TreeIndexSpec extends ZIOSpecDefault {
   val itPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = itRiskIdStr,
     name = "IT Risk",
-    childIds = Array(hardwareIdStr, softwareIdStr),
+    childIds = Vector(hardwareIdStr, softwareIdStr),
     parentId = Some(nodeId("ops-risk"))
   ), "portfolio")
 
   val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = opsRiskIdStr,
     name = "Operational Risk",
-    childIds = Array(cyberIdStr, itRiskIdStr),
+    childIds = Vector(cyberIdStr, itRiskIdStr),
     parentId = None
   ), "portfolio")
   
@@ -223,7 +223,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root"),
           name = "Root",
-          childIds = Array(idStr("orphan")),  // Lists orphan as child
+          childIds = Vector(idStr("orphan")),  // Lists orphan as child
           parentId = None
         ), "portfolio")
         
@@ -244,7 +244,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root"),
           name = "Root",
-          childIds = Array(idStr("ghost-child")),  // References non-existent node
+          childIds = Vector(idStr("ghost-child")),  // References non-existent node
           parentId = None
         ), "portfolio")
         
@@ -284,7 +284,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root"),
           name = "Root",
-          childIds = Array(idStr("other-child")),  // Only lists other-child, not lonely
+          childIds = Vector(idStr("other-child")),  // Only lists other-child, not lonely
           parentId = None
         ), "portfolio")
         
@@ -398,7 +398,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val parent = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("valid-parent"),
           name = "Valid Parent",
-          childIds = Array(idStr("valid-child")),
+          childIds = Vector(idStr("valid-child")),
           parentId = None
         ), "portfolio")
         

@@ -32,7 +32,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val l2 = leaf("flood", "Flood", 2L, "root-pf")
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = Array(l1.id.value, l2.id.value), parentId = None), "portfolio")
+        childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
       val result = RiskTree.fromNodes(treeId("bounds-ok"), name("Bounds OK"), Seq(root, l1, l2), root.id, mitigations = Nil)
       assertTrue(result.isSuccess)
     },
@@ -43,7 +43,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val l2 = leaf("dup-b", "Dup", 2L, "root-pf")
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = Array(l1.id.value, l2.id.value), parentId = None), "portfolio")
+        childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
       val result = RiskTree.fromNodes(treeId("bounds-dup"), name("Bounds Dup"), Seq(root, l1, l2), root.id, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
@@ -61,7 +61,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val l2 = leaf("space-b", "Server  Outage", 2L, "root-pf")
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = Array(l1.id.value, l2.id.value), parentId = None), "portfolio")
+        childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
       val result = RiskTree.fromNodes(treeId("bounds-space"), name("Bounds Space"), Seq(root, l1, l2), root.id, mitigations = Nil)
       assertTrue(
         SafeName.requireDistinct(Seq(l1.name, l2.name), ErrorLocation.Whole).isSuccess,
@@ -83,13 +83,13 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
         }
         val sub = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr(subLabel), name = s"Sub $s",
-          childIds = leaves.map(_.id.value).toArray,
+          childIds = leaves.map(_.id.value).toVector,
           parentId = Some(nodeId("root-pf"))), "portfolio")
         (sub, leaves)
       }
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = subs.map(_._1.id.value).toArray, parentId = None), "portfolio")
+        childIds = subs.map(_._1.id.value).toVector, parentId = None), "portfolio")
       val allNodes = root +: subs.flatMap { case (sub, leaves) => sub +: leaves }
       val result = RiskTree.fromNodes(treeId("bounds-many"), name("Bounds Many"), allNodes, root.id, mitigations = Nil)
       assertTrue(

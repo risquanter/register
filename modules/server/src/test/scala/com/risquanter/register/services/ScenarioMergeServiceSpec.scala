@@ -66,7 +66,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
       nodes = unsafeGet(RiskPortfolio.createFromStrings(
         id = rootId.value.toString,
         name = "Root",
-        childIds = children.map(_.id.value.toString).toArray,
+        childIds = children.map(_.id.value.toString).toVector,
         parentId = None
       ), "portfolio") +: children,
       rootId = rootId,

@@ -64,14 +64,14 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
   private val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id       = rootUlid,
     name     = "Operational Risk",
-    childIds = Array(leafUlid),
+    childIds = Vector(leafUlid),
     parentId = None
   ), "portfolio")
 
   private val childPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id       = childUlid,
     name     = "IT Risk",
-    childIds = Array(leafUlid),
+    childIds = Vector(leafUlid),
     parentId = Some(rootId)
   ), "portfolio")
 
@@ -87,7 +87,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
   private val rootPortfolioWithChild = unsafeGet(RiskPortfolio.createFromStrings(
     id       = rootUlid,
     name     = "Operational Risk",
-    childIds = Array(childUlid),
+    childIds = Vector(childUlid),
     parentId = None
   ), "portfolio")
 
@@ -371,7 +371,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leaf2Ulid = "01HX9ABCDE0000000000000005"
         val leaf1 = unsafeGet(RiskLeaf.create(id = leafUlid,  name = "LeafA", probability = 0.1, shape = lognormalShape(100L, 1000L), parentId = Some(rootId), seedVarId = 11L), "leaf")
         val leaf2 = unsafeGet(RiskLeaf.create(id = leaf2Ulid, name = "LeafB", probability = 0.2, shape = lognormalShape(100L, 1000L), parentId = Some(rootId), seedVarId = 12L), "leaf")
-        val root2 = unsafeGet(RiskPortfolio.createFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, leaf2Ulid), parentId = None), "portfolio")
+        val root2 = unsafeGet(RiskPortfolio.createFromStrings(id = rootUlid, name = "Operational Risk", childIds = Vector(leafUlid, leaf2Ulid), parentId = None), "portfolio")
         val tree  = mkTree(treeUlid, "Collision", Seq(root2, leaf1, leaf2), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -523,7 +523,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           parentId         = Some(rootId),
           seedVarId = 18L
         ), "leaf")
-        val rootWithTwo = unsafeGet(RiskPortfolio.createFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, childUlid), parentId = None), "portfolio")
+        val rootWithTwo = unsafeGet(RiskPortfolio.createFromStrings(id = rootUlid, name = "Operational Risk", childIds = Vector(leafUlid, childUlid), parentId = None), "portfolio")
         val tree  = mkTree(treeUlid, "RemoveOther", Seq(rootWithTwo, leaf1, leaf2), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)

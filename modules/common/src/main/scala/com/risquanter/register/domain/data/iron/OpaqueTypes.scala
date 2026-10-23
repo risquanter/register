@@ -299,6 +299,15 @@ type OccurrenceProbability = Double :| (GreaterEqual[0.0] & LessEqual[1.0])
 // Distribution type string (must be "expert" or "lognormal")
 type DistributionType = String :| Match["^(expert|lognormal)$"]
 
+// JSON codecs for DistributionType. It crosses the wire as the mode field of
+// `DistributionPreviewResponse`, so a derived codec for that response needs an
+// instance for this type. The refinement is re-checked on decode: the two modes
+// are the contract, and a decoded value is as trustworthy as a constructed one
+// (ADR-038).
+given JsonEncoder[DistributionType] = JsonEncoder[String].contramap(identity)
+given JsonDecoder[DistributionType] =
+  JsonDecoder[String].mapOrFail(_.refineEither[Match["^(expert|lognormal)$"]])
+
 // SafeName character whitelist: letters, digits, space, hyphen, forward-slash.
 // Excludes HTML/script/FOL-grammar chars. Deliberately narrow — add only when
 // a concrete use case requires the character and no injection risk exists.

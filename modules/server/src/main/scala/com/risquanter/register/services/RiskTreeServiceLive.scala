@@ -272,8 +272,8 @@ class RiskTreeServiceLive private (
           )
 
         case RiskTreeRequests.NodeKind.Portfolio =>
-          val childIds: Array[NodeId] =
-            childrenByParent.get(RiskTreeRequests.ParentRef.Under(node.name)).toList.flatten.flatMap(nameToId.get).toArray
+          val childIds: Vector[NodeId] =
+            childrenByParent.get(RiskTreeRequests.ParentRef.Under(node.name)).toList.flatten.flatMap(nameToId.get).toVector
           RiskPortfolio.fromValidated(
             id = node.id,
             name = node.name,

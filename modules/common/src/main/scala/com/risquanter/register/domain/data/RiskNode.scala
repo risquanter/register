@@ -232,12 +232,17 @@ object RiskLeaf {
   * Domain Model: Uses Iron refined types for type safety
   * - safeId: SafeId (3-30 alphanumeric chars + hyphen/underscore)
   * - safeName: SafeName (non-blank, max 50 chars)
-  * - childIds: Array[NodeId] (references to child nodes, must be non-empty)
+  * - childIds: Vector[NodeId] (references to child nodes, must be non-empty)
+  *
+  * The children are held in an immutable sequence, so two portfolios with the
+  * same children are equal and hash alike. An `Array` field would make the
+  * derived `equals` compare by reference and report two identical portfolios as
+  * different.
   *
   * @param safeId Unique identifier (Iron refined type)
   * @param safeName Human-readable portfolio name (Iron refined type)
   * @param parentId Optional parent node ID (None for root)
-  * @param childIds Array of child node IDs (references, not embedded objects)
+  * @param childIds Child node IDs (references, not embedded objects)
   */
 final case class RiskPortfolio private (
   // See RiskLeaf: @jsonField is read by the zio-json codec, @encodedName by the
@@ -245,11 +250,8 @@ final case class RiskPortfolio private (
   @jsonField("id") @encodedName("id") safeId: SafeId.SafeId,
   @jsonField("name") @encodedName("name") safeName: SafeName.SafeName,
   parentId: Option[NodeId],
-  childIds: Array[NodeId]
+  childIds: Vector[NodeId]
 ) extends RiskNode {
-  // Defense in depth: invariant check as safety net
-  require(childIds != null && childIds.nonEmpty, "RiskPortfolio invariant violated: childIds must be non-empty")
-
   // Public API: Extract values from Iron types
   override def id: NodeId = NodeId(safeId)
   override def name: SafeName.SafeName = safeName
@@ -268,7 +270,7 @@ object RiskPortfolio {
     * Validation Rules:
     * 1. ID must be valid SafeId (3-30 chars, alphanumeric + hyphen/underscore)
     * 2. Name must be valid SafeName (non-blank, max 50 chars)
-    * 3. childIds array must be non-empty
+    * 3. childIds must be non-empty and within the child-count limit
     *
     * Returns:
     * - Validation.succeed(RiskPortfolio) if all validations pass
@@ -277,7 +279,7 @@ object RiskPortfolio {
   def create(
     id: String,
     name: String,
-    childIds: Array[NodeId],
+    childIds: Vector[NodeId],
     parentId: Option[NodeId],
     subject: ErrorSubject = ErrorSubject.Request
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
@@ -292,24 +294,23 @@ object RiskPortfolio {
     val nameValidation: Validation[ValidationError, SafeName.SafeName] =
       toValidation(ValidationUtil.refineName(name, ErrorLocation.Field(subject, FieldName.Name)))
 
-    // Step 3: Validate childIds array (business rule): non-empty AND count-bounded, accumulated
-    val arr = Option(childIds).getOrElse(Array.empty[NodeId])
-    val nonEmptyV = Validation.fromPredicateWith[ValidationError, Array[NodeId]](
+    // Step 3: Validate childIds (business rule): non-empty AND count-bounded, accumulated
+    val nonEmptyV = Validation.fromPredicateWith[ValidationError, Vector[NodeId]](
       ValidationError(
         location = ErrorLocation.Field(subject, FieldName.ChildIds),
         code = ValidationErrorCode.REQUIRED_FIELD,
-        message = "childIds array must not be empty"
+        message = ValidationMessages.portfolioHasNoChildren
       )
-    )(arr)(_.nonEmpty)
-    val countV = Validation.fromPredicateWith[ValidationError, Array[NodeId]](
+    )(childIds)(_.nonEmpty)
+    val countV = Validation.fromPredicateWith[ValidationError, Vector[NodeId]](
       ValidationError(
         location = ErrorLocation.Field(subject, FieldName.ChildIds),
         code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"too many children: ${arr.length} exceeds the limit of $MaxChildren"
+        message = ValidationMessages.tooManyChildren(childIds.length, MaxChildren)
       )
-    )(arr)(_.length <= MaxChildren)
-    val childIdsValidation: Validation[ValidationError, Array[NodeId]] =
-      Validation.validateWith(nonEmptyV, countV)((_, _) => arr)
+    )(childIds)(_.length <= MaxChildren)
+    val childIdsValidation: Validation[ValidationError, Vector[NodeId]] =
+      Validation.validateWith(nonEmptyV, countV)((_, _) => childIds)
 
     // Step 4: Combine all validations (parallel error accumulation)
     Validation.validateWith(
@@ -331,7 +332,7 @@ object RiskPortfolio {
   def createFromStrings(
     id: String,
     name: String,
-    childIds: Array[String],
+    childIds: Vector[String],
     parentId: Option[NodeId],
     subject: ErrorSubject = ErrorSubject.Request
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
@@ -367,7 +368,7 @@ object RiskPortfolio {
     id: String,
     name: String,
     parentId: Option[String],
-    childIds: Array[String]
+    childIds: Vector[String]
   )
   private object RiskPortfolioRaw {
     given rawCodec: JsonCodec[RiskPortfolioRaw] = DeriveJsonCodec.gen[RiskPortfolioRaw]
@@ -404,7 +405,7 @@ object RiskPortfolio {
   def fromValidated(
     id: SafeId.SafeId,
     name: SafeName.SafeName,
-    childIds: Array[NodeId],
+    childIds: Vector[NodeId],
     parentId: Option[NodeId]
   ): RiskPortfolio =
     new RiskPortfolio(safeId = id, safeName = name, parentId = parentId, childIds = childIds)

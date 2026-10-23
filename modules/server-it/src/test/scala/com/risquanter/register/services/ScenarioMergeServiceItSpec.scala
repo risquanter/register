@@ -10,7 +10,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, Mitigation,
   MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  RiskLeafTransform, LikelihoodTransform, DistributionTransform
+  AbsoluteReplacement
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, SafeName, TreeId, NodeId, MitigationId}
 import com.risquanter.register.domain.errors.{AppError, MergeConflict, RepositoryFailure, ValidationFailed}
@@ -18,7 +18,7 @@ import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.testcontainers.IrminCompose
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId as treeIdOf}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId as treeIdOf, lognormalShape}
 
 /**
   * Integration tests for `ScenarioMergeService` against live Irmin.
@@ -78,8 +78,8 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     */
   private def leaf(id: NodeId, leafName: String, probability: Double, seedVarId: Long): RiskLeaf =
     RiskLeaf.create(
-      id = id.value, name = leafName, distributionType = "lognormal",
-      probability = probability, minLoss = Some(1000L), maxLoss = Some(100000L),
+      id = id.value, name = leafName, probability = probability,
+      shape = lognormalShape(1000L, 100000L),
       parentId = Some(rootId), seedVarId = seedVarId
     ).toEither.toOption.get
 
@@ -89,7 +89,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     */
   private def root(childIds: NodeId*): RiskPortfolio =
     RiskPortfolio.create(
-      id = rootId.value, name = "Merge Root", childIds = childIds.toArray, parentId = None
+      id = rootId.value, name = "Merge Root", childIds = childIds.toVector, parentId = None
     ).toEither.toOption.get
 
   private val pred: MitigationTarget =
@@ -103,11 +103,10 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
   private def mitigation(id: MitigationId, label: String, likelihood: Double): Mitigation =
     Mitigation.create(
       id, sname(label), pred,
-      MitigationSpec.LeafStage(
+      MitigationSpec.LeafAbsolute(
         // refineUnsafe rather than autoRefine: the value is a parameter here,
         // so the refinement cannot be checked at compile time.
-        RiskLeafTransform(LikelihoodTransform.Override(likelihood.refineUnsafe), DistributionTransform.Keep),
-        Some(stamp), Some(nodeA)),
+        AbsoluteReplacement.Likelihood(likelihood.refineUnsafe), nodeA, stamp),
       MitigationPrecedence.overrideFinal
     ).toEither.toOption.get
 

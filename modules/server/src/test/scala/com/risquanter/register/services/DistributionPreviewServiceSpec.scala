@@ -52,7 +52,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
         for resp <- preview(expert(None))
         yield
           val cdfs = resp.points.map(_.cdf)
-          val monotone = cdfs.sliding(2).forall { case Array(a, b) => a < b; case _ => true }
+          val monotone = cdfs.sliding(2).forall { case Vector(a, b) => a < b; case _ => true }
           assertTrue(monotone)
       },
 
@@ -99,7 +99,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
         for resp <- preview(lognormal)
         yield
           val cdfs = resp.points.map(_.cdf)
-          val monotone = cdfs.sliding(2).forall { case Array(a, b) => a < b; case _ => true }
+          val monotone = cdfs.sliding(2).forall { case Vector(a, b) => a < b; case _ => true }
           assertTrue(monotone)
       },
 

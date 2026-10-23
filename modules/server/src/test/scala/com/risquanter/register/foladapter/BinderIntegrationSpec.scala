@@ -37,11 +37,11 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
   private val rootPortfolio = unsafeGet(RiskPortfolio.create(
     id   = rootId.value, name = "Root",
-    childIds = Array(itId), parentId = None
+    childIds = Vector(itId), parentId = None
   ), "portfolio")
   private val itPortfolio = unsafeGet(RiskPortfolio.create(
     id   = itId.value, name = "IT Risk",
-    childIds = Array(cyberId, hardwareId), parentId = Some(rootId)
+    childIds = Vector(cyberId, hardwareId), parentId = Some(rootId)
   ), "portfolio")
   private val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = cyberId.value, name = "Cyber",

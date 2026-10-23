@@ -36,7 +36,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   private val bId    = nodeId("qsl-b")
 
   private val rootP = unsafeGet(RiskPortfolio.create(
-    id = rootId.value, name = "Root", childIds = Array(aId, bId), parentId = None), "portfolio")
+    id = rootId.value, name = "Root", childIds = Vector(aId, bId), parentId = None), "portfolio")
   private val aLeaf = unsafeGet(RiskLeaf.create(
     id = aId.value, name = "Alpha", probability = 0.2,
     shape = lognormalShape(100L, 100000L), parentId = Some(rootId), seedVarId = 1L), "leaf")
