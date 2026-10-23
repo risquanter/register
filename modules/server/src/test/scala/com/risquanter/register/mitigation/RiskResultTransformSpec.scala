@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.{
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveInt, PositiveLong, RetentionFactor, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
-import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
+import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage}
 
 /** `Identity` laws, `nTrials` preservation, and all result-stage transform strategies. */
 object RiskResultTransformSpec extends ZIOSpecDefault {
@@ -269,7 +269,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val id      = nodeId("risk-001")
         val applied = List(MitigationApplicationRecord(
           mitigationId("scale-over"),
-          MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.ScaleLosses(1.0)))),
+          resultStage(ResultTransformSpec.ScaleLosses(1.0)),
           Set.empty,
           MitigationPrecedence.default
         ))

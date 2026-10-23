@@ -45,14 +45,12 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   ), "portfolio")
   private val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = cyberId.value, name = "Cyber",
-    distributionType = "lognormal", probability = 0.25,
-    minLoss = Some(1000L), maxLoss = Some(50000L), parentId = Some(itId),
+    probability = 0.25, shape = lognormalShape(1000L, 50000L), parentId = Some(itId),
     seedVarId = 1L
   ), "leaf")
   private val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = hardwareId.value, name = "Hardware",
-    distributionType = "lognormal", probability = 0.10,
-    minLoss = Some(500L), maxLoss = Some(10000L), parentId = Some(itId),
+    probability = 0.10, shape = lognormalShape(500L, 10000L), parentId = Some(itId),
     seedVarId = 2L
   ), "leaf")
 

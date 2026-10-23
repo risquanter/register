@@ -5,7 +5,7 @@ import zio.test.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.TelemetryLive
-import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, TransformPipeline, ResultTransformSpec, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
+import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, ResultTransformSpec, RelativeLikelihood, RelativeSeverity}
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
@@ -29,10 +29,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
   val risk1Leaf = unsafeGet(RiskLeaf.create(
     id = risk1IdStr,
     name = "Risk 1",
-    distributionType = "lognormal",
     probability = 0.1,
-    minLoss = Some(10000L),
-    maxLoss = Some(50000L),
+    shape = lognormalShape(10000L, 50000L),
     parentId = Some(nodeId("root")),
     seedVarId = 1L
   ), "leaf")
@@ -40,10 +38,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
   val risk2Leaf = unsafeGet(RiskLeaf.create(
     id = risk2IdStr,
     name = "Risk 2",
-    distributionType = "lognormal",
     probability = 0.2,
-    minLoss = Some(5000L),
-    maxLoss = Some(20000L),
+    shape = lognormalShape(5000L, 20000L),
     parentId = Some(nodeId("root")),
     seedVarId = 2L
   ), "leaf")
@@ -103,17 +99,15 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
                         precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
     Mitigation.create(
       mitigationId(label), mitName(label), pred,
-      MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)))),
+      resultStage(ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)),
       precedence).toEither.toOption.get
 
   private def leafScaleSeverity(label: String, factor: Double): Mitigation =
     Mitigation.create(
       mitigationId(label), mitName(label), pred,
-      MitigationSpec.LeafStage(
-        RiskLeafTransform(LikelihoodTransform.Keep,
-          DistributionTransform.ScaleSeverity(ValidationUtil.refineRetentionFactor(factor, paramAt).toOption.get)),
-        None, None),
+      MitigationSpec.LeafRelative(
+        RelativeLikelihood.Keep,
+        RelativeSeverity.ScaleSeverity(ValidationUtil.refineRetentionFactor(factor, paramAt).toOption.get)),
       MitigationPrecedence.default).toEither.toOption.get
 
   // Test layer with all dependencies
@@ -205,10 +199,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
         val editedLeaf = unsafeGet(RiskLeaf.create(
           id = risk1IdStr,
           name = "Risk 1",
-          distributionType = "lognormal",
           probability = 0.6,
-          minLoss = Some(10000L),
-          maxLoss = Some(50000L),
+          shape = lognormalShape(10000L, 50000L),
           parentId = Some(nodeId("root")),
           seedVarId = 1L
         ), "leaf")

@@ -2,9 +2,9 @@ package app.state
 
 import zio.test.*
 
-import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{SafeName, IronConstants, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
+import com.risquanter.register.testutil.TestHelpers.lognormalShape
 import io.github.iltotore.iron.*
 
 object FormModeSpec extends ZIOSpecDefault:
@@ -14,14 +14,7 @@ object FormModeSpec extends ZIOSpecDefault:
   private val portName      = SafeName.fromString("Operational Risk").toOption.get
   private val otherPortName = SafeName.fromString("IT Risk").toOption.get
 
-  private val lognormalDistribution = Distribution(
-    distributionType = IronConstants.Lognormal,
-    minLoss          = Some(1000L),
-    maxLoss          = Some(50000L),
-    percentiles      = None,
-    quantiles        = None,
-    terms            = None
-  )
+  private val lognormalDistribution = lognormalShape(1000L, 50000L)
   private val savedProbability: OccurrenceProbability = 0.3
 
   private val savedLeaf = LeafDraft(leafName, ParentRef.Root, lognormalDistribution, savedProbability)

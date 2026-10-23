@@ -1,15 +1,24 @@
 package com.risquanter.register.domain.data
 
 import zio.test.*
-import zio.test.Assertion.*
+import zio.json.{DecoderOps, EncoderOps}
 import com.risquanter.register.domain.data.RiskLeaf
 import zio.prelude.Validation
 
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError, ValidationErrorCode
+  ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError
 }
-import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{expertShape, idStr, lognormalShape, nodeId, unsafeGet}
 
+/** What `RiskLeaf.create` refines, and nothing else.
+  *
+  * The loss shape arrives already gated, so every rule about percentiles,
+  * quantiles, term counts and loss bounds is asserted in
+  * [[DistributionShapeSpec]] against the type that holds it. What is left here
+  * is the four values this constructor refines — identifier, name, occurrence
+  * probability and seed identity — their accumulation, and the leaf's own wire
+  * format.
+  */
 object RiskLeafSpec extends ZIOSpecDefault {
 
   /** The node a caller names when the leaf came from a submitted collection
@@ -17,370 +26,106 @@ object RiskLeafSpec extends ZIOSpecDefault {
   private val submittedLeaf: ErrorSubject =
     ErrorSubject.nodeAtIndex(SubmittedCollection.Leaves, 0)
 
+  /** A shape whose own gate passes, so a refusal in these tests is always about
+    * one of the four values `create` refines. */
+  private val validShape: DistributionShape = lognormalShape(100L, 1000L)
+
   /** Every location the refusal reported, in the order the errors accumulated. */
   private def locationsOf[A](
     result: Validation[ValidationError, A]
   ): List[ErrorLocation] =
     result.toEither.swap.toOption.toList.flatMap(_.toList).map(_.location)
 
+  private def create(
+    id:          String,
+    name:        String,
+    probability: Double,
+    seedVarId:   Long,
+    shape:       DistributionShape = validShape,
+    subject:     ErrorSubject      = ErrorSubject.Request
+  ): Validation[ValidationError, RiskLeaf] =
+    RiskLeaf.create(id, name, probability, shape, parentId = None, seedVarId, subject)
+
   def spec = suite("RiskLeaf Smart Constructor")(
+
     suite("Valid RiskLeaf Creation")(
-      test("creates valid expert mode risk") {
-        val result = RiskLeaf.create(
-          id = idStr("cyber-attack"),
-          name = "Cyber Attack",
-          distributionType = "expert",
-          probability = 0.25,
-          percentiles = Some(Array(0.05, 0.5, 0.95)),
-          quantiles = Some(Array(1000.0, 5000.0, 25000.0)),
-          seedVarId = 1L
+      test("creates a leaf whose shape is an expert fit") {
+        val result = create(
+          id = idStr("cyber-attack"), name = "Cyber Attack", probability = 0.25, seedVarId = 1L,
+          shape = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
         )
         assertTrue(result.isSuccess)
       },
-      test("creates valid lognormal mode risk") {
-        val result = RiskLeaf.create(
-          id = idStr("data-breach"),
-          name = "Data Breach",
-          distributionType = "lognormal",
-          probability = 0.15,
-          minLoss = Some(1000L),
-          maxLoss = Some(50000L),
-          seedVarId = 2L
+      test("creates a leaf whose shape is a lognormal") {
+        val result = create(
+          id = idStr("data-breach"), name = "Data Breach", probability = 0.15, seedVarId = 2L,
+          shape = lognormalShape(1000L, 50000L)
         )
         assertTrue(result.isSuccess)
       },
-      test("accepts ULID-format id") {
-        val result = RiskLeaf.create(
-          id = idStr("abc"),
-          name = "ABC Risk",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 3L
-        )
-        assertTrue(result.isSuccess)
+      test("accepts a ULID-format id") {
+        assertTrue(create(idStr("abc"), "ABC Risk", 0.5, 3L).isSuccess)
       },
       test("accepts another ULID-format id") {
-        val result = RiskLeaf.create(
-          id = idStr("long-id"),
-          name = "Long ID Risk",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 4L
-        )
-        assertTrue(result.isSuccess)
+        assertTrue(create(idStr("long-id"), "Long ID Risk", 0.5, 4L).isSuccess)
       },
-      test("accepts id derived from label with hyphens and underscores") {
-        val result = RiskLeaf.create(
-          id = idStr("ops_risk-2024"),
-          name = "Operations Risk",
-          distributionType = "lognormal",
-          probability = 0.3,
-          minLoss = Some(500L),
-          maxLoss = Some(5000L),
-          seedVarId = 5L
-        )
-        assertTrue(result.isSuccess)
+      test("accepts an id derived from a label with hyphens and underscores") {
+        assertTrue(create(idStr("ops_risk-2024"), "Operations Risk", 0.5, 5L).isSuccess)
       },
-      test("accepts boundary probability values") {
+      test("accepts a leaf with a parent") {
         val result = RiskLeaf.create(
-          id = idStr("low-prob"),
-          name = "Low Probability",
-          distributionType = "lognormal",
-          probability = 0.01,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 6L
+          idStr("child-leaf"), "Child Leaf", 0.5, validShape,
+          parentId = Some(nodeId("root-pf")), seedVarId = 6L
         )
-        assertTrue(result.isSuccess)
+        assertTrue(result.map(_.parentId).toOption.contains(Some(nodeId("root-pf"))))
       }
     ),
+
     suite("Invalid ID Validation")(
-      test("rejects empty id") {
-        val result = RiskLeaf.create(
-          id = "",
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 7L
-        )
-        assertTrue(result.isFailure)
+      test("rejects an empty id") {
+        assertTrue(create("", "Valid Name", 0.5, 7L).isFailure)
       },
-      test("rejects non-ULID id (too short)") {
-        val result = RiskLeaf.create(
-          id = "ab",
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 8L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a non-ULID id (too short)") {
+        assertTrue(create("ab", "Valid Name", 0.5, 8L).isFailure)
       },
-      test("rejects non-ULID id (too long)") {
-        val result = RiskLeaf.create(
-          id = "a" * 31,
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 9L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a non-ULID id (too long)") {
+        assertTrue(create("a" * 31, "Valid Name", 0.5, 9L).isFailure)
       },
-      test("rejects non-ULID id (spaces)") {
-        val result = RiskLeaf.create(
-          id = "cyber attack",
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 10L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a non-ULID id (spaces)") {
+        assertTrue(create("cyber attack", "Valid Name", 0.5, 10L).isFailure)
       },
-      test("rejects non-ULID id (special characters)") {
-        val result = RiskLeaf.create(
-          id = "cyber@attack!",
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 11L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a non-ULID id (special characters)") {
+        assertTrue(create("cyber@attack!", "Valid Name", 0.5, 11L).isFailure)
       }
     ),
+
     suite("Invalid Name Validation")(
-      test("rejects empty name") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 12L
-        )
-        assertTrue(result.isFailure)
+      test("rejects an empty name") {
+        assertTrue(create(idStr("valid-id"), "", 0.5, 12L).isFailure)
       },
-      test("rejects blank name") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "   ",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 13L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a blank name") {
+        assertTrue(create(idStr("valid-id"), "   ", 0.5, 13L).isFailure)
       },
-      test("rejects name too long (> 50 chars)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "a" * 51,
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 14L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a name longer than fifty characters") {
+        assertTrue(create(idStr("valid-id"), "a" * 51, 0.5, 14L).isFailure)
       }
     ),
+
     suite("Invalid Probability Validation")(
-      test("accepts probability = 0.0 (event that never occurs)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.0,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 15L
-        )
-        assertTrue(result.isSuccess)
+      test("accepts a probability of zero — an event that never occurs") {
+        assertTrue(create(idStr("valid-id"), "Valid Name", 0.0, 15L).isSuccess)
       },
-      test("accepts probability = 1.0 (event that always occurs)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 1.0,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 16L
-        )
-        assertTrue(result.isSuccess)
+      test("accepts a probability of one — an event that always occurs") {
+        assertTrue(create(idStr("valid-id"), "Valid Name", 1.0, 16L).isSuccess)
       },
-      test("rejects negative probability") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = -0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 17L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a negative probability") {
+        assertTrue(create(idStr("valid-id"), "Valid Name", -0.1, 17L).isFailure)
       },
-      test("rejects probability > 1.0") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 1.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 18L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a probability above one") {
+        assertTrue(create(idStr("valid-id"), "Valid Name", 1.5, 18L).isFailure)
       }
     ),
-    suite("Invalid Distribution Type Validation")(
-      test("rejects invalid distribution type") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "normal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 19L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects empty distribution type") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 20L
-        )
-        assertTrue(result.isFailure)
-      }
-    ),
-    suite("Expert Mode Validation")(
-      test("rejects expert mode without percentiles") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          quantiles = Some(Array(1000.0, 5000.0)),
-          seedVarId = 21L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects expert mode without quantiles") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.05, 0.95)),
-          seedVarId = 22L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects expert mode with empty percentiles") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array.empty[Double]),
-          quantiles = Some(Array(1000.0)),
-          seedVarId = 23L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects expert mode with mismatched array lengths") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.05, 0.5, 0.95)),
-          quantiles = Some(Array(1000.0, 5000.0)),  // Length mismatch
-          seedVarId = 24L
-        )
-        assertTrue(result.isFailure)
-      },
-      // OD-1 (Option A): expert-mode point count must lie in the metalog
-      // fitter's valid range [2, 20]; outside it the fitter throws past the
-      // validation boundary, so the bound is enforced at construction.
-      test("accepts expert mode with 20 points (upper bound)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some((1 to 20).map(_ * 0.04).toArray),
-          quantiles = Some((1 to 20).map(_.toDouble * 1000).toArray),
-          seedVarId = 25L
-        )
-        assertTrue(result.isSuccess)
-      },
-      test("rejects expert mode with 21 points (above the metalog cap of 20)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some((1 to 21).map(_ * 0.04).toArray),
-          quantiles = Some((1 to 21).map(_.toDouble * 1000).toArray),
-          seedVarId = 26L
-        )
-        assertTrue(
-          result.toEither.swap.toOption.get.exists(e =>
-            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-            e.location == ErrorLocation.requestField(FieldName.Percentiles))
-        )
-      },
-      test("rejects expert mode with 1 point (below the fitter minimum of 2)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.5)),
-          quantiles = Some(Array(1000.0)),
-          seedVarId = 27L
-        )
-        assertTrue(
-          result.toEither.swap.toOption.get.exists(e =>
-            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-            e.location == ErrorLocation.requestField(FieldName.Percentiles))
-        )
-      },
-      test("accepts expert mode with 2 points (lower bound)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.9)),
-          quantiles = Some(Array(1000.0, 5000.0)),
-          seedVarId = 28L
-        )
-        assertTrue(result.isSuccess)
-      }
-    ),
+
     suite("Tapir schema matches the JSON wire names")(
       // The zio-json codec and the Tapir schema are derived independently: the
       // codec encodes through RiskLeafRaw, the schema reads this case class's
@@ -413,599 +158,171 @@ object RiskLeafSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("Lognormal Mode Validation")(
-      test("rejects a minLoss of zero — the bound feeds a logarithm in the fit") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(0L),
-          maxLoss = Some(1000L),
-          seedVarId = 25L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects a maxLoss of zero") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(0L),
-          maxLoss = Some(0L),
-          seedVarId = 25L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("accepts bounds of one and two, the smallest ordered positive pair") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(1L),
-          maxLoss = Some(2L),
-          seedVarId = 25L
-        )
-        assertTrue(result.isSuccess)
-      },
-      test("rejects lognormal mode without minLoss") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          maxLoss = Some(1000L),
-          seedVarId = 25L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects lognormal mode without maxLoss") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          seedVarId = 26L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects negative minLoss") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(-100L),
-          maxLoss = Some(1000L),
-          seedVarId = 27L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects negative maxLoss") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(-1000L),
-          seedVarId = 28L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects minLoss >= maxLoss (equal)") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(1000L),
-          seedVarId = 29L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects minLoss > maxLoss") {
-        val result = RiskLeaf.create(
-          id = idStr("valid-id"),
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(5000L),
-          maxLoss = Some(1000L),
-          seedVarId = 30L
-        )
-        assertTrue(result.isFailure)
-      }
-    ),
     suite("Error Accumulation")(
-      test("accumulates multiple validation errors") {
-        val result = RiskLeaf.create(
-          id = "ab",                    // Too short
-          name = "",                    // Empty
-          distributionType = "invalid", // Invalid type
-          probability = 1.5,            // Out of range
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 31L
-        )
+      test("every refusable field fails together rather than short-circuiting") {
+        val result = create(id = "x", name = "", probability = 2.0, seedVarId = 0L)
+        val locations = locationsOf(result)
         assertTrue(
-          result.isFailure
+          locations.contains(ErrorLocation.requestField(FieldName.Id)),
+          locations.contains(ErrorLocation.requestField(FieldName.Name)),
+          locations.contains(ErrorLocation.requestField(FieldName.Probability)),
+          locations.contains(ErrorLocation.requestField(FieldName.SeedVarId))
         )
-        // Note: Error accumulation verified by isFailure - Validation accumulates all errors
       },
-      
-      test("accumulates all field validation errors and returns them") {
-        val result = RiskLeaf.create(
-          id = "x",                     // Too short (< 3 chars)
-          name = "",                    // Empty
-          distributionType = "invalid", // Not "expert" or "lognormal"
-          probability = 2.0,            // > 1.0
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 32L
-        )
-        
-        result.toEither match {
+      test("the accumulated messages name each refused field") {
+        val result = create(id = "x", name = "", probability = 2.0, seedVarId = 19L)
+        result.toEither match
           case Left(errors) =>
             val errorStr = errors.mkString("; ")
             assertTrue(
               errorStr.contains("id") || errorStr.contains("ID") || errorStr.contains("3"),
               errorStr.toLowerCase.contains("name") || errorStr.contains("blank"),
-              errorStr.toLowerCase.contains("distribution") || errorStr.contains("expert") || errorStr.contains("lognormal"),
               errorStr.toLowerCase.contains("prob") || errorStr.contains("1.0")
             )
-          case Right(_) =>
-            assertTrue(false) // Should have failed
-        }
+          case Right(_) => assertTrue(false).label("Expected failure but got Success")
       },
-      
-      test("accumulates cross-field validation errors with field errors") {
-        val result = RiskLeaf.create(
-          id = "",                      // Empty - invalid
-          name = "Valid Name",
-          distributionType = "lognormal",
-          probability = 1.5,            // > 1.0 - invalid
-          minLoss = Some(5000L),        // minLoss > maxLoss - cross-field error
-          maxLoss = Some(1000L),
-          seedVarId = 33L
-        )
-        
-        result.toEither match {
-          case Left(errors) =>
-            val errorStr = errors.mkString("; ")
-            assertTrue(
-              errors.length >= 3,  // At least 3 errors
-              errorStr.toLowerCase.contains("id") || errorStr.contains("blank") || errorStr.contains("empty"),
-              errorStr.toLowerCase.contains("prob"),
-              errorStr.contains("min") && errorStr.contains("max")
-            )
-          case Right(_) =>
-            assertTrue(false) // Should have failed
-        }
-      },
-      
-      test("accumulates mode-specific validation errors") {
-        // Expert mode without required fields
-        val result = RiskLeaf.create(
-          id = "x",                     // Too short
-          name = "",                    // Empty
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = None,           // Missing for expert mode
-          quantiles = None,             // Missing for expert mode
-          seedVarId = 34L
-        )
-        
-        result.toEither match {
-          case Left(errors) =>
-            val errorStr = errors.mkString("; ")
-            assertTrue(
-              errors.length >= 3,  // id, name, and mode-specific errors
-              errorStr.toLowerCase.contains("percentile") || errorStr.toLowerCase.contains("quantile"),
-              errorStr.toLowerCase.contains("expert")
-            )
-          case Right(_) =>
-            assertTrue(false)
-        }
+      test("a valid shape contributes no error to the accumulation") {
+        val result = create(id = "x", name = "Valid Name", probability = 0.5, seedVarId = 20L)
+        assertTrue(locationsOf(result) == List(ErrorLocation.requestField(FieldName.Id)))
       }
     ),
+
     suite("Successful Construction Properties")(
-      test("constructed RiskLeaf has correct id") {
-        val result = RiskLeaf.create(
-          id = idStr("test-risk"),
-          name = "Test Risk",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 35L
-        )
-        assertTrue(
-          result.map(_.id).toOption.contains(nodeId("test-risk"))
-        )
+      test("the constructed leaf carries the id it was given") {
+        val result = create(idStr("test-risk"), "Test Risk", 0.5, 35L)
+        assertTrue(result.map(_.id).toOption.contains(nodeId("test-risk")))
       },
-      test("constructed RiskLeaf has correct name") {
-        val result = RiskLeaf.create(
-          id = idStr("test-risk"),
-          name = "Test Risk Name",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 36L
-        )
-        assertTrue(
-          result.map(_.name).toOption.contains("Test Risk Name")
-        )
+      test("the constructed leaf carries the name it was given") {
+        val result = create(idStr("test-risk"), "Test Risk Name", 0.5, 36L)
+        assertTrue(result.map(_.name).toOption.contains("Test Risk Name"))
       },
-      test("constructed RiskLeaf preserves percentiles/quantiles") {
-        val percentiles = Array(0.05, 0.5, 0.95)
-        val quantiles = Array(1000.0, 5000.0, 25000.0)
-        val result = RiskLeaf.create(
-          id = idStr("test-risk"),
-          name = "Test Risk",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(percentiles),
-          quantiles = Some(quantiles),
-          seedVarId = 37L
-        )
-        assertTrue(
-          result.map(_.percentiles.isDefined).toOption.contains(true),
-          result.map(_.quantiles.isDefined).toOption.contains(true)
-        )
+      test("the constructed leaf carries the shape it was given, anchors intact") {
+        val shape  = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
+        val result = create(idStr("test-risk"), "Test Risk", 0.5, 37L, shape = shape)
+        assertTrue(result.map(_.shape).toOption.contains(shape))
+      },
+      test("the constructed leaf carries a stated term count") {
+        val shape  = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), Some(2))
+        val result = create(idStr("terms-stated"), "Terms Stated", 0.5, 45L, shape = shape)
+        result.toOption.get.shape match
+          case DistributionShape.Expert(_, terms) => assertTrue(terms.map(t => t: Int) == Some(2))
+          case other                              => assertTrue(false).label(s"expected an expert shape, got $other")
+      },
+      test("the constructed leaf carries no term count when none was stated") {
+        val shape  = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
+        val result = create(idStr("terms-absent"), "Terms Absent", 0.5, 46L, shape = shape)
+        result.toOption.get.shape match
+          case DistributionShape.Expert(_, terms) => assertTrue(terms.isEmpty)
+          case other                              => assertTrue(false).label(s"expected an expert shape, got $other")
       }
     ),
+
     suite("Error Location Context in Errors")(
       test("an invalid id reports at the id field") {
-        val result = RiskLeaf.create(
-          id = "x",  // Too short (< 3)
-          name = "Test",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 38L
-        )
+        val result = create("x", "Test", 0.5, 38L)
         assertTrue(
           result.isFailure,
           locationsOf(result).contains(ErrorLocation.requestField(FieldName.Id))
         )
       },
       test("an invalid name reports at the name field") {
-        val result = RiskLeaf.create(
-          id = idStr("test-id"),
-          name = "",  // Blank
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 39L
-        )
+        val result = create(idStr("test-id"), "", 0.5, 39L)
         assertTrue(
           result.isFailure,
           locationsOf(result).contains(ErrorLocation.requestField(FieldName.Name))
         )
       },
       test("an out-of-range probability reports at the probability field") {
-        val result = RiskLeaf.create(
-          id = idStr("test-id"),
-          name = "Test",
-          distributionType = "lognormal",
-          probability = 1.5,  // Out of range
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 40L
-        )
+        val result = create(idStr("test-id"), "Test", 1.5, 40L)
         assertTrue(
           result.isFailure,
           locationsOf(result).contains(ErrorLocation.requestField(FieldName.Probability))
         )
       },
-      test("an unrecognised distribution type reports at the distribution-type field") {
-        val result = RiskLeaf.create(
-          id = idStr("test-id"),
-          name = "Test",
-          distributionType = "invalid",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 41L
-        )
-        assertTrue(
-          result.isFailure,
-          locationsOf(result).contains(ErrorLocation.requestField(FieldName.DistributionType))
-        )
-      },
-      test("minLoss at or above maxLoss reports at the loss range, not at either field") {
-        val result = RiskLeaf.create(
-          id = idStr("test-id"),
-          name = "Test",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(100L),  // maxLoss < minLoss
-          seedVarId = 42L
-        )
-        assertTrue(
-          result.isFailure,
-          locationsOf(result).contains(ErrorLocation.requestField(FieldName.LossRange)),
-          !locationsOf(result).contains(ErrorLocation.requestField(FieldName.MinLoss)),
-          !locationsOf(result).contains(ErrorLocation.requestField(FieldName.MaxLoss))
-        )
-      },
-      test("expert mode with neither collection reports at the distribution-type field") {
-        val result = RiskLeaf.create(
-          id = idStr("test-id"),
-          name = "Test",
-          distributionType = "expert",
-          probability = 0.5,
-          // Missing percentiles and quantiles
-          seedVarId = 43L
-        )
-        assertTrue(
-          result.isFailure,
-          locationsOf(result).contains(ErrorLocation.requestField(FieldName.DistributionType))
-        )
-      },
       test("a caller-supplied subject propagates to errors") {
-        val result = RiskLeaf.create(
-          id = "x",  // Too short
-          name = "Test",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          subject = submittedLeaf,
-          seedVarId = 44L
-        )
+        val result = create("x", "Test", 0.5, 44L, subject = submittedLeaf)
         assertTrue(
           result.isFailure,
           locationsOf(result).contains(ErrorLocation.Field(submittedLeaf, FieldName.Id))
         )
       }
     ),
-    suite("Terms Validation (Expert Mode)")(
-      test("accepts explicit terms equal to anchor count") {
-        val result = RiskLeaf.create(
-          id = idStr("terms-exact"),
-          name = "Terms Exact",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(3),
-          seedVarId = 45L
-        )
-        assertTrue(result.isSuccess)
-      },
-      test("accepts terms less than anchor count") {
-        val result = RiskLeaf.create(
-          id = idStr("terms-less"),
-          name = "Terms Less",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(2),
-          seedVarId = 46L
-        )
-        assertTrue(result.isSuccess)
-      },
-      test("accepts terms = None (server chooses min(n, 4) default)") {
-        val result = RiskLeaf.create(
-          id = idStr("terms-none"),
-          name = "Terms None",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = None,
-          seedVarId = 47L
-        )
-        assertTrue(result.isSuccess)
-      },
-      test("preserves terms value on created RiskLeaf") {
-        val result = RiskLeaf.create(
-          id = idStr("terms-preserved"),
-          name = "Terms Preserved",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(3),
-          seedVarId = 48L
-        )
-        assertTrue(
-          result.isSuccess,
-          result.toOption.get.terms.exists(_.toInt == 3)
-        )
-      },
-      test("terms = None produces None on RiskLeaf") {
-        val result = RiskLeaf.create(
-          id = idStr("terms-none-field"),
-          name = "Terms None Field",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          seedVarId = 49L
-        )
-        assertTrue(
-          result.isSuccess,
-          result.toOption.get.terms.isEmpty
-        )
-      },
-      test("rejects terms exceeding anchor count") {
-        // 3 anchor points, but terms = 5 — exceeds n
-        val result = RiskLeaf.create(
-          id = idStr("terms-too-high"),
-          name = "Terms Too High",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(5),
-          seedVarId = 50L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("rejects terms = 0 (not PositiveInt)") {
-        val result = RiskLeaf.create(
-          id = idStr("terms-zero"),
-          name = "Terms Zero",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(0),
-          seedVarId = 51L
-        )
-        assertTrue(result.isFailure)
-      },
-      test("terms error includes field path") {
-        val result = RiskLeaf.create(
-          id = idStr("terms-field-path"),
-          name = "Terms Field Path",
-          distributionType = "expert",
-          probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(5),
-          seedVarId = 52L
-        )
-        assertTrue(
-          result.isFailure,
-          locationsOf(result).contains(ErrorLocation.requestField(FieldName.Terms))
-        )
-      }
-    ),
+
     suite("SeedVarId Validation")(
-      test("rejects seedVarId = 0, reporting at the seedVarId field") {
-        val result = RiskLeaf.create(
-          id = idStr("seed-zero"),
-          name = "Seed Zero",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 0L
-        )
+      test("rejects a seedVarId of zero, reporting at the seedVarId field") {
+        val result = create(idStr("seed-zero"), "Seed Zero", 0.5, 0L)
         assertTrue(
           result.isFailure,
           locationsOf(result).contains(ErrorLocation.requestField(FieldName.SeedVarId))
         )
       },
-      test("rejects seedVarId = 50000000 (stream doubling budget)") {
-        val result = RiskLeaf.create(
-          id = idStr("seed-cap"),
-          name = "Seed Cap",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 50000000L
-        )
-        assertTrue(result.isFailure)
+      test("rejects a seedVarId of fifty million — the stream-doubling budget") {
+        assertTrue(create(idStr("seed-cap"), "Seed Cap", 0.5, 50000000L).isFailure)
       },
-      test("accepts range bounds 1 and 49999999") {
-        val lo = RiskLeaf.create(
-          id = idStr("seed-lo"),
-          name = "Seed Lo",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 1L
-        )
-        val hi = RiskLeaf.create(
-          id = idStr("seed-hi"),
-          name = "Seed Hi",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 49999999L
-        )
+      test("accepts the range bounds one and 49 999 999") {
+        val lo = create(idStr("seed-lo"), "Seed Lo", 0.5, 1L)
+        val hi = create(idStr("seed-hi"), "Seed Hi", 0.5, 49999999L)
         assertTrue(lo.isSuccess, hi.isSuccess)
       },
-      test("seedVarId error accumulates with other field errors") {
-        val result = RiskLeaf.create(
-          id = "x",           // too short
-          name = "Seed Accum",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 0L      // out of range
+      test("a seedVarId error accumulates with other field errors") {
+        val result    = create("x", "Seed Accum", 0.5, 0L)
+        val locations = locationsOf(result)
+        assertTrue(
+          locations.contains(ErrorLocation.requestField(FieldName.Id)),
+          locations.contains(ErrorLocation.requestField(FieldName.SeedVarId))
         )
-        result.toEither match {
-          case Left(errors) =>
-            val locations = errors.map(_.location)
-            assertTrue(
-              errors.length >= 2,
-              locations.contains(ErrorLocation.requestField(FieldName.Id)),
-              locations.contains(ErrorLocation.requestField(FieldName.SeedVarId))
-            )
-          case Right(_) => assertTrue(false)
-        }
       },
-      test("preserves seedVarId on created RiskLeaf") {
-        val result = RiskLeaf.create(
-          id = idStr("seed-preserved"),
-          name = "Seed Preserved",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 77L
-        )
+      test("the constructed leaf carries the seedVarId it was given") {
+        val result = create(idStr("seed-preserved"), "Seed Preserved", 0.5, 77L)
         assertTrue(
           result.isSuccess,
           result.toOption.get.seedVarId.value == 77L
         )
       }
     ),
+
     suite("SeedVarId JSON")(
-      test("encoder writes seedVarId and decoder round-trips it") {
-        import zio.json.{EncoderOps, DecoderOps}
-        val leaf = unsafeGet(RiskLeaf.create(
-          id = idStr("seed-json"),
-          name = "Seed JSON",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
-          seedVarId = 42L
-        ), "leaf")
-        val json = leaf.toJson
+      test("the encoder writes seedVarId and the decoder round-trips it") {
+        val leaf    = unsafeGet(create(idStr("seed-json"), "Seed JSON", 0.5, 42L), "leaf")
+        val json    = leaf.toJson
         val decoded = json.fromJson[RiskLeaf]
         assertTrue(
           json.contains("\"seedVarId\":42"),
           decoded.map(_.seedVarId.value) == Right(42L)
         )
       },
-      test("decoder rejects leaf JSON without seedVarId") {
-        import zio.json.DecoderOps
-        val json =
-          s"""{"id":"${idStr("seed-missing")}","name":"Seed Missing","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000}"""
-        assertTrue(json.fromJson[RiskLeaf].isLeft)
+      test("the decoder rejects leaf JSON with no seedVarId") {
+        val leaf     = unsafeGet(create(idStr("seed-missing"), "Seed Missing", 0.5, 42L), "leaf")
+        val json     = leaf.toJson
+        val tampered = json.replace(",\"seedVarId\":42", "")
+        assertTrue(json != tampered, tampered.fromJson[RiskLeaf].isLeft)
       },
-      test("decoder rejects out-of-range seedVarId in JSON") {
-        import zio.json.DecoderOps
-        val json =
-          s"""{"id":"${idStr("seed-oor")}","name":"Seed OOR","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000,"seedVarId":0}"""
-        val decoded = json.fromJson[RiskLeaf]
+      test("the decoder rejects an out-of-range seedVarId in JSON") {
+        val leaf     = unsafeGet(create(idStr("seed-oor"), "Seed OOR", 0.5, 42L), "leaf")
+        val tampered = leaf.toJson.replace("\"seedVarId\":42", "\"seedVarId\":0")
+        val decoded  = tampered.fromJson[RiskLeaf]
         assertTrue(
           decoded.isLeft,
           decoded.swap.toOption.get.contains("seedVarId")
         )
       }
+    ),
+
+    suite("the leaf's wire format carries the shape as one nested field")(
+      test("a lognormal leaf round-trips") {
+        val leaf = unsafeGet(create(idStr("wire-lognormal"), "Wire Lognormal", 0.3, 50L), "leaf")
+        assertTrue(leaf.toJson.fromJson[RiskLeaf] == Right(leaf))
+      },
+      test("an expert leaf round-trips") {
+        val shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
+        val leaf  = unsafeGet(create(idStr("wire-expert"), "Wire Expert", 0.3, 51L, shape = shape), "leaf")
+        assertTrue(leaf.toJson.fromJson[RiskLeaf] == Right(leaf))
+      },
+      test("a leaf whose shape breaks its own rule is refused on the wire") {
+        val leaf     = unsafeGet(create(idStr("wire-bad"), "Wire Bad", 0.3, 52L), "leaf")
+        val tampered = leaf.toJson.replace("\"minLoss\":100", "\"minLoss\":5000")
+        assertTrue(leaf.toJson != tampered, tampered.fromJson[RiskLeaf].isLeft)
+      }
     )
   )
 }
-

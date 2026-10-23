@@ -6,7 +6,7 @@ import scala.scalajs.js
 
 import app.facades.{vegaEmbed, EmbedResult}
 import app.state.{DistributionChartState, DistributionViewMode, LoadState}
-import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.DistributionShape
 import com.risquanter.register.http.requests.DistributionShapeRequest
 
 /** Reason the chart area shows idle text rather than a chart or loading state.
@@ -220,17 +220,10 @@ object DistributionChartView:
 
   // ── Draft → request conversion ────────────────────────────────
 
-  /** Build a preview request from a valid distribution shape.
+  /** Build a preview request from a gated draft shape.
     *
-    * Percentiles in [[Distribution]] are stored as 0–1 (domain scale) and the
-    * preview endpoint now expects 0–1, so no rescaling is needed.
+    * Percentiles are on the 0–1 domain scale in both the shape and the request,
+    * so no rescaling happens here.
     */
-  private def toPreviewRequest(draft: Distribution): DistributionShapeRequest =
-    DistributionShapeRequest(
-      distributionType = draft.distributionType.toString,
-      percentiles      = draft.percentiles,   // 0-1, no conversion
-      quantiles        = draft.quantiles,
-      terms            = draft.terms.map(_.toInt),
-      minLoss          = draft.minLoss.map(identity),
-      maxLoss          = draft.maxLoss.map(identity)
-    )
+  private def toPreviewRequest(draft: DistributionShape): DistributionShapeRequest =
+    DistributionShapeRequest.fromShape(draft)

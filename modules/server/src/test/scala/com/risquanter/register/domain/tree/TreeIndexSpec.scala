@@ -5,7 +5,7 @@ import zio.test.Assertion.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.domain.errors.ValidationErrorCode
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, lognormalShape, unsafeGet}
 
 object TreeIndexSpec extends ZIOSpecDefault {
 
@@ -28,10 +28,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
   val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = cyberIdStr,
     name = "Cyber Attack",
-    distributionType = "lognormal",
     probability = 0.25,
-    minLoss = Some(1000L),
-    maxLoss = Some(50000L),
+    shape = lognormalShape(1000L, 50000L),
     parentId = Some(nodeId("ops-risk")),
     seedVarId = 1L
   ), "leaf")
@@ -39,10 +37,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
   val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = hardwareIdStr,
     name = "Hardware Failure",
-    distributionType = "lognormal",
     probability = 0.1,
-    minLoss = Some(500L),
-    maxLoss = Some(10000L),
+    shape = lognormalShape(500L, 10000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 2L
   ), "leaf")
@@ -50,10 +46,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
   val softwareLeaf = unsafeGet(RiskLeaf.create(
     id = softwareIdStr,
     name = "Software Bug",
-    distributionType = "lognormal",
     probability = 0.3,
-    minLoss = Some(100L),
-    maxLoss = Some(5000L),
+    shape = lognormalShape(100L, 5000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 3L
   ), "leaf")
@@ -220,10 +214,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val orphanLeaf = unsafeGet(RiskLeaf.create(
           id = idStr("orphan"),
           name = "Orphan Node",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("wrong-parent")),  // Points to non-existent parent
           seedVarId = 4L
         ), "leaf")
@@ -274,10 +266,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val lonely = unsafeGet(RiskLeaf.create(
           id = idStr("lonely"),
           name = "Lonely Node",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("root")),  // Claims root as parent
           seedVarId = 5L
         ), "leaf")
@@ -285,10 +275,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val otherChild = unsafeGet(RiskLeaf.create(
           id = idStr("other-child"),
           name = "Other Child",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("root")),  // Correctly claims root
           seedVarId = 6L
         ), "leaf")
@@ -317,10 +305,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val parent = unsafeGet(RiskLeaf.create(
           id = idStr("parent-leaf"),
           name = "Parent Leaf",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = None,
           seedVarId = 7L
         ), "leaf")
@@ -328,10 +314,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val child = unsafeGet(RiskLeaf.create(
           id = idStr("child"),
           name = "Child",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("parent-leaf")),  // Points to leaf, not portfolio
           seedVarId = 8L
         ), "leaf")
@@ -353,10 +337,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val orphan = unsafeGet(RiskLeaf.create(
           id = idStr("orphan"),
           name = "Orphan",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("non-existent")),  // Points to missing parent
           seedVarId = 9L
         ), "leaf")
@@ -379,10 +361,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val orphan1 = unsafeGet(RiskLeaf.create(
           id = idStr("orphan1"),
           name = "Orphan 1",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("missing1")),
           seedVarId = 10L
         ), "leaf")
@@ -390,10 +370,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val orphan2 = unsafeGet(RiskLeaf.create(
           id = idStr("orphan2"),
           name = "Orphan 2",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("missing2")),
           seedVarId = 11L
         ), "leaf")
@@ -411,10 +389,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
         val child = unsafeGet(RiskLeaf.create(
           id = idStr("valid-child"),
           name = "Valid Child",
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(100L),
-          maxLoss = Some(1000L),
+          shape = lognormalShape(100L, 1000L),
           parentId = Some(nodeId("valid-parent")),
           seedVarId = 12L
         ), "leaf")

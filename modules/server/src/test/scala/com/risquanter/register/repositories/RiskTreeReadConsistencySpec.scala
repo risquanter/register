@@ -39,10 +39,8 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     unsafeGet(RiskLeaf.create(
       id = id.value.toString,
       name = s"Leaf ${id.value}",
-      distributionType = "lognormal",
       probability = probability,
-      minLoss = Some(1000L),
-      maxLoss = Some(50000L),
+      shape = lognormalShape(1000L, 50000L),
       parentId = Some(rootId),
       seedVarId = if id == leaf1Id then 1L else 2L
     ), "leaf")

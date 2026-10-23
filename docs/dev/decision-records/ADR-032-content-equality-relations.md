@@ -1,7 +1,7 @@
 # ADR-032: Content Equality Strategy — Domain Hash vs Storage Hash
 
-**Status:** Accepted  
-**Date:** 2026-07-24  
+**Status:** Amended  
+**Date:** 2026-07-24 (amended 2026-10-22)  
 **Tags:** hashing, caching, diff, merge, irmin
 
 ---
@@ -22,7 +22,7 @@
 | Relation | Hashes what | Answers |
 |---|---|---|
 | **Domain content hash** (`ContentHashIndex`) | `LeafSimContent` projection of a leaf; Merkle over sorted child hashes for a portfolio | "Does this change simulation results?" |
-| **Storage hash** (Irmin blob hash) | Full persisted node JSON (`RiskTreeRepositoryIrmin.nodeJson`) | "Did the stored artifact change? Can a merge conflict here?" |
+| **Storage hash** (Irmin blob hash) | Full persisted node JSON (`RiskTreeRepositoryIrmin.encodeStoredNode`) | "Did the stored artifact change? Can a merge conflict here?" |
 
 The projections differ deliberately:
 
@@ -31,20 +31,21 @@ The projections differ deliberately:
 final case class LeafSimContent(
   seedVarId: SeedVarId.SeedVarId,
   probability: OccurrenceProbability,
-  distributionType: DistributionType,
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]],
-  minLoss: Option[PositiveLong],
-  maxLoss: Option[PositiveLong],
-  terms: Option[PositiveInt]
+  shape: DistributionShape
 )
 
 // Storage relation input — the full leaf, additionally carrying
 // safeName and parentId:
-private def nodeJson(node: RiskNode): String = node match
+private[repositories] def encodeStoredNode(node: RiskNode): String = node match
   case leaf: RiskLeaf           => leaf.toJson
   case portfolio: RiskPortfolio => portfolio.toJson
 ```
+
+The projection holds the loss shape as the same coproduct the leaf holds, so a
+record naming one mode while carrying the other mode's fields cannot enter a
+hash. It renders its own bytes through a private encoder rather than through the
+leaf's wire codec, so a change to the wire shape cannot move cache keys without
+failing the projection's byte-stability test.
 
 Irmin is itself a Merkle store — the distinction is **which JSON gets hashed**, not "Merkle vs not".
 
@@ -107,6 +108,17 @@ irminHashesA(path) != irminHashesB(path)
 hashesA(nodeId) != hashesB(nodeId)  // ContentHashIndex output
 ```
 
+### ❌ Hashing the projection through the wire codec
+
+```scala
+// BAD: the cache key follows the wire shape — a wire edit silently rekeys every entry
+given JsonEncoder[LeafSimContent] = DeriveJsonEncoder.gen[LeafSimContent]
+
+// GOOD: the projection owns its bytes; a wire change cannot reach them
+private case class Raw(seedVarId: Long, probability: Double, /* ... */)
+given JsonEncoder[LeafSimContent] = JsonEncoder[Raw].contramap(/* ... */)
+```
+
 ### ❌ Growing `LeafSimContent` beyond simulation inputs
 
 ```scala
@@ -126,7 +138,7 @@ final case class LeafSimContent(seedVarId: SeedVarId.SeedVarId, /* ... */)
 | `ContentHashIndex` | Domain | Builds per-node domain hashes (leaf projection + portfolio Merkle) |
 | `LeafSimContent` | Domain | The hashed projection; also the cache-key preimage |
 | `ChangedNodesService` | Domain | Branch-to-branch semantic changed-nodes comparison |
-| `RiskTreeRepositoryIrmin.nodeJson` | Storage | Defines the persisted blob Irmin hashes |
+| `RiskTreeRepositoryIrmin.encodeStoredNode` | Storage | Defines the persisted blob Irmin hashes |
 | `IrminClient.mergeBranch` / `lca` | Storage | Byte-level three-way merge and its base |
 
 ---

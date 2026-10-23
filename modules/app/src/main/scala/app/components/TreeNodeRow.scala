@@ -1,8 +1,9 @@
 package app.components
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import org.scalajs.dom.MouseEvent
-import com.risquanter.register.domain.data.iron.{SafeName, NodeId, OccurrenceProbability, DistributionType}
+import com.risquanter.register.domain.data.DistributionShape
+import com.risquanter.register.domain.data.iron.{SafeName, NodeId, OccurrenceProbability}
 
 /** Unified tree-node row used by both TreePreview (draft state) and
   * TreeDetailView (persisted tree).
@@ -27,37 +28,46 @@ object TreeNodeRow:
   enum NodeKind:
     case Portfolio, Leaf
 
-  /** Structured leaf tooltip for native `title` attribute (D2(a)).
+  /** Structured leaf tooltip for the native `title` attribute. The lines below
+    * the separator are decided by the shape's case: an expert fit renders its
+    * quantile anchors as two parallel lists, a lognormal its two bounds. A draft
+    * node has no identifier yet, and its identifier line is omitted.
     *
-    * Used by both TreePreview (draft nodes — no ID) and TreeDetailView (persisted nodes — with ID).
-    * Optional fields are omitted when absent.
+    * {{{
+    * leafTooltip(name = "Outage", probability = 0.3,
+    *             shape = Lognormal(LossRange(1000, 50000)), id = None)
+    * // Outage
+    * // ─────────────────────
+    * // Type:         lognormal
+    * // Probability:  0.3
+    * // Min Loss:     1000
+    * // Max Loss:     50000
+    * }}}
     */
   def leafTooltip(
     name:        SafeName.SafeName,
-    distType:    DistributionType,
     probability: OccurrenceProbability,
-    id:          Option[NodeId]          = None,
-    percentiles: Option[Array[Double]]   = None,
-    quantiles:   Option[Array[Double]]   = None,
-    minLoss:     Option[Long]            = None,
-    maxLoss:     Option[Long]            = None
+    shape:       DistributionShape,
+    id:          Option[NodeId]
   ): String =
     val idLine = id.fold("")(n => s"\nID:           ${n.toSafeId.value}")
-    val base   = s"${name.value}\n─────────────────────$idLine\nType:         ${distType}\nProbability:  $probability"
-    val pLine  = percentiles.fold("")(arr => s"\nPercentiles:  [${arr.mkString(", ")}]")
-    val qLine  = quantiles.fold("")(arr => s"\nQuantiles:    [${arr.mkString(", ")}]")
-    val mnLine = minLoss.fold("")(v => s"\nMin Loss:     $v")
-    val mxLine = maxLoss.fold("")(v => s"\nMax Loss:     $v")
-    s"$base$pLine$qLine$mnLine$mxLine"
+    val base   = s"${name.value}\n─────────────────────$idLine\nType:         ${shape.distributionType}\nProbability:  $probability"
+    val shapeLines = shape match
+      case DistributionShape.Expert(anchors, _) =>
+        val percentiles = anchors.values.map(a => (a.percentile: Double)).mkString(", ")
+        val quantiles   = anchors.values.map(a => (a.loss: Double)).mkString(", ")
+        s"\nPercentiles:  [$percentiles]\nQuantiles:    [$quantiles]"
+      case DistributionShape.Lognormal(bounds) =>
+        s"\nMin Loss:     ${bounds.min: Long}\nMax Loss:     ${bounds.max: Long}"
+    s"$base$shapeLines"
 
-  /** Structured portfolio tooltip for native `title` attribute (D2(a)).
-    *
-    * Used by both TreePreview (draft nodes — no ID) and TreeDetailView (persisted nodes — with ID).
+  /** Structured portfolio tooltip for the native `title` attribute. A draft node
+    * has no identifier and no counted children, and those lines are omitted.
     */
   def portfolioTooltip(
     name:       SafeName.SafeName,
-    id:         Option[NodeId] = None,
-    childCount: Option[Int]    = None
+    id:         Option[NodeId],
+    childCount: Option[Int]
   ): String =
     val sep       = "\n─────────────────────"
     val idLine    = id.fold("")(n => s"\nID:           ${n.toSafeId.value}")
@@ -68,10 +78,10 @@ object TreeNodeRow:
     label:         String,
     kind:          NodeKind,
     depth:         Int,
-    onRemove:      Option[() => Unit]         = None,
-    onNodeClick:   Option[MouseEvent => Unit] = None,
+    onRemove:      Option[() => Unit],
+    onNodeClick:   Option[MouseEvent => Unit],
     isSelected:    Signal[Boolean]            = Signal.fromValue(false),
-    tooltip:       Option[String]             = None,
+    tooltip:       Option[String],
     prefixContent: Seq[Modifier[HtmlElement]] = Nil,
     suffixContent: Seq[Modifier[HtmlElement]] = Nil
   ): HtmlElement =

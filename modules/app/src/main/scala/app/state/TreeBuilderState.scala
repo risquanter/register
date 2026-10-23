@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
-import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.{DistributionShape, RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
@@ -16,11 +16,11 @@ final case class PortfolioDraft(
   id: Option[NodeId] = None
 )
 final case class LeafDraft(
-  name:         SafeName.SafeName,
-  parent:       ParentRef,
-  distribution: Distribution,
+  name:        SafeName.SafeName,
+  parent:      ParentRef,
+  shape:       DistributionShape,
   probability: OccurrenceProbability,
-  id:           Option[NodeId] = None
+  id:          Option[NodeId] = None
 )
 
 /** Type-safe field identifiers for the tree builder form. */
@@ -53,8 +53,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * Reset to None on form unmount. Read by [[app.state.DistributionChartState]] for
     * debounced preview fetches.
     */
-  val currentDraftVar: Var[Option[Distribution]] = Var(None)
-  val draftSignal: StrictSignal[Option[Distribution]] = currentDraftVar.signal
+  val currentDraftVar: Var[Option[DistributionShape]] = Var(None)
+  val draftSignal: StrictSignal[Option[DistributionShape]] = currentDraftVar.signal
 
   /** Each form's own dirty flag, written ONLY by that form's own
     * `isDirty --> ...writer` binding — see [[app.views.PortfolioFormView]] /
@@ -181,7 +181,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   def addLeaf(
     name:        SafeName.SafeName,
     parent:      ParentRef,
-    shape:       Distribution,
+    shape:       DistributionShape,
     probability: OccurrenceProbability
   ): Validation[ValidationError, LeafDraft] =
     val draft = LeafDraft(name, parent, shape, probability)
@@ -235,7 +235,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     originalName: SafeName.SafeName,
     name:         SafeName.SafeName,
     parent:       ParentRef,
-    shape:        Distribution,
+    shape:        DistributionShape,
     probability:  OccurrenceProbability
   ): Validation[ValidationError, LeafDraft] =
     val existing = leavesVar.now().find(_.name == originalName)
@@ -442,18 +442,11 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
     val leaves = tree.nodes.collect { case l: RiskLeaf => l }.map { l =>
       LeafDraft(
-        name         = l.name,
-        parent       = parentRefOf(tree, l.parentId),
-        distribution = Distribution(
-          distributionType = l.distributionType,
-          minLoss          = l.minLoss,
-          maxLoss          = l.maxLoss,
-          percentiles      = l.percentiles,
-          quantiles        = l.quantiles,
-          terms            = l.terms
-        ),
-        probability  = l.probability,
-        id           = Some(l.id)
+        name        = l.name,
+        parent      = parentRefOf(tree, l.parentId),
+        shape       = l.shape,
+        probability = l.probability,
+        id          = Some(l.id)
       )
     }.toList
 
@@ -494,9 +487,10 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     ParentRef.nameOf(parent).map(_.value.toString)
 
   // Total conversions: every field is already a refined domain type (`SafeName`,
-  // `Distribution`, `Probability`), so construction cannot fail. Returning the plain
-  // request type keeps totality visible; callers wrap the whole collection once with
-  // `Validation.succeed` where a `Validation` is needed for `validateWith`.
+  // `DistributionShape`, `OccurrenceProbability`), so construction cannot fail.
+  // Returning the plain request type keeps totality visible; callers wrap the whole
+  // collection once with `Validation.succeed` where a `Validation` is needed for
+  // `validateWith`.
   private def toPortfolioRequest(draft: PortfolioDraft): RiskPortfolioDefinitionRequest =
     RiskPortfolioDefinitionRequest(draft.name.value, parentNameOf(draft.parent))
 
@@ -505,14 +499,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       name              = draft.name.value,
       parentName        = parentNameOf(draft.parent),
       probability       = draft.probability,
-      distributionShape = DistributionShapeRequest(
-        distributionType = draft.distribution.distributionType.toString,
-        percentiles      = draft.distribution.percentiles,
-        quantiles        = draft.distribution.quantiles,
-        terms            = draft.distribution.terms.map(_.toInt),
-        minLoss          = draft.distribution.minLoss.map(identity),
-        maxLoss          = draft.distribution.maxLoss.map(identity)
-      )
+      distributionShape = DistributionShapeRequest.fromShape(draft.shape)
     )
 
   // Identity-preserving variants: emit an update DTO carrying the node's existing id,
@@ -529,13 +516,6 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       name              = draft.name.value,
       parentName        = parentNameOf(draft.parent),
       probability       = draft.probability,
-      distributionShape = DistributionShapeRequest(
-        distributionType = draft.distribution.distributionType.toString,
-        percentiles      = draft.distribution.percentiles,
-        quantiles        = draft.distribution.quantiles,
-        terms            = draft.distribution.terms.map(_.toInt),
-        minLoss          = draft.distribution.minLoss.map(identity),
-        maxLoss          = draft.distribution.maxLoss.map(identity)
-      )
+      distributionShape = DistributionShapeRequest.fromShape(draft.shape)
     )
 

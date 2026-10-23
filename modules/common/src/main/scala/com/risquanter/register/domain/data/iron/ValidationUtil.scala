@@ -183,8 +183,9 @@ object ValidationUtil {
   }
 
   /** True when every adjacent pair in `xs` satisfies a < b.  Single-element
-   *  and empty sequences are trivially increasing. Used by both Distribution.create
-   *  (server-side validation) and RiskLeafFormState (client-side form validation).
+   *  and empty sequences are trivially increasing. Used by
+   *  `QuantileAnchors.create`, which owns the ordering rule, and by
+   *  `RiskLeafFormState` for the form's own live feedback.
    */
   def isStrictlyIncreasing(xs: Seq[Double]): Boolean =
     xs.sliding(2).forall { case Seq(a, b) => a < b; case _ => true }
@@ -300,6 +301,38 @@ object ValidationUtil {
         location = location,
         code = ValidationErrorCode.INVALID_RANGE,
         message = ValidationMessages.valueMustBeNonNegative
+      )))
+  }
+
+  // Refinement for a strictly positive, finite double — a loss figure in
+  // millions. LessEqual[1.7976931348623157e308] rejects +Infinity; Greater[0.0]
+  // already rejects -Infinity, NaN and zero (IEEE 754 comparisons against the
+  // first two are always false). Zero is refused because the distribution fit
+  // takes the logarithm of a loss.
+  def refinePositiveDouble(value: Double, location: ErrorLocation): Either[List[ValidationError], PositiveDouble] = {
+    value
+      .refineEither[Greater[0.0] & LessEqual[1.7976931348623157e308]]
+      .left
+      .map(_ => List(ValidationError(
+        location = location,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.quantilesMustBePositive
+      )))
+  }
+
+  // Refinement for a metalog fit's term count. The bounds are the fitter's own
+  // precondition — Metalog.validateInputs throws outside [2, 20] — and must
+  // match the type-level literals of MetalogTermCount in OpaqueTypes and the
+  // sentence in ValidationMessages.termsOutsideFitterRange (type-level
+  // constraints cannot reference runtime constants).
+  def refineMetalogTermCount(value: Int, location: ErrorLocation): Either[List[ValidationError], MetalogTermCount] = {
+    value
+      .refineEither[GreaterEqual[2] & LessEqual[20]]
+      .left
+      .map(_ => List(ValidationError(
+        location = location,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.termsOutsideFitterRange
       )))
   }
 

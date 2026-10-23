@@ -1,6 +1,7 @@
 package app.state
 
-import com.risquanter.register.domain.data.iron.{SafeName, IronConstants}
+import com.risquanter.register.domain.data.DistributionShape
+import com.risquanter.register.domain.data.iron.SafeName
 
 /** Identifies which saved node (leaf or portfolio) a [[FormMode]] is pointing at. */
 enum FormTarget:
@@ -137,21 +138,34 @@ object FormMode:
     * exactly one domain-to-display mapping, not two.
     */
   def leafDraftToFieldSnapshot(leaf: LeafDraft): FieldSnapshot.LeafFields =
-    val mode = leaf.distribution.distributionType match
-      case IronConstants.Expert    => DistributionMode.Expert
-      case IronConstants.Lognormal => DistributionMode.Lognormal
-      case other => throw new IllegalStateException(s"Unrecognised DistributionType: $other — update leafDraftToFieldSnapshot")
-    FieldSnapshot.LeafFields(
-      name        = leaf.name.value,
-      parent      = ParentSelection.fromSaved(leaf.parent),
-      probability = RiskLeafFormState.domainToDisplayPct(leaf.probability, 2),
-      mode        = mode,
-      percentiles = leaf.distribution.percentiles.fold("")(arr => arr.map(RiskLeafFormState.domainToDisplayPct(_, 0)).mkString(", ")),
-      quantiles   = leaf.distribution.quantiles.fold("")(arr => arr.map(_.toString).mkString(", ")),
-      terms       = leaf.distribution.terms.fold("")(_.toString),
-      minLoss     = leaf.distribution.minLoss.fold("")(_.toString),
-      maxLoss     = leaf.distribution.maxLoss.fold("")(_.toString)
-    )
+    val name        = leaf.name.value
+    val parent      = ParentSelection.fromSaved(leaf.parent)
+    val probability = RiskLeafFormState.domainToDisplayPct(leaf.probability, 2)
+    leaf.shape match
+      case DistributionShape.Expert(anchors, terms) =>
+        FieldSnapshot.LeafFields(
+          name        = name,
+          parent      = parent,
+          probability = probability,
+          mode        = DistributionMode.Expert,
+          percentiles = anchors.values.map(a => RiskLeafFormState.domainToDisplayPct(a.percentile, 0)).mkString(", "),
+          quantiles   = anchors.values.map(a => (a.loss: Double).toString).mkString(", "),
+          terms       = terms.fold("")(_.toString),
+          minLoss     = "",
+          maxLoss     = ""
+        )
+      case DistributionShape.Lognormal(bounds) =>
+        FieldSnapshot.LeafFields(
+          name        = name,
+          parent      = parent,
+          probability = probability,
+          mode        = DistributionMode.Lognormal,
+          percentiles = "",
+          quantiles   = "",
+          terms       = "",
+          minLoss     = (bounds.min: Long).toString,
+          maxLoss     = (bounds.max: Long).toString
+        )
 
   /** The one place a saved [[PortfolioDraft]] is converted to raw display-field
     * values — reused by both `populatePortfolioForm` and `isFormDirty`.

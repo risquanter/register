@@ -4,14 +4,19 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.iron.{ContentHash, NodeId, SafeName, ValidationUtil}
-import com.risquanter.register.domain.errors.ValidationErrorCode
-import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId, unsafeGet}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
+import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, mitigationId, nodeId, treeId, unsafeGet}
 
 /**
- * Mitigation entity: create cross-field rules (override stamp + anchor), wire
+ * Mitigation entity: the result-stage pipeline's step-count rule, the wire
  * codec, precedence presets, and the tree-level mitigation invariants
  * (RiskTree.fromNodes + JSON codec, including backward compatibility with
  * mitigation-less payloads and the mitigation-count bound).
+ *
+ * An absolute replacement's anchor and base stamp are plain fields of
+ * `MitigationSpec.LeafAbsolute`, and a relative spec has no field for either,
+ * so the presence and absence rules those once needed have no expression here
+ * to test — a spec missing its stamp is a program that does not compile.
  */
 object MitigationEntitySpec extends ZIOSpecDefault {
 
@@ -19,21 +24,25 @@ object MitigationEntitySpec extends ZIOSpecDefault {
 
   private val stamp: ContentHash = ContentHash.fromString("a" * 64).toOption.get
 
+  /** Where the pipeline's own gate reports, which is what its decoder passes. */
+  private val specLocation: ErrorLocation = ErrorLocation.requestField(FieldName.Spec)
+
   /** A well-formed targeting predicate; resolution is a server concern, so any
     * member of the targeting fragment serves for entity-level tests. */
   private val pred: MitigationTarget =
     MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
 
+  private def resultStage(steps: List[ResultTransformSpec]) =
+    MitigationSpec.ResultStage.create(TransformPipeline(steps), specLocation)
+
   private val resultSpec: MitigationSpec =
-    MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.CapLosses(1000000L))))
+    unsafeGet(resultStage(List(ResultTransformSpec.CapLosses(1000000L))), "resultSpec")
 
   private val scaleLeafSpec: MitigationSpec =
-    MitigationSpec.LeafStage(
-      RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, None)
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep)
 
-  private def overrideLeafSpec(stamp: Option[ContentHash], anchor: Option[NodeId]): MitigationSpec =
-    MitigationSpec.LeafStage(
-      RiskLeafTransform(LikelihoodTransform.Override(0.05), DistributionTransform.Keep), stamp, anchor)
+  private def absoluteLeafSpec(stamp: ContentHash, anchor: NodeId): MitigationSpec =
+    MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), anchor, stamp)
 
   private def mk(
     label: String,
@@ -43,8 +52,8 @@ object MitigationEntitySpec extends ZIOSpecDefault {
 
   private def leaf(label: String, seedVarId: Long): RiskLeaf =
     unsafeGet(RiskLeaf.create(
-      id = idStr(label), name = label, distributionType = "lognormal",
-      probability = 0.4, minLoss = Some(1000L), maxLoss = Some(100000L),
+      id = idStr(label), name = label, probability = 0.4,
+      shape = lognormalShape(1000L, 100000L),
       parentId = Some(nodeId("root-pf")), seedVarId = seedVarId
     ), "leaf")
 
@@ -53,54 +62,48 @@ object MitigationEntitySpec extends ZIOSpecDefault {
     val l2 = leaf("flood", 2L)
     val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr("root-pf"), name = "Root Portfolio",
-      childIds = Array(l1.id.value, l2.id.value)), "portfolio")
+      childIds = Array(l1.id.value, l2.id.value), parentId = None), "portfolio")
     RiskTree.fromNodes(treeId("mit-tree"), name("Mit Tree"), Seq(root, l1, l2), root.id,
       mitigations = mitigations.toList)
   }
 
   def spec = suite("MitigationEntitySpec")(
 
-    suite("Mitigation.create cross-field rules")(
+    suite("Mitigation.create accepts every spec its type admits")(
       test("result-stage mitigation is valid") {
         assertTrue(mk("m-result", resultSpec).toEither.isRight)
       },
-      test("non-Override leaf-stage mitigation is valid") {
+      test("relative leaf-stage mitigation is valid") {
         assertTrue(mk("m-scale", scaleLeafSpec).toEither.isRight)
       },
-      test("Override with stamp and anchor is valid") {
-        assertTrue(mk("m-ov-ok", overrideLeafSpec(Some(stamp), Some(nodeId("cyber")))).toEither.isRight)
+      test("absolute leaf-stage mitigation is valid") {
+        assertTrue(mk("m-abs-ok", absoluteLeafSpec(stamp, nodeId("cyber"))).toEither.isRight)
+      }
+    ),
+
+    suite("ResultStage.create holds the step-count rule")(
+      test("a pipeline of one step is valid") {
+        assertTrue(resultStage(List(ResultTransformSpec.CapLosses(1000000L))).toEither.isRight)
       },
-      test("Override without base stamp is rejected") {
-        val result = mk("m-ov-nostamp", overrideLeafSpec(None, Some(nodeId("cyber"))))
-        assertTrue(result.toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.REQUIRED_FIELD))
+      test("a pipeline at the step limit is valid") {
+        assertTrue(resultStage(List.fill(10)(ResultTransformSpec.CapLosses(1000000L))).toEither.isRight)
       },
-      test("Override without an anchor is rejected") {
-        val result = mk("m-ov-noanchor", overrideLeafSpec(Some(stamp), None))
-        assertTrue(result.toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.REQUIRED_FIELD))
+      test("a pipeline over the step limit is rejected") {
+        val result = resultStage(List.fill(11)(ResultTransformSpec.CapLosses(1000000L)))
+        assertTrue(result.toEither.swap.toOption.get.exists(e =>
+          e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == specLocation))
       },
-      test("non-Override carrying a stamp is rejected") {
-        val badSpec = MitigationSpec.LeafStage(
-          RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), Some(stamp), None)
-        assertTrue(mk("m-stamped", badSpec).toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.INVALID_COMBINATION))
+      test("an empty pipeline is rejected") {
+        val result = resultStage(Nil)
+        assertTrue(result.toEither.swap.toOption.get.exists(e =>
+          e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == specLocation))
       },
-      test("non-Override carrying an anchor is rejected") {
-        val badSpec = MitigationSpec.LeafStage(
-          RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, Some(nodeId("cyber")))
-        assertTrue(mk("m-anchored", badSpec).toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.INVALID_COMBINATION))
-      },
-      test("result-stage pipeline at the step limit is valid") {
-        val steps = List.fill(10)(ResultTransformSpec.CapLosses(1000000L))
-        val okSpec = MitigationSpec.ResultStage(TransformPipeline(steps))
-        assertTrue(mk("m-atlimit", okSpec).toEither.isRight)
-      },
-      test("result-stage pipeline over the step limit is rejected") {
-        val steps = List.fill(11)(ResultTransformSpec.CapLosses(1000000L))
-        val bigSpec = MitigationSpec.ResultStage(TransformPipeline(steps))
-        assertTrue(mk("m-big", bigSpec).toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.CONSTRAINT_VIOLATION))
-      },
-      test("result-stage pipeline that is empty is rejected") {
-        val emptySpec = MitigationSpec.ResultStage(TransformPipeline(Nil))
-        assertTrue(mk("m-empty", emptySpec).toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.CONSTRAINT_VIOLATION))
+      test("the decoder routes through create, so an over-long pipeline is refused on the wire") {
+        val valid  = mk("m-result", resultSpec).toEither.toOption.get
+        val oneStep = """{"op":"capLosses","cap":1000000}"""
+        val eleven  = List.fill(11)(oneStep).mkString("[", ",", "]")
+        val tampered = valid.toJson.replace(s"[$oneStep]", eleven)
+        assertTrue(valid.toJson != tampered, tampered.fromJson[Mitigation].isLeft)
       }
     ),
 
@@ -114,21 +117,31 @@ object MitigationEntitySpec extends ZIOSpecDefault {
     ),
 
     suite("codec")(
-      test("result-stage and override mitigations round-trip") {
+      test("all three spec cases round-trip") {
         val ms = List(
           mk("m-result", resultSpec).toEither.toOption.get,
-          mk("m-ov-ok", overrideLeafSpec(Some(stamp), Some(nodeId("cyber"))),
+          mk("m-scale", scaleLeafSpec).toEither.toOption.get,
+          mk("m-abs-ok", absoluteLeafSpec(stamp, nodeId("cyber")),
              MitigationPrecedence.overrideFinal).toEither.toOption.get
         )
         assertTrue(ms.forall(m => m.toJson.fromJson[Mitigation] == Right(m)))
       },
-      test("decoder enforces create rules (Override without stamp rejected on the wire)") {
-        val valid = mk("m-ov-ok", overrideLeafSpec(Some(stamp), Some(nodeId("cyber")))).toEither.toOption.get
+      test("an absolute spec missing its base stamp is refused on the wire") {
+        val valid = mk("m-abs-ok", absoluteLeafSpec(stamp, nodeId("cyber"))).toEither.toOption.get
         val json = valid.toJson
         val tampered = json
-          .replace(s""","overrideBaseStamp":"${"a" * 64}"""", "")
-          .replace(s""""overrideBaseStamp":"${"a" * 64}",""", "")
+          .replace(s""","baseStamp":"${"a" * 64}"""", "")
+          .replace(s""""baseStamp":"${"a" * 64}",""", "")
         assertTrue(json != tampered, tampered.fromJson[Mitigation].isLeft)
+      },
+      test("the three spec cases carry distinct stage tags") {
+        val tags = List(resultSpec, scaleLeafSpec, absoluteLeafSpec(stamp, nodeId("cyber")))
+          .map(s => mk("m", s).toEither.toOption.get.toJson)
+        assertTrue(
+          tags(0).contains("\"stage\":\"result\""),
+          tags(1).contains("\"stage\":\"leafRelative\""),
+          tags(2).contains("\"stage\":\"leafAbsolute\"")
+        )
       }
     ),
 

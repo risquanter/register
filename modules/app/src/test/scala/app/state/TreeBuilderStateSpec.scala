@@ -3,11 +3,11 @@ package app.state
 import zio.test.*
 import zio.prelude.Validation
 
-import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Distribution}
+import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, DistributionShape}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, OccurrenceProbability, SeedVarId}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
-import com.risquanter.register.testutil.TestHelpers.unsafeGet
+import com.risquanter.register.testutil.TestHelpers.{unsafeGet, expertShape, lognormalShape}
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
 
@@ -46,10 +46,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
   private val lognormalLeaf = unsafeGet(RiskLeaf.create(
     id               = leafUlid,
     name             = "Cyber Risk",
-    distributionType = "lognormal",
     probability      = 0.3,
-    minLoss          = Some(1000L),
-    maxLoss          = Some(50000L),
+    shape            = lognormalShape(1000L, 50000L),
     parentId         = None,
     seedVarId = 1L
   ), "leaf")
@@ -57,11 +55,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
   private val expertLeaf = unsafeGet(RiskLeaf.create(
     id               = leafUlid,
     name             = "Expert Risk",
-    distributionType = "expert",
     probability      = 0.2,
-    percentiles      = Some(Array(0.1, 0.5, 0.9)),
-    quantiles        = Some(Array(1000.0, 5000.0, 20000.0)),
-    terms            = Some(3),
+    shape            = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)),
     parentId         = None,
     seedVarId = 2L
   ), "leaf")
@@ -83,10 +78,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
   private val leafUnderChild = unsafeGet(RiskLeaf.create(
     id               = leafUlid,
     name             = "Hardware Failure",
-    distributionType = "lognormal",
     probability      = 0.1,
-    minLoss          = Some(500L),
-    maxLoss          = Some(10000L),
+    shape            = lognormalShape(500L, 10000L),
     parentId         = Some(childId),
     seedVarId = 3L
   ), "leaf")
@@ -121,18 +114,19 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         assertTrue(state.leavesVar.now().length == 1) &&
         assertTrue(state.leavesVar.now().head.parent == ParentRef.Root) &&
-        assertTrue(state.leavesVar.now().head.distribution.terms.contains(3)) &&
-        assertTrue(state.leavesVar.now().head.distribution.distributionType == IronConstants.Expert)
+        assertTrue(state.leavesVar.now().head.shape match
+          case e: DistributionShape.Expert    => e.terms.contains(3)
+          case _: DistributionShape.Lognormal => false
+        ) &&
+        assertTrue(state.leavesVar.now().head.shape.distributionType == IronConstants.Expert)
       },
 
       test("root portfolio + leaf under root: parent resolved correctly") {
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 4L
         ), "leaf")
@@ -164,10 +158,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 5L
         ), "leaf")
@@ -250,10 +242,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 6L
         ), "leaf")
@@ -276,10 +266,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 7L
         ), "leaf")
@@ -287,14 +275,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
 
-        val newShape = Distribution(
-          distributionType = IronConstants.Lognormal,
-          minLoss          = Some(2000L),
-          maxLoss          = Some(8000L),
-          percentiles      = None,
-          quantiles        = None,
-          terms            = None
-        )
+        val newShape = lognormalShape(2000L, 8000L)
         val newProb: OccurrenceProbability = 0.15
         val added = state.addLeaf(n("Fraud Risk"), under("Operational Risk"), newShape, newProb)
 
@@ -316,10 +297,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 8L
         ), "leaf")
@@ -345,10 +324,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 9L
         ), "leaf")
@@ -356,7 +333,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         val originalName = state.leavesVar.now().head.name
-        val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(80000L), None, None, None)
+        val newShape = lognormalShape(2000L, 80000L)
         val newProb: OccurrenceProbability = 0.5
         state.updateLeaf(originalName, n("Renamed Risk"), under("Operational Risk"), newShape, newProb) match
           case Validation.Success(_, _) =>
@@ -373,10 +350,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 10L
         ), "leaf")
@@ -384,7 +359,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         val originalName = state.leavesVar.now().head.name
-        val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(8000L), None, None, None)
+        val newShape = lognormalShape(2000L, 8000L)
         state.updateLeaf(originalName, n("Renamed Risk"), under("Operational Risk"), newShape, 0.3) match
           case Validation.Success(_, _) =>
             assertTrue(state.leavesVar.now().head.id.map(_.value.toString).contains(leafUlid))
@@ -394,14 +369,14 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("fails when new name collides with another leaf") {
         val leaf2Ulid = "01HX9ABCDE0000000000000005"
-        val leaf1 = unsafeGet(RiskLeaf.create(id = leafUlid,  name = "LeafA", distributionType = "lognormal", probability = 0.1, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 11L), "leaf")
-        val leaf2 = unsafeGet(RiskLeaf.create(id = leaf2Ulid, name = "LeafB", distributionType = "lognormal", probability = 0.2, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 12L), "leaf")
+        val leaf1 = unsafeGet(RiskLeaf.create(id = leafUlid,  name = "LeafA", probability = 0.1, shape = lognormalShape(100L, 1000L), parentId = Some(rootId), seedVarId = 11L), "leaf")
+        val leaf2 = unsafeGet(RiskLeaf.create(id = leaf2Ulid, name = "LeafB", probability = 0.2, shape = lognormalShape(100L, 1000L), parentId = Some(rootId), seedVarId = 12L), "leaf")
         val root2 = unsafeGet(RiskPortfolio.createFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, leaf2Ulid), parentId = None), "portfolio")
         val tree  = mkTree(treeUlid, "Collision", Seq(root2, leaf1, leaf2), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         val nameA    = state.leavesVar.now().find(_.name.value == "LeafA").get.name
-        val newShape = Distribution(IronConstants.Lognormal, Some(100L), Some(1000L), None, None, None)
+        val newShape = lognormalShape(100L, 1000L)
         assertTrue(state.updateLeaf(nameA, n("LeafB"), under("Operational Risk"), newShape, 0.1).isFailure)
       }
 
@@ -413,10 +388,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 13L
         ), "leaf")
@@ -439,10 +412,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 14L
         ), "leaf")
@@ -464,7 +435,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("addLeaf: activeForm becomes Locked(Leaf(name)) on success") {
         val state = new TreeBuilderState()
-        val shape = Distribution(IronConstants.Lognormal, Some(1000L), Some(5000L), None, None, None)
+        val shape = lognormalShape(1000L, 5000L)
         val added = state.addLeaf(n("Fraud Risk"), ParentRef.Root, shape, 0.2)
         assertTrue(
           added.isSuccess,
@@ -485,10 +456,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 15L
         ), "leaf")
@@ -497,7 +466,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val originalName = state.leavesVar.now().head.name
         state.activeForm.set(FormMode.Editing(FormTarget.Leaf(originalName)))
-        val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(8000L), None, None, None)
+        val newShape = lognormalShape(2000L, 8000L)
         val result = state.updateLeaf(originalName, n("Renamed"), under("Operational Risk"), newShape, 0.3)
         assertTrue(
           result.isSuccess,
@@ -523,10 +492,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 16L
         ), "leaf")
@@ -543,20 +510,16 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leaf1 = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 17L
         ), "leaf")
         val leaf2 = unsafeGet(RiskLeaf.create(
           id               = childUlid,
           name             = "Market Risk",
-          distributionType = "lognormal",
           probability      = 0.2,
-          minLoss          = Some(500L),
-          maxLoss          = Some(20000L),
+          shape            = lognormalShape(500L, 20000L),
           parentId         = Some(rootId),
           seedVarId = 18L
         ), "leaf")
@@ -575,10 +538,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 19L
         ), "leaf")
@@ -606,11 +567,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Expert Risk",
-          distributionType = "expert",
           probability      = 0.2,
-          percentiles      = Some(Array(0.1, 0.5, 0.9)),
-          quantiles        = Some(Array(1000.0, 5000.0, 20000.0)),
-          terms            = Some(3),
+          shape            = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)),
           parentId         = Some(rootId),
           seedVarId = 19L
         ), "leaf")
@@ -634,10 +592,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Lognormal Risk",
-          distributionType = "lognormal",
           probability      = 0.3,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L),
+          shape            = lognormalShape(1000L, 50000L),
           parentId         = Some(rootId),
           seedVarId = 20L
         ), "leaf")

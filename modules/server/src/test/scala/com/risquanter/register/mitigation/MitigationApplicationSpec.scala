@@ -3,20 +3,21 @@ package com.risquanter.register.mitigation
 import zio.test.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
-  DistributionTransform, LikelihoodTransform, Mitigation, MitigationPrecedence,
-  MitigationSpec, MitigationTarget, ResultTransformSpec, RiskLeaf, RiskLeafTransform,
-  RiskPortfolio, RiskTree, TargetingPredicate, TransformPipeline
+  AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence,
+  MitigationSpec, MitigationTarget, RelativeLikelihood, RelativeSeverity,
+  ResultTransformSpec, RiskLeaf, RiskPortfolio, RiskTree, TargetingPredicate
 }
-import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName}
+import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
 import com.risquanter.register.simulation.TrialOutcomes
-import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, mitigationId, nodeId, resultStage, treeId, unsafeGet}
 
 /**
  * MitigationApplication — the action's decomposition: per-node scoping with
  * precedence order and restrictions, the param-stage effective tree (closure,
- * Override absorption, baseline/final presets), the composed result-stage
- * transform, and application records.
+ * the absorption an absolute replacement performs, and the two precedence
+ * presets that decide whether it absorbs or is absorbed), the composed
+ * result-stage transform, and application records.
  *
  * Targeting is a predicate resolved server-side, so each test supplies the
  * resolved node scope explicitly via `scopes(...)` — the lookup table the
@@ -43,8 +44,8 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
   private def leaf(label: String, seedVarId: Long, prob: Double = 0.4,
                    min: Long = 1000L, max: Long = 100000L): RiskLeaf =
     unsafeGet(RiskLeaf.create(
-      id = idStr(label), name = label, distributionType = "lognormal",
-      probability = prob, minLoss = Some(min), maxLoss = Some(max),
+      id = idStr(label), name = label, probability = prob,
+      shape = lognormalShape(min, max),
       parentId = Some(nodeId("root-pf")), seedVarId = seedVarId
     ), "leaf")
 
@@ -52,59 +53,78 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
   private val flood = leaf("flood", 2L)
   private val root = unsafeGet(RiskPortfolio.createFromStrings(
     id = idStr("root-pf"), name = "Root Portfolio",
-    childIds = Array(cyber.id.value, flood.id.value)), "portfolio")
+    childIds = Array(cyber.id.value, flood.id.value), parentId = None), "portfolio")
 
   private def mkTree(mitigations: Mitigation*): RiskTree =
     RiskTree.fromNodes(treeId("act-tree"), name("Action Tree"), Seq(root, cyber, flood), root.id,
       mitigations = mitigations.toList).toEither.toOption.get
 
-  private def leafScale(label: String, factor: Double,
-                        precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
+  /** A relative statement scaling severity and leaving likelihood alone. */
+  private def leafScaleSeverity(label: String, factor: Double,
+                                precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
     Mitigation.create(
       mitigationId(label), name(label), pred,
-      MitigationSpec.LeafStage(
-        RiskLeafTransform(LikelihoodTransform.Keep,
-          DistributionTransform.ScaleSeverity(com.risquanter.register.domain.data.iron.ValidationUtil.refineRetentionFactor(factor, paramAt).toOption.get)),
-        None, None),
+      MitigationSpec.LeafRelative(
+        RelativeLikelihood.Keep,
+        RelativeSeverity.ScaleSeverity(ValidationUtil.refineRetentionFactor(factor, paramAt).toOption.get)),
       precedence).toEither.toOption.get
 
-  private def leafOverride(label: String, prob: Double, anchor: String,
-                           precedence: MitigationPrecedence): Mitigation =
+  /** A relative statement scaling likelihood and leaving severity alone. */
+  private def leafScaleLikelihood(label: String, factor: Double,
+                                  precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
     Mitigation.create(
       mitigationId(label), name(label), pred,
-      MitigationSpec.LeafStage(
-        RiskLeafTransform(
-          LikelihoodTransform.Override(com.risquanter.register.domain.data.iron.ValidationUtil.refineResidualProbability(prob, paramAt).toOption.get),
-          DistributionTransform.Keep),
-        Some(stamp), Some(nodeId(anchor))),
+      MitigationSpec.LeafRelative(
+        RelativeLikelihood.Scale(ValidationUtil.refineRetentionFactor(factor, paramAt).toOption.get),
+        RelativeSeverity.Keep),
+      precedence).toEither.toOption.get
+
+  /** An absolute statement replacing the anchor leaf's likelihood. */
+  private def leafAbsoluteLikelihood(label: String, prob: Double, anchor: String,
+                                     precedence: MitigationPrecedence): Mitigation =
+    Mitigation.create(
+      mitigationId(label), name(label), pred,
+      MitigationSpec.LeafAbsolute(
+        AbsoluteReplacement.Likelihood(ValidationUtil.refineResidualProbability(prob, paramAt).toOption.get),
+        nodeId(anchor),
+        stamp),
       precedence).toEither.toOption.get
 
   private def resultCap(label: String, cap: Long,
                         precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
     Mitigation.create(
       mitigationId(label), name(label), pred,
-      MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(com.risquanter.register.domain.data.iron.ValidationUtil.refineLossCap(cap, paramAt).toOption.get)))),
+      resultStage(ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)),
       precedence).toEither.toOption.get
 
   private def resultDeductible(label: String, d: Long,
                                precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
     Mitigation.create(
       mitigationId(label), name(label), pred,
-      MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.ApplyDeductible(com.risquanter.register.domain.data.iron.ValidationUtil.refineNonNegativeLong(d, paramAt).toOption.get)))),
+      resultStage(ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(d, paramAt).toOption.get)),
       precedence).toEither.toOption.get
 
+  /** The leaf at `label`. Every id these tests pass names a leaf, so a portfolio
+    * here is a broken fixture rather than a case to handle. */
+  private def leafAt(t: RiskTree, label: String): RiskLeaf =
+    t.index.nodes(nodeId(label)) match
+      case l: RiskLeaf      => l
+      case p: RiskPortfolio => throw new AssertionError(s"expected a leaf at $label, got $p")
+
+  /** The leaf's lower lognormal bound. Every fixture here is lognormal. */
   private def minOf(t: RiskTree, label: String): Long =
-    t.index.nodes(nodeId(label)).asInstanceOf[RiskLeaf].minLoss.map(l => l: Long).get
+    leafAt(t, label).shape match
+      case DistributionShape.Lognormal(bounds) => bounds.min
+      case e: DistributionShape.Expert         => throw new AssertionError(s"expected a lognormal shape at $label, got $e")
+
   private def probOf(t: RiskTree, label: String): Double =
-    t.index.nodes(nodeId(label)).asInstanceOf[RiskLeaf].probability
+    leafAt(t, label).probability
 
   def spec = suite("MitigationApplicationSpec")(
 
     suite("scoped")(
       test("selection Inherent applies nothing") {
-        val m = leafScale("m-scale", 0.5)
+        val m = leafScaleSeverity("m-scale", 0.5)
         val t = mkTree(m)
         assertTrue(MitigationApplication.scoped(t, MitigationSelection.Inherent, scopes(m -> Set("cyber"))).isEmpty)
       },
@@ -118,7 +138,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         assertTrue(ms.map(_.id.value) == List(early, late, tie).map(_.id.value))
       },
       test("Selected with FullScope covers the whole resolved scope; absent mitigations are off") {
-        val a = leafScale("m-scale", 0.5)
+        val a = leafScaleSeverity("m-scale", 0.5)
         val b = resultCap("m-cap", 1000000L)
         val t = mkTree(a, b)
         val scoped = MitigationApplication.scoped(t,
@@ -131,7 +151,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         )
       },
       test("NodesOnly restricts to the intersection with the resolved scope; foreign ids no-op") {
-        val a = leafScale("m-scale", 0.5)
+        val a = leafScaleSeverity("m-scale", 0.5)
         val t = mkTree(a)
         val scoped = MitigationApplication.scoped(t,
           MitigationSelection.Selected(Map(a.id ->
@@ -143,7 +163,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
     suite("effectiveTree (param-stage half of the action)")(
       test("scoped leaf transformed, out-of-scope leaf and portfolio untouched; mitigations carried") {
-        val a = leafScale("m-scale", 0.5)
+        val a = leafScaleSeverity("m-scale", 0.5)
         val t = mkTree(a)
         val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Residual, scopes(a -> Set("cyber"))).toEither.toOption.get
         assertTrue(
@@ -154,32 +174,24 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
           eff.seedVarHighWater == t.seedVarHighWater
         )
       },
-      test("baseline Override blends: replacement first, relative op on top") {
-        val base = leafOverride("m-ov-base", 0.1, "cyber", MitigationPrecedence.overrideBaseline)
-        val scale = Mitigation.create(
-          mitigationId("m-prob-scale"), name("m-prob-scale"), pred,
-          MitigationSpec.LeafStage(
-            RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, None),
-          MitigationPrecedence.default).toEither.toOption.get
+      test("an absolute replacement at the baseline preset is blended: it runs first, the relative op on top") {
+        val base  = leafAbsoluteLikelihood("m-abs-base", 0.1, "cyber", MitigationPrecedence.overrideBaseline)
+        val scale = leafScaleLikelihood("m-prob-scale", 0.5)
         val t = mkTree(base, scale)
         val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Residual,
           scopes(base -> Set("cyber"), scale -> Set("cyber"))).toEither.toOption.get
-        assertTrue(math.abs(probOf(eff, "cyber") - 0.05) < 1e-9) // 0.1 overridden first, then × 0.5
+        assertTrue(math.abs(probOf(eff, "cyber") - 0.05) < 1e-9) // replaced with 0.1 first, then × 0.5
       },
-      test("final Override asserts: applied last, discards the prior relative op") {
-        val fin = leafOverride("m-ov-final", 0.1, "cyber", MitigationPrecedence.overrideFinal)
-        val scale = Mitigation.create(
-          mitigationId("m-prob-scale"), name("m-prob-scale"), pred,
-          MitigationSpec.LeafStage(
-            RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, None),
-          MitigationPrecedence.default).toEither.toOption.get
+      test("an absolute replacement at the final preset absorbs: it runs last and discards the relative op") {
+        val fin   = leafAbsoluteLikelihood("m-abs-final", 0.1, "cyber", MitigationPrecedence.overrideFinal)
+        val scale = leafScaleLikelihood("m-prob-scale", 0.5)
         val t = mkTree(fin, scale)
         val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Residual,
           scopes(fin -> Set("cyber"), scale -> Set("cyber"))).toEither.toOption.get
-        assertTrue(math.abs(probOf(eff, "cyber") - 0.1) < 1e-9) // × 0.5 first, then asserted to 0.1
+        assertTrue(math.abs(probOf(eff, "cyber") - 0.1) < 1e-9) // × 0.5 first, then replaced with 0.1
       },
       test("selection Inherent is the identity on the tree") {
-        val m = leafScale("m-scale", 0.5)
+        val m = leafScaleSeverity("m-scale", 0.5)
         val t = mkTree(m)
         val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Inherent, scopes(m -> Set("cyber"))).toEither.toOption.get
         assertTrue(minOf(eff, "cyber") == 1000L)
@@ -192,7 +204,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val dFirst = resultDeductible("m-a-ded", 10000L, MitigationPrecedence(-1))
         val scale  = Mitigation.create(
           mitigationId("m-b-scale"), name("m-b-scale"), pred,
-          MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.ScaleLosses(0.5)))),
+          resultStage(ResultTransformSpec.ScaleLosses(0.5)),
           MitigationPrecedence(1)).toEither.toOption.get
         val t = mkTree(dFirst, scale)
         val scoped = MitigationApplication.scoped(t, MitigationSelection.Residual,
@@ -207,7 +219,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       test("a parameter-stage mitigation produces no record") {
         // Parameter-stage transforms shape the figure the layer is applied to,
         // and are never part of the layer.
-        val m = leafScale("m-scale", 0.5)
+        val m = leafScaleSeverity("m-scale", 0.5)
         val t = mkTree(m)
         val scoped  = MitigationApplication.scoped(t, MitigationSelection.Residual, scopes(m -> Set("cyber")))
         val records = MitigationApplication.recordsByNode(scoped)
@@ -235,9 +247,9 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("applicationRecords (D-4 provenance layer)")(
+    suite("applicationRecords — the provenance layer")(
       test("one record per applied mitigation with the actually-touched scope") {
-        val a = leafScale("m-scale", 0.5)
+        val a = leafScaleSeverity("m-scale", 0.5)
         val b = resultCap("m-cap", 1000000L, MitigationPrecedence(5))
         val t = mkTree(a, b)
         val records = MitigationApplication.applicationRecords(t,

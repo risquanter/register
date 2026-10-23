@@ -1,9 +1,12 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.*
-import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
+import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator, jsonHint}
 import sttp.tapir.Schema
-import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{
+  ContentHash, MitigationId, NodeId, OccurrenceProbability, ResidualProbability,
+  SafeName, ValidationMessages, ValidationUtil
+}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
 
 /** What a mitigation applies to; resolves server-side to the scoped node set. */
@@ -36,59 +39,160 @@ object MitigationPrecedence {
 /**
  * The mitigation's effect, by stage.
  *
- * `LeafStage` — param-stage transform on leaves. An Override component requires
- * `overrideBaseStamp` (the target leaf's `LeafSimContent` hash at authoring time)
- * and `overrideAnchor` (the single leaf the override asserts against); both absent
- * when no Override is present — enforced by `Mitigation.create`.
+ * The two param-stage cases are split by whether the statement is relative to
+ * whatever the leaf currently says or absolute. A relative statement stays true
+ * when the leaf changes, so it records nothing about the leaf it was written
+ * against. An absolute statement asserts figures against one leaf as it stood,
+ * so it carries that leaf and its content hash at authoring time — as plain
+ * fields, which is what makes an absolute statement without them not
+ * representable rather than refused.
  *
- * `ResultStage` — ordered `TransformPipeline` on trial outcomes, any node.
+ * `ResultStage` is an ordered `TransformPipeline` on trial outcomes, applicable
+ * to any node.
+ *
+ * The stage field is the serialised form's only discriminator: the cases are
+ * distinguished by it rather than by which fields are present.
  */
+@jsonDiscriminator("stage")
 sealed trait MitigationSpec
+
+/** The two param-stage specs, grouped so a caller that collects applicable
+  * leaf-stage specs stays a single pattern. */
+sealed trait LeafStageSpec extends MitigationSpec
+
+object LeafStageSpec {
+
+  /** A leaf-stage spec as a Kleisli arrow on the parameters it can change:
+    * `LeafParams => Validation[ValidationError, LeafParams]`. Composition is
+    * `flatMap`, and the identity arrow is `params => Validation.succeed(params)`,
+    * which `LeafRelative(Keep, Keep)` is. An absolute replacement discards what
+    * it replaces, so it is the absorbing element.
+    *
+    * `subject` names the leaf being transformed. `LeafParams` carries no
+    * identity — identity, name, parent and seed identity are outside a
+    * transform's reach — so a refusal has nothing of its own to report against.
+    */
+  def applyTo(
+    spec:    LeafStageSpec,
+    params:  LeafParams,
+    subject: ErrorSubject
+  ): Validation[ValidationError, LeafParams] = spec match {
+    case MitigationSpec.LeafRelative(likelihood, severity) =>
+      val probabilityV: Validation[ValidationError, OccurrenceProbability] = likelihood match {
+        case RelativeLikelihood.Keep => Validation.succeed(params.probability)
+        case RelativeLikelihood.Scale(factor) =>
+          ValidationUtil.toValidation(ValidationUtil.refineOccurrenceProbability(
+            params.probability * factor,
+            ErrorLocation.Field(subject, FieldName.Probability)
+          ))
+      }
+
+      val shapeV: Validation[ValidationError, DistributionShape] = severity match {
+        case RelativeSeverity.Keep => Validation.succeed(params.shape)
+        case RelativeSeverity.ScaleSeverity(factor) =>
+          RiskLeafTransform.scaleSeverity(params.shape, factor, subject)
+      }
+
+      Validation.validateWith(probabilityV, shapeV)(LeafParams.apply)
+
+    // A replacement states post-control figures outright, so each case is the
+    // constant arrow on the components it names.
+    case MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(probability), _, _) =>
+      residualAsOccurrence(probability, subject).map(p => LeafParams(p, params.shape))
+
+    case MitigationSpec.LeafAbsolute(AbsoluteReplacement.Severity(shape), _, _) =>
+      Validation.succeed(LeafParams(params.probability, shape))
+
+    case MitigationSpec.LeafAbsolute(AbsoluteReplacement.Both(probability, shape), _, _) =>
+      residualAsOccurrence(probability, subject).map(p => LeafParams(p, shape))
+  }
+
+  /** A mitigation's residual probability read as a leaf's occurrence
+    * probability. The residual interval (0, 1] sits inside the leaf's closed
+    * [0, 1], so this never fails; it is refined rather than cast because the two
+    * constraints are different types. */
+  private def residualAsOccurrence(
+    probability: ResidualProbability,
+    subject:     ErrorSubject
+  ): Validation[ValidationError, OccurrenceProbability] =
+    ValidationUtil.toValidation(ValidationUtil.refineOccurrenceProbability(
+      probability,
+      ErrorLocation.Field(subject, FieldName.Probability)
+    ))
+}
 
 object MitigationSpec {
 
-  final case class LeafStage(
-    transform: RiskLeafTransform,
-    overrideBaseStamp: Option[ContentHash],
-    overrideAnchor: Option[NodeId]
-  ) extends MitigationSpec
+  /** A relative param-stage change. The statement stays true when the leaf
+    * changes, so there is nothing to stamp and nothing to anchor. */
+  @jsonHint("leafRelative")
+  final case class LeafRelative(
+    likelihood: RelativeLikelihood,
+    severity: RelativeSeverity
+  ) extends LeafStageSpec
 
-  final case class ResultStage(pipeline: TransformPipeline) extends MitigationSpec
+  /** An absolute param-stage replacement, with the leaf it was asserted against
+    * and that leaf's content hash at authoring time. */
+  @jsonHint("leafAbsolute")
+  final case class LeafAbsolute(
+    replacement: AbsoluteReplacement,
+    anchor: NodeId,
+    baseStamp: ContentHash
+  ) extends LeafStageSpec
+
+  /** A result-stage pipeline. The step-count rule is this case's own relation
+    * over its one field, so it is held here rather than one level up. */
+  @jsonHint("result")
+  final case class ResultStage private (pipeline: TransformPipeline) extends MitigationSpec
+
+  object ResultStage {
+
+    /** A pipeline with no steps has no effect. */
+    private val MinPipelineSteps = 1
+
+    /** Above ten steps a pipeline is restating operations: a realistic one uses
+      * at most one of each of the five operation types. */
+    private val MaxPipelineSteps = 10
+
+    def create(
+      pipeline: TransformPipeline,
+      location: ErrorLocation
+    ): Validation[ValidationError, ResultStage] =
+      pipeline.steps.size match {
+        case n if n < MinPipelineSteps =>
+          Validation.fail(ValidationError(
+            location = location,
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"result-stage pipeline is empty: at least $MinPipelineSteps step is required"
+          ))
+        case n if n > MaxPipelineSteps =>
+          Validation.fail(ValidationError(
+            location = location,
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"result-stage pipeline has too many steps: $n exceeds the limit of $MaxPipelineSteps"
+          ))
+        case _ => Validation.succeed(new ResultStage(pipeline))
+      }
+
+    /** Wire form: an object, so the discriminated parent has a field set to add
+      * the stage tag to. */
+    private case class Raw(pipeline: TransformPipeline)
+    private object Raw { given rawCodec: JsonCodec[Raw] = DeriveJsonCodec.gen[Raw] }
+
+    /** Decodes through `create`, so the step-count rule holds on the store-read
+      * path as well as the request path (ADR-039 §3). */
+    given codec: JsonCodec[ResultStage] = JsonCodec(
+      JsonEncoder[Raw].contramap(stage => Raw(stage.pipeline)),
+      Raw.rawCodec.decoder.mapOrFail(raw =>
+        create(raw.pipeline, ErrorLocation.requestField(FieldName.Spec))
+          .toEither.left.map(_.map(_.message).mkString("; "))
+      )
+    )
+  }
 
   given Equal[MitigationSpec] = Equal.default
 
-  private case class Raw(
-    stage: String,
-    transform: Option[RiskLeafTransform],
-    overrideBaseStamp: Option[String],
-    overrideAnchor: Option[String],
-    pipeline: Option[TransformPipeline]
-  )
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  given codec: JsonCodec[MitigationSpec] = JsonCodec(
-    JsonEncoder[Raw].contramap {
-      case LeafStage(t, stamp, anchor) => Raw("leaf", Some(t), stamp.map(_.value), anchor.map(_.value), None)
-      case ResultStage(p)              => Raw("result", None, None, None, Some(p))
-    },
-    JsonDecoder[Raw].mapOrFail {
-      case Raw("leaf", Some(t), stamp, anchor, None) =>
-        for {
-          h <- stamp match {
-            case None    => Right(None)
-            case Some(s) => ContentHash.fromString(s)
-              .map(Some(_)).left.map(_.map(_.message).mkString("; "))
-          }
-          a <- anchor match {
-            case None    => Right(None)
-            case Some(s) => NodeId.fromString(s)
-              .map(Some(_)).left.map(_.map(_.message).mkString("; "))
-          }
-        } yield LeafStage(t, h, a)
-      case Raw("result", None, None, None, Some(p)) => Right(ResultStage(p))
-      case other => Left(s"invalid mitigation spec: stage '${other.stage}' with mismatched fields")
-    }
-  )
+  given codec: JsonCodec[MitigationSpec] = DeriveJsonCodec.gen[MitigationSpec]
 }
 
 /**
@@ -105,68 +209,20 @@ final case class Mitigation private (
 
 object Mitigation {
 
-  /** Maximum steps in one ResultStage pipeline. Realistic pipelines use at most one of each of the five op types. */
-  private val MaxPipelineSteps = 10
-
-  /** A pipeline with no steps has no effect and is rejected at construction. */
-  private val MinPipelineSteps = 1
-
-  /** Cross-field rules: an Override component requires both `overrideBaseStamp` and `overrideAnchor`;
-    * a ResultStage pipeline must have between 1 and 10 steps. */
+  /** The sole gate of the private constructor (ADR-001 §5). It holds no rule of
+    * its own: the step-count rule belongs to `MitigationSpec.ResultStage`, which
+    * owns the field it is about, and the spec's two param-stage cases carry
+    * exactly the fields their statement needs, so there is no combination left
+    * to forbid.
+    */
   def create(
     id: MitigationId,
     name: SafeName.SafeName,
     target: MitigationTarget,
     spec: MitigationSpec,
     precedence: MitigationPrecedence
-  ): Validation[ValidationError, Mitigation] = {
-    val specLocation = ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Spec)
-
-    val overrideRulesV: Validation[ValidationError, Unit] = spec match {
-      case MitigationSpec.LeafStage(transform, stamp, anchor) =>
-        (hasOverrideComponent(transform), stamp, anchor) match {
-          case (true, Some(_), Some(_)) => Validation.succeed(())
-          case (false, None, None)      => Validation.succeed(())
-          case (true, _, _) =>
-            val missing = List(
-              Option.when(stamp.isEmpty)("base stamp"),
-              Option.when(anchor.isEmpty)("override anchor")
-            ).flatten
-            Validation.fail(ValidationError(
-              location = specLocation,
-              code = ValidationErrorCode.REQUIRED_FIELD,
-              message = s"An Override mitigation must carry its ${missing.mkString(" and ")}"
-            ))
-          case (false, _, _) =>
-            Validation.fail(ValidationError(
-              location = specLocation,
-              code = ValidationErrorCode.INVALID_COMBINATION,
-              message = "Only an Override mitigation may carry a base stamp or override anchor"
-            ))
-        }
-      case MitigationSpec.ResultStage(_) => Validation.succeed(())
-    }
-
-    val stepsV: Validation[ValidationError, Unit] = spec match {
-      case MitigationSpec.ResultStage(pipeline) if pipeline.steps.sizeIs < MinPipelineSteps =>
-        Validation.fail(ValidationError(
-          location = specLocation,
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"result-stage pipeline is empty: at least $MinPipelineSteps step is required"
-        ))
-      case MitigationSpec.ResultStage(pipeline) if pipeline.steps.sizeIs > MaxPipelineSteps =>
-        Validation.fail(ValidationError(
-          location = specLocation,
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"result-stage pipeline has too many steps: ${pipeline.steps.size} exceeds the limit of $MaxPipelineSteps"
-        ))
-      case _ => Validation.succeed(())
-    }
-
-    Validation
-      .validateWith(overrideRulesV, stepsV) { (_, _) => () }
-      .map(_ => new Mitigation(id, name, target, spec, precedence))
-  }
+  ): Validation[ValidationError, Mitigation] =
+    Validation.succeed(new Mitigation(id, name, target, spec, precedence))
 
   /** Mitigation identifiers are unique within one tree. One error per repeated
     * identifier, carrying how many mitigations hold it. */
@@ -201,13 +257,6 @@ object Mitigation {
           message = ValidationMessages.duplicateMitigationNames(name.toString, group.size)
         )
     )
-
-  private def hasOverrideComponent(t: RiskLeafTransform): Boolean =
-    (t.likelihood, t.distribution) match {
-      case (_: LikelihoodTransform.Override, _)   => true
-      case (_, _: DistributionTransform.Override) => true
-      case _                                      => false
-    }
 
   given Equal[Mitigation] = Equal.default
 

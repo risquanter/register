@@ -30,10 +30,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = idStr("cyber"),
     name = "Cyber Attack",
-    distributionType = "lognormal",
     probability = 0.25,
-    minLoss = Some(1000L),
-    maxLoss = Some(50000L),
+    shape = lognormalShape(1000L, 50000L),
     parentId = Some(nodeId("ops-risk")),
     seedVarId = 1L
   ), "leaf")
@@ -41,10 +39,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = idStr("hardware"),
     name = "Hardware Failure",
-    distributionType = "lognormal",
     probability = 0.1,
-    minLoss = Some(500L),
-    maxLoss = Some(10000L),
+    shape = lognormalShape(500L, 10000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 2L
   ), "leaf")
@@ -52,10 +48,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   val softwareLeaf = unsafeGet(RiskLeaf.create(
     id = idStr("software"),
     name = "Software Bug",
-    distributionType = "lognormal",
     probability = 0.3,
-    minLoss = Some(100L),
-    maxLoss = Some(5000L),
+    shape = lognormalShape(100L, 5000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 3L
   ), "leaf")
@@ -115,10 +109,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val changedSoftware = unsafeGet(RiskLeaf.create(
         id = idStr("software"),
         name = "Software Bug",
-        distributionType = "lognormal",
         probability = 0.7,
-        minLoss = Some(100L),
-        maxLoss = Some(5000L),
+        shape = lognormalShape(100L, 5000L),
         parentId = Some(nodeId("it-risk")),
         seedVarId = 3L
       ), "leaf")
@@ -139,10 +131,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val movedChangedHardware = unsafeGet(RiskLeaf.create(
         id = idStr("hardware"),
         name = "Hardware Failure",
-        distributionType = "lognormal",
         probability = 0.6,               // param change
-        minLoss = Some(500L),
-        maxLoss = Some(10000L),
+        shape = lognormalShape(500L, 10000L),
         parentId = Some(nodeId("ops-risk")),  // reparent
         seedVarId = 2L
       ), "leaf")
@@ -198,11 +188,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         unsafeGet(RiskLeaf.create(
           id = idStr("expert-leaf"),
           name = "Expert Leaf",
-          distributionType = "expert",
           probability = 0.2,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(1000.0, 5000.0, 25000.0)),
-          terms = Some(3),
+          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3)),
           parentId = Some(nodeId("ops-risk")),
           seedVarId = 4L
         ), "leaf")
@@ -214,19 +201,16 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     },
 
     test("changing only an expert leaf's quantile VALUES publishes exactly that leaf + ancestors") {
-      def expertLeaf(quantiles: Array[Double]): RiskLeaf =
+      def expertLeaf(quantiles: Vector[Double]): RiskLeaf =
         unsafeGet(RiskLeaf.create(
           id = idStr("expert-leaf"),
           name = "Expert Leaf",
-          distributionType = "expert",
           probability = 0.2,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(quantiles),
-          terms = Some(3),
+          shape = expertShape(Vector(0.1, 0.5, 0.9), quantiles, Some(3)),
           parentId = Some(nodeId("it-risk")),
           seedVarId = 4L
         ), "leaf")
-      def build(quantiles: Array[Double]): RiskTree = treeWith(Seq(
+      def build(quantiles: Vector[Double]): RiskTree = treeWith(Seq(
         rootPortfolio,
         cyberLeaf,
         unsafeGet(RiskPortfolio.createFromStrings(
@@ -242,8 +226,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       for {
         handler <- ZIO.service[InvalidationHandler]
         result  <- handler.handleMutation(
-          build(Array(1000.0, 5000.0, 25000.0)),
-          build(Array(1000.0, 5000.0, 30000.0)),
+          build(Vector(1000.0, 5000.0, 25000.0)),
+          build(Vector(1000.0, 5000.0, 30000.0)),
           BranchChoice.Main
         )
       } yield assertTrue(
@@ -297,10 +281,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val changedCyber = unsafeGet(RiskLeaf.create(
         id = idStr("cyber"),
         name = "Cyber Attack",
-        distributionType = "lognormal",
         probability = 0.5,
-        minLoss = Some(1000L),
-        maxLoss = Some(50000L),
+        shape = lognormalShape(1000L, 50000L),
         parentId = Some(nodeId("ops-risk")),
         seedVarId = 1L
       ), "leaf")

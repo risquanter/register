@@ -3,11 +3,11 @@ package com.risquanter.register.mitigation
 import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
 import com.risquanter.register.domain.data.{
-  Mitigation, MitigationApplicationRecord, MitigationSpec,
-  RiskLeaf, RiskLeafTransform, RiskNode, RiskPortfolio, RiskTree
+  LeafParams, LeafStageSpec, Mitigation, MitigationApplicationRecord, MitigationSpec,
+  RiskLeaf, RiskNode, RiskPortfolio, RiskTree
 }
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorSubject, ValidationError}
 import com.risquanter.register.simulation.TrialOutcomes
 
 /**
@@ -138,9 +138,11 @@ object MitigationApplication {
     pairs.groupMap(_._1)(_._2).view.mapValues(inPrecedenceOrder).toMap
   }
 
-  /** Applies every LeafStage transform to its scoped leaves, in precedence
-    * order per leaf; portfolios and out-of-scope leaves pass through. The
-    * result revalidates through `RiskTree.fromNodes` (errors accumulate). */
+  /** Applies every leaf-stage spec to its scoped leaves, in precedence order
+    * per leaf; portfolios and out-of-scope leaves pass through. The fold
+    * threads only the parameters a spec can change, so the leaf is rebuilt once
+    * at the end rather than per step. The result revalidates through
+    * `RiskTree.fromNodes` (errors accumulate). */
   def effectiveTree(
     tree: RiskTree,
     selection: MitigationSelection,
@@ -151,11 +153,23 @@ object MitigationApplication {
     val newNodesV: Validation[ValidationError, List[RiskNode]] =
       Validation.validateAll(tree.nodes.toList.map {
         case leaf: RiskLeaf =>
-          perNode.get(leaf.id).map(_.collect { case Mitigation(_, _, _, MitigationSpec.LeafStage(t, _, _), _) => t }) match {
-            case Some(transforms) if transforms.nonEmpty =>
-              transforms.foldLeft(Validation.succeed(leaf): Validation[ValidationError, RiskLeaf]) {
-                (accV, t) => accV.flatMap(l => RiskLeafTransform.applyTo(t, l))
-              }
+          perNode.get(leaf.id).map(_.collect { case Mitigation(_, _, _, spec: LeafStageSpec, _) => spec }) match {
+            case Some(specs) if specs.nonEmpty =>
+              val subject = ErrorSubject.ExistingNode(leaf.id)
+              specs
+                .foldLeft(Validation.succeed(LeafParams(leaf.probability, leaf.shape)): Validation[ValidationError, LeafParams]) {
+                  (accV, spec) => accV.flatMap(params => LeafStageSpec.applyTo(spec, params, subject))
+                }
+                .map(params =>
+                  RiskLeaf.fromValidated(
+                    id = leaf.safeId,
+                    name = leaf.safeName,
+                    probability = params.probability,
+                    shape = params.shape,
+                    parentId = leaf.parentId,
+                    seedVarId = leaf.seedVarId
+                  )
+                )
             case _ => Validation.succeed(leaf)
           }
         case portfolio: RiskPortfolio => Validation.succeed(portfolio)

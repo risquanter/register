@@ -65,16 +65,14 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   private val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = cyberId.value, name = "Cyber",
-    distributionType = "lognormal", probability = 0.25,
-    minLoss = Some(1000L), maxLoss = Some(50000L),
+    probability = 0.25, shape = lognormalShape(1000L, 50000L),
     parentId = Some(itId),
     seedVarId = 1L
   ), "leaf")
 
   private val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = hardwareId.value, name = "Hardware",
-    distributionType = "lognormal", probability = 0.10,
-    minLoss = Some(500L), maxLoss = Some(10000L),
+    probability = 0.10, shape = lognormalShape(500L, 10000L),
     parentId = Some(itId),
     seedVarId = 2L
   ), "leaf")
@@ -193,7 +191,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       mitigationId(idLabel),
       SafeName.fromString(nm).toOption.get,
       MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
-      MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.CapLosses(1000000L)))),
+      resultStage(ResultTransformSpec.CapLosses(1000000L)),
       MitigationPrecedence.default
     ).toEither.toOption.get
 
@@ -647,8 +645,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       ), "portfolio")
       val c = unsafeGet(RiskLeaf.create(
         id = cIdStr, name = "leaf",
-        distributionType = "lognormal", probability = 0.1,
-        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root3"))),
+        probability = 0.1, shape = lognormalShape(1L, 2L), parentId = Some(NodeId(safeId("root3"))),
         seedVarId = 5L
       ), "leaf")
       val t = bypassTree(Seq(rootP, c))
@@ -853,8 +850,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       ), "portfolio")
       val leafInherent = unsafeGet(RiskLeaf.create(
         id = idStr("inh"), name = "inherent",
-        distributionType = "lognormal", probability = 0.1,
-        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root-col"))),
+        probability = 0.1, shape = lognormalShape(1L, 2L), parentId = Some(NodeId(safeId("root-col"))),
         seedVarId = 7L
       ), "leaf")
       val mResidual = mkMit("m-res", "residual")

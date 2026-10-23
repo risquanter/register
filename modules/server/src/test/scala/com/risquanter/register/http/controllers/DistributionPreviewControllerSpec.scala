@@ -12,7 +12,7 @@ import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.auth.UserContextExtractor
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.http.requests.DistributionShapeRequest
+import com.risquanter.register.http.requests.{DistributionShapeRequest, LognormalShapeRequest}
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.telemetry.TelemetryLive
 
@@ -22,9 +22,9 @@ import com.risquanter.register.telemetry.TelemetryLive
   * POST /distribution/preview.  Each test wires the controller directly (no full
   * [[HttpApi]] stack, no Irmin, no database) and drives it through [[TapirStubInterpreter]].
   *
-  * Decision context (2026-06-10): The preview endpoint moved to the public surface
-  * (no workspace key).  [[UserContextExtractor.requirePresent]] is the L1 gate;
-  * this spec verifies it is correctly threaded by the controller and that:
+  * The preview endpoint is on the public surface and takes no workspace key, so
+  * [[UserContextExtractor.requirePresent]] is its only gate. This spec verifies
+  * the controller threads that gate and that:
   *   - [[UserContextExtractor.noOp]]          → absent header is accepted (L0 open)
   *   - [[UserContextExtractor.requirePresent]] → absent header returns 403 (L1 gate)
   *   - [[UserContextExtractor.requirePresent]] → present, valid header returns 200
@@ -37,15 +37,12 @@ object DistributionPreviewControllerSpec extends ZIOSpecDefault:
 
   // ── Request fixture ──────────────────────────────────────────────────────────
 
-  /** Minimal valid lognormal request — passes [[DistributionShapeRequest.validate]]. */
-  private val lognormalRequest = DistributionShapeRequest(
-    distributionType = "lognormal",
-    percentiles      = None,
-    quantiles        = None,
-    terms            = None,
-    minLoss          = Some(1_000L),
-    maxLoss          = Some(50_000L)
-  )
+  /** Minimal lognormal request: the bounds are ordered, so `toShape` accepts it.
+    *
+    * Typed as the sealed parent because the JSON codec is derived there — it is
+    * what writes the `distributionType` discriminator the endpoint decodes. */
+  private val lognormalRequest: DistributionShapeRequest =
+    LognormalShapeRequest(minLoss = 1_000L, maxLoss = 50_000L)
 
   /** A valid UUID v4 — accepted by the [[UserId]] opaque type codec. */
   private val validUserId = "550e8400-e29b-41d4-a716-446655440000"
@@ -66,7 +63,7 @@ object DistributionPreviewControllerSpec extends ZIOSpecDefault:
   /** POST /distribution/preview with an optional x-user-id header value. */
   private def previewRequest(
     backend:  SttpBackend[Task, Any],
-    userId:   Option[String] = None
+    userId:   Option[String]
   ): Task[Response[Either[String, String]]] =
     val base = basicRequest
       .post(uri"http://localhost/distribution/preview")

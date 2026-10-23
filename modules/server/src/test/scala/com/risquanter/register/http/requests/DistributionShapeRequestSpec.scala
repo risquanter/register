@@ -3,341 +3,326 @@ package com.risquanter.register.http.requests
 import zio.prelude.Validation
 import zio.test.*
 
-import sttp.tapir.SchemaType.SProduct
-import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import sttp.tapir.SchemaType.SCoproduct
+import com.risquanter.register.domain.data.DistributionShape
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
 
+/** The submitted shape and its gate: one request case per mode, and `toShape`
+  * refining each into the domain shape.
+  *
+  * What the two cases make unrepresentable is not tested here, because there is
+  * no Scala expression for it: an expert body has no bound to omit and a
+  * lognormal body has no anchor sequence to omit, so a missing-field rule has
+  * nothing to refuse. The wire is the one place those states can still be
+  * written, so the decode suite below is where they are refused.
+  */
 object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
-  // ── helpers ────────────────────────────────────────────────────────────────
+  // ── fixtures ───────────────────────────────────────────────────────────────
+
+  /** Three anchors at the 5th, 50th and 95th percentile, strictly increasing in
+    * both sequences, so the fixture itself breaks no rule. */
+  private val anchorPercentiles: Vector[Double] = Vector(0.05, 0.50, 0.95)
+  private val anchorQuantiles:   Vector[Double] = Vector(1_000.0, 5_000.0, 25_000.0)
 
   private def expertReq(
-    percentiles: Array[Double] = Array(0.05, 0.50, 0.95),
-    quantiles:   Array[Double] = Array(1000.0, 5000.0, 25000.0),
-    terms:       Option[Int]   = None
-  ): DistributionShapeRequest =
-    DistributionShapeRequest(
-      distributionType = "expert",
-      percentiles      = Some(percentiles),
-      quantiles        = Some(quantiles),
-      terms            = terms,
-      minLoss          = None,
-      maxLoss          = None
-    )
+    percentiles: Vector[Double],
+    quantiles:   Vector[Double],
+    terms:       Option[Int]
+  ): ExpertShapeRequest =
+    ExpertShapeRequest(percentiles, quantiles, terms)
 
-  private def lognormalReq(
-    minLoss: Long = 1_000L,
-    maxLoss: Long = 50_000L
-  ): DistributionShapeRequest =
-    DistributionShapeRequest(
-      distributionType = "lognormal",
-      percentiles      = None,
-      quantiles        = None,
-      terms            = None,
-      minLoss          = Some(minLoss),
-      maxLoss          = Some(maxLoss)
-    )
+  private def lognormalReq(minLoss: Long, maxLoss: Long): LognormalShapeRequest =
+    LognormalShapeRequest(minLoss, maxLoss)
 
-  private def isFailWithCode(
-    v:    Validation[?, ?],
-    code: ValidationErrorCode
-  ): Boolean = v match
-    case Validation.Failure(_, errs) =>
-      errs.exists {
-        case e: com.risquanter.register.domain.errors.ValidationError => e.code == code
-        case _                                                          => false
-      }
-    case _ => false
+  /** `toShape` reports against the subject it is given; every test here submits
+    * the request as a whole, so `ErrorLocation.requestField` is what a refusal
+    * carries. */
+  private def shapeOf(request: DistributionShapeRequest): Validation[ValidationError, DistributionShape] =
+    request.toShape(ErrorSubject.Request)
 
   private def failsOnField(
-    v:     Validation[?, ?],
+    v:     Validation[ValidationError, ?],
     field: FieldName,
     code:  ValidationErrorCode
   ): Boolean =
     val at = ErrorLocation.requestField(field)
     v match
-      case Validation.Failure(_, errs) =>
-        errs.exists {
-          case e: ValidationError => e.location == at && e.code == code
-          case _                  => false
-        }
-      case _ => false
+      case Validation.Failure(_, errs) => errs.exists(e => e.location == at && e.code == code)
+      case Validation.Success(_, _)    => false
+
+  private def locationsOf(v: Validation[ValidationError, ?]): List[ErrorLocation] =
+    v match
+      case Validation.Failure(_, errs) => errs.toList.map(_.location)
+      case Validation.Success(_, _)    => Nil
 
   // ── spec ───────────────────────────────────────────────────────────────────
 
-  def spec = suite("DistributionShapeRequest.validate")(
+  def spec = suite("DistributionShapeRequest.toShape")(
 
-    // ── valid inputs ──────────────────────────────────────────────────────────
+    suite("accepted expert requests")(
 
-    suite("valid expert requests")(
-
-      test("accepts a 3-anchor expert request without terms") {
-        assertTrue(DistributionShapeRequest.validate(expertReq()).isSuccess)
+      test("three anchors with no stated term count") {
+        assertTrue(shapeOf(expertReq(anchorPercentiles, anchorQuantiles, None)).isSuccess)
       },
 
-      test("accepts expert request with terms ≤ anchor count") {
-        assertTrue(DistributionShapeRequest.validate(expertReq(terms = Some(3))).isSuccess)
+      test("a term count equal to the anchor count") {
+        assertTrue(shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(3))).isSuccess)
       },
 
-      test("accepts expert request with terms equal to 2 (minimum valid)") {
-        assertTrue(DistributionShapeRequest.validate(expertReq(terms = Some(2))).isSuccess)
+      test("a term count of two, the smallest the fitter accepts") {
+        assertTrue(shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(2))).isSuccess)
       },
 
-      test("rejects expert request with terms equal to 1 (below minimum)") {
-        val result = DistributionShapeRequest.validate(expertReq(terms = Some(1)))
-        assertTrue(isFailWithCode(result, ValidationErrorCode.INVALID_COMBINATION))
+      test("two anchors, the smallest count the shape accepts") {
+        assertTrue(
+          shapeOf(expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), None)).isSuccess
+        )
+      },
+
+      test("the shape carries the expert mode spelling") {
+        shapeOf(expertReq(anchorPercentiles, anchorQuantiles, None)) match
+          case Validation.Success(_, shape) => assertTrue(shape.distributionType == "expert")
+          case Validation.Failure(_, errs)  =>
+            assertTrue(false).label(s"expected a shape, got ${errs.map(_.message).mkString("; ")}")
       }
     ),
 
-    suite("valid lognormal requests")(
+    suite("accepted lognormal requests")(
 
-      test("accepts a lognormal request with minLoss < maxLoss") {
-        assertTrue(DistributionShapeRequest.validate(lognormalReq()).isSuccess)
+      test("a minimum below the maximum") {
+        assertTrue(shapeOf(lognormalReq(1_000L, 50_000L)).isSuccess)
       },
 
-      test("accepts lognormal with adjacent values") {
-        assertTrue(DistributionShapeRequest.validate(lognormalReq(minLoss = 1L, maxLoss = 2L)).isSuccess)
+      test("adjacent bounds, the narrowest ordered pair") {
+        assertTrue(shapeOf(lognormalReq(1L, 2L)).isSuccess)
+      },
+
+      test("the shape carries the lognormal mode spelling") {
+        shapeOf(lognormalReq(1_000L, 50_000L)) match
+          case Validation.Success(_, shape) => assertTrue(shape.distributionType == "lognormal")
+          case Validation.Failure(_, errs)  =>
+            assertTrue(false).label(s"expected a shape, got ${errs.map(_.message).mkString("; ")}")
       }
     ),
 
-    // ── validate returns Distribution ─────────────────────────────────────────
+    suite("expert rules the field types cannot hold")(
 
-    suite("validate return type is Distribution")(
-
-      test("returns Distribution on valid expert request") {
-        DistributionShapeRequest.validate(expertReq()) match
-          case Validation.Success(_, dist: Distribution) =>
-            assertTrue(dist.distributionType.toString == "expert")
-          case _ =>
-            assertTrue(false).label("Expected Success[Distribution]")
+      test("a term count of one is outside the fitter's range") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(1))),
+          FieldName.Terms,
+          ValidationErrorCode.INVALID_RANGE
+        ))
       },
 
-      test("returns Distribution on valid lognormal request") {
-        DistributionShapeRequest.validate(lognormalReq()) match
-          case Validation.Success(_, dist: Distribution) =>
-            assertTrue(dist.distributionType.toString == "lognormal")
-          case _ =>
-            assertTrue(false).label("Expected Success[Distribution]")
+      test("a term count above the anchor count is refused: a fit cannot use more terms than points") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(4))),
+          FieldName.Terms,
+          ValidationErrorCode.INVALID_COMBINATION
+        ))
+      },
+
+      test("unequal sequence lengths are refused against the pairing, not against either sequence") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(anchorPercentiles, Vector(1_000.0, 5_000.0), None)),
+          FieldName.PercentileQuantilePairing,
+          ValidationErrorCode.INVALID_COMBINATION
+        ))
+      },
+
+      test("strictly decreasing quantiles are refused against the quantiles") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(anchorPercentiles, Vector(25_000.0, 5_000.0, 1_000.0), None)),
+          FieldName.Quantiles,
+          ValidationErrorCode.INVALID_COMBINATION
+        ))
+      },
+
+      test("quantiles that rise then fall are refused") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(anchorPercentiles, Vector(1_000.0, 25_000.0, 5_000.0), None)),
+          FieldName.Quantiles,
+          ValidationErrorCode.INVALID_COMBINATION
+        ))
+      },
+
+      test("a repeated quantile is refused: the sequence must strictly increase") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(anchorPercentiles, Vector(1_000.0, 1_000.0, 25_000.0), None)),
+          FieldName.Quantiles,
+          ValidationErrorCode.INVALID_COMBINATION
+        ))
+      },
+
+      test("percentiles out of order are refused against the percentiles") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(Vector(0.9, 0.1, 0.5), anchorQuantiles, None)),
+          FieldName.Percentiles,
+          ValidationErrorCode.INVALID_COMBINATION
+        ))
+      },
+
+      test("a repeated percentile is refused") {
+        assertTrue(failsOnField(
+          shapeOf(expertReq(Vector(0.05, 0.05, 0.95), anchorQuantiles, None)),
+          FieldName.Percentiles,
+          ValidationErrorCode.INVALID_COMBINATION
+        ))
+      },
+
+      test("both sequences out of order accumulate, one refusal each") {
+        val locations = locationsOf(
+          shapeOf(expertReq(Vector(0.9, 0.1, 0.5), Vector(25_000.0, 5_000.0, 1_000.0), None))
+        )
+        assertTrue(
+          locations.contains(ErrorLocation.requestField(FieldName.Percentiles)),
+          locations.contains(ErrorLocation.requestField(FieldName.Quantiles))
+        ).label(
+          "expected a refusal against each sequence, got: " +
+            locations.map(ErrorLocation.describe).mkString(", ")
+        )
       }
     ),
 
-    // ── schema and codec ──────────────────────────────────────────────────────
+    suite("lognormal rules the field types cannot hold")(
 
-    suite("Schema.derived replaces Schema.any")(
-
-      test("schemaType is SProduct (not the empty object Schema.any produces)") {
-        assertTrue(DistributionShapeRequest.schema.schemaType.isInstanceOf[SProduct[?]])
+      test("equal bounds are refused against the pair, not against either bound") {
+        assertTrue(failsOnField(
+          shapeOf(lognormalReq(10_000L, 10_000L)),
+          FieldName.LossRange,
+          ValidationErrorCode.INVALID_RANGE
+        ))
       },
 
-      test("schema.name is defined") {
+      test("a minimum above the maximum is refused against the pair") {
+        assertTrue(failsOnField(
+          shapeOf(lognormalReq(50_000L, 1_000L)),
+          FieldName.LossRange,
+          ValidationErrorCode.INVALID_RANGE
+        ))
+      },
+
+      test("a non-positive minimum is refused against that bound alone") {
+        assertTrue(locationsOf(shapeOf(lognormalReq(0L, 50_000L)))
+          .contains(ErrorLocation.requestField(FieldName.MinLoss)))
+      }
+    ),
+
+    suite("the wire form — where a cross-mode body is still writable")(
+
+      test("a body tagged expert carrying only lognormal fields is refused") {
+        val decoded = DistributionShapeRequest.codec.decodeJson(
+          """{"distributionType":"expert","minLoss":1000,"maxLoss":50000}"""
+        )
+        assertTrue(decoded.isLeft)
+      },
+
+      test("a body tagged lognormal carrying only expert fields is refused") {
+        val decoded = DistributionShapeRequest.codec.decodeJson(
+          """{"distributionType":"lognormal","percentiles":[0.05,0.95],"quantiles":[1000.0,25000.0]}"""
+        )
+        assertTrue(decoded.isLeft)
+      },
+
+      test("an unrecognised mode spelling is refused by the discriminator") {
+        val decoded = DistributionShapeRequest.codec.decodeJson(
+          """{"distributionType":"unknown"}"""
+        )
+        assertTrue(decoded.isLeft)
+      },
+
+      test("a body with no mode spelling is refused") {
+        val decoded = DistributionShapeRequest.codec.decodeJson(
+          """{"minLoss":1000,"maxLoss":50000}"""
+        )
+        assertTrue(decoded.isLeft)
+      },
+
+      test("a lognormal request encodes to the exact bytes the flat form produced") {
+        // The discriminator is named `distributionType` and each case's hint is
+        // the mode spelling, so the encoded object carries the same keys with
+        // the same values as the single flat product did, and no key for the
+        // other mode. A client reading either form sees the same object.
+        val req: DistributionShapeRequest = lognormalReq(1_000L, 50_000L)
+        assertTrue(
+          DistributionShapeRequest.codec.encodeJson(req, None).toString ==
+            """{"distributionType":"lognormal","minLoss":1000,"maxLoss":50000}"""
+        )
+      },
+
+      test("an expert request encodes to the exact bytes the flat form produced") {
+        val req: DistributionShapeRequest = expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2))
+        assertTrue(
+          DistributionShapeRequest.codec.encodeJson(req, None).toString ==
+            """{"distributionType":"expert","percentiles":[0.05,0.95],"quantiles":[1000.0,25000.0],"terms":2}"""
+        )
+      },
+
+      test("a body naming one mode and also carrying the other's fields decodes to the named mode, dropping the rest") {
+        // The derived decoder ignores keys the named case does not declare, so a
+        // mixed body is accepted and the surplus values are discarded rather
+        // than refused. Strictness is not available here: the library's
+        // no-extra-fields annotation treats the discriminator key as an extra
+        // field and rejects every valid body along with the mixed one.
+        val decoded = DistributionShapeRequest.codec.decodeJson(
+          """{"distributionType":"lognormal","minLoss":1000,"maxLoss":50000,"percentiles":[0.1,0.9],"quantiles":[1.0,2.0]}"""
+        )
+        assertTrue(decoded == Right(LognormalShapeRequest(1000L, 50000L)))
+      },
+
+      test("an expert request round-trips through the codec") {
+        val req: DistributionShapeRequest = expertReq(anchorPercentiles, anchorQuantiles, None)
+        val decoded = DistributionShapeRequest.codec.decodeJson(
+          DistributionShapeRequest.codec.encodeJson(req, None).toString
+        )
+        assertTrue(decoded.contains(req))
+      },
+
+      test("a lognormal request round-trips through the codec") {
+        val req: DistributionShapeRequest = lognormalReq(1_000L, 50_000L)
+        val decoded = DistributionShapeRequest.codec.decodeJson(
+          DistributionShapeRequest.codec.encodeJson(req, None).toString
+        )
+        assertTrue(decoded.contains(req))
+      },
+
+      test("fromShape is the inverse of toShape, in both modes") {
+        // Both halves are stated here because both are now assertable: the
+        // request's sequences are immutable, so the projection back out of a
+        // shape is compared by value rather than by identity.
+        def inverts(req: DistributionShapeRequest): Boolean =
+          shapeOf(req) match
+            case Validation.Success(_, shape) => DistributionShapeRequest.fromShape(shape) == req
+            case Validation.Failure(_, _)     => false
+
+        assertTrue(
+          inverts(lognormalReq(1_000L, 50_000L)),
+          inverts(expertReq(anchorPercentiles, anchorQuantiles, Some(2))),
+          inverts(expertReq(anchorPercentiles, anchorQuantiles, None))
+        )
+      },
+
+      test("two structurally identical expert requests are equal") {
+        // The defect this pins: with a mutable array field these two would be
+        // unequal, and every round-trip assertion above would have had to
+        // compare element by element instead of comparing the value.
+        assertTrue(
+          expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2)) ==
+            expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2))
+        )
+      }
+    ),
+
+    suite("the Tapir schema")(
+
+      test("the schema is a coproduct, one member per mode") {
+        assertTrue(DistributionShapeRequest.schema.schemaType.isInstanceOf[SCoproduct[?]])
+      },
+
+      test("the schema is named, so the generated document names the type") {
         assertTrue(DistributionShapeRequest.schema.name.isDefined)
-      },
-
-      test("schema contains distributionType field") {
-        val fields = DistributionShapeRequest.schema.schemaType.asInstanceOf[SProduct[?]].fields
-        assertTrue(fields.exists(_.name.name == "distributionType"))
-      },
-
-      test("percentiles field schema is an array, not an empty SProduct") {
-        val fields = DistributionShapeRequest.schema.schemaType.asInstanceOf[SProduct[?]].fields
-        val pctField = fields.find(_.name.name == "percentiles")
-        // Optional[Array[Double]] wraps in SOption then SArray
-        assertTrue(pctField.isDefined)
-      },
-
-      test("codec round-trips a valid expert request without error") {
-        val req = DistributionShapeRequest(
-          distributionType = "expert",
-          percentiles      = Some(Array(0.05, 0.50, 0.95)),
-          quantiles        = Some(Array(1000.0, 5000.0, 25000.0)),
-          terms            = None,
-          minLoss          = None,
-          maxLoss          = None
-        )
-        val json    = DistributionShapeRequest.codec.encodeJson(req, None)
-        val decoded = DistributionShapeRequest.codec.decodeJson(json.toString)
-        assertTrue(
-          decoded.isRight,
-          decoded.exists(d => d.distributionType == req.distributionType),
-          decoded.exists(d => d.percentiles.exists(_.sameElements(req.percentiles.get)))
-        )
-      },
-
-      test("codec round-trips a valid lognormal request without error") {
-        val req = DistributionShapeRequest(
-          distributionType = "lognormal",
-          percentiles      = None,
-          quantiles        = None,
-          terms            = None,
-          minLoss          = Some(1000L),
-          maxLoss          = Some(50000L)
-        )
-        val json    = DistributionShapeRequest.codec.encodeJson(req, None)
-        val decoded = DistributionShapeRequest.codec.decodeJson(json.toString)
-        assertTrue(
-          decoded.isRight,
-          decoded.exists(d => d.minLoss == req.minLoss),
-          decoded.exists(d => d.maxLoss == req.maxLoss)
-        )
-      }
-    ),
-
-    // ── distributionType errors ───────────────────────────────────────────────
-
-    suite("distributionType validation")(
-
-      test("rejects unknown distribution type") {
-        val result = DistributionShapeRequest.validate(
-          DistributionShapeRequest("unknown", None, None, None, None, None)
-        )
-        // Distribution.create delegates to refineDistributionType (Iron Match pattern)
-        // which produces INVALID_PATTERN for unrecognised type strings.
-        assertTrue(isFailWithCode(result, ValidationErrorCode.INVALID_PATTERN))
-      },
-
-      test("rejects empty-string distribution type") {
-        val result = DistributionShapeRequest.validate(
-          DistributionShapeRequest("", None, None, None, None, None)
-        )
-        assertTrue(result.isFailure)
-      }
-    ),
-
-    // ── expert-mode cross-field errors ────────────────────────────────────────
-
-    suite("expert mode cross-field rules")(
-
-      test("rejects expert when percentiles are missing") {
-        val result = DistributionShapeRequest.validate(expertReq().copy(percentiles = None))
-        assertTrue(isFailWithCode(result, ValidationErrorCode.REQUIRED_FIELD))
-      },
-
-      test("rejects expert when quantiles are missing") {
-        val result = DistributionShapeRequest.validate(expertReq().copy(quantiles = None))
-        assertTrue(isFailWithCode(result, ValidationErrorCode.REQUIRED_FIELD))
-      },
-
-      test("rejects expert when percentile and quantile lengths differ") {
-        val result = DistributionShapeRequest.validate(
-          expertReq(
-            percentiles = Array(0.05, 0.50, 0.95),
-            quantiles   = Array(1000.0, 5000.0)
-          )
-        )
-        assertTrue(isFailWithCode(result, ValidationErrorCode.INVALID_COMBINATION))
-      },
-
-      test("rejects expert when terms exceeds anchor count") {
-        val result = DistributionShapeRequest.validate(expertReq(terms = Some(4)))
-        assertTrue(isFailWithCode(result, ValidationErrorCode.INVALID_COMBINATION))
-      },
-
-      // ── quantile monotonicity ────────────────────────────────────────────
-
-      test("rejects expert when quantiles are strictly decreasing") {
-        val result = DistributionShapeRequest.validate(
-          expertReq(quantiles = Array(25_000.0, 5_000.0, 1_000.0))
-        )
-        assertTrue(failsOnField(result, FieldName.Quantiles, ValidationErrorCode.INVALID_COMBINATION))
-      },
-
-      test("rejects expert when quantiles are non-monotone (valley)") {
-        val result = DistributionShapeRequest.validate(
-          expertReq(quantiles = Array(1_000.0, 25_000.0, 5_000.0))
-        )
-        assertTrue(failsOnField(result, FieldName.Quantiles, ValidationErrorCode.INVALID_COMBINATION))
-      },
-
-      test("rejects expert when quantiles contain a repeated value (not strictly increasing)") {
-        val result = DistributionShapeRequest.validate(
-          expertReq(quantiles = Array(1_000.0, 1_000.0, 25_000.0))
-        )
-        assertTrue(failsOnField(result, FieldName.Quantiles, ValidationErrorCode.INVALID_COMBINATION))
-      },
-
-      test("accepts expert when quantiles are strictly increasing") {
-        assertTrue(
-          DistributionShapeRequest.validate(
-            expertReq(quantiles = Array(1_000.0, 5_000.0, 25_000.0))
-          ).isSuccess
-        )
-      },
-
-      // ── percentile monotonicity ──────────────────────────────────────────
-
-      test("rejects expert when percentiles are out of order") {
-        val result = DistributionShapeRequest.validate(
-          expertReq(percentiles = Array(0.9, 0.1, 0.5))
-        )
-        assertTrue(failsOnField(result, FieldName.Percentiles, ValidationErrorCode.INVALID_COMBINATION))
-      },
-
-      test("rejects expert when percentiles contain a repeated value") {
-        val result = DistributionShapeRequest.validate(
-          expertReq(percentiles = Array(0.05, 0.05, 0.95))
-        )
-        assertTrue(failsOnField(result, FieldName.Percentiles, ValidationErrorCode.INVALID_COMBINATION))
-      },
-
-      test("both non-monotone percentiles and quantiles accumulate independently") {
-        val result = DistributionShapeRequest.validate(
-          expertReq(
-            percentiles = Array(0.9, 0.1, 0.5),
-            quantiles   = Array(25_000.0, 5_000.0, 1_000.0)
-          )
-        )
-        result match
-          case Validation.Failure(_, errs) =>
-            val locations = errs.toList.collect { case e: ValidationError => e.location }
-            assertTrue(
-              locations.contains(ErrorLocation.requestField(FieldName.Percentiles)),
-              locations.contains(ErrorLocation.requestField(FieldName.Quantiles))
-            ).label(
-              "Expected errors on both percentiles and quantiles, got: " +
-                locations.map(ErrorLocation.describe).mkString(", ")
-            )
-          case Validation.Success(_, _) =>
-            assertTrue(false).label("Expected failure but got Success")
-      },
-
-      test("accepts expert with two anchors (monotonicity edge case)") {
-        assertTrue(
-          DistributionShapeRequest.validate(
-            expertReq(
-              percentiles = Array(0.05, 0.95),
-              quantiles   = Array(1_000.0, 25_000.0)
-            )
-          ).isSuccess
-        )
-      }
-    ),
-
-    // ── lognormal-mode cross-field errors ─────────────────────────────────────
-
-    suite("lognormal mode cross-field rules")(
-
-      test("rejects lognormal when minLoss is missing") {
-        val result = DistributionShapeRequest.validate(lognormalReq().copy(minLoss = None))
-        assertTrue(isFailWithCode(result, ValidationErrorCode.REQUIRED_FIELD))
-      },
-
-      test("rejects lognormal when maxLoss is missing") {
-        val result = DistributionShapeRequest.validate(lognormalReq().copy(maxLoss = None))
-        assertTrue(isFailWithCode(result, ValidationErrorCode.REQUIRED_FIELD))
-      },
-
-      test("rejects lognormal when minLoss equals maxLoss") {
-        val result = DistributionShapeRequest.validate(
-          lognormalReq(minLoss = 10_000L, maxLoss = 10_000L)
-        )
-        assertTrue(isFailWithCode(result, ValidationErrorCode.INVALID_LOGNORMAL_PARAMS))
-      },
-
-      test("rejects lognormal when minLoss > maxLoss") {
-        val result = DistributionShapeRequest.validate(
-          lognormalReq(minLoss = 50_000L, maxLoss = 1_000L)
-        )
-        assertTrue(isFailWithCode(result, ValidationErrorCode.INVALID_LOGNORMAL_PARAMS))
       }
     )
   )

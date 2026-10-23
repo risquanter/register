@@ -81,6 +81,11 @@ type NonNegativeLong = Long :| GreaterEqual[0L]
 // Positive integers (must be > 0)
 type PositiveInt = Int :| Greater[0]
 
+// The metalog fit's term count. Both bounds are the fitter's own precondition:
+// Metalog.validateInputs throws IllegalArgumentException outside [2, MAX_TERMS],
+// and MAX_TERMS is 20. A fit with fewer than two terms has no curve to describe.
+type MetalogTermCount = Int :| (GreaterEqual[2] & LessEqual[20])
+
 // Positive long values (must be > 0) — e.g. lognormal CI bounds, which feed a logarithm
 type PositiveLong = Long :| Greater[0L]
 
@@ -109,6 +114,12 @@ given JsonDecoder[NonNegativeInt] = JsonDecoder[Int].mapOrFail(_.refineEither[Gr
 // foldable for literal autoRefine in this Iron version.
 type NonNegativeDouble = Double :| (GreaterEqual[0.0] & LessEqual[1.7976931348623157e308])
 
+// A loss figure in millions: strictly positive and finite. The upper bound is
+// Double.MaxValue spelled out, which is what excludes positive infinity —
+// Greater[0.0] alone admits it. Losses feed a logarithm in the distribution
+// fit, so zero is as unusable as a negative figure.
+type PositiveDouble = Double :| (Greater[0.0] & LessEqual[1.7976931348623157e308])
+
 // Fraction of a figure a mitigation keeps: strictly above 0 and at most 1. A
 // scale operation reduces and can never eliminate — a residual risk of exactly
 // zero is not a defensible estimate, because it removes control failure from the
@@ -124,6 +135,16 @@ type RetentionFactor = Double :| (Greater[0.0] & LessEqual[1.0])
 // declared probability: an author may state that an event never occurs, a
 // mitigation may not state that it has been prevented.
 type ResidualProbability = Double :| (Greater[0.0] & LessEqual[1.0])
+
+// JSON codecs for the fraction-in-(0, 1] refinement. A mitigation's relative
+// and absolute components both cross the wire carrying one, so the derived
+// codecs for those cases need an instance. `RetentionFactor` and
+// `ResidualProbability` are the same refinement, so one instance serves both.
+// The refinement is re-checked on decode: the bound is the contract, and a
+// decoded value is as trustworthy as a constructed one (ADR-038).
+given JsonEncoder[RetentionFactor] = JsonEncoder[Double].contramap(identity)
+given JsonDecoder[RetentionFactor] =
+  JsonDecoder[Double].mapOrFail(_.refineEither[Greater[0.0] & LessEqual[1.0]])
 
 /**
  * Common constant values for Iron refined types.
@@ -654,6 +675,13 @@ object ContentHash:
         )
       )
       .map(ContentHash(_))
+
+  // A mitigation's absolute spec stores the anchor leaf's hash at authoring
+  // time, so the hash crosses the wire and is read back from the store. The
+  // format is re-checked on decode (ADR-039 §1).
+  given JsonEncoder[ContentHash] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[ContentHash] = JsonDecoder[String].mapOrFail(s =>
+    fromString(s).left.map(_.map(_.message).mkString(", ")))
 
 // CommitHash: an Irmin commit/store hash. Pinned to Irmin's real format,
 // verified against a live local/irmin-prod:3.11 instance (2026-07-18): every

@@ -4,8 +4,7 @@ import scala.scalajs.js
 
 import app.state.DistributionViewMode
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
-import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.IronConstants
+import com.risquanter.register.domain.data.DistributionShape
 import com.risquanter.register.http.requests.{DistributionPreviewPoint, DistributionPreviewResponse}
 
 /** Client-side Vega-Lite v6 specification builder for distribution preview charts.
@@ -13,15 +12,16 @@ import com.risquanter.register.http.requests.{DistributionPreviewPoint, Distribu
   * Produces `js.Dynamic` specs ready for `vegaEmbed` for both PDF and CDF views.
   * Dark theme config comes from [[VegaSpecShared]], shared with the LEC chart.
   *
-  * The `draft` parameter supplies the original anchor points (percentiles/quantiles
-  * for expert mode, minLoss/maxLoss for lognormal) used to draw overlay annotations.
+  * The `draft` parameter supplies the shape the author stated — the quantile
+  * anchors of an expert fit, or the two bounds of a lognormal — and the overlay
+  * annotations are drawn from it.
   */
 object DistributionSpecBuilder:
 
   def build(
     response: DistributionPreviewResponse,
     viewMode: DistributionViewMode,
-    draft:    Option[Distribution] = None,
+    draft:    Option[DistributionShape],
     width:    Int = 950,
     height:   Int = 300
   ): js.Dynamic =
@@ -34,7 +34,7 @@ object DistributionSpecBuilder:
 
   private def buildPdfSpec(
     response: DistributionPreviewResponse,
-    draft:    Option[Distribution],
+    draft:    Option[DistributionShape],
     width:    Int,
     height:   Int
   ): js.Dynamic =
@@ -75,7 +75,7 @@ object DistributionSpecBuilder:
 
   private def buildCdfSpec(
     response: DistributionPreviewResponse,
-    draft:    Option[Distribution],
+    draft:    Option[DistributionShape],
     width:    Int,
     height:   Int
   ): js.Dynamic =
@@ -138,30 +138,30 @@ object DistributionSpecBuilder:
     * (`VegaSpecShared.verticalRuleLayers`); CDF anchor dots stay per-anchor. */
   private def anchorAnnotations(
     response: DistributionPreviewResponse,
-    draft:    Option[Distribution],
+    draft:    Option[DistributionShape],
     viewMode: DistributionViewMode
   ): js.Array[js.Any] =
     val layers = js.Array[js.Any]()
     val rules = Vector.newBuilder[VegaSpecShared.VerticalRuleDatum]
-    draft.foreach { d =>
-      if d.distributionType == IronConstants.Expert then
-        // Expert mode: vertical rules at each input quantile x-position
-        val pcts   = d.percentiles.getOrElse(Array.empty[Double])
-        val quants = d.quantiles.getOrElse(Array.empty[Double])
-        pcts.zip(quants).foreach { case (p, q) =>
-          val label = f"P${(p * 100).round}%d"
+    draft.foreach {
+      // Expert mode: vertical rules at each anchor's x-position
+      case DistributionShape.Expert(anchors, _) =>
+        anchors.values.foreach { anchor =>
+          val percentile: Double = anchor.percentile
+          val loss: Double       = anchor.loss
           viewMode match
             case DistributionViewMode.PDF =>
               // Vertical dashed rule + text label
-              rules += anchorRule(q, label)
+              rules += anchorRule(loss, f"P${(percentile * 100).round}%d")
             case DistributionViewMode.CDF =>
-              // Filled dot at (quantile_x, percentile) for exact-fit verification
-              layers.push(cdfAnchorDot(q, p))
+              // Filled dot at (loss_x, percentile) for exact-fit verification
+              layers.push(cdfAnchorDot(loss, percentile))
         }
-      else
-        // Lognormal: rules at minLoss (P05) and maxLoss (P95) — same in both views
-        d.minLoss.foreach { min => rules += anchorRule(min.toDouble, "P05") }
-        d.maxLoss.foreach { max => rules += anchorRule(max.toDouble, "P95") }
+
+      // Lognormal: rules at the two bounds — same in both views
+      case DistributionShape.Lognormal(bounds) =>
+        rules += anchorRule((bounds.min: Long).toDouble, "P05")
+        rules += anchorRule((bounds.max: Long).toDouble, "P95")
     }
     VegaSpecShared
       .verticalRuleLayers(rules.result(), fontSize = 11, textDx = 4, textDy = -6, baseline = "alphabetic")

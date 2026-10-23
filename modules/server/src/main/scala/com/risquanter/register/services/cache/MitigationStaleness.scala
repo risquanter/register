@@ -17,7 +17,7 @@ object MitigationStaleness:
 
   def staleOverrides(tree: RiskTree): Set[MitigationId] =
     tree.mitigations.iterator.collect {
-      case m @ Mitigation(_, _, _, MitigationSpec.LeafStage(_, Some(stamp), Some(anchor)), _)
+      case m @ Mitigation(_, _, _, MitigationSpec.LeafAbsolute(_, anchor, stamp), _)
           if isStale(tree, anchor, stamp) =>
         m.id
     }.toSet

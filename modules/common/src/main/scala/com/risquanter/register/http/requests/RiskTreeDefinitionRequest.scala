@@ -35,7 +35,7 @@ object RiskTreeDefinitionRequest:
           l.name -> ResolvedNode(newId(), l.name, l.parent, NodeKind.Leaf)
         }
         val nodes = (portfolioNodes ++ leafNodes).toMap
-        val leafOccurrenceAndShape = leaves.map(l => l.name -> (l.probability, l.distribution)).toMap
+        val leafOccurrenceAndShape = leaves.map(l => l.name -> (l.probability, l.shape)).toMap
         ResolvedCreate(treeName, nodes, leafOccurrenceAndShape, providedSeeds.toMap, rootName)
       }
     }.flatMap(identity)

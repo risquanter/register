@@ -1,247 +1,119 @@
 package com.risquanter.register.domain.data
 
-import zio.prelude.*
-import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
+import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator, jsonHint}
+import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.{
-  DistributionType, PositiveInt, PositiveLong, ResidualProbability,
-  RetentionFactor, ValidationMessages, ValidationUtil
+  OccurrenceProbability, ResidualProbability, RetentionFactor, ValidationMessages
 }
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
-
-/**
- * Param-stage transform on a leaf's occurrence probability. `Keep` is the
- * identity component of the `RiskLeafTransform` product.
- */
-sealed trait LikelihoodTransform
-
-object LikelihoodTransform {
-  case object Keep extends LikelihoodTransform
-
-  /** Relative: probability × factor. The factor is at most 1 and the probability
-    * at most 1, so the product stays inside the closed [0, 1] domain. */
-  final case class Scale(factor: RetentionFactor) extends LikelihoodTransform
-
-  /** Absolute: the expert-supplied post-mitigation probability. Strictly above
-    * zero — an author may declare a leaf that never occurs, but a mitigation may
-    * not assert that a risk has been prevented. */
-  final case class Override(probability: ResidualProbability) extends LikelihoodTransform
-
-  given Equal[LikelihoodTransform] = Equal.default
-
-  private case class Raw(op: String, factor: Option[Double], probability: Option[Double])
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  given codec: JsonCodec[LikelihoodTransform] = JsonCodec(
-    JsonEncoder[Raw].contramap {
-      case Keep          => Raw("keep", None, None)
-      case Scale(f)      => Raw("scale", Some(f), None)
-      case Override(p)   => Raw("override", None, Some(p))
-    },
-    JsonDecoder[Raw].mapOrFail {
-      case Raw("keep", None, None) => Right(Keep)
-      case Raw("scale", Some(f), None) =>
-        ValidationUtil.refineRetentionFactor(f, ErrorLocation.requestField(FieldName.Factor)).map(Scale(_))
-          .left.map(_.map(_.message).mkString("; "))
-      case Raw("override", None, Some(p)) =>
-        ValidationUtil.refineResidualProbability(p, ErrorLocation.requestField(FieldName.Probability)).map(Override(_))
-          .left.map(_.map(_.message).mkString("; "))
-      case other => Left(s"invalid likelihood transform: op '${other.op}' with mismatched fields")
-    }
-  )
+import com.risquanter.register.domain.data.iron.given
+import com.risquanter.register.domain.errors.{
+  ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
 }
 
 /**
- * Absolute replacement of a leaf's loss distribution — the expert-supplied
- * post-mitigation shape. Representation-agnostic by construction (it replaces,
- * so no cross-representation mapping is needed). Same mode invariant as
- * `RiskLeaf` (expert ⇒ percentiles+quantiles; lognormal ⇒ minLoss < maxLoss),
- * enforced through the shared `RiskLeaf.validateModeFields` helper.
- */
-final case class OverrideDistributionParams private (
-  distributionType: DistributionType,
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]],
-  minLoss: Option[PositiveLong],
-  maxLoss: Option[PositiveLong],
-  terms: Option[PositiveInt]
-) {
-  // Array fields compare by reference under case-class equality; content
-  // comparison is required for Equal.default / Set membership downstream.
-  override def equals(that: Any): Boolean = that match {
-    case o: OverrideDistributionParams =>
-      distributionType == o.distributionType &&
-        optArrayEq(percentiles, o.percentiles) &&
-        optArrayEq(quantiles, o.quantiles) &&
-        minLoss == o.minLoss && maxLoss == o.maxLoss && terms == o.terms
-    case _ => false
-  }
-  override def hashCode: Int =
-    (distributionType.toString, percentiles.map(_.toSeq), quantiles.map(_.toSeq), minLoss, maxLoss, terms).hashCode
-
-  private def optArrayEq(a: Option[Array[Double]], b: Option[Array[Double]]): Boolean = (a, b) match {
-    case (Some(x), Some(y)) => x.sameElements(y)
-    case (None, None)       => true
-    case _                  => false
-  }
-}
-
-object OverrideDistributionParams {
-
-  def create(
-    distributionType: DistributionType,
-    percentiles: Option[Array[Double]],
-    quantiles: Option[Array[Double]],
-    minLoss: Option[PositiveLong],
-    maxLoss: Option[PositiveLong],
-    terms: Option[PositiveInt],
-    subject: ErrorSubject
-  ): Validation[ValidationError, OverrideDistributionParams] =
-    RiskLeaf
-      .validateModeFields(distributionType, percentiles, quantiles, minLoss, maxLoss, terms, subject)
-      .as(new OverrideDistributionParams(distributionType, percentiles, quantiles, minLoss, maxLoss, terms))
-
-  given Equal[OverrideDistributionParams] = Equal.default
-
-  private case class Raw(
-    distributionType: String,
-    percentiles: Option[Array[Double]],
-    quantiles: Option[Array[Double]],
-    minLoss: Option[Long],
-    maxLoss: Option[Long],
-    terms: Option[Int]
-  )
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  given codec: JsonCodec[OverrideDistributionParams] = JsonCodec(
-    JsonEncoder[Raw].contramap(p =>
-      Raw(p.distributionType.toString, p.percentiles, p.quantiles,
-          p.minLoss.map(identity), p.maxLoss.map(identity), p.terms.map(_.toInt))),
-    JsonDecoder[Raw].mapOrFail { raw =>
-      val distTypeV = ValidationUtil.toValidation(
-        ValidationUtil.refineDistributionType(raw.distributionType, ErrorLocation.requestField(FieldName.DistributionType)))
-      val minV = optRefineLong(raw.minLoss, ErrorLocation.requestField(FieldName.MinLoss))
-      val maxV = optRefineLong(raw.maxLoss, ErrorLocation.requestField(FieldName.MaxLoss))
-      val termsV = raw.terms match {
-        case Some(t) => ValidationUtil.toValidation(ValidationUtil.refinePositiveInt(t, ErrorLocation.requestField(FieldName.Terms))).map(Some(_))
-        case None    => Validation.succeed(None)
-      }
-      Validation
-        .validateWith(distTypeV, minV, maxV, termsV) { (dt, min, max, terms) => (dt, min, max, terms) }
-        .flatMap { case (dt, min, max, terms) =>
-          create(dt, raw.percentiles, raw.quantiles, min, max, terms, ErrorSubject.Request)
-        }
-        .toEither.left.map(_.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
-    }
-  )
-
-  private def optRefineLong(
-    v: Option[Long],
-    location: ErrorLocation
-  ): Validation[ValidationError, Option[PositiveLong]] = v match {
-    case Some(l) => ValidationUtil.toValidation(ValidationUtil.refinePositiveLong(l, location)).map(Some(_))
-    case None    => Validation.succeed(None)
-  }
-}
-
-/**
- * Param-stage transform on a leaf's loss distribution. One semantic operation
- * interpreted per representation (uniform-op semantics):
+ * A likelihood change stated relative to whatever the leaf currently says.
  *
- * - `ScaleSeverity` — the loss an occurrence produces is smaller, because a
- *   control changed what it costs. Applies before simulation, so the leaf is
- *   re-simulated from the scaled parameters. Lognormal: scales both CI bounds,
- *   multiplying every quantile by the factor and leaving the spread parameter
- *   unchanged. Expert: scales the quantile values, with the same effect on the
- *   fitted distribution. Broadcasts across a heterogeneous target set, and applies
- *   alongside `ResultTransformSpec.ScaleLosses` on the same node — that one scales
- *   what the entity bears of a loss this one has already reduced.
- * - `Override` — absolute replacement (representation-agnostic).
+ * `Keep` is the identity. A relative statement stays true when the leaf
+ * changes, so it records nothing about the leaf's former value.
  */
-sealed trait DistributionTransform
+@jsonDiscriminator("op")
+sealed trait RelativeLikelihood
 
-object DistributionTransform {
-  case object Keep extends DistributionTransform
-  final case class ScaleSeverity(factor: RetentionFactor) extends DistributionTransform
-  final case class Override(params: OverrideDistributionParams) extends DistributionTransform
+object RelativeLikelihood {
+  @jsonHint("keep")
+  case object Keep extends RelativeLikelihood
 
-  given Equal[DistributionTransform] = Equal.default
+  /** Probability × factor. The factor is at most 1 and the probability at most
+    * 1, so the product stays inside the closed [0, 1] domain. */
+  @jsonHint("scale")
+  final case class Scale(factor: RetentionFactor) extends RelativeLikelihood
 
-  private case class Raw(
-    op: String,
-    factor: Option[Double],
-    fraction: Option[Double],
-    params: Option[OverrideDistributionParams]
-  )
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  given codec: JsonCodec[DistributionTransform] = JsonCodec(
-    JsonEncoder[Raw].contramap {
-      case Keep             => Raw("keep", None, None, None)
-      case ScaleSeverity(f) => Raw("scaleSeverity", Some(f), None, None)
-      case Override(p)      => Raw("override", None, None, Some(p))
-    },
-    JsonDecoder[Raw].mapOrFail {
-      case Raw("keep", None, None, None) => Right(Keep)
-      case Raw("scaleSeverity", Some(f), None, None) =>
-        ValidationUtil.refineRetentionFactor(f, ErrorLocation.requestField(FieldName.Factor)).map(ScaleSeverity(_))
-          .left.map(_.map(_.message).mkString("; "))
-      case Raw("override", None, None, Some(p)) => Right(Override(p))
-      case other => Left(s"invalid distribution transform: op '${other.op}' with mismatched fields")
-    }
-  )
+  given codec: JsonCodec[RelativeLikelihood] = DeriveJsonCodec.gen[RelativeLikelihood]
 }
 
 /**
- * Product of the two independent param-stage components — disjoint fields, so
- * they commute; either component may be `Keep` (identity). Application
- * interprets both onto a leaf; the output is a normal `RiskLeaf` revalidated
- * through `RiskLeaf.create` (closure: the tree persists params, so a
- * param-transformed leaf is an ordinary leaf).
+ * A loss-shape change stated relative to whatever the leaf currently says.
+ *
+ * `ScaleSeverity` means the loss an occurrence produces is smaller, because a
+ * control changed what it costs. It applies before simulation, so the leaf is
+ * re-simulated from the scaled parameters. Lognormal: scales both confidence
+ * interval bounds, multiplying every quantile by the factor and leaving the
+ * spread parameter unchanged. Expert: scales the anchor losses, with the same
+ * effect on the fitted distribution. It broadcasts across a heterogeneous
+ * target set, and applies alongside `ResultTransformSpec.ScaleLosses` on the
+ * same node — that one scales what the entity bears of a loss this one has
+ * already reduced.
  */
-final case class RiskLeafTransform(
-  likelihood: LikelihoodTransform,
-  distribution: DistributionTransform
+@jsonDiscriminator("op")
+sealed trait RelativeSeverity
+
+object RelativeSeverity {
+  @jsonHint("keep")
+  case object Keep extends RelativeSeverity
+
+  @jsonHint("scaleSeverity")
+  final case class ScaleSeverity(factor: RetentionFactor) extends RelativeSeverity
+
+  given codec: JsonCodec[RelativeSeverity] = DeriveJsonCodec.gen[RelativeSeverity]
+}
+
+/**
+ * What an absolute replacement asserts: a post-control probability, a
+ * post-control loss shape, or both.
+ *
+ * Three cases, which is 2² − 1 — the non-empty subsets of a two-element set.
+ * "At least one component is replaced" is therefore not a rule but the absence
+ * of a fourth case: a replacement that replaces nothing is
+ * `RelativeLikelihood.Keep` paired with `RelativeSeverity.Keep` instead.
+ *
+ * A replacement is representation-agnostic by construction, because it names a
+ * whole shape rather than adjusting the one already there.
+ */
+@jsonDiscriminator("replaces")
+sealed trait AbsoluteReplacement
+
+object AbsoluteReplacement {
+  /** Absolute post-control probability. Strictly above zero — an author may
+    * declare a leaf that never occurs, but a mitigation may not assert that a
+    * risk has been prevented. */
+  @jsonHint("likelihood")
+  final case class Likelihood(probability: ResidualProbability) extends AbsoluteReplacement
+
+  @jsonHint("severity")
+  final case class Severity(shape: DistributionShape) extends AbsoluteReplacement
+
+  @jsonHint("both")
+  final case class Both(
+    probability: ResidualProbability,
+    shape: DistributionShape
+  ) extends AbsoluteReplacement
+
+  given codec: JsonCodec[AbsoluteReplacement] = DeriveJsonCodec.gen[AbsoluteReplacement]
+}
+
+/**
+ * What a leaf-stage transform may change: the occurrence probability and the
+ * loss distribution. Identity, name, parent and seed identity are outside a
+ * transform's reach, so they are outside its type.
+ *
+ * Making this the arrow's object is what removes the repeated widening a
+ * whole-leaf arrow performs: with n leaf-stage mitigations scoping one leaf, the
+ * identifier, the name and the seed identifier were each widened to a primitive
+ * and re-refined n times although no transform can change any of them.
+ */
+final case class LeafParams(
+  probability: OccurrenceProbability,
+  shape: DistributionShape
 )
 
+/**
+ * The arithmetic of severity scaling on lognormal bounds.
+ *
+ * Kept as named functions rather than inlined because the lower-bound guard
+ * produces a diagnosis the field type cannot: `PositiveLong` refuses the same
+ * inputs, and only this check can name the smallest factor that still applies.
+ */
 object RiskLeafTransform {
-
-  val identity: RiskLeafTransform =
-    RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.Keep)
-
-  given Equal[RiskLeafTransform] = Equal.default
-
-  given codec: JsonCodec[RiskLeafTransform] = DeriveJsonCodec.gen[RiskLeafTransform]
-
-  /** Interpret onto a leaf. Identity/parent/name/seed identity are untouched;
-    * only the simulation-relevant params change, and the result is revalidated
-    * through the smart constructor (errors accumulate). */
-  def applyTo(t: RiskLeafTransform, leaf: RiskLeaf): Validation[ValidationError, RiskLeaf] = {
-    val subject = ErrorSubject.ExistingNode(leaf.id)
-
-    val newProbability: Double = t.likelihood match {
-      case LikelihoodTransform.Keep        => leaf.probability
-      case LikelihoodTransform.Scale(f)    => leaf.probability * f
-      case LikelihoodTransform.Override(p) => p
-    }
-
-    distributionFields(t.distribution, leaf, subject).flatMap {
-      case (distType, percentiles, quantiles, minLoss, maxLoss, terms) =>
-        RiskLeaf.create(
-          id = leaf.id.value,
-          name = leaf.name.value,
-          distributionType = distType,
-          probability = newProbability,
-          percentiles = percentiles,
-          quantiles = quantiles,
-          minLoss = minLoss,
-          maxLoss = maxLoss,
-          parentId = leaf.parentId,
-          subject = subject,
-          terms = terms,
-          seedVarId = leaf.seedVarId.value
-        )
-    }
-  }
 
   /** Severity-scaled lognormal CI bounds: lower floored, upper ceiled. Outward
     * rounding only widens the fitted interval (σ never shrinks) and preserves the
@@ -256,60 +128,40 @@ object RiskLeafTransform {
   /** Smallest severity factor that keeps `min` representable (`min * f ≥ 1`). */
   def minRepresentableFactor(min: Long): Double = 1.0 / min.toDouble
 
-  private type DistFields =
-    (String, Option[Array[Double]], Option[Array[Double]], Option[Long], Option[Long], Option[Int])
-
-  private def distributionFields(
-    dt: DistributionTransform,
-    leaf: RiskLeaf,
+  /** Severity scaling interpreted onto a shape, one reading per mode.
+    *
+    * Lognormal: both confidence-interval bounds scale, which multiplies every
+    * quantile by the factor and leaves the spread parameter unchanged. Expert:
+    * the anchor losses scale and the percentiles do not, which has the same
+    * effect on the fitted curve.
+    *
+    * The one refusal is a lognormal lower bound that scales below the positive
+    * floor. It is reported here rather than left to the field type because only
+    * this check can name the smallest factor that still applies.
+    */
+  def scaleSeverity(
+    shape:   DistributionShape,
+    factor:  RetentionFactor,
     subject: ErrorSubject
-  ): Validation[ValidationError, DistFields] = dt match {
+  ): Validation[ValidationError, DistributionShape] = shape match {
+    case DistributionShape.Lognormal(bounds) =>
+      val (scaledMin, scaledMax) = scaleSeverityBounds(bounds.min, bounds.max, factor)
+      if lowerBoundRepresentable(scaledMin) then
+        DistributionShape.Lognormal.fromPrimitives(scaledMin, scaledMax, subject)
+      else
+        Validation.fail(ValidationError(
+          location = ErrorLocation.Field(subject, FieldName.MinLoss),
+          code = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
+          message = ValidationMessages.mitigationLowersMinLossBelowFloor(
+            bounds.min, minRepresentableFactor(bounds.min))
+        ))
 
-    case DistributionTransform.Keep =>
-      Validation.succeed(currentFields(leaf))
-
-    case DistributionTransform.Override(p) =>
-      Validation.succeed((
-        p.distributionType.toString, p.percentiles, p.quantiles,
-        p.minLoss.map(l => l: Long), p.maxLoss.map(l => l: Long), p.terms.map(_.toInt)
-      ))
-
-    case DistributionTransform.ScaleSeverity(f) =>
-      leaf.distributionType.toString match {
-        case "lognormal" =>
-          (leaf.minLoss, leaf.maxLoss) match {
-            case (Some(min), Some(max)) =>
-              val (newMin, newMax) = scaleSeverityBounds(min, max, f)
-              if (!lowerBoundRepresentable(newMin))
-                Validation.fail(ValidationError(
-                  location = ErrorLocation.Field(subject, FieldName.MinLoss),
-                  code    = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-                  message = ValidationMessages.mitigationLowersMinLossBelowFloor(
-                              min, minRepresentableFactor(min))
-                ))
-              else
-                Validation.succeed(("lognormal", None, None, Some(newMin), Some(newMax), None))
-            // Unreachable for a lognormal leaf: RiskLeaf's class invariant
-            // guarantees both bounds are present. Passes them through so
-            // RiskLeaf.create reports the missing-bound case with its own message.
-            case _ =>
-              Validation.succeed(("lognormal", None, None,
-                leaf.minLoss.map(m => m: Long), leaf.maxLoss.map(m => m: Long), None))
-          }
-        case _ =>
-          Validation.succeed((
-            "expert",
-            leaf.percentiles,
-            leaf.quantiles.map(_.map(_ * f)),
-            None, None,
-            leaf.terms.map(_.toInt)
-          ))
-      }
-
+    case DistributionShape.Expert(anchors, terms) =>
+      DistributionShape.Expert.fromPrimitives(
+        percentiles = anchors.percentiles,
+        quantiles = anchors.losses.map(_ * factor),
+        terms = terms.map(t => t: Int),
+        subject = subject
+      )
   }
-
-  private def currentFields(leaf: RiskLeaf): DistFields =
-    (leaf.distributionType.toString, leaf.percentiles, leaf.quantiles,
-     leaf.minLoss.map(l => l: Long), leaf.maxLoss.map(l => l: Long), leaf.terms.map(_.toInt))
-
 }

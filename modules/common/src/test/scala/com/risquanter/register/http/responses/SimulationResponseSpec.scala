@@ -6,7 +6,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf}
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.testutil.TestHelpers.{idStr, treeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, treeId, unsafeGet}
 
 object SimulationResponseSpec extends ZIOSpecDefault {
 
@@ -34,12 +34,9 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       val root = unsafeGet(RiskLeaf.create(
         id = idStr("test-risk"),
         name = "TestRisk",
-        distributionType = "lognormal",
         probability = 0.5,
-        minLoss = Some(1000L),
-        maxLoss = Some(50000L),
-        percentiles = None,
-        quantiles = None,
+        shape = lognormalShape(1000L, 50000L),
+        parentId = None,
         seedVarId = 1L
       ), "leaf")
       val riskTree = unsafeGet(RiskTree.fromNodes(
@@ -64,12 +61,9 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       val root = unsafeGet(RiskLeaf.create(
         id = idStr("risk1"),
         name = "Risk1",
-        distributionType = "lognormal",
         probability = 0.3,
-        minLoss = Some(100L),
-        maxLoss = Some(5000L),
-        percentiles = None,
-        quantiles = None,
+        shape = lognormalShape(100L, 5000L),
+        parentId = None,
         seedVarId = 2L
       ), "leaf")
       val riskTree = unsafeGet(RiskTree.fromNodes(
@@ -108,12 +102,9 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       val root = unsafeGet(RiskLeaf.create(
         id = idStr("risk1"),
         name = "Risk1",
-        distributionType = "lognormal",
         probability = 0.8,
-        minLoss = Some(1000L),
-        maxLoss = Some(15000L),
-        percentiles = None,
-        quantiles = None,
+        shape = lognormalShape(1000L, 15000L),
+        parentId = None,
         seedVarId = 3L
       ), "leaf")
       val riskTree = unsafeGet(RiskTree.fromNodes(

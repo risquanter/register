@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, LognormalShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.domain.errors.AppError
@@ -54,13 +54,9 @@ object SeedStabilitySpec extends ZIOSpecDefault {
     }
 
   private def shape(minLoss: Long, maxLoss: Long): DistributionShapeRequest =
-    DistributionShapeRequest(
-      distributionType = "lognormal",
-      percentiles = None, quantiles = None, terms = None,
-      minLoss = Some(minLoss), maxLoss = Some(maxLoss)
-    )
+    LognormalShapeRequest(minLoss = minLoss, maxLoss = maxLoss)
 
-  private def leafDef(name: String, parent: String, minLoss: Long = 1000L, seedVarId: Option[Long] = None): RiskLeafDefinitionRequest =
+  private def leafDef(name: String, parent: String, minLoss: Long = 1000L, seedVarId: Option[Long]): RiskLeafDefinitionRequest =
     RiskLeafDefinitionRequest(
       name = name,
       parentName = Some(parent),
@@ -74,7 +70,10 @@ object SeedStabilitySpec extends ZIOSpecDefault {
     RiskTreeDefinitionRequest(
       name = treeName,
       portfolios = Seq(RiskPortfolioDefinitionRequest("Stable Root", None)),
-      leaves = Seq(leafDef("Cyber Attack", "Stable Root"), leafDef("Fraud", "Stable Root"))
+      leaves = Seq(
+        leafDef("Cyber Attack", "Stable Root", seedVarId = None),
+        leafDef("Fraud", "Stable Root", seedVarId = None)
+      )
     )
 
   private def seedsByName(tree: RiskTree): Map[String, Long] =
@@ -184,7 +183,11 @@ object SeedStabilitySpec extends ZIOSpecDefault {
           created <- service(_.create(wsId, RiskTreeDefinitionRequest(
             name = "Export Source Tree",
             portfolios = Seq(RiskPortfolioDefinitionRequest("Stable Root", None)),
-            leaves = Seq(leafDef("Alpha", "Stable Root"), leafDef("Beta", "Stable Root"), leafDef("Gamma", "Stable Root"))
+            leaves = Seq(
+              leafDef("Alpha", "Stable Root", seedVarId = None),
+              leafDef("Beta", "Stable Root", seedVarId = None),
+              leafDef("Gamma", "Stable Root", seedVarId = None)
+            )
           ), BranchRef.Main))
           pruned <- service(_.update(wsId, created.id, RiskTreeUpdateRequest(
             name = "Export Source Tree",

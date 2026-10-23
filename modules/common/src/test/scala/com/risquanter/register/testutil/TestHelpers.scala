@@ -1,7 +1,10 @@
 package com.risquanter.register.testutil
 
 import zio.prelude.Validation
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
+import com.risquanter.register.domain.data.{
+  DistributionShape, MitigationSpec, ResultTransformSpec, TransformPipeline
+}
 import com.risquanter.register.domain.data.iron.{SafeId, NodeId, TreeId, MitigationId}
 import scala.annotation.tailrec
 import scala.util.hashing.MurmurHash3
@@ -97,6 +100,55 @@ trait TestHelpers {
     v.toEither.fold(
       errs => throw new AssertionError(s"$label: ${errs.map(_.message).mkString("; ")}"),
       identity
+    )
+
+  /**
+    * An expert loss shape built from the two parallel sequences an author
+    * states. Goes through the same gate the request decoder uses, so a fixture
+    * that breaks a construction rule fails loudly here instead of producing a
+    * value the domain cannot hold.
+    *
+    * {{{
+    * expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
+    * }}}
+    */
+  def expertShape(
+    percentiles: Vector[Double],
+    quantiles:   Vector[Double],
+    terms:       Option[Int]
+  ): DistributionShape.Expert =
+    unsafeGet(
+      DistributionShape.Expert.fromPrimitives(percentiles, quantiles, terms, ErrorSubject.Request),
+      "expertShape"
+    )
+
+  /**
+    * A lognormal loss shape built from its two bounds, through the same gate
+    * the request decoder uses.
+    */
+  def lognormalShape(minLoss: Long, maxLoss: Long): DistributionShape.Lognormal =
+    unsafeGet(
+      DistributionShape.Lognormal.fromPrimitives(minLoss, maxLoss, ErrorSubject.Request),
+      "lognormalShape"
+    )
+
+  /**
+    * A result-stage spec built from its steps, through the same step-count gate
+    * the request decoder uses. A fixture with no steps, or with more than the
+    * pipeline allows, fails here rather than producing a spec the domain
+    * refuses.
+    *
+    * {{{
+    * resultStage(ResultTransformSpec.CapLosses(1_000L))
+    * }}}
+    */
+  def resultStage(steps: ResultTransformSpec*): MitigationSpec.ResultStage =
+    unsafeGet(
+      MitigationSpec.ResultStage.create(
+        TransformPipeline(steps.toList),
+        ErrorLocation.requestField(FieldName.Spec)
+      ),
+      "resultStage"
     )
 
   /** Deterministically derive a ULID from a human-readable label (for fixtures/tests).

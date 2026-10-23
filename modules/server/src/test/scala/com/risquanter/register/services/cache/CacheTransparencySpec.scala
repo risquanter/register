@@ -19,8 +19,10 @@ import com.risquanter.register.testutil.TestHelpers.*
   * into an executable assertion: if the cache could ever serve a stale or
   * wrong entry, the cached run would diverge from the uncached run.
   *
-  * The edit sequence deliberately includes the item-17 shape (reparent +
-  * param change in one step) and repeated reads (cache hits on the real run).
+  * The edit sequence deliberately includes one update that both reparents a
+  * leaf and changes its parameters, because that is where a stale leaf result
+  * is most likely to reach an aggregate, and repeated reads, which are the cache
+  * hits on the real run.
   */
 object CacheTransparencySpec extends ZIOSpecDefault {
 
@@ -32,10 +34,8 @@ object CacheTransparencySpec extends ZIOSpecDefault {
     unsafeGet(RiskLeaf.create(
       id = idStr(id),
       name = s"Leaf $id",
-      distributionType = "lognormal",
       probability = prob,
-      minLoss = Some(1000L),
-      maxLoss = Some(50000L),
+      shape = lognormalShape(1000L, 50000L),
       parentId = Some(nodeId(parent)),
       seedVarId = seedVar
     ), "leaf")

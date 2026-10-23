@@ -1,7 +1,7 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, TargetingPredicate}
+import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, LeafStageSpec, TargetingPredicate}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.FolQueryFailure   // NodeReferenceSortNames (single source of truth)
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
@@ -53,7 +53,7 @@ final case class MitigationScopeResolverLive(
   private def resolveOne(m: Mitigation, tree: RiskTree, kb: RiskTreeKnowledgeBase): ScopeOutcome =
     val predicate = m.target match { case MitigationTarget.Predicate(p) => p }
     val domain: Set[NodeId] = m.spec match          // stage-domain restriction
-      case _: MitigationSpec.LeafStage   => tree.index.leafIds
+      case _: LeafStageSpec              => tree.index.leafIds
       case _: MitigationSpec.ResultStage => tree.index.nodes.keySet
     satisfyingIds(predicate, kb) match
       case Right(ids)     => ScopeOutcome.Resolved(ids intersect domain)

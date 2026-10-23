@@ -8,7 +8,7 @@ import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbabil
 import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, ExpertDistributionParams}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.simulation.LossDistribution
-import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
+import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, expertShape}
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import io.github.iltotore.iron.*
@@ -451,11 +451,9 @@ object SimulatorSpec extends ZIOSpecDefault {
         val leaf = RiskLeaf.create(
           id = idStr("terms-explicit"),
           name = "Terms Explicit",
-          distributionType = "expert",
           probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(3),
+          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), Some(3)),
+          parentId = None,
           seedVarId = 1L
         ).toOption.get
 
@@ -470,11 +468,9 @@ object SimulatorSpec extends ZIOSpecDefault {
         val leaf = RiskLeaf.create(
           id = idStr("terms-two"),
           name = "Terms Two",
-          distributionType = "expert",
           probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(2),
+          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), Some(2)),
+          parentId = None,
           seedVarId = 2L
         ).toOption.get
 
@@ -490,11 +486,9 @@ object SimulatorSpec extends ZIOSpecDefault {
         val leaf = RiskLeaf.create(
           id = idStr("terms-default-3"),
           name = "Terms Default 3",
-          distributionType = "expert",
           probability = 0.5,
-          percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = None,
+          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), None),
+          parentId = None,
           seedVarId = 3L
         ).toOption.get
 
@@ -505,43 +499,49 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
       },
 
-      test("defaults to min(n=5, 4) = 4 when terms is None and n = 5") {
-        // 5 anchor points, no explicit terms → Simulator uses min(5, 4) = 4
+      test("defaults to the anchor count when terms is None and n = 5") {
+        // No explicit term count, so the fit uses one term per anchor and its
+        // curve passes through all five stated losses.
         val leaf = RiskLeaf.create(
-          id = idStr("terms-default-4"),
-          name = "Terms Default 4",
-          distributionType = "expert",
+          id = idStr("terms-default-5"),
+          name = "Terms Default 5",
           probability = 0.5,
-          percentiles = Some(Array(0.05, 0.25, 0.5, 0.75, 0.95)),
-          quantiles = Some(Array(50.0, 200.0, 500.0, 1500.0, 5000.0)),
-          terms = None,
+          shape = expertShape(
+            Vector(0.05, 0.25, 0.5, 0.75, 0.95),
+            Vector(50.0, 200.0, 500.0, 1500.0, 5000.0),
+            None
+          ),
+          parentId = None,
           seedVarId = 4L
         ).toOption.get
 
         for {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
-          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 4
+          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 5
         )
       },
 
-      test("defaults to min(n=9, 4) = 4 when terms is None and n = 9") {
-        // 9 anchor points, no explicit terms → Simulator uses min(9, 4) = 4
+      test("defaults to the anchor count when terms is None and n = 9") {
+        // The derived count follows the anchor count with no ceiling, so nine
+        // anchors are fitted with nine terms rather than being smoothed.
         val leaf = RiskLeaf.create(
           id = idStr("terms-default-9pts"),
           name = "Terms Default 9pts",
-          distributionType = "expert",
           probability = 0.5,
-          percentiles = Some(Array(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99)),
-          quantiles = Some(Array(10.0, 50.0, 100.0, 300.0, 700.0, 2000.0, 5000.0, 10000.0, 30000.0)),
-          terms = None,
+          shape = expertShape(
+            Vector(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99),
+            Vector(10.0, 50.0, 100.0, 300.0, 700.0, 2000.0, 5000.0, 10000.0, 30000.0),
+            None
+          ),
+          parentId = None,
           seedVarId = 5L
         ).toOption.get
 
         for {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
-          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 4
+          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 9
         )
       }
     )

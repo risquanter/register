@@ -1,11 +1,12 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import org.scalajs.dom.MouseEvent
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, FormMode, FormTarget, currentTarget}
 import app.components.{Icons, TreeNodeRow}
 import app.components.ConfirmGuard.proceedOrConfirm
-import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, DistributionType}
+import com.risquanter.register.domain.data.DistributionShape
+import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
@@ -13,8 +14,8 @@ import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
  *
  * Displays a structured tree with one DOM row per node. Each row carries
  * depth-aware CSS classes (`.tree-node-row--depth-{n}`) and a `data-depth`
- * attribute on the indent span so Phase D can draw connector lines in CSS
- * without touching Scala code again.
+ * attribute on the indent span, so connector lines are drawn in CSS without
+ * touching Scala code.
  *
  * Pure derived view — owns no state (ADR-019 Pattern 4).
  */
@@ -25,12 +26,8 @@ object TreePreview:
     case Portfolio(n: SafeName.SafeName) extends TreeNode(n)
     case Leaf(
       n:           SafeName.SafeName,
-      distType:    DistributionType,
       probability: OccurrenceProbability,
-      percentiles: Option[Array[Double]],
-      quantiles:   Option[Array[Double]],
-      minLoss:     Option[Long],
-      maxLoss:     Option[Long]
+      shape:       DistributionShape
     ) extends TreeNode(n)
 
     def iconSvg: SvgElement = this match
@@ -39,21 +36,19 @@ object TreePreview:
 
     def label: String = this match
       case Portfolio(n)  => n.value
-      case l: Leaf       => s"${l.n.value} (${l.distType}, p=${f"${l.probability}%.2f"})"
+      case l: Leaf       => s"${l.n.value} (${l.shape.distributionType}, p=${f"${l.probability}%.2f"})"
 
-    /** Tooltip — delegates to shared TreeNodeRow utilities (D2(a): native title). */
+    /** Native `title` text, built by the shared [[TreeNodeRow]] helpers. A draft
+      * node has no identifier and no counted children, so both are `None`. */
     def tooltip: String = this match
       case Portfolio(n) =>
-        TreeNodeRow.portfolioTooltip(name = n)
+        TreeNodeRow.portfolioTooltip(name = n, id = None, childCount = None)
       case l: Leaf =>
         TreeNodeRow.leafTooltip(
           name        = l.n,
-          distType    = l.distType,
           probability = l.probability,
-          percentiles = l.percentiles,
-          quantiles   = l.quantiles,
-          minLoss     = l.minLoss,
-          maxLoss     = l.maxLoss
+          shape       = l.shape,
+          id          = None
         )
 
   def apply(builderState: TreeBuilderState): HtmlElement =
@@ -91,12 +86,8 @@ object TreePreview:
       leaves.map { l =>
         val node = TreeNode.Leaf(
           n           = l.name,
-          distType    = l.distribution.distributionType,
           probability = l.probability,
-          percentiles = l.distribution.percentiles,
-          quantiles   = l.distribution.quantiles,
-          minLoss     = l.distribution.minLoss.map(identity),
-          maxLoss     = l.distribution.maxLoss.map(identity)
+          shape       = l.shape
         )
         (node, ParentRef.nameOf(l.parent).map(_.value))
       }

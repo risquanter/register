@@ -13,7 +13,7 @@ import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, Bra
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.testutil.TestHelpers.{safeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{safeId, unsafeGet, lognormalShape}
 
 /** Unit tests for `ScenarioMergeServiceLive` with no Docker or live Irmin.
   *
@@ -48,10 +48,8 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     unsafeGet(RiskLeaf.create(
       id = id,
       name = nodeName,
-      distributionType = "lognormal",
       probability = 0.1,
-      minLoss = Some(1000L),
-      maxLoss = Some(50000L),
+      shape = lognormalShape(1000L, 50000L),
       parentId = Some(rootId),
       seedVarId = seedVarId
     ), "leaf")

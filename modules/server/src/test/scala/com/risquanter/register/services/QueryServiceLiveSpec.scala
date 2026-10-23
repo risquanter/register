@@ -5,8 +5,8 @@ import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.{
   RiskLeaf, RiskPortfolio, RiskNode, RiskTree,
-  Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  TransformPipeline, ResultTransformSpec
+  Mitigation, MitigationTarget, MitigationPrecedence, TargetingPredicate,
+  ResultTransformSpec
 }
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
@@ -38,11 +38,11 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   private val rootP = unsafeGet(RiskPortfolio.create(
     id = rootId.value, name = "Root", childIds = Array(aId, bId), parentId = None), "portfolio")
   private val aLeaf = unsafeGet(RiskLeaf.create(
-    id = aId.value, name = "Alpha", distributionType = "lognormal", probability = 0.2,
-    minLoss = Some(100L), maxLoss = Some(100000L), parentId = Some(rootId), seedVarId = 1L), "leaf")
+    id = aId.value, name = "Alpha", probability = 0.2,
+    shape = lognormalShape(100L, 100000L), parentId = Some(rootId), seedVarId = 1L), "leaf")
   private val bLeaf = unsafeGet(RiskLeaf.create(
-    id = bId.value, name = "Beta", distributionType = "lognormal", probability = 0.2,
-    minLoss = Some(100L), maxLoss = Some(100000L), parentId = Some(rootId), seedVarId = 2L), "leaf")
+    id = bId.value, name = "Beta", probability = 0.2,
+    shape = lognormalShape(100L, 100000L), parentId = Some(rootId), seedVarId = 2L), "leaf")
 
   private val allNodes: Map[NodeId, RiskNode] = Map(rootId -> rootP, aId -> aLeaf, bId -> bLeaf)
 
@@ -51,7 +51,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
     mAlphaId,
     SafeName.fromString("Alpha Mitigation").toOption.get,
     MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
-    MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.CapLosses(1000L)))),
+    resultStage(ResultTransformSpec.CapLosses(1000L)),
     MitigationPrecedence.default
   ).toEither.toOption.get
 

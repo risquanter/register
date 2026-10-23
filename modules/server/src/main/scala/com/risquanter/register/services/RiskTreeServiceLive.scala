@@ -6,7 +6,7 @@ import zio.telemetry.opentelemetry.metrics.{Meter, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
@@ -247,7 +247,7 @@ class RiskTreeServiceLive private (
   /** Build domain nodes and rootId from a resolved V2 request. */
   private def buildNodes(
     nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
-    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
     rootName: SafeName.SafeName,
     seedVarIdByLeafName: Map[SafeName.SafeName, SeedVarId.SeedVarId]
   ): IO[AppError,(Seq[RiskNode], NodeId)] = ZIO.attempt {
@@ -265,14 +265,9 @@ class RiskTreeServiceLive private (
           RiskLeaf.fromValidated(
             id = node.id,
             name = node.name,
-            distributionType = shape.distributionType,
             probability = prob,
-            percentiles = shape.percentiles,
-            quantiles = shape.quantiles,
-            minLoss = shape.minLoss,
-            maxLoss = shape.maxLoss,
+            shape = shape,
             parentId = parentIdFor(node),
-            terms = shape.terms,
             seedVarId = seedVarIdByLeafName(node.name)
           )
 

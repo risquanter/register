@@ -5,12 +5,12 @@ import zio.prelude.*
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{
   LognormalDistributionParams, MitigationApplicationRecord, MitigationPrecedence,
-  MitigationSpec, NodeProvenance, ResultTransformSpec, TransformPipeline
+  NodeProvenance, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.mitigation.MitigationApplication
-import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
+import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import java.time.Instant
@@ -31,8 +31,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
   private def capRecord(label: String, cap: Long): MitigationApplicationRecord =
     MitigationApplicationRecord(
       mitigationId(label),
-      MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)))),
+      resultStage(ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap, paramAt).toOption.get)),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -40,8 +39,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
   private def scaleRecord(label: String, factor: Double): MitigationApplicationRecord =
     MitigationApplicationRecord(
       mitigationId(label),
-      MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.ScaleLosses(factor.refineUnsafe)))),
+      resultStage(ResultTransformSpec.ScaleLosses(factor.refineUnsafe)),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -49,8 +47,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
   private def deductibleRecord(label: String, deductible: Long): MitigationApplicationRecord =
     MitigationApplicationRecord(
       mitigationId(label),
-      MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(deductible, paramAt).toOption.get)))),
+      resultStage(ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(deductible, paramAt).toOption.get)),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -58,8 +55,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
   private def thresholdRecord(label: String, threshold: Long): MitigationApplicationRecord =
     MitigationApplicationRecord(
       mitigationId(label),
-      MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.FilterBelowThreshold(ValidationUtil.refineNonNegativeLong(threshold, paramAt).toOption.get)))),
+      resultStage(ResultTransformSpec.FilterBelowThreshold(ValidationUtil.refineNonNegativeLong(threshold, paramAt).toOption.get)),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -70,7 +66,6 @@ object LossDistributionSpec extends ZIOSpecDefault {
     lossVarId = 2001L,
     globalSeed3 = 0L,
     globalSeed4 = 0L,
-    distributionType = "lognormal",
     distributionParams = LognormalDistributionParams(1000L.refineUnsafe, 5000L.refineUnsafe, 0.9),
     timestamp = Instant.parse("2026-01-01T00:00:00Z"),
     metalogDistributionVersion = "1.0.0"

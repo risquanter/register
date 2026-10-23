@@ -29,7 +29,7 @@ object ResultTransformSpec {
     * transfer or by an agreed share. The loss itself is unchanged — this scales
     * cached trial outcomes at the read edge rather than re-simulating, and it is
     * the only proportional scaling that can be ordered against a deductible or a
-    * cap. Applies alongside `DistributionTransform.ScaleSeverity` on the same
+    * cap. Applies alongside `RelativeSeverity.ScaleSeverity` on the same
     * node — that one states the loss got smaller, this one states who pays for
     * it, and both factors apply. */
   final case class ScaleLosses(factor: RetentionFactor)             extends ResultTransformSpec

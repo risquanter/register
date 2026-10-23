@@ -4,7 +4,7 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
-import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
 
 /** Defense-in-depth layer for seed identity:
   * RiskTree's smart constructor — and therefore its JSON decoder, which routes
@@ -21,10 +21,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
     unsafeGet(RiskLeaf.create(
       id = idStr(idLabel),
       name = leafName,
-      distributionType = "lognormal",
       probability = 0.5,
-      minLoss = Some(100L),
-      maxLoss = Some(1000L),
+      shape = lognormalShape(100L, 1000L),
       parentId = Some(nodeId("root-pf")),
       seedVarId = seedVarId
     ), "leaf")
@@ -33,7 +31,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
     val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr("root-pf"),
       name = "Root Portfolio",
-      childIds = leaves.map(_.id.value).toArray
+      childIds = leaves.map(_.id.value).toArray,
+      parentId = None
     ), "portfolio")
     RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, mitigations = Nil)
   }
@@ -80,7 +79,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 2L))
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
-          childIds = leaves.map(_.id.value).toArray
+          childIds = leaves.map(_.id.value).toArray,
+          parentId = None
         ), "portfolio")
         val hw = SeedVarId.fromLong(9L).toOption.get
         val result = RiskTree.fromNodes(
@@ -92,7 +92,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 5L))
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
-          childIds = leaves.map(_.id.value).toArray
+          childIds = leaves.map(_.id.value).toArray,
+          parentId = None
         ), "portfolio")
         val hw = SeedVarId.fromLong(3L).toOption.get
         val result = RiskTree.fromNodes(
@@ -111,7 +112,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 2L))
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
-          childIds = leaves.map(_.id.value).toArray
+          childIds = leaves.map(_.id.value).toArray,
+          parentId = None
         ), "portfolio")
         val hw = SeedVarId.fromLong(42L).toOption.get
         val valid = RiskTree.fromNodes(

@@ -1,6 +1,6 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import app.state.{TreeViewState, LoadState, ChartHoverBridge}
 import app.components.{Icons, ColorSwatchPicker, TreeNodeRow}
@@ -50,13 +50,9 @@ object TreeDetailView:
     case leaf: RiskLeaf =>
       TreeNodeRow.leafTooltip(
         name        = leaf.name,
-        distType    = leaf.distributionType,
         probability = leaf.probability,
-        id          = Some(leaf.id),
-        percentiles = leaf.percentiles,
-        quantiles   = leaf.quantiles,
-        minLoss     = leaf.minLoss.map(identity),
-        maxLoss     = leaf.maxLoss.map(identity)
+        shape       = leaf.shape,
+        id          = Some(leaf.id)
       )
     case portfolio: RiskPortfolio =>
       TreeNodeRow.portfolioTooltip(
@@ -268,6 +264,7 @@ object TreeDetailView:
       kind          = nodeKind,
       depth         = depth,
       tooltip       = Some(nodeTooltip(node)),
+      onRemove      = None,
       onNodeClick   = Some(handleNodeClick),
       isSelected    = isSelected,
       prefixContent = List(toggleSpan),

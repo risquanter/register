@@ -96,7 +96,7 @@ final case class CachedResultResolverLive(
       )
     } yield results.toMap
 
-  /** Param-stage half of the mitigation action: LeafStage transforms baked into
+  /** Param-stage half of the mitigation action: leaf-stage specs baked into
     * the tree so they drive the cache keys. `selection = Inherent` yields the input
     * tree revalidated through `RiskTree.fromNodes` — identical content, identical
     * hashes — so raw leaf simulations are shared with the un-mitigated path.

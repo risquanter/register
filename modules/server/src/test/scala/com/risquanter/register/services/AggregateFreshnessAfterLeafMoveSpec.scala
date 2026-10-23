@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, LognormalShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.domain.errors.AppError
@@ -42,11 +42,7 @@ object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   private def shape(minLoss: Long = 1000L, maxLoss: Long = 50000L): DistributionShapeRequest =
-    DistributionShapeRequest(
-      distributionType = "lognormal",
-      percentiles = None, quantiles = None, terms = None,
-      minLoss = Some(minLoss), maxLoss = Some(maxLoss)
-    )
+    LognormalShapeRequest(minLoss = minLoss, maxLoss = maxLoss)
 
   private def leafDef(name: String, parent: String, probability: Double): RiskLeafDefinitionRequest =
     RiskLeafDefinitionRequest(

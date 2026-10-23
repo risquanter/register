@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.iron.{SafeName, SeedEntityId}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
-import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet, lognormalShape}
 import zio.*
 import zio.test.*
 import zio.json.*
@@ -47,7 +47,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
           lossVarId = 2042L,
           globalSeed3 = 0L,
           globalSeed4 = 0L,
-          distributionType = "lognormal",
           distributionParams = LognormalDistributionParams(
             minLoss = 1000000L.refineUnsafe,
             maxLoss = 50000000L.refineUnsafe,
@@ -60,25 +59,27 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val json = provenance.toJson
         val decoded = json.fromJson[NodeProvenance]
         
+        // The round trip has to preserve which mode the params are in, and that
+        // is now the decoded case rather than a separate tag field.
         assertTrue(decoded.isRight) &&
         assertTrue(decoded.toOption.get.entityId == 42L) &&
-        assertTrue(decoded.toOption.get.distributionType == "lognormal")
+        assertTrue(decoded.toOption.get.distributionParams.isInstanceOf[LognormalDistributionParams])
       },
       
-      test("ExpertDistributionParams serializes correctly") {
+      test("ExpertDistributionParams round-trips to an equal value") {
         val params = ExpertDistributionParams(
-          percentiles = Array(0.05, 0.5, 0.95),
-          quantiles = Array(1000.0, 5000.0, 25000.0),
+          percentiles = Vector(0.05, 0.5, 0.95),
+          quantiles = Vector(1000.0, 5000.0, 25000.0),
           terms = 3.refineUnsafe
         )
-        
+
         val json = params.toJson
         val decoded = json.fromJson[ExpertDistributionParams]
-        
-        assertTrue(decoded.isRight) &&
-        assertTrue(decoded.toOption.get.percentiles.length == 3) &&
-        assertTrue(decoded.toOption.get.quantiles.length == 3) &&
-        assertTrue(decoded.toOption.get.terms == 3)
+
+        // The anchors are compared by value, not by length: the sequences are
+        // immutable, so the record's own equality is the assertion and a decoder
+        // that returned the right count of wrong numbers would fail here.
+        assertTrue(decoded == Right(params))
       },
 
       test("ExpertDistributionParams rejects terms = 0") {
@@ -129,9 +130,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       test("DistributionParams sealed trait handles both subtypes") {
         val expert: DistributionParams = ExpertDistributionParams(
-          percentiles = Array(0.5),
-          quantiles = Array(1000.0),
-          terms = 1.refineUnsafe
+          percentiles = Vector(0.1, 0.9),
+          quantiles = Vector(1000.0, 5000.0),
+          terms = 2.refineUnsafe
         )
         
         val lognormal: DistributionParams = LognormalDistributionParams(
@@ -154,10 +155,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("test-risk"),
           name = "Test Risk",
-          distributionType = "lognormal",
           probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(10000L),
+          shape = lognormalShape(1000L, 10000L),
+          parentId = None,
           seedVarId = 1L
         ), "leaf")
 
@@ -188,10 +188,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("test-risk"),
           name = "Test Risk",
-          distributionType = "lognormal",
           probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(10000L),
+          shape = lognormalShape(1000L, 10000L),
+          parentId = None,
           seedVarId = 2L
         ), "leaf")
 
@@ -220,10 +219,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val leaf = unsafeGet(RiskLeaf.create(
           id = riskId.value,
           name = "Cyber Attack",
-          distributionType = "lognormal",
           probability = 0.25,
-          minLoss = Some(1000L),
-          maxLoss = Some(50000L),
+          shape = lognormalShape(1000L, 50000L),
+          parentId = None,
           seedVarId = 3L
         ), "leaf")
 
@@ -255,10 +253,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("lognormal-risk"),
           name = "Lognormal Risk",
-          distributionType = "lognormal",
           probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(10000L),
+          shape = lognormalShape(1000L, 10000L),
+          parentId = None,
           seedVarId = 4L
         ), "leaf")
 
@@ -276,7 +273,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         } yield {
           val nodeProv = leafProvenances(result).head
           assertTrue(result.nodeId == nodeId("lognormal-risk")) &&
-          assertTrue(nodeProv.distributionType == "lognormal") &&
           assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
           assertTrue(
             nodeProv.distributionParams.asInstanceOf[LognormalDistributionParams].minLoss == 1000L
@@ -291,10 +287,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val risk1 = unsafeGet(RiskLeaf.create(
           id = idStr("risk1"),
           name = "Risk 1",
-          distributionType = "lognormal",
           probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(5000L),
+          shape = lognormalShape(1000L, 5000L),
           parentId = Some(nodeId("portfolio")),
           seedVarId = 5L
         ), "leaf")
@@ -302,10 +296,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val risk2 = unsafeGet(RiskLeaf.create(
           id = idStr("risk2"),
           name = "Risk 2",
-          distributionType = "lognormal",
           probability = 0.5,
-          minLoss = Some(2000L),
-          maxLoss = Some(8000L),
+          shape = lognormalShape(2000L, 8000L),
           parentId = Some(nodeId("portfolio")),
           seedVarId = 6L
         ), "leaf")
@@ -350,10 +342,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("deterministic-risk"),
           name = "Deterministic Risk",
-          distributionType = "lognormal",
           probability = 0.5,
-          minLoss = Some(5000L),
-          maxLoss = Some(20000L),
+          shape = lognormalShape(5000L, 20000L),
+          parentId = None,
           seedVarId = 7L
         ), "leaf")
         
@@ -392,10 +383,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("test-reconstruction"),
           name = "Test Reconstruction",
-          distributionType = "lognormal",
           probability = 0.3,
-          minLoss = Some(1000L),
-          maxLoss = Some(15000L),
+          shape = lognormalShape(1000L, 15000L),
+          parentId = None,
           seedVarId = 8L
         ), "leaf")
 
@@ -421,8 +411,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           assertTrue(nodeProv.lossVarId != 0L) &&
           assertTrue(nodeProv.globalSeed3 == 0L) &&
           assertTrue(nodeProv.globalSeed4 == 0L) &&
-          assertTrue(nodeProv.distributionType == "lognormal") &&
-          assertTrue(nodeProv.distributionParams != null) &&
+          assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
           assertTrue(nodeProv.timestamp != null) &&
           assertTrue(nodeProv.metalogDistributionVersion.nonEmpty)
         }

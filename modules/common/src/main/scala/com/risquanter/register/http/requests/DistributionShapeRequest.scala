@@ -1,52 +1,71 @@
 package com.risquanter.register.http.requests
 
-import zio.json.{JsonCodec, DeriveJsonCodec}
+import zio.json.{JsonCodec, DeriveJsonCodec, jsonDiscriminator, jsonHint}
 import zio.prelude.Validation
 import sttp.tapir.Schema
 
-import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.data.DistributionShape
+import com.risquanter.register.domain.errors.{ErrorSubject, ValidationError}
 
-/** Distribution shape parameters shared by the preview endpoint and the tree leaf wire DTOs.
+/** A submitted loss distribution shape, in the two modes an author can declare.
   *
-  * Carries the raw (unrefined) distribution parameters needed to fit and sample a
-  * distribution curve, and to construct a [[Distribution]] domain value. Both modes
-  * share this type; the `distributionType` field acts as the discriminator.
+  * One case per mode, so a decoded submission holds the fields of exactly one
+  * mode: an expert value has nowhere to put a lognormal bound, and a lognormal
+  * value has nowhere to put anchors. A mode stated without its fields is
+  * refused, because each case's fields are required.
   *
-  * Expert mode fields: `percentiles`, `quantiles`, `terms`.
-  * Lognormal mode fields: `minLoss`, `maxLoss`.
+  * The derived decoder ignores keys the named case does not declare, so a body
+  * naming one mode and also carrying the other's fields decodes to the named
+  * mode alone and the surplus values are discarded rather than refused.
   *
-  * Percentile values are in domain scale 0–1. The form's 0–100 display values are
-  * divided by 100 (via `pctToDomain`) before serialising into this type.
+  * Carries primitives rather than refined types, and `toShape` is the gate.
+  * The gate takes the subject because the same body appears inside a collection
+  * of submitted leaves, and a refusal has to name which one it is about.
   *
-  * All cross-field validation is owned by [[Distribution.create]], which is
-  * invoked by [[DistributionShapeRequest.validate]].
+  * Percentile values are in domain scale 0–1. The browser form's 0–100 display
+  * values are divided by 100 before being serialised into this type.
   */
-final case class DistributionShapeRequest(
-  distributionType: String,
-  percentiles:      Option[Array[Double]],
-  quantiles:        Option[Array[Double]],
-  terms:            Option[Int],
-  minLoss:          Option[Long],
-  maxLoss:          Option[Long]
-)
+@jsonDiscriminator("distributionType")
+sealed trait DistributionShapeRequest:
+  /** Refine and gate this submission into a domain shape, reporting every
+    * refusal against `subject`. */
+  def toShape(subject: ErrorSubject): Validation[ValidationError, DistributionShape]
+
+/** Expert opinion: the author's anchor points as two parallel sequences, and
+  * optionally the number of metalog terms to fit. An absent term count means
+  * the fit derives one from the anchors. */
+@jsonHint("expert")
+final case class ExpertShapeRequest(
+  percentiles: Vector[Double],
+  quantiles:   Vector[Double],
+  terms:       Option[Int]
+) extends DistributionShapeRequest:
+  def toShape(subject: ErrorSubject): Validation[ValidationError, DistributionShape] =
+    DistributionShape.Expert.fromPrimitives(percentiles, quantiles, terms, subject)
+
+/** Lognormal: the two bounds of a 90% confidence interval. The confidence level
+  * is not submitted — it is fixed by the method the fit uses. */
+@jsonHint("lognormal")
+final case class LognormalShapeRequest(
+  minLoss: Long,
+  maxLoss: Long
+) extends DistributionShapeRequest:
+  def toShape(subject: ErrorSubject): Validation[ValidationError, DistributionShape] =
+    DistributionShape.Lognormal.fromPrimitives(minLoss, maxLoss, subject)
 
 object DistributionShapeRequest:
-  given schema: Schema[DistributionShapeRequest] = Schema.derived
-  given codec:  JsonCodec[DistributionShapeRequest] = DeriveJsonCodec.gen
+  /** The submitted form of a shape, and the inverse of `toShape`. The browser
+    * holds a draft as a domain value and has to put it on the wire, so the
+    * projection lives beside the gate rather than on the domain type — the
+    * request layer knows the domain and not the other way round. */
+  def fromShape(shape: DistributionShape): DistributionShapeRequest = shape match
+    case DistributionShape.Expert(anchors, terms) =>
+      ExpertShapeRequest(anchors.percentiles, anchors.losses, terms.map(t => t: Int))
+    case DistributionShape.Lognormal(bounds) =>
+      LognormalShapeRequest(bounds.min, bounds.max)
 
-  /** Validate cross-field rules and return a [[Distribution]] domain value, or
-    * accumulated [[ValidationError]]s.
-    *
-    * Delegates entirely to [[Distribution.create]], which owns all invariants:
-    * element range, strictly-increasing order, length match, and terms limit.
-    */
-  def validate(req: DistributionShapeRequest): Validation[ValidationError, Distribution] =
-    Distribution.create(
-      distributionType = req.distributionType,
-      minLoss          = req.minLoss,
-      maxLoss          = req.maxLoss,
-      percentiles      = req.percentiles,
-      quantiles        = req.quantiles,
-      terms            = req.terms
-    )
+  given codec: JsonCodec[DistributionShapeRequest] = DeriveJsonCodec.gen[DistributionShapeRequest]
+
+  given schema: Schema[DistributionShapeRequest] =
+    import sttp.tapir.generic.auto.*
+    Schema.derived[DistributionShapeRequest]

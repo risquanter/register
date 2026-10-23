@@ -2,7 +2,7 @@ package com.risquanter.register.http.requests
 
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
-import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.DistributionShape
 import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
@@ -78,7 +78,7 @@ object RiskTreeRequests {
     name: SafeName.SafeName,
     parent: ParentRef,
     probability: OccurrenceProbability,
-    distribution: Distribution,
+    shape: DistributionShape,
     seedVarId: SeedVarIdChoice
   )
 
@@ -95,7 +95,7 @@ object RiskTreeRequests {
     name: SafeName.SafeName,
     parent: ParentRef,
     probability: OccurrenceProbability,
-    distribution: Distribution
+    shape: DistributionShape
   )
 
   final case class ResolvedNode(
@@ -105,25 +105,25 @@ object RiskTreeRequests {
     kind: NodeKind
   )
 
-  // Result of resolving a create request: all names refined, ids generated, topology validated, distributions validated.
+  // Result of resolving a create request: all names refined, ids generated, topology validated, shapes gated.
   // `nodes` is keyed by name for easy parent resolution in the service layer; `leafOccurrenceAndShape` carries the
-  // domain-validated occurrence probability paired with the distribution shape for each leaf.
+  // domain-validated occurrence probability paired with the loss distribution shape for each leaf.
   final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
-    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )
 
   // Result of resolving an update request: existing nodes keep caller ids, new nodes get generated ids.
-  // Distributions are validated here so the service does not repeat cross-field checks.
+  // Shapes are gated here so the service does not repeat cross-field checks.
   final case class ResolvedUpdate(
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
     added: Map[SafeName.SafeName, ResolvedNode],
-    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
-    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
+    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
+    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )
@@ -169,9 +169,9 @@ object RiskTreeRequests {
         refineNameField(l.name, ErrorLocation.Field(subject, FieldName.Name)),
         refineParentName(l.parentName, ErrorLocation.Field(subject, FieldName.ParentName)),
         toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
-        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, subject, terms = l.distributionShape.terms),
+        l.distributionShape.toShape(subject),
         refineSeedVarIdChoice(l.seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId))
-      )((name, parent, prob, dist, seed) => SubmittedLeaf(subject, name, parent, prob, dist, seed))
+      )((name, parent, prob, shape, seed) => SubmittedLeaf(subject, name, parent, prob, shape, seed))
     }
 
   /** A caller-provided seedVarId on a leaf definition, range-refined. Absent
@@ -213,9 +213,9 @@ object RiskTreeRequests {
         refineNameField(l.name, ErrorLocation.Field(subject, FieldName.Name)),
         refineParentName(l.parentName, ErrorLocation.Field(subject, FieldName.ParentName)),
         toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
-        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, subject, terms = l.distributionShape.terms),
+        l.distributionShape.toShape(subject),
         requireAbsentSeedVarId(l.seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId))
-      )((id, name, parent, prob, dist, _) => ExistingLeaf(ErrorSubject.ExistingNode(NodeId(id)), id, name, parent, prob, dist))
+      )((id, name, parent, prob, shape, _) => ExistingLeaf(ErrorSubject.ExistingNode(NodeId(id)), id, name, parent, prob, shape))
     }
 
   // Guard: ensure no node name collides with a reserved FOL query symbol (e.g. "leaf", "p95").

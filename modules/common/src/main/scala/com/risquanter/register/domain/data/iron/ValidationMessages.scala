@@ -173,6 +173,18 @@ object ValidationMessages:
     s"$field must be a whole number"
   val minMustBeLessThanMax: String      = "Minimum loss must be less than maximum loss"
 
+  /** Why a loss range was refused, naming both bounds. The pair is the subject
+    * of the refusal: neither bound is wrong on its own and editing either one
+    * satisfies the rule, so the sentence names both rather than blaming one.
+    *
+    * {{{
+    * lossRangeNotOrdered(120, 20)
+    * // Minimum loss (120) must be less than maximum loss (20)
+    * }}}
+    */
+  def lossRangeNotOrdered(min: Long, max: Long): String =
+    s"Minimum loss ($min) must be less than maximum loss ($max)"
+
   val mitigationEliminatesRisk: String =
     "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap or the scale factor, lower the deductible, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
 
@@ -198,11 +210,37 @@ object ValidationMessages:
   def expertLengthMismatch(pLen: Int, qLen: Int): String =
     s"Percentiles and quantiles must have same length ($pLen vs $qLen)"
 
+  /** Why an anchor count was refused, with the bounds and the count supplied.
+    *
+    * The bounds are the caller's, so the sentence cannot state one the caller
+    * does not enforce. They originate in the metalog fitter: below the minimum
+    * there is no curve to fit, and above the maximum the fitter throws.
+    *
+    * {{{
+    * anchorCountOutOfRange(1, 2, 20)
+    * // Expert mode takes between 2 and 20 percentile-quantile pairs (got 1)
+    * }}}
+    */
+  def anchorCountOutOfRange(count: Int, min: Int, max: Int): String =
+    s"Expert mode takes between $min and $max percentile-quantile pairs (got $count)"
+
   // ══════════════════════════════════════════════════════════════════
   // Expert mode — Metalog terms
   // ══════════════════════════════════════════════════════════════════
   val termsOutOfRange: String =
     "Terms must be between 2 and the number of percentile-quantile pairs"
+
+  /** Why a stated term count was refused as outside the fit's own range.
+    *
+    * Distinct from `termsOutOfRange`, which refuses a count inside this range
+    * that exceeds the number of anchors supplied. The bounds are
+    * `Metalog.validateInputs`' precondition, which throws outside [2, 20], and
+    * must match the type-level literals of `MetalogTermCount` in OpaqueTypes
+    * and `refineMetalogTermCount` in ValidationUtil (type-level constraints
+    * cannot reference runtime constants).
+    */
+  val termsOutsideFitterRange: String =
+    "Terms must be between 2 and 20 — a fit with fewer has no curve to describe, and the fitter accepts no more"
 
   // ══════════════════════════════════════════════════════════════════
   // Distribution fit failure

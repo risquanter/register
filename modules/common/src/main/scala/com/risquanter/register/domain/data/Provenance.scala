@@ -1,8 +1,8 @@
 package com.risquanter.register.domain.data
 
-import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
+import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, jsonDiscriminator, jsonHint}
 import java.time.Instant
-import com.risquanter.register.domain.data.iron.{PositiveInt, PositiveLong, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{MetalogTermCount, PositiveLong, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
 
 /**
@@ -13,6 +13,9 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
  * single derivation site `SeedDerivation.streams`. This record is content-only: attribution
  * is by node, via the `LossDistribution` that carries it beside its `nodeId`. A portfolio
  * has no provenance record of its own.
+ *
+ * The mode is not a field of its own: `distributionParams` is a tagged union, so its
+ * case carries the mode and the two cannot disagree.
  */
 case class NodeProvenance(
   // HDR seed hierarchy
@@ -23,7 +26,6 @@ case class NodeProvenance(
   globalSeed4: Long,
 
   // Distribution configuration
-  distributionType: String,
   distributionParams: DistributionParams,
 
   // Execution metadata
@@ -31,31 +33,41 @@ case class NodeProvenance(
   metalogDistributionVersion: String
 )
 
-/** Distribution-specific parameters for loss modeling. Two variants: expert (Metalog quantile-fit) and lognormal (BCG 90% CI). */
+/** Distribution-specific parameters for loss modeling, as the simulator consumed
+  * them. Two variants: expert (Metalog quantile-fit) and lognormal (BCG 90% CI).
+  *
+  * The tag field is the payload's only discriminator: the two cases are
+  * distinguished by it rather than by which fields are present. Discriminating
+  * by field presence makes a malformed record of one case report the other
+  * case's complaint.
+  */
+@jsonDiscriminator("distributionType")
 sealed trait DistributionParams
 
 /** Metalog quantile-function parameters. */
-case class ExpertDistributionParams(
-  percentiles: Array[Double],
-  quantiles: Array[Double],
-  terms: PositiveInt
+@jsonHint("expert")
+final case class ExpertDistributionParams(
+  percentiles: Vector[Double],
+  quantiles: Vector[Double],
+  terms: MetalogTermCount
 ) extends DistributionParams
 
 /** Lognormal distribution parameters using the BCG 90% CI approach. */
-case class LognormalDistributionParams(
+@jsonHint("lognormal")
+final case class LognormalDistributionParams(
   minLoss: PositiveLong,
   maxLoss: PositiveLong,
   confidenceInterval: Double
 ) extends DistributionParams
 
 object ExpertDistributionParams {
-  private case class Raw(percentiles: Array[Double], quantiles: Array[Double], terms: Int)
+  private case class Raw(percentiles: Vector[Double], quantiles: Vector[Double], terms: Int)
   private object Raw { given rawCodec: JsonCodec[Raw] = DeriveJsonCodec.gen[Raw] }
 
   given codec: JsonCodec[ExpertDistributionParams] = JsonCodec(
-    JsonEncoder[Raw].contramap(p => Raw(p.percentiles, p.quantiles, p.terms.toInt)),
+    JsonEncoder[Raw].contramap(p => Raw(p.percentiles, p.quantiles, p.terms)),
     Raw.rawCodec.decoder.mapOrFail { raw =>
-      ValidationUtil.refinePositiveInt(raw.terms, ErrorLocation.requestField(FieldName.Terms))
+      ValidationUtil.refineMetalogTermCount(raw.terms, ErrorLocation.requestField(FieldName.Terms))
         .map(t => ExpertDistributionParams(raw.percentiles, raw.quantiles, t))
         .left.map(_.map(_.message).mkString("; "))
     }
@@ -81,18 +93,7 @@ object LognormalDistributionParams {
 }
 
 object DistributionParams {
-  given encoder: JsonEncoder[DistributionParams] = new JsonEncoder[DistributionParams] {
-    override def unsafeEncode(a: DistributionParams, indent: Option[Int], out: zio.json.internal.Write): Unit = a match {
-      case p: ExpertDistributionParams => 
-        ExpertDistributionParams.codec.encoder.unsafeEncode(p, indent, out)
-      case p: LognormalDistributionParams => 
-        LognormalDistributionParams.codec.encoder.unsafeEncode(p, indent, out)
-    }
-  }
-  
-  given decoder: JsonDecoder[DistributionParams] = 
-    ExpertDistributionParams.codec.decoder.widen[DistributionParams] <> 
-    LognormalDistributionParams.codec.decoder.widen[DistributionParams]
+  given codec: JsonCodec[DistributionParams] = DeriveJsonCodec.gen[DistributionParams]
 }
 
 object NodeProvenance {
@@ -101,4 +102,3 @@ object NodeProvenance {
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
   given schema: Schema[NodeProvenance] = Schema.any[NodeProvenance]
 }
-

@@ -4,7 +4,7 @@ import zio.test.*
 import zio.prelude.Validation
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.http.requests.RiskTreeRequests.*
-import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.DistributionShape
 import com.risquanter.register.domain.errors.ValidationError
 
 object RiskTreeRequestsSpec extends ZIOSpecDefault {
@@ -23,14 +23,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       name              = name,
       parentName        = parent,
       probability       = 0.8,
-      distributionShape = DistributionShapeRequest(
-        distributionType = "lognormal",
-        percentiles      = None,
-        quantiles        = None,
-        terms            = None,
-        minLoss          = Some(1000L),
-        maxLoss          = Some(5000L)
-      )
+      distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 5000L)
     )
 
   // Update request helpers use raw ULID string literals for `id` fields because
@@ -43,18 +36,11 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       name              = name,
       parentName        = parent,
       probability       = 0.8,
-      distributionShape = DistributionShapeRequest(
-        distributionType = "lognormal",
-        percentiles      = None,
-        quantiles        = None,
-        terms            = None,
-        minLoss          = Some(1000L),
-        maxLoss          = Some(5000L)
-      )
+      distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 5000L)
     )
 
   def spec = suite("RiskTreeRequests")(
-    test("resolveCreate fails when distribution is invalid") {
+    test("resolveCreate fails when a leaf's shape breaks its own rule") {
       val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
@@ -63,20 +49,14 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             name              = "Leaf",
             parentName        = Some("Root"),
             probability       = 0.8,
-            distributionShape = DistributionShapeRequest(
-              distributionType = "lognormal",
-              percentiles      = None,
-              quantiles        = None,
-              terms            = None,
-              minLoss          = None, // invalid for lognormal
-              maxLoss          = None
-            )
+            // The bounds are the wrong way round, which `LossRange` refuses.
+            distributionShape = LognormalShapeRequest(minLoss = 5000L, maxLoss = 1000L)
           )
         )
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
-      assertFailsWith(result)("Lognormal mode requires minLoss and maxLoss")
+      assertFailsWith(result)("must be less than maximum loss")
     },
 
     test("resolveCreate returns validated distributions for leaves") {
@@ -91,10 +71,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       result match {
         case Validation.Success(_, resolved) =>
           val (_, shape) = resolved.leafOccurrenceAndShape.values.head
+          val bounds = shape match
+            case DistributionShape.Lognormal(b) => Some(((b.min: Long), (b.max: Long)))
+            case _                              => None
           assertTrue(
             resolved.nodes.values.count(_.kind == NodeKind.Leaf) == 1,
-            shape.minLoss.exists(_ == 1000L),
-            shape.maxLoss.exists(_ == 5000L)
+            bounds == Some((1000L, 5000L))
           )
         case Validation.Failure(_, errors) =>
           assertTrue(false).label(s"resolveCreate should succeed but failed: ${errors.map(_.message).mkString(", ")}")

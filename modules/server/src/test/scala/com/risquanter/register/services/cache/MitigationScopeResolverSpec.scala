@@ -7,8 +7,7 @@ import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, RiskNode,
   Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  RiskLeafTransform, LikelihoodTransform, DistributionTransform,
-  TransformPipeline, ResultTransformSpec
+  RelativeLikelihood, RelativeSeverity, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}
 import com.risquanter.register.domain.tree.TreeIndex
@@ -45,8 +44,8 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
     childIds = Array(webId, dbId), parentId = Some(serversId)), "portfolio")
   private def leaf(id: NodeId, nm: String, seed: Long, parent: NodeId): RiskLeaf =
     unsafeGet(RiskLeaf.create(
-      id = id.value, name = nm, distributionType = "lognormal", probability = 0.2,
-      minLoss = Some(1000L), maxLoss = Some(50000L), parentId = Some(parent), seedVarId = seed), "leaf")
+      id = id.value, name = nm, probability = 0.2,
+      shape = lognormalShape(1000L, 50000L), parentId = Some(parent), seedVarId = seed), "leaf")
   private val web  = leaf(webId, "Web", 1L, appTierId)
   private val db   = leaf(dbId, "DB", 2L, appTierId)
   private val edge = leaf(edgeId, "Edge", 3L, serversId)
@@ -67,10 +66,9 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
   // ── Mitigation builders ──────────────────────────────────────────────
 
   private val leafSpec: MitigationSpec =
-    MitigationSpec.LeafStage(
-      RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, None)
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep)
   private val resultSpec: MitigationSpec =
-    MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.CapLosses(1000000L))))
+    resultStage(ResultTransformSpec.CapLosses(1000000L))
 
   private def mit(label: String, predSrc: String, spec: MitigationSpec): Mitigation =
     Mitigation.create(

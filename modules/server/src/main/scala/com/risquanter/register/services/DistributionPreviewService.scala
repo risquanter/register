@@ -2,19 +2,21 @@ package com.risquanter.register.services
 
 import zio.*
 
-import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.{
+  DistributionShape, ExpertDistributionParams, LognormalDistributionParams
+}
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode, ValidationFailed}
 import com.risquanter.register.http.requests.{DistributionPreviewResponse, DistributionPreviewPoint}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
 
-/** Computes a sampled distribution preview curve from raw distribution parameters.
+/** Computes a sampled distribution preview curve from a gated distribution shape.
   *
   * The service is stateless and has no ZIO environment dependencies — it is a pure
   * function of its request input. The workspace key auth gate lives in the controller.
   */
 trait DistributionPreviewService:
-  def preview(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse]
+  def preview(shape: DistributionShape): IO[ValidationFailed, DistributionPreviewResponse]
 
 object DistributionPreviewService:
   val layer: ZLayer[Any, Nothing, DistributionPreviewService] =
@@ -36,23 +38,27 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
     val step = (hi - lo) / GridSize
     (1 to GridSize).map(i => lo + (i - 0.5) * step)
 
-  override def preview(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse] =
-    // distributionType is DistributionType = String :| Match["^(expert|lognormal)$"],
-    // so only these two values are reachable here.
-    (dist.distributionType: String) match
-      case "expert"    => previewExpert(dist)
-      case "lognormal" => previewLognormal(dist)
+  /** The preview runs the same resolution the simulator does, so the curve a
+    * client sees is the curve a run would fit. */
+  override def preview(shape: DistributionShape): IO[ValidationFailed, DistributionPreviewResponse] =
+    DistributionShape.resolve(shape) match
+      case ExpertDistributionParams(percentiles, quantiles, terms) =>
+        previewExpert(percentiles, quantiles, terms)
+      case LognormalDistributionParams(minLoss, maxLoss, _) =>
+        previewLognormal(minLoss, maxLoss)
 
-  private def previewExpert(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse] =
-    val percentiles   = dist.percentiles.getOrElse(Array.empty[Double])  // already 0-1
-    val quantiles     = dist.quantiles.getOrElse(Array.empty[Double])
-    val resolvedTerms = dist.terms.map(_.toInt).getOrElse(math.min(percentiles.length, 4))
-
+  private def previewExpert(
+    percentiles: Vector[Double],
+    quantiles: Vector[Double],
+    resolvedTerms: Int
+  ): IO[ValidationFailed, DistributionPreviewResponse] =
     for
       metalog <- ZIO.fromEither(
         MetalogDistribution.fromPercentilesUnsafe(
-          percentiles = percentiles,
-          quantiles   = quantiles,
+          // The fitter is a Java interface taking primitive arrays, so the
+          // conversion happens at this call and nowhere above it.
+          percentiles = percentiles.toArray,
+          quantiles   = quantiles.toArray,
           terms       = resolvedTerms,
           lower       = Some(0.0),
           upper       = None
@@ -70,10 +76,10 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
       points           = points
     )
 
-  private def previewLognormal(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse] =
-    val minLoss = dist.minLoss.getOrElse(0L)
-    val maxLoss = dist.maxLoss.getOrElse(0L)
-
+  private def previewLognormal(
+    minLoss: Long,
+    maxLoss: Long
+  ): IO[ValidationFailed, DistributionPreviewResponse] =
     for
       lognormal <- ZIO.fromEither(LognormalHelper.fromLognormal90CI(minLoss, maxLoss))
         .mapError(ve => ValidationFailed(List(ValidationError(

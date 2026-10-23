@@ -2,13 +2,14 @@ package com.risquanter.register.services.helper
 
 import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution, SeedDerivation}
-import com.risquanter.register.domain.data.{TrialId, Loss, RiskLeaf, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
+import com.risquanter.register.domain.data.{
+  TrialId, Loss, RiskLeaf, NodeProvenance, DistributionShape, DistributionParams,
+  ExpertDistributionParams, LognormalDistributionParams
+}
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
-import io.github.iltotore.iron.constraint.numeric.Greater
 import com.risquanter.register.simulation.LognormalHelper
-import com.risquanter.register.domain.data.iron.ValidationUtil
 import zio.{IO, ZIO}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron._
@@ -110,7 +111,6 @@ object Simulator {
           lossVarId = streams.lossVarId,
           globalSeed3 = streams.seed3,
           globalSeed4 = streams.seed4,
-          distributionType = leaf.distributionType,
           distributionParams = distParams,
           timestamp = Instant.now(),
           metalogDistributionVersion = BuildInfo.metalogDistributionVersion
@@ -120,98 +120,55 @@ object Simulator {
   }
   
   /**
-   * Create MetalogDistribution from RiskLeaf parameters.
-   * Returns both distribution and parameters for provenance.
+   * Build the leaf's loss distribution and the record of what the fit ran with.
+   *
+   * A numerical fit failure is the only refusal left. The shape carries its own
+   * construction proof, so there is no absent field, no mode mismatch and no
+   * out-of-range element to check — those states have no spelling in
+   * `DistributionShape`.
    */
-  private def createDistributionWithParams(leaf: RiskLeaf): IO[AppError, (Distribution, com.risquanter.register.domain.data.DistributionParams)] = {
-    import io.github.iltotore.iron.*
-    import com.risquanter.register.domain.data.iron.PositiveInt
-
-    // The leaf is persisted, so every refusal here names it by identifier and
-    // the message carries only the reason.
+  private def createDistributionWithParams(leaf: RiskLeaf): IO[AppError, (Distribution, DistributionParams)] = {
+    // The leaf is persisted, so a refusal names it by identifier and the message
+    // carries only the reason.
     def at(field: FieldName): ErrorLocation =
       ErrorLocation.Field(ErrorSubject.ExistingNode(leaf.id), field)
 
-    leaf.distributionType.toLowerCase match {
-      // Expert opinion mode: fit from percentiles + quantiles
-      case "expert" =>
-        (leaf.percentiles, leaf.quantiles) match {
-          case (Some(ps), Some(qs)) if ps.length == qs.length && ps.length >= 2 =>
-            // Refine percentile values to Probability type (exclusive bounds (0,1) per QPFitter)
-            val percentileResults = ps.zipWithIndex.map { case (p, i) =>
-              ValidationUtil.refineProbability(p, at(FieldName.percentileAt(i)))
-            }
-            val percentileErrors = percentileResults.collect { case Left(errors) => errors }.flatten
-            
-            if (percentileErrors.nonEmpty) {
-              ZIO.fail(ValidationFailed(percentileErrors.toList))
-            } else {
-              val percentiles = percentileResults.collect { case Right(p) => p }
-              val terms: PositiveInt = leaf.terms.getOrElse(math.min(ps.length, 4).refineUnsafe)
-              
-              MetalogDistribution.fromPercentiles(
-                percentiles = percentiles,
-                quantiles = qs,
-                terms = terms,
-                lower = Some(0.0) // Loss cannot be negative
-              ) match {
-                case Right(metalog) =>
-                  val params = ExpertDistributionParams(
-                    percentiles = ps,
-                    quantiles = qs,
-                    terms = terms
-                  )
-                  ZIO.succeed((metalog, params))
-                case Left(validationError) => ZIO.fail(ValidationFailed(List(ValidationError(
-                  location = at(FieldName.DistributionType),
-                  code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
-                  message = s"Failed to fit Metalog: ${validationError.message}"
-                ))))
-              }
-            }
-          
-          case _ =>
-            ZIO.fail(ValidationFailed(List(ValidationError(
-              location = at(FieldName.DistributionType),
-              code = ValidationErrorCode.INVALID_EXPERT_PARAMS,
-              message = "Expert mode requires percentiles and quantiles arrays with same length (≥2)"
-            ))))
-        }
-      
-      // Lognormal mode: use BCG 90% CI approach
-      case "lognormal" =>
-        (leaf.minLoss, leaf.maxLoss) match {
-          case (Some(min), Some(max)) if min > 0 && min < max =>
-            LognormalHelper.fromLognormal90CI(min, max) match {
-              case Right(dist) =>
-                val params = LognormalDistributionParams(
-                  minLoss = min,
-                  maxLoss = max,
-                  confidenceInterval = 0.90
-                )
-                ZIO.succeed((dist, params))
-              case Left(err) => ZIO.fail(ValidationFailed(List(ValidationError(
-                location = at(FieldName.DistributionType),
-                code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
-                message = s"Failed to create lognormal: ${err.message}"
-              ))))
-            }
-          
-          case _ =>
-            ZIO.fail(ValidationFailed(List(ValidationError(
-              location = at(FieldName.DistributionType),
-              code = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-              message = "Lognormal mode requires minLoss > 0 and minLoss < maxLoss"
-            ))))
-        }
-      
-      case other =>
-        ZIO.fail(ValidationFailed(List(ValidationError(
-          location = at(FieldName.DistributionType),
-          code = ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE,
-          message = s"Unsupported distribution type: $other"
-        ))))
+    // The parameters the fit runs with: the authored shape with every value the
+    // system supplies filled in. One derivation, so the record cannot state a
+    // term count or a confidence level the fit did not use.
+    val params = DistributionShape.resolve(leaf.shape)
+
+    // Both fitters take the widened figures the record carries. The metalog
+    // fitter re-checks the percentile interval on arrival, which is the
+    // third-party boundary refining its own input (ADR-039 §1) rather than the
+    // domain re-validating itself.
+    val fitted: Either[String, Distribution] = params match {
+      case ExpertDistributionParams(percentiles, quantiles, terms) =>
+        MetalogDistribution
+          .fromPercentilesUnsafe(
+            // The fitter is a Java interface taking primitive arrays, so the
+            // conversion from the domain's immutable sequences happens here and
+            // nowhere above.
+            percentiles = percentiles.toArray,
+            quantiles = quantiles.toArray,
+            terms = terms,
+            lower = Some(0.0) // Loss cannot be negative
+          )
+          .left.map(error => s"Failed to fit Metalog: ${error.message}")
+
+      case LognormalDistributionParams(minLoss, maxLoss, _) =>
+        LognormalHelper
+          .fromLognormal90CI(minLoss, maxLoss)
+          .left.map(error => s"Failed to create lognormal: ${error.message}")
     }
+
+    ZIO
+      .fromEither(fitted.map(distribution => (distribution, params)))
+      .mapError(reason => ValidationFailed(List(ValidationError(
+        location = at(FieldName.DistributionType),
+        code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
+        message = reason
+      ))))
   }
 }
 

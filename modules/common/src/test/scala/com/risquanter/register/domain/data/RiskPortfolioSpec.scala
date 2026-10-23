@@ -15,7 +15,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -33,7 +34,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("multi-child"),
           name = "Multi-Child Portfolio",
-          childIds = childIds
+          childIds = childIds,
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -45,7 +47,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("parent-port"),
           name = "Parent Portfolio",
-          childIds = Array[NodeId](nodeId("child-port"))
+          childIds = Array[NodeId](nodeId("child-port")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -58,7 +61,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("mixed-port"),
           name = "Mixed Portfolio",
-          childIds = Array[NodeId](nodeId("leaf-1"), nodeId("child-port"))
+          childIds = Array[NodeId](nodeId("leaf-1"), nodeId("child-port")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -69,7 +73,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("abc"),
           name = "Short ID",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess)
@@ -79,7 +84,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("long-id"),
           name = "Long ID",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess)
@@ -89,7 +95,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("ops-risk_2024"),
           name = "Ops Risk",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess)
@@ -114,7 +121,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -124,7 +132,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "   ",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -134,7 +143,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ab",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -145,7 +155,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = longId,
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -155,7 +166,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ops risk",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -165,7 +177,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ops.risk/2024",
           name = "Valid Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -178,7 +191,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -188,7 +202,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "   ",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -199,7 +214,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = longName,
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -212,7 +228,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "Valid Name",
-          childIds = null
+          childIds = null,
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -222,7 +239,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "Valid Name",
-          childIds = Array.empty[NodeId]
+          childIds = Array.empty[NodeId],
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -232,7 +250,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "Valid Name",
-          childIds = Array.tabulate(1000)(i => nodeId(s"leaf-$i"))
+          childIds = Array.tabulate(1000)(i => nodeId(s"leaf-$i")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess)
@@ -242,7 +261,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("valid-id"),
           name = "Valid Name",
-          childIds = Array.tabulate(1001)(i => nodeId(s"leaf-$i"))
+          childIds = Array.tabulate(1001)(i => nodeId(s"leaf-$i")),
+          parentId = None
         )
 
         assertTrue(
@@ -259,7 +279,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "ab",  // Too short
           name = "",  // Empty
-          childIds = Array.empty[NodeId]  // Empty array
+          childIds = Array.empty[NodeId],  // Empty array
+          parentId = None
         )
 
         assertTrue(result.isFailure)
@@ -269,7 +290,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "x",                    // Too short (< 3 chars)
           name = "",                   // Empty
-          childIds = Array.empty[NodeId]  // Empty - invalid
+          childIds = Array.empty[NodeId],  // Empty - invalid
+          parentId = None
         )
         
         result.toEither match {
@@ -290,7 +312,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "this-id-is-way-too-long-and-exceeds-thirty-characters",  // > 30 chars
           name = "Valid Name",
-          childIds = null  // Null - invalid
+          childIds = null,  // Null - invalid
+          parentId = None
         )
         
         result.toEither match {
@@ -310,7 +333,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = "invalid id!",          // Contains spaces and special chars
           name = "a" * 51,              // > 50 chars
-          childIds = Array.empty[NodeId]
+          childIds = Array.empty[NodeId],
+          parentId = None
         )
         
         result.toEither match {
@@ -334,7 +358,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -345,7 +370,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -360,7 +386,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",
-          childIds = childIds
+          childIds = childIds,
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -373,7 +400,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",
-          childIds = Array[NodeId](nodeId("leaf-1"))
+          childIds = Array[NodeId](nodeId("leaf-1")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -387,7 +415,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.createFromStrings(
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
-          childIds = Array(idStr("leaf-1"), idStr("leaf-2"))
+          childIds = Array(idStr("leaf-1"), idStr("leaf-2")),
+          parentId = None
         )
 
         assertTrue(result.isSuccess) &&
@@ -398,7 +427,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         val result = RiskPortfolio.createFromStrings(
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
-          childIds = Array("ab", idStr("valid-id"))  // "ab" is not a valid ULID
+          childIds = Array("ab", idStr("valid-id")),  // "ab" is not a valid ULID
+          parentId = None
         )
 
         assertTrue(result.isFailure)
