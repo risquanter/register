@@ -122,12 +122,12 @@ fail. A model that admits a zero residual has removed control failure from the
 analysis, which is the thing a risk register exists to keep visible. The exclusion
 is methodological, not arithmetic.
 
-The three scale operations carry this in their type. `LikelihoodTransform.Scale`,
-`DistributionTransform.ScaleSeverity` and `ResultTransformSpec.ScaleLosses` all
+The three scale operations carry this in their type. `RelativeLikelihood.Scale`,
+`RelativeSeverity.ScaleSeverity` and `ResultTransformSpec.ScaleLosses` all
 take a `RetentionFactor` — above 0 and at most 1 — so a factor of zero is rejected
 at the boundary with a message, and a factor above 1 is rejected too, because a
-figure that increases is stated absolutely through an `Override` rather than as a
-factor.
+figure that increases is stated absolutely through an `AbsoluteReplacement` rather
+than as a factor.
 
 A risk that genuinely no longer exists is not a mitigated risk: the system was
 decommissioned, the data deleted, the business line exited. That is removal of the
@@ -137,7 +137,8 @@ transform applied to a node that remains.
 The rule has two enforcement points, because the paths to a zero residual divide
 on whether the parameter annihilates on its own.
 
-**A type at the boundary, where the parameter decides it.** `Override` takes a
+**A type at the boundary, where the parameter decides it.**
+`AbsoluteReplacement.Likelihood` takes a
 `ResidualProbability` and `CapLosses` a `PositiveLong`, so a probability of zero
 and a cap of zero are refused before any handler runs. `ResidualProbability` is
 deliberately narrower than `OccurrenceProbability`: an author may declare a leaf

@@ -487,8 +487,8 @@ The five sites, named once:
 | Percentile and loss counts equal | A, B, D | all agree | unwritable — one sequence of pairs (`LSA-D-3`) |
 | At least 2 anchors | B (`MinPercentiles`, `:123`), D (`:139`) | theirs; A requires only non-empty | `MinAnchors = 2` |
 | At most 20 anchors | **B only** (`MaxPercentiles`, `:124`) | B's | `MaxAnchors = 20` |
-| Term count at least 2 | **A only** (`:84`) | A's | `MetalogTerms` |
-| Term count at most 20 | none explicitly | the fitter's own | `MetalogTerms` |
+| Term count at least 2 | **A only** (`:84`) | A's | `MetalogTermCount` |
+| Term count at most 20 | none explicitly | the fitter's own | `MetalogTermCount` |
 | Term count at most the anchor count | A (`:82`), B and E (`requireTermsWithinPercentiles`, `:344-358`) | all agree | `DistributionShape.Expert.create` |
 | Both lognormal bounds present | A (`:96-104`), B (`:306-308`), E | all agree | unwritable — the case holds one `LossRange` |
 | Both bounds strictly positive | A, B (`PositiveLong`), D (`:181`) | all agree | `PositiveLong`, `LossRange`'s field type |
@@ -523,7 +523,7 @@ public static void validateInputs(int terms) {
 for this plan's own test.** §1.4 says the type is correct when `interpret` is
 total up to genuine fit failure, and a term count of one would otherwise satisfy
 §13's two-arm criterion while being a shape refusal wearing a fit failure's name.
-`MetalogTerms` closes it, and the `Option[PositiveInt]` this plan carried until
+`MetalogTermCount` closes it, and the `Option[PositiveInt]` this plan carried until
 this audit would not have.
 
 **A scaled lower bound is the one case where the explicit check is kept, and the
@@ -638,7 +638,7 @@ own source rather than from this project:
 // The metalog fit's term count. Both bounds are the fitter's own precondition:
 // Metalog.validateInputs throws IllegalArgumentException outside [2, MAX_TERMS],
 // and MAX_TERMS is 20. A fit with fewer than two terms has no curve to describe.
-type MetalogTerms = Int :| (GreaterEqual[2] & LessEqual[20])
+type MetalogTermCount = Int :| (GreaterEqual[2] & LessEqual[20])
 ```
 
 ### 5.1 One anchor
@@ -681,10 +681,10 @@ final case class QuantileAnchors private (values: Vector[QuantileAnchor]):
     *
     * The `refineUnsafe` is sound here and nowhere else in this plan: the only
     * constructor bounds the anchor count to [2, 20], so the result is inside
-    * `MetalogTerms`' own [2, 20]. ADR-001 names `.refineUnsafe` in production as
+    * `MetalogTermCount`' own [2, 20]. ADR-001 names `.refineUnsafe` in production as
     * a smell because it crashes on invalid input; it cannot be reached with
     * invalid input from here. */
-  def termsToFit: MetalogTerms = values.length.refineUnsafe
+  def termsToFit: MetalogTermCount = values.length.refineUnsafe
 
 object QuantileAnchors:
   /** The metalog fitter's valid term range is two to twenty, and a fit cannot
@@ -745,7 +745,7 @@ object DistributionShape:
     * anchors. `terms` absent means fit with `anchors.termsToFit`. */
   final case class Expert private (
     anchors: QuantileAnchors,
-    terms:   Option[MetalogTerms]
+    terms:   Option[MetalogTermCount]
   ) extends DistributionShape
 
   object Expert:
@@ -753,12 +753,12 @@ object DistributionShape:
       * use more terms than it has points. An absent count is always valid,
       * because `anchors.termsToFit` derives one that cannot exceed the count.
       *
-      * This is the whole of the rule, because `MetalogTerms` carries the range
+      * This is the whole of the rule, because `MetalogTermCount` carries the range
       * [2, 20] and `QuantileAnchors` carries the count [2, 20]. What is left is
       * the one comparison no field type can hold. */
     def create(
       anchors:  QuantileAnchors,
-      terms:    Option[MetalogTerms],
+      terms:    Option[MetalogTermCount],
       location: ErrorLocation
     ): Validation[ValidationError, Expert]
 
@@ -867,7 +867,7 @@ sealed trait DistributionParams
 final case class ExpertDistributionParams(
   percentiles: Array[Double],
   quantiles:   Array[Double],
-  terms:       MetalogTerms
+  terms:       MetalogTermCount
 ) extends DistributionParams
 
 @jsonHint("lognormal")
@@ -881,7 +881,7 @@ object DistributionParams:
   given codec: JsonCodec[DistributionParams] = DeriveJsonCodec.gen[DistributionParams]
 ```
 
-`terms` tightens from `PositiveInt` to `MetalogTerms`, which is the strictest
+`terms` tightens from `PositiveInt` to `MetalogTermCount`, which is the strictest
 type that still describes the value: the record states what the simulator
 consumed, and what it consumed always passed the fitter's own [2, 20]
 precondition. `ADR-038` §3 — "No Raw Primitive Where a Refined Type Exists" —
@@ -891,7 +891,7 @@ signature in
 reason §5.6 already gives: each names `NodeProvenance` as a whole.
 
 Each case keeps its own existing `Raw`-based codec, with the refinement helper
-changed from `ValidationUtil.refinePositiveInt` to one for `MetalogTerms`
+changed from `ValidationUtil.refinePositiveInt` to one for `MetalogTermCount`
 (`Provenance.scala:50-60` is the current site); the
 derivation above adds the tag above them and replaces only the hand-written
 encoder and the `<>` fallback decoder. **Whether `DeriveJsonCodec.gen` composes
@@ -960,58 +960,55 @@ object RiskLeaf:
 `Option[T] = None`, which `.claude/rules/scala-style.md` names and this is not,
 so it is stated here rather than left to look like an oversight.
 
-**The cache-key projection.** `LeafSimContent` keeps its eight flat fields
-unchanged, because §9 holds every emitted byte fixed. What changes is that `from`
-becomes the one site that flattens the coproduct back into them:
+**The cache-key projection.** The 2026-10-22 ruling recorded in §9 rewrites the
+cache-key preimage to the coproduct form, so `LeafSimContent` holds the shape as
+one field and renders it through its own private raw coproduct. The projection
+is then total with no field to leave absent:
 
 ```scala
+final case class LeafSimContent(
+  seedVarId:   SeedVarId.SeedVarId,
+  probability: OccurrenceProbability,
+  shape:       DistributionShape
+)
+
 object LeafSimContent:
-  /** Project the simulation-relevant fields out of a leaf. The flat shape is a
-    * storage contract, so this fills the same eight fields in the same order
-    * the encoder has always emitted. */
-  def from(leaf: RiskLeaf): LeafSimContent = leaf.shape match
-    case DistributionShape.Expert(anchors, terms) =>
-      LeafSimContent(
-        seedVarId        = leaf.seedVarId,
-        probability      = leaf.probability,
-        distributionType = IronConstants.Expert,
-        percentiles      = Some(anchors.percentiles),
-        quantiles        = Some(anchors.losses),
-        minLoss          = None,
-        maxLoss          = None,
-        terms            = terms
-      )
-    case DistributionShape.Lognormal(bounds) =>
-      LeafSimContent(
-        seedVarId        = leaf.seedVarId,
-        probability      = leaf.probability,
-        distributionType = IronConstants.Lognormal,
-        percentiles      = None,
-        quantiles        = None,
-        minLoss          = Some(bounds.min),
-        maxLoss          = Some(bounds.max),
-        terms            = None
-      )
+  /** Project the simulation-relevant fields out of a leaf. The shape carries
+    * its own mode, so there is nothing to flatten and no field to leave
+    * absent. */
+  def from(leaf: RiskLeaf): LeafSimContent =
+    LeafSimContent(leaf.seedVarId, leaf.probability, leaf.shape)
 ```
 
-The two `None` groups are where `LSA-D-5` bites; §9 states why.
+The preimage's own bytes are produced by a private `ShapeRaw` coproduct inside
+this companion rather than by the shape's wire codec, which is what keeps the
+cache key independent of the wire (§9).
 
-**The leaf's codec.** `RiskLeafRaw` (`RiskNode.scala:435-447`) keeps its eleven
-flat primitive fields in their current declaration order, which is what makes §9
-true. The decoder gains the case split `Distribution.create` performs today, and
-routes through the shape's own gates:
+**The leaf's codec.** `RiskLeafRaw` holds the shape as one field rather than six
+flat primitives, so the record carries the coproduct and the shape's own codec
+does the mode split. The leaf's decoder then refines only the four primitives
+that are its own:
 
 ```scala
-given decoder: JsonDecoder[RiskLeaf] = RiskLeafRaw.rawCodec.decoder.mapOrFail: raw =>
-  // raw.distributionType decides which gate runs; each returns Validation, and
-  // the leaf's own create refines the remaining four primitives.
-  shapeFromRaw(raw).flatMap(shape => RiskLeaf.create(...)).toEither.left.map(...)
+private case class RiskLeafRaw(
+  id: String,
+  name: String,
+  parentId: Option[String],
+  probability: Double,
+  shape: DistributionShape,
+  seedVarId: Long
+)
 
-/** The store-read and request-decode boundary for the shape: the one place two
-  * parallel arrays are zipped into anchors, so the pairing rule lives here
-  * (§4.2) rather than in three domain constructors. */
-private def shapeFromRaw(raw: RiskLeafRaw): Validation[ValidationError, DistributionShape]
+/** Custom decoder that uses the smart constructor for cross-field validation.
+  * The shape arrives already gated: `DistributionShape`'s decoder routes
+  * through its own smart constructors, so this refines only the four
+  * remaining primitives. */
+given decoder: JsonDecoder[RiskLeaf] = RiskLeafRaw.rawCodec.decoder.mapOrFail(raw => ...)
 ```
+
+The pairing rule — that the two parallel sequences describe the same points —
+therefore lives in `QuantileAnchors.fromPairedSequences` (§4.2) and is reached
+from the shape's decoder, not from the leaf's.
 
 **The browser's shape parse.** `RiskLeafFormState.currentShapeValidation`
 (`:387-411`) today runs four `mode match` expressions to decide which fields to
@@ -1264,7 +1261,8 @@ object LeafStageSpec:
   def applyTo(spec: LeafStageSpec, params: LeafParams): Validation[ValidationError, LeafParams]
 ```
 
-The leaf is then rebuilt once, after the fold, by `copy`. The *n* identifier and
+The leaf is then rebuilt once, after the fold, by `RiskLeaf.fromValidated` —
+`copy` is private because the primary constructor is (§5.0). The *n* identifier and
 name refinements become zero, and the monoid is visible in the signature.
 
 The arrow is declared on `LeafStageSpec` rather than on a transform type, because
@@ -1479,9 +1477,9 @@ at `Mitigation.scala:87` — so a stored mitigation is decoded without
 guard the store-read path at all. That is the shape `ADR-039` §3 names: "A
 composite goes through its smart constructor, not its field types alone." Under
 this ruling the gap is not closed by adding a call but by the state becoming
-unrepresentable: a decoder reading `stage: "leaf"` with no stamp can only produce
-`LeafRelative`, and one reading a stamp and an anchor can only produce
-`LeafAbsolute`.
+unrepresentable: a decoder reading `stage: "leafRelative"` has no field through
+which a stamp could arrive, and one reading `stage: "leafAbsolute"` cannot
+complete without both the stamp and the anchor.
 
 #### What this makes unwritable
 
@@ -1504,21 +1502,27 @@ cases are still arrows `LeafParams => F[LeafParams]`, and composition is still
 Kleisli — but the law `Override(s) ∘ x = Override(s)` is now provable by matching
 on the spec rather than by matching on a component inside a product.
 
-#### The one cost, and the route through it
+#### The one cost, which is paid rather than avoided
 
 Mitigations are persisted: `RiskTreeRepositoryIrmin.scala:123` writes
 `mitigations/<id>` as `m.toJson`. So unlike the shape change of §9, this one
 reaches a stored format.
 
-The same device applies. `MitigationSpec.Raw` (`Mitigation.scala:61-67`) is
-already a flat product carrying `stage`, `transform`, `overrideBaseStamp`,
-`overrideAnchor` and `pipeline`. A decoder can read `stage: "leaf"` with the
-stamp and anchor present as `LeafAbsolute` and absent as `LeafRelative`, and an
-encoder can write the same two fields back, so stored mitigations decode and
-re-encode unchanged. **This is the route, not a verified fact** — the decoder has
-not been written. The check that settles it already exists:
-`MitigationPersistenceItSpec`'s "an override mitigation round-trips with its
-overrideBaseStamp intact". §13 lists it.
+A flat `Raw` record carrying `stage`, `transform`, `overrideBaseStamp`,
+`overrideAnchor` and `pipeline` was the route considered first, on the reasoning
+that a decoder could read `stage: "leaf"` with the stamp and anchor present as
+`LeafAbsolute` and absent as `LeafRelative`. §13's gate refused it, so the cost
+is paid rather than avoided: the three cases are tagged by the serialiser.
+`@jsonDiscriminator("stage")` names the tag field and a `@jsonHint` per case
+gives the spelling — `leafRelative`, `leafAbsolute` and `result` — so the two
+leaf cases are distinguishable from the tag alone rather than by which fields
+happen to be present. That is what ADR-037 prescribes for a closed set, and it
+is the device the shape and both component coproducts use.
+
+The consequence is a stored-format migration. A mitigation blob written before
+this change says `stage: "leaf"` and does not decode. `LSA-D-5` records the
+ground that makes the migration free of work: the environment is a development
+one and nothing stored predates this change.
 
 #### One observation this ruling does not settle
 
@@ -1639,7 +1643,7 @@ the file holding the strictest variant of five rules, and each lands somewhere
 narrower rather than being dropped: the percentile and loss element checks
 (`:65-72`) become `Probability` and `PositiveDouble`, the two ordering checks
 (`:77-80`) become `QuantileAnchors.create`'s rule, the term-count lower bound
-(`:84`) becomes `MetalogTerms`, and the term-count relation (`:82`) becomes
+(`:84`) becomes `MetalogTermCount`, and the term-count relation (`:82`) becomes
 `DistributionShape.Expert.create`. `requireStrictlyIncreasing` (`:27-34`) moves
 with them; its `arr.length >= 2` guard becomes unnecessary, because `MinAnchors`
 makes a shorter sequence unconstructible.
@@ -1693,10 +1697,34 @@ decoder for `DistributionParams` (`:83-96`), which a derived discriminated codec
 replaces. The field goes only after the tag moves inside the union — §5.6 states
 why that order is not optional.
 
-In `ValidationErrorCode.scala`: whether `UNSUPPORTED_DISTRIBUTION_TYPE`,
-`INVALID_EXPERT_PARAMS` and `INVALID_LOGNORMAL_PARAMS` retain any construction
-site is to be re-counted during implementation; each is currently raised only by
-arms this part deletes.
+In `ValidationErrorCode.scala`: the three mode-related codes were re-counted
+after the arms this part deletes were gone, and the count settled how each is
+used rather than whether it survives. One rule covers every site.
+
+> A refusal about a mode's parameter set as a whole carries that mode's code. A
+> refusal about one named field carries the aspect code and the field's
+> location.
+
+The second half is why the authoring boundary keeps `INVALID_RANGE`,
+`INVALID_COMBINATION` and `CONSTRAINT_VIOLATION`: each of those refusals names
+the element at fault, which a mode code cannot. The first half reaches two kinds
+of site, and both had been reporting the mode they concern inconsistently.
+
+A **fit refusal** is about one mode's parameters, and the remedy differs by mode:
+an infeasible metalog system is answered by moving an anchor or lowering the term
+count, a lognormal by moving a bound. So `Simulator`'s two arms carry
+`INVALID_EXPERT_PARAMS` and `INVALID_LOGNORMAL_PARAMS` rather than one shared
+code, and `DistributionPreviewService`'s expert arm carries the expert code to
+match its lognormal sibling, which already did.
+
+A **representability refusal** from a severity scaling is the same condition read
+against each mode's floor — a factor small enough to take a severity figure below
+what its type holds. `RiskLeafTransform.scaleSeverity` reports it per mode, with
+the message naming the smallest factor that still applies to that leaf.
+
+`DISTRIBUTION_FIT_FAILED` has no site left under that rule. It named the stage
+that failed rather than what was wrong, which is the information a caller cannot
+act on.
 
 ---
 
@@ -1727,12 +1755,21 @@ Three serialized forms touch the shape, and each is produced by an intermediate
   incorrect results)." It is guarded by a byte-stability snapshot test in
   `LeafSimContentSpec`.
 
-The first two keep their current flat declarations, and the domain type becomes a
-coproduct above them: the leaf's decoder gains the case split that
-`Distribution.create` performs today, and its encoder writes the same keys with
-the same values. So there is no stored-tree migration, no client-visible wire
-change, and the Irmin blob hashes — the second of `ADR-032`'s two hash
-relations — stay identical because the leaf's bytes do.
+The wire request keeps its flat declaration, because a caller states the two
+sequences and the pairing is applied on decode. The stored and returned leaf does
+not: `RiskLeafRaw` holds the shape as one `DistributionShape` field, so the
+coproduct is the serialised form in storage and on the wire alike, and the shape's
+own codec is the single gate for the store-read path, the request path and the
+browser.
+
+So the leaf's bytes change, and two consequences follow. The Irmin blob hash —
+the second of `ADR-032`'s two hash relations — changes with them, and a leaf
+stored before this change does not decode, because its six shape fields sit at
+the top level where the decoder now expects `shape`. Both are free of work here
+for the reason `LSA-D-5` records: the environment is a development one and nothing
+stored predates this change. Neither is free of consequence, which is why the
+coproduct is stated as the stored form rather than described as byte-identical to
+what it replaced.
 
 **The cache key is the one that moves.** `LeafSimContent` now holds the shape as
 one `DistributionShape` field and renders it through its own private `Raw`, which
@@ -2235,7 +2272,7 @@ constructor raising it changes.
 
 **The strictness audit's two findings each get a test, and both fail before the
 change** (§4.5). A term count of one with five anchors is refused by
-`MetalogTerms` at the boundary; today it is accepted by `RiskLeaf.create` and
+`MetalogTermCount` at the boundary; today it is accepted by `RiskLeaf.create` and
 surfaces as `DISTRIBUTION_FIT_FAILED` from the fitter on a stored node, so the
 test pins which layer refuses it as much as that it is refused. And a leaf
 submitted as lognormal with expert arrays is refused by `shapeFromRaw`
@@ -2249,12 +2286,13 @@ and the term-count lower bound — exist in only one of the five current sites, 
 a test that passes against the weak variant would hide the regression this audit
 exists to prevent.
 
-**The mitigation format specifically**, which is `LSA-D-1`'s one cost.
-`MitigationPersistenceItSpec`'s "an override mitigation round-trips with its
-overrideBaseStamp intact" must pass **unmodified**. If it needs editing, the
-`Raw`-level route described at the end of §6.6 does not hold and the split is a
-stored-format migration rather than a free change. That test is the gate on the
-ruling, not a confirmation of it.
+**The mitigation format specifically**, which is `LSA-D-1`'s one cost. The gate
+was `MitigationPersistenceItSpec`'s "an override mitigation round-trips with its
+overrideBaseStamp intact" passing unmodified, and it fired: the spec's fixtures
+had to be rebuilt for the two new cases. So the `Raw`-level route described at
+the end of §6.6 does not hold, and the split is a stored-format migration rather
+than a free change. The spec also could not have settled it on its own, because
+it writes and reads through one process rather than against a byte fixture.
 
 **The provenance record's new codec** (`LSA-D-2`, §5.6). A round-trip test
 pinning the discriminated form: each case encodes with its tag, decodes back to
@@ -2290,12 +2328,12 @@ sbt "serverIt/test"
 
 | Record | What this plan touches | Status |
 |---|---|---|
-| ADR-001 (validation strategy) | the smart constructors, the construction surface | **Compliant, and it closes three violations.** §5 of the record is the governing clause — "Aggregate constructors are private — the smart constructor is the only gate", generalised "to every aggregate" — and §5.0 of this plan applies its test type by type. §7.1 lists the three current violations: `Distribution.apply`, `RiskLeaf.fromValidated`'s six positional shape fields, and the `TreeBuilderState.scala:447` call that uses the first. §7.2 removes all three, and the gate ends up behind the private constructor of each of the four types that hold a relational rule — `QuantileAnchors`, `LossRange`, `DistributionShape.Expert` and `MitigationSpec.ResultStage` — which is also where `.copy` stops being a second path in. **One named smell is used once and declared here rather than slipped in:** the record lists "❌ Bypassing with `.refineUnsafe` in production", and `QuantileAnchors.termsToFit` (§5.2) uses it. It is sound at exactly that site and nowhere else, because the only constructor bounds the anchor count to [2, 20] so the result is inside `MetalogTerms`' own [2, 20]. It is also not new: `Simulator.scala:150` performs the same `refineUnsafe` today, sound for the same reason but with the reason unstated, and the second copy of the derivation at `DistributionPreviewService.scala:49` computes a raw `Int` and skips refinement altogether. So the change goes from one unproven use plus one unrefined value to a single use carrying its proof. No amendment needed; the record already states the rule this makes true. |
+| ADR-001 (validation strategy) | the smart constructors, the construction surface | **Compliant, and it closes three violations.** §5 of the record is the governing clause — "Aggregate constructors are private — the smart constructor is the only gate", generalised "to every aggregate" — and §5.0 of this plan applies its test type by type. §7.1 lists the three current violations: `Distribution.apply`, `RiskLeaf.fromValidated`'s six positional shape fields, and the `TreeBuilderState.scala:447` call that uses the first. §7.2 removes all three, and the gate ends up behind the private constructor of each of the four types that hold a relational rule — `QuantileAnchors`, `LossRange`, `DistributionShape.Expert` and `MitigationSpec.ResultStage` — which is also where `.copy` stops being a second path in. **One named smell is used once and declared here rather than slipped in:** the record lists "❌ Bypassing with `.refineUnsafe` in production", and `QuantileAnchors.termsToFit` (§5.2) uses it. It is sound at exactly that site and nowhere else, because the only constructor bounds the anchor count to [2, 20] so the result is inside `MetalogTermCount`' own [2, 20]. It is also not new: `Simulator.scala:150` performs the same `refineUnsafe` today, sound for the same reason but with the reason unstated, and the second copy of the derivation at `DistributionPreviewService.scala:49` computes a raw `Int` and skips refinement altogether. So the change goes from one unproven use plus one unrefined value to a single use carrying its proof. No amendment needed; the record already states the rule this makes true. |
 | ADR-037 (in-code constants) | the mode discriminator, the confidence level, the derived term count, the defaulted parameters | **Compliant.** The `expert`/`lognormal` strings stop being a domain field and survive only as the persisted spelling, which is the record's §2 carve-out for a string contracted with something other than the serialiser. The bare `0.90` at `Simulator.scala:190` becomes `LognormalConfidenceInterval` with its origin stated, and the twice-written `math.min(n, 4)` becomes the single `termsToFit` method — whose body is now the anchor count, because the `4` had no origin to state and the rule obliges one. All eight forbidden `Option[T] = None` parameters in the two replaced files go, five of them unwritable under the new type and three as `boyscout` removals — §4.3a has the table and distinguishes them from the derived value, which is a method and not a parameter default. |
 | ADR-018 (nominal wrappers) | `QuantileAnchor`, `QuantileAnchors`, `LossRange` | **Compliant.** Each is a nominal `case class` over refined types, which is the record's prescribed pattern, and none is a credential — so `ADR-022`'s opposing `final class` rule does not apply, per the Layer 3 collision row in the `adr-constraints` skill. |
-| ADR-038 (response wire shapes) | `DistributionShapeRequest`, the leaf codec, the mitigation codec | **Compliant.** §9 keeps the wire shape inside the domain type's companion with the decoder routing through the smart constructor, which is the record's §1 pattern, and the module is cross-compiled so it holds on both sides of the wire at once. `LSA-D-1` applies the same device to `MitigationSpec.Raw`, so the split reaches no stored or wire byte — gated by the integration test §13 names. The finding this row once carried open — `NodeProvenance.distributionType` holding a widened `DistributionType` as a raw `String` — is closed by §5.6 deleting that field, so the record's "no raw primitive where a refined type exists" rule has nothing left to catch here. §16.3 applies the same rule to `DistributionPreviewResponse.distributionType`, which cannot be deleted because a client reading the curve needs the mode, and which takes the refined type instead. |
+| ADR-038 (response wire shapes) | `DistributionShapeRequest`, the leaf codec, the mitigation codec | **Compliant.** §9 keeps the wire shape inside the domain type's companion with the decoder routing through the smart constructor, which is the record's §1 pattern, and the module is cross-compiled so it holds on both sides of the wire at once. `LSA-D-1` tags the spec coproduct by its discriminator instead, which §13's gate selected and which the record's §2 prescribes for a closed set; it reaches the stored mitigation's bytes, and §6.6 states that consequence. The finding this row once carried open — `NodeProvenance.distributionType` holding a widened `DistributionType` as a raw `String` — is closed by §5.6 deleting that field, so the record's "no raw primitive where a refined type exists" rule has nothing left to catch here. §16.3 applies the same rule to `DistributionPreviewResponse.distributionType`, which cannot be deleted because a client reading the curve needs the mode, and which takes the refined type instead. |
 | ADR-039 (trust-boundary ingress) | the two zip boundaries | **Compliant, and it strengthens the ingress.** Under `LSA-D-3`'s Option A the pairing and ordering rules are enforced at the decoder, which is the border the record names, rather than three times inward of it. |
-| ADR-032 (content equality relations) | the leaf cache key, the Irmin blob hash | **Compliant, and the record is amended.** The Irmin blob relation is untouched, because the leaf's own stored bytes are unchanged (§9). The domain-content relation's projection moves: `LeafSimContent` holds one `DistributionShape` and nests its keys under `shape`, so the preimage and therefore the key changes once. The record was amended in the same pass to state the projection in its coproduct form and to add the rule that the projection keeps its own private encoder rather than delegating to the wire codec. |
+| ADR-032 (content equality relations) | the leaf cache key, the Irmin blob hash | **Compliant, and the record is amended.** Both relations move, because the leaf's stored bytes now carry the shape as one nested field (§9). The Irmin blob relation is unchanged as a *relation* — it still hashes the stored bytes — and the hashes it produces differ, which costs nothing while nothing stored predates the change (`LSA-D-5`). The domain-content relation's projection moves too: `LeafSimContent` holds one `DistributionShape` and nests its keys under `shape`, so the preimage and therefore the key changes once. The record was amended in the same pass to state the projection in its coproduct form and to add the rule that the projection keeps its own private encoder rather than delegating to the wire codec. |
 | ADR-014 (simulation result caching) | the leaf cache key | **Compliant.** The key moves once, which the record permits — it forbids *invalidation*, not a deliberate change of the hashed projection. The cache is an in-memory `Ref`, so a moved key costs one re-simulation per leaf after deployment and no stale entry can be served, because a key that is absent is recomputed rather than guessed. |
 | ADR-034 (mitigation valuation model) | the leaf-stage transform algebra, and the no-elimination rule's enforcement points | **Compliant on substance, and the record is amended.** This plan touches the parameter-stage side only. The two folds, the result-stage pipeline and the no-elimination rule itself are untouched: the rule is carried by `RetentionFactor` and `ResidualProbability`, and §6.6 keeps both on the cases that replace the ones naming them. §6.5 makes the parameter-stage side match the standard the result-stage side already meets. **Amendment owed:** §6 names the rule's three type-level enforcement points — "`LikelihoodTransform.Scale`, `DistributionTransform.ScaleSeverity` and `ResultTransformSpec.ScaleLosses` all take a `RetentionFactor`" — and `LSA-D-1` renames the first two; the same section's "stated absolutely through an `Override`" names a case that becomes `AbsoluteReplacement`. Two names and one reference, edited in the same pass. |
 | ADR-003 (seeding and provenance) | `NodeProvenance`, and the endpoint that will serve it | **Compliant on substance, and the record is amended.** `LSA-D-2` kept the record's parameter shape, so Decision 4's audit payload still reports what the simulation consumed — the resolved term count and the confidence level — which is what reproducibility requires. §5.6 removes the redundant `distributionType` field and tags the union instead; that changes the payload's tagging but not what it reports, and it is free today because nothing decodes the record yet. **Amendment owed:** Decision 4 writes `NodeProvenance` out verbatim including `distributionType: String`, so that code block is edited in the same pass — see the amendment list below. **One presentation is owed and not made:** [`PLAN-PROVENANCE-ENDPOINT.md`](PLAN-PROVENANCE-ENDPOINT.md) quotes `NodeProvenance` verbatim at `:53-65` including the deleted field. It is approved and unimplemented, so that amendment waits on the user; none of its signatures is affected, because each names the record as a whole. |
@@ -2314,7 +2352,7 @@ checked against the plan rather than assumed:
 | Record | Verdict |
 |---|---|
 | ADR-011 (import conventions) | Unused imports go as a `boyscout` obligation on every file the change edits. |
-| ADR-010 (error handling) | Every new gate returns `Validation[ValidationError, T]` and accumulates. Nothing moves to an exception or to a string match. Whether `UNSUPPORTED_DISTRIBUTION_TYPE`, `INVALID_EXPERT_PARAMS` and `INVALID_LOGNORMAL_PARAMS` retain a construction site is re-counted during implementation (§8). |
+| ADR-010 (error handling) | Every new gate returns `Validation[ValidationError, T]` and accumulates. Nothing moves to an exception or to a string match. The three mode-related codes were re-counted and §8 states the rule that resulted: a refusal about a mode's parameter set carries that mode's code, and a refusal about one named field carries the aspect code with the field's location. |
 | ADR-009 (risk aggregation) | Untouched: the change is to a leaf's input shape, not to `TrialOutcomes` or `PortfolioLosses`. |
 | ADR-015 (the cached-result resolver) | Untouched, and nothing reintroduces the invalidation its retired sections describe. |
 | ADR-019 (frontend architecture) | The seven app files keep their state layering. Replacing the constant comparison at `DistributionSpecBuilder.scala:147` with a two-arm match is the record's Pattern 6 — "a small set of named phases … modeled as a sealed enum/ADT" — rather than a departure from it. |
@@ -2323,7 +2361,7 @@ checked against the plan rather than assumed:
 | ADR-035 (error leakage) | No new wire error case, and no message gains an internal value. |
 | ADR-036 (confidential identifiers) | `LeafAbsolute.anchor` is a `NodeId`, which is not one of the record's confidential identifiers; nothing here names a `WorkspaceId`. |
 | ADR-002 (logging and telemetry) | No log line is added, removed or changed. |
-| ADR-032 (content equality relations) | Already in the table above, and re-verified: §1 writes `LeafSimContent` out with its eight flat fields, and §5.7 keeps that declaration, so the record's own code block stays accurate. |
+| ADR-032 (content equality relations) | Already in the table above, and re-verified: the record's §1 writes `LeafSimContent` out, so the 2026-10-22 ruling that rewrites the preimage to the coproduct form (§9, §5.7) makes that code block stale and the record is amended in the same pass. |
 
 **ADR-004a and ADR-007 do not bear.** They govern the storage layout and
 scenario branching, and §9 is the reason the repository needs no edit:
@@ -2351,6 +2389,24 @@ and no new collision is created.
 4. **ADR-029 §3** — the Irmin GraphQL row's reasoning stops citing
    `DistributionType` as a leaf field and states that the mode spelling is a
    matched literal.
+
+### 14.3 Terminology impact
+
+Four headings in `docs/user/TERMINOLOGY.md` are made stale by this plan's
+decisions, each paired here with the decision that makes it so. The glossary
+carries the replacement wording and no record of the revision.
+
+| Glossary heading | The decision that makes it stale |
+|---|---|
+| Loss Shape | `LSA-D-3`. The entry has to state the two modes as the cases of a coproduct, with the anchor sequence and its bounds, because the concept it previously named was a product with optional fields. |
+| Relative and Absolute Statements | `LSA-D-1`. The split of the parameter-stage spec into two cases makes the distinction between the two kinds of statement a property of the type rather than a rule over one, and the evidence fields become required fields of one case. |
+| Product and Coproduct | §1.1–1.2. The argument for preferring a coproduct is what both `LSA-D-1` and `LSA-D-3` rest on, and the glossary had no entry stating it. |
+| How Parameter-Stage Mitigations Compose | §6.4. The Kleisli composition with its identity arrow is what replaces the previous account of how two parameter-stage mitigations combine. |
+
+No other term is affected. The result-stage vocabulary, the two valuations, the
+fold and the homomorphism are untouched, because this plan's subject is the type
+of the shape a leaf consumes rather than the type of the value a fold returns
+(§15).
 
 ---
 
@@ -2606,16 +2662,30 @@ the replacement does not land, and `nodeContent` keeps its JSON route with a
 corrected comment. The comment correction is unconditional either way, because
 the current wording names two fields that no longer exist.
 
-**`Schema.any`.** Four sites declare a Tapir schema as `Schema.any`, which
-publishes the type as an unconstrained object: `Mitigation.scala:287` and `:303`,
-`Provenance.scala:103`, and `DistributionPreviewResponse.scala:38`. Replacing one
-with `Schema.derived` changes the generated interface description, which is
-Decision Trigger 1, and whether each type derives at all is **not verified** —
-each holds Iron opaque types and one holds a `java.time.Instant`. The rule for
-this pass: attempt `Schema.derived` for each, and keep the result only where it
-compiles and the published document gains the type's real shape without renaming
-a field or changing whether one is required. Any site that fails either half
-keeps `Schema.any` and is reported, not forced.
+**`Schema.any`.** Four sites declared a Tapir schema as `Schema.any`, which
+publishes the type as an unconstrained object: the two in `Mitigation.scala`, the
+one in `Provenance.scala`, and the one in `DistributionPreviewResponse.scala`.
+All four now derive, and none survives.
+
+Two facts came out of doing it, and both generalise beyond these sites.
+
+**An auto-derivation import scoped to a `given`'s own body widens nothing
+else.** `scala-style.md` forbids a wildcard import that widens implicit scope
+unexpectedly, and a file-level `import sttp.tapir.generic.auto.*` does exactly
+that. Placed inside the body of the `given` that needs it, its scope is that
+body, which is what makes the derivation available without the cost the rule
+names.
+
+**Auto-derivation does not descend into a sealed trait from a record that holds
+one.** So every coproduct in a chain needs a declared `Schema` of its own:
+`MitigationSpec` needs one, and reaching it needs `RelativeLikelihood`,
+`RelativeSeverity`, `AbsoluteReplacement` and `ResultTransformSpec` to have
+theirs. `NodeProvenance` needs one on `DistributionParams`. The chain then
+bottoms out at refined types, and three were missing from `IronTapirCodecs.scala`
+— `MetalogTermCount`, `ContentHash`, and the fraction-in-(0, 1] refinement that
+`RetentionFactor` and `ResidualProbability` share. That last one takes a single
+instance, because the two names denote one Iron type and a second instance would
+be ambiguous.
 
 ### 16.7 What this sweep does not reach
 

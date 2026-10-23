@@ -2,6 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
+import sttp.tapir.Schema
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 
@@ -156,6 +157,14 @@ object ResultTransformSpec {
       filterBelowThresholdCodec.decoder.widen[ResultTransformSpec] <>
       insurancePolicyCodec.decoder.widen[ResultTransformSpec]
   )
+
+  // Declared rather than left to a holder's derivation: auto-derivation driven
+  // from a record holding this trait does not descend into it, so every holder
+  // would publish an unconstrained object instead of the five operations.
+  given schema: Schema[ResultTransformSpec] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[ResultTransformSpec]
 }
 
 /**

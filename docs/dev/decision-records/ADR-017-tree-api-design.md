@@ -97,7 +97,7 @@ the smart constructors for the collections:
 | HTTP request body | 8 MiB (env `REGISTER_MAX_REQUEST_BYTES`) | zio-http `RequestStreaming.Disabled(maxRequestBytes)` — rejected with 413 before any handler runs |
 | Nodes per tree | ≤ 10 000 | `RiskTree.fromNodes` (`validateNodeCount`) |
 | Children per portfolio | ≤ 1 000 | `RiskPortfolio.create` (accumulated with the non-empty rule) |
-| Expert percentile/quantile points | 2 … 20 | `RiskLeaf.create` (`validateExpertMode`) — matches the metalog fitter's valid term range |
+| Expert percentile/quantile points | 2 … 20 | `QuantileAnchors.create` — matches the metalog fitter's valid term range |
 | Mitigations per tree | ≤ 1 000 | `RiskTree.fromNodes` (`validateMitigations`) |
 
 The 8 MiB body cap is sized above the largest valid tree payload (a maximal

@@ -93,16 +93,29 @@ object LognormalDistributionParams {
 }
 
 object DistributionParams {
+  import sttp.tapir.Schema
+
   given codec: JsonCodec[DistributionParams] = DeriveJsonCodec.gen[DistributionParams]
+
+  /** Declared rather than left to a holder's derivation: auto-derivation driven
+    * from a record holding this trait does not descend into it, so a holder
+    * would publish an unconstrained object instead of the two modes. */
+  given schema: Schema[DistributionParams] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[DistributionParams]
 }
 
 object NodeProvenance {
   import sttp.tapir.Schema
 
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
-  // `Schema.derived` cannot be used here: no `Schema` exists for the sealed
-  // `DistributionParams`, and the only route to one is a wildcard
-  // auto-derivation import that would widen implicit scope across the file. The
-  // published description is an unconstrained object as a result.
-  given schema: Schema[NodeProvenance] = Schema.any[NodeProvenance]
+  // The published description is the record's real field list, with the
+  // parameter union described as the coproduct it is. The auto-derivation
+  // import is scoped to this body, so it reaches the refined field types
+  // without widening implicit scope across the file.
+  given schema: Schema[NodeProvenance] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[NodeProvenance]
 }

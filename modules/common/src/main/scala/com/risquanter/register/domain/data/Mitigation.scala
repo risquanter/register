@@ -193,6 +193,16 @@ object MitigationSpec {
   given Equal[MitigationSpec] = Equal.default
 
   given codec: JsonCodec[MitigationSpec] = DeriveJsonCodec.gen[MitigationSpec]
+
+  // The published description of the spec coproduct. Auto-derivation cannot
+  // reach it from a holder, because `LeafStageSpec` sits between this trait and
+  // its two leaf cases and a derivation driven from the holder does not descend
+  // through an intermediate sealed trait. Declaring it here is what lets every
+  // record holding a spec describe it as the coproduct it is.
+  given schema: Schema[MitigationSpec] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[MitigationSpec]
 }
 
 /**
@@ -284,11 +294,14 @@ object Mitigation {
     }
   )
 
-  // `Schema.derived` cannot be used here: no `Schema` exists for `MitigationId`,
-  // the nominal wrapper over the Iron identifier, and the only route to one is a
-  // wildcard auto-derivation import that would widen implicit scope across the
-  // file. The published description is an unconstrained object as a result.
-  given schema: Schema[Mitigation] = Schema.any[Mitigation]
+  // The published description is the record's real field list, with the spec
+  // described as the coproduct it is. The auto-derivation import is scoped to
+  // this body, so it reaches the nominal wrappers over Iron identifiers without
+  // widening implicit scope across the file.
+  given schema: Schema[Mitigation] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[Mitigation]
 }
 
 /**
@@ -304,6 +317,9 @@ final case class MitigationApplicationRecord(
 
 object MitigationApplicationRecord {
   given codec: JsonCodec[MitigationApplicationRecord] = DeriveJsonCodec.gen[MitigationApplicationRecord]
-  // Same reason as `Mitigation`'s: `MitigationId` has no `Schema`.
-  given schema: Schema[MitigationApplicationRecord] = Schema.any[MitigationApplicationRecord]
+  // Derived against a body-scoped import, for the same reason as `Mitigation`'s.
+  given schema: Schema[MitigationApplicationRecord] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[MitigationApplicationRecord]
 }

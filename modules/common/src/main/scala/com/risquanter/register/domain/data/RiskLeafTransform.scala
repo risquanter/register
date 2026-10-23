@@ -2,6 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator, jsonHint}
 import zio.prelude.Validation
+import sttp.tapir.Schema
 import com.risquanter.register.domain.data.iron.{
   OccurrenceProbability, ResidualProbability, RetentionFactor, ValidationMessages
 }
@@ -29,6 +30,14 @@ object RelativeLikelihood {
   final case class Scale(factor: RetentionFactor) extends RelativeLikelihood
 
   given codec: JsonCodec[RelativeLikelihood] = DeriveJsonCodec.gen[RelativeLikelihood]
+
+  // Declared rather than left to a holder's derivation: auto-derivation driven
+  // from a record holding this trait does not descend into it, so every holder
+  // would publish an unconstrained object instead of the cases.
+  given schema: Schema[RelativeLikelihood] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[RelativeLikelihood]
 }
 
 /**
@@ -55,6 +64,12 @@ object RelativeSeverity {
   final case class ScaleSeverity(factor: RetentionFactor) extends RelativeSeverity
 
   given codec: JsonCodec[RelativeSeverity] = DeriveJsonCodec.gen[RelativeSeverity]
+
+  // Declared for the same reason as `RelativeLikelihood`'s.
+  given schema: Schema[RelativeSeverity] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[RelativeSeverity]
 }
 
 /**
@@ -89,6 +104,13 @@ object AbsoluteReplacement {
   ) extends AbsoluteReplacement
 
   given codec: JsonCodec[AbsoluteReplacement] = DeriveJsonCodec.gen[AbsoluteReplacement]
+
+  // Declared for the same reason as `RelativeLikelihood`'s. The two cases that
+  // carry a whole shape reach `DistributionShape`'s own schema through it.
+  given schema: Schema[AbsoluteReplacement] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[AbsoluteReplacement]
 }
 
 /**
@@ -107,11 +129,13 @@ final case class LeafParams(
 )
 
 /**
- * The arithmetic of severity scaling on lognormal bounds.
+ * Severity scaling: its interpretation onto each mode of a shape, and the
+ * representability arithmetic each mode needs.
  *
- * Kept as named functions rather than inlined because the lower-bound guard
- * produces a diagnosis the field type cannot: `PositiveLong` refuses the same
- * inputs, and only this check can name the smallest factor that still applies.
+ * The arithmetic is kept as named functions rather than inlined because each
+ * mode's floor guard produces a diagnosis the field type cannot: `PositiveLong`
+ * and `PositiveDouble` refuse the same inputs, and only these checks can name
+ * the smallest factor that still applies to this leaf.
  */
 object RiskLeafTransform {
 
@@ -128,6 +152,15 @@ object RiskLeafTransform {
   /** Smallest severity factor that keeps `min` representable (`min * f ≥ 1`). */
   def minRepresentableFactor(min: Long): Double = 1.0 / min.toDouble
 
+  /** A scaled anchor loss is representable while it stays above zero. An anchor
+    * loss is a `PositiveDouble`, so its floor is the smallest positive double
+    * rather than a whole unit, and only underflow reaches it. */
+  def anchorLossRepresentable(scaledLoss: Double): Boolean = scaledLoss > 0.0
+
+  /** Smallest severity factor that keeps `min` above the positive-double floor
+    * (`min * f > 0`). */
+  def minAnchorFactor(min: Double): Double = Double.MinPositiveValue / min
+
   /** Severity scaling interpreted onto a shape, one reading per mode.
     *
     * Lognormal: both confidence-interval bounds scale, which multiplies every
@@ -135,9 +168,12 @@ object RiskLeafTransform {
     * the anchor losses scale and the percentiles do not, which has the same
     * effect on the fitted curve.
     *
-    * The one refusal is a lognormal lower bound that scales below the positive
-    * floor. It is reported here rather than left to the field type because only
-    * this check can name the smallest factor that still applies.
+    * Each mode has one refusal, and it is the same condition read against that
+    * mode's floor: the factor is small enough to take a severity figure below
+    * what its type can hold. Both are reported here rather than left to the
+    * field type, because the actionable number is the smallest factor that
+    * still applies to this leaf and only these checks can compute it. The code
+    * names the mode whose parameters the caller must look at.
     */
   def scaleSeverity(
     shape:   DistributionShape,
@@ -145,23 +181,37 @@ object RiskLeafTransform {
     subject: ErrorSubject
   ): Validation[ValidationError, DistributionShape] = shape match {
     case DistributionShape.Lognormal(bounds) =>
-      val (scaledMin, scaledMax) = scaleSeverityBounds(bounds.min, bounds.max, factor)
-      if lowerBoundRepresentable(scaledMin) then
-        DistributionShape.Lognormal.fromPrimitives(scaledMin, scaledMax, subject)
-      else
-        Validation.fail(ValidationError(
-          location = ErrorLocation.Field(subject, FieldName.MinLoss),
-          code = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-          message = ValidationMessages.mitigationLowersMinLossBelowFloor(
-            bounds.min, minRepresentableFactor(bounds.min))
-        ))
+      scaleSeverityBounds(bounds.min, bounds.max, factor) match {
+        case (scaledMin, scaledMax) if lowerBoundRepresentable(scaledMin) =>
+          DistributionShape.Lognormal.fromPrimitives(scaledMin, scaledMax, subject)
+
+        case _ =>
+          Validation.fail(ValidationError(
+            location = ErrorLocation.Field(subject, FieldName.MinLoss),
+            code = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
+            message = ValidationMessages.mitigationLowersMinLossBelowFloor(
+              bounds.min, minRepresentableFactor(bounds.min))
+          ))
+      }
 
     case DistributionShape.Expert(anchors, terms) =>
-      DistributionShape.Expert.fromPrimitives(
-        percentiles = anchors.percentiles,
-        quantiles = anchors.losses.map(_ * factor),
-        terms = terms.map(t => t: Int),
-        subject = subject
-      )
+      anchors.losses.map(_ * factor) match {
+        case scaled if scaled.forall(anchorLossRepresentable) =>
+          DistributionShape.Expert.fromPrimitives(
+            percentiles = anchors.percentiles,
+            quantiles = scaled,
+            terms = terms.map(t => t: Int),
+            subject = subject
+          )
+
+        case _ =>
+          val smallest = anchors.losses.min
+          Validation.fail(ValidationError(
+            location = ErrorLocation.Field(subject, FieldName.Quantiles),
+            code = ValidationErrorCode.INVALID_EXPERT_PARAMS,
+            message = ValidationMessages.mitigationLowersAnchorLossBelowFloor(
+              smallest, minAnchorFactor(smallest))
+          ))
+      }
   }
 }

@@ -383,8 +383,12 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * only place in the browser that rule can be stated.
     *
     * Percentiles from the form are on the 0–100 scale and are converted to 0–1
-    * before gating. A field that is not a number parses to nothing and is
-    * refused by the gate it feeds, so the mode's own fields are always read.
+    * before gating.
+    *
+    * An entry that is not a number is dropped rather than refused, so only the
+    * surviving entries reach the gate and only their count is checked. A field
+    * of `0.1, abc, 0.9` therefore arrives as two percentiles, and pairs
+    * successfully with a two-entry loss field.
     */
   def currentShapeValidation(): Validation[ValidationError, DistributionShape] =
     distributionModeVar.now() match
@@ -405,8 +409,10 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
             DistributionShape.Lognormal.fromPrimitives(min, max, ErrorSubject.DraftNode)
           }
 
-  /** A lognormal bound that did not parse as a whole number. Reported per field
-    * so both missing bounds surface at once. */
+  /** A lognormal bound that is absent, blank, or not a whole number. All three
+    * reach this as `None` and are reported as the field being required, so the
+    * inline field signal is where a non-numeric entry is named as such.
+    * Reported per field, so both bounds surface at once. */
   private def requireBound(
     parsed: Option[Long],
     field: FieldName,

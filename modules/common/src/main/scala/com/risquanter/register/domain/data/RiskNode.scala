@@ -12,24 +12,19 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, Field
   * - RiskLeaf: Terminal node with distribution parameters (actual risk)
   * - RiskPortfolio: Branch node containing children (aggregation of risks)
   *
-  * Example:
+  * A portfolio names its children by identifier rather than embedding them, and
+  * the identifiers are held in an immutable sequence. So a tree is a flat set of
+  * nodes plus the parent and child references relating them, and both node kinds
+  * are built through their own smart constructor:
+  *
   * {{{
-  * RiskPortfolio(
-  *   id = "ops-risk",
-  *   name = "Operational Risk",
-  *   children = Array(
-  *     RiskLeaf(
-  *       id = "cyber",
-  *       name = "Cyber Attack",
-  *       probability = 0.25,
-  *       shape = DistributionShape.Lognormal(LossRange(1000, 50000))
-  *     ),
-  *     RiskPortfolio(
-  *       id = "it-risk",
-  *       name = "IT Risk",
-  *       children = Array(...)
-  *     )
-  *   )
+  * RiskPortfolio.create(
+  *   id = "ops-risk", name = "Operational Risk",
+  *   childIds = Vector(cyberId, itRiskId), parentId = None
+  * )
+  * RiskLeaf.create(
+  *   id = "cyber", name = "Cyber Attack", probability = 0.25,
+  *   shape = lognormalShape, parentId = Some(opsRiskId), seedVarId = 1L
   * )
   * }}}
   */

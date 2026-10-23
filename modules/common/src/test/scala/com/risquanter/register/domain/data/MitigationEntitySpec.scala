@@ -44,6 +44,21 @@ object MitigationEntitySpec extends ZIOSpecDefault {
   private def absoluteLeafSpec(stamp: ContentHash, anchor: NodeId): MitigationSpec =
     MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), anchor, stamp)
 
+  /** One spec per component case, so every case of the three component
+    * coproducts appears in the round-trip. The two replacement cases that carry
+    * a whole shape are what put a `DistributionShape` into a mitigation's own
+    * bytes, so they are the ones a shape-level codec change would break. */
+  private val everyComponentCase: List[MitigationSpec] = List(
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep),
+    MitigationSpec.LeafRelative(RelativeLikelihood.Keep, RelativeSeverity.ScaleSeverity(0.4)),
+    MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), nodeId("cyber"), stamp),
+    MitigationSpec.LeafAbsolute(
+      AbsoluteReplacement.Severity(lognormalShape(2000L, 90000L)), nodeId("cyber"), stamp),
+    MitigationSpec.LeafAbsolute(
+      AbsoluteReplacement.Both(0.02, lognormalShape(3000L, 80000L)), nodeId("cyber"), stamp),
+    unsafeGet(resultStage(List(ResultTransformSpec.CapLosses(1000000L))), "capSpec")
+  )
+
   private def mk(
     label: String,
     spec: MitigationSpec,
@@ -132,6 +147,25 @@ object MitigationEntitySpec extends ZIOSpecDefault {
         val tampered = json
           .replace(s""","baseStamp":"${"a" * 64}"""", "")
           .replace(s""""baseStamp":"${"a" * 64}",""", "")
+        assertTrue(json != tampered, tampered.fromJson[Mitigation].isLeft)
+      },
+      test("every component case round-trips") {
+        // One fixture per case of `RelativeLikelihood`, `RelativeSeverity` and
+        // `AbsoluteReplacement`. Each component declares its own discriminated
+        // codec, so a tag or a field name that changes in one of them is
+        // invisible to a round-trip that only reaches the other cases.
+        val ms = everyComponentCase.zipWithIndex.map { case (spec, i) =>
+          mk(s"m-component-$i", spec).toEither.toOption.get
+        }
+        assertTrue(ms.forall(m => m.toJson.fromJson[Mitigation] == Right(m)))
+      },
+      test("an unrecognised component tag is refused") {
+        // The discriminator sends the body to one case's decoder, so an
+        // unknown `op` has no case to fall through to and the decode fails
+        // rather than silently selecting a sibling.
+        val valid = mk("m-scale", scaleLeafSpec).toEither.toOption.get
+        val json = valid.toJson
+        val tampered = json.replace("\"op\":\"scale\"", "\"op\":\"stretch\"")
         assertTrue(json != tampered, tampered.fromJson[Mitigation].isLeft)
       },
       test("the three spec cases carry distinct stage tags") {

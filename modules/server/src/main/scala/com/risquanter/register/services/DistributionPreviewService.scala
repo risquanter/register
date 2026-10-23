@@ -5,7 +5,9 @@ import zio.*
 import com.risquanter.register.domain.data.{
   DistributionShape, ExpertDistributionParams, LognormalDistributionParams
 }
-import com.risquanter.register.domain.data.iron.{IronConstants, ValidationMessages}
+import com.risquanter.register.domain.data.iron.{
+  IronConstants, MetalogTermCount, PositiveLong, ValidationMessages
+}
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode, ValidationFailed}
 import com.risquanter.register.http.requests.{DistributionPreviewResponse, DistributionPreviewPoint}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
@@ -50,7 +52,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
   private def previewExpert(
     percentiles: Vector[Double],
     quantiles: Vector[Double],
-    resolvedTerms: Int
+    resolvedTerms: MetalogTermCount
   ): IO[ValidationFailed, DistributionPreviewResponse] =
     for
       metalog <- ZIO.fromEither(
@@ -65,8 +67,8 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
         )
       ).mapError(_ => ValidationFailed(List(ValidationError(
         location = ErrorLocation.Whole,
-        code    = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
-        message = ValidationMessages.distributionFitFailed
+        code    = ValidationErrorCode.INVALID_EXPERT_PARAMS,
+        message = ValidationMessages.expertFitFailed
       ))))
       points = sampleMetalog(metalog)
     yield DistributionPreviewResponse(
@@ -77,15 +79,15 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
     )
 
   private def previewLognormal(
-    minLoss: Long,
-    maxLoss: Long
+    minLoss: PositiveLong,
+    maxLoss: PositiveLong
   ): IO[ValidationFailed, DistributionPreviewResponse] =
     for
       lognormal <- ZIO.fromEither(LognormalHelper.fromLognormal90CI(minLoss, maxLoss))
-        .mapError(ve => ValidationFailed(List(ValidationError(
+        .mapError(_ => ValidationFailed(List(ValidationError(
           location = ErrorLocation.Whole,
           code    = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-          message = ve.message
+          message = ValidationMessages.lognormalFitFailed
         ))))
       points = pGrid.map { p =>
         val x = lognormal.quantile(p)

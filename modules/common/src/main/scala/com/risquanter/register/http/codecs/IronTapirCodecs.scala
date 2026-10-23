@@ -2,7 +2,7 @@ package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor}
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /**
@@ -288,6 +288,28 @@ object IronTapirCodecs {
   /** Schema for PositiveInt for JSON body derivation. */
   given Schema[PositiveInt] = Schema.schemaForInt.map[PositiveInt](
     i => ValidationUtil.refinePositiveInt(i, codecLocation).toOption
+  )(identity)
+
+  /** Schema for MetalogTermCount for JSON body derivation. A provenance record
+    * carries the term count a fit ran with, so this is what lets that record be
+    * described as its own field list rather than as an unconstrained object. */
+  given Schema[MetalogTermCount] = Schema.schemaForInt.map[MetalogTermCount](
+    i => ValidationUtil.refineMetalogTermCount(i, codecLocation).toOption
+  )(identity)
+
+  /** Schema for ContentHash for JSON body derivation. An absolute mitigation
+    * carries the stamp of the leaf it was asserted against, so this is what
+    * lets a mitigation be described as its own field list. */
+  given Schema[ContentHash] = Schema.string.map[ContentHash](
+    (s: String) => ContentHash.fromString(s, codecLocation).toOption
+  )(_.value)
+
+  /** Schema for the fraction-in-(0, 1] refinement, which carries a mitigation's
+    * scale factor and its asserted residual probability alike. `RetentionFactor`
+    * and `ResidualProbability` are the same underlying Iron type, so one
+    * instance serves both and a second would be ambiguous. */
+  given Schema[RetentionFactor] = Schema.schemaForDouble.map[RetentionFactor](
+    d => ValidationUtil.refineRetentionFactor(d, codecLocation).toOption
   )(identity)
 
   /** Schema for NonNegativeInt for JSON body derivation. */

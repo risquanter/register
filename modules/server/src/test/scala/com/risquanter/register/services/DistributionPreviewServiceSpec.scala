@@ -63,7 +63,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       },
 
       test("response metadata reflects resolved terms and anchor count") {
-        // 3 anchors, no explicit terms → resolvedTerms = min(3, 4) = 3
+        // 3 anchors, no explicit terms → one term per anchor, so resolvedTerms = 3
         for resp <- preview(expert(None))
         yield assertTrue(
           resp.distributionType == "expert" &&

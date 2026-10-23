@@ -119,6 +119,17 @@ object Simulator {
     } yield (sampler, provenance)
   }
   
+  /** A refused fit, split by where each part goes. `clientMessage` is the
+    * sentence the caller can act on, and `diagnostic` is the fitting library's
+    * own text, which names a third-party class and carries whatever it threw,
+    * so it is logged and never sent (ADR-035).
+    */
+  private final case class FitRefusal(
+    code:          ValidationErrorCode,
+    clientMessage: String,
+    diagnostic:    String
+  )
+
   /**
    * Build the leaf's loss distribution and the record of what the fit ran with.
    *
@@ -142,7 +153,12 @@ object Simulator {
     // fitter re-checks the percentile interval on arrival, which is the
     // third-party boundary refining its own input (ADR-039 §1) rather than the
     // domain re-validating itself.
-    val fitted: Either[String, Distribution] = params match {
+    // A fit refusal is about the parameters of one mode, and the remedy differs
+    // by mode: an infeasible metalog system is answered by moving an anchor or
+    // lowering the term count, and a lognormal by moving a bound. So each arm
+    // carries its own code and its own sentence, and a caller is told which
+    // mode's parameters to look at rather than only that fitting failed.
+    val fitted: Either[FitRefusal, Distribution] = params match {
       case ExpertDistributionParams(percentiles, quantiles, terms) =>
         MetalogDistribution
           .fromPercentilesUnsafe(
@@ -154,21 +170,39 @@ object Simulator {
             terms = terms,
             lower = Some(0.0) // Loss cannot be negative
           )
-          .left.map(error => s"Failed to fit Metalog: ${error.message}")
+          .left.map(error => FitRefusal(
+            ValidationErrorCode.INVALID_EXPERT_PARAMS,
+            ValidationMessages.expertFitFailed,
+            s"Failed to fit Metalog: ${error.message}"
+          ))
 
       case LognormalDistributionParams(minLoss, maxLoss, _) =>
         LognormalHelper
           .fromLognormal90CI(minLoss, maxLoss)
-          .left.map(error => s"Failed to create lognormal: ${error.message}")
+          .left.map(error => FitRefusal(
+            ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
+            ValidationMessages.lognormalFitFailed,
+            s"Failed to create lognormal: ${error.message}"
+          ))
     }
 
     ZIO
       .fromEither(fitted.map(distribution => (distribution, params)))
-      .mapError(reason => ValidationFailed(List(ValidationError(
-        location = at(FieldName.DistributionType),
-        code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
-        message = reason
-      ))))
+      // The diagnosis is written here because the failure cannot carry it: a
+      // `ValidationFailed` derives its log text from the same messages it sends
+      // to the client, so a reason put there would cross. At ordinary-traffic
+      // level, because a refused fit is a caller's input being correctly
+      // declined rather than an operational signal (ADR-002).
+      .tapError(refusal =>
+        ZIO.logInfo(s"Distribution fit refused for leaf ${leaf.id.value}: ${refusal.diagnostic}")
+      )
+      .mapError(refusal =>
+        ValidationFailed(List(ValidationError(
+          location = at(FieldName.DistributionType),
+          code = refusal.code,
+          message = refusal.clientMessage
+        )))
+      )
   }
 }
 

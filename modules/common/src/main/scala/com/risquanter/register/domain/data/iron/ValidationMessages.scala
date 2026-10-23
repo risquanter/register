@@ -200,8 +200,33 @@ object ValidationMessages:
   val mitigationEliminatesRisk: String =
     "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap or the scale factor, lower the deductible, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
 
+  /** Why a severity scaling was refused on a lognormal shape, with the leaf's
+    * own minimum and the smallest factor that still applies to it. The leaf's
+    * figures are the caller's, so the sentence cannot state a floor the caller
+    * can derive for a different leaf.
+    *
+    * {{{
+    * mitigationLowersMinLossBelowFloor(2000, 5.0e-4)
+    * // ... The leaf's minimum loss is 2000, so the smallest severity factor
+    * // that still applies here is 5.000e-04 (1 / 2000).
+    * }}}
+    */
   def mitigationLowersMinLossBelowFloor(min: Long, minFactor: Double): String =
     f"This mitigation reduces the minimum loss below 1, the smallest representable whole unit. The leaf's minimum loss is $min, so the smallest severity factor that still applies here is $minFactor%.3e (1 / $min)."
+
+  /** The expert mode's counterpart to `mitigationLowersMinLossBelowFloor`. An
+    * anchor loss is a positive double rather than a whole unit, so its floor is
+    * the smallest positive double and only underflow reaches it. The sentence
+    * names the same actionable number: the smallest factor this leaf tolerates.
+    *
+    * {{{
+    * mitigationLowersAnchorLossBelowFloor(2.0, 2.5e-324)
+    * // ... The leaf's smallest anchor loss is 2.000e+00, so the smallest
+    * // severity factor that still applies here is 2.470e-324.
+    * }}}
+    */
+  def mitigationLowersAnchorLossBelowFloor(min: Double, minFactor: Double): String =
+    f"This mitigation reduces the smallest anchor loss to zero, below the positive floor an anchor loss must stay above. The leaf's smallest anchor loss is $min%.3e, so the smallest severity factor that still applies here is $minFactor%.3e."
 
   // ══════════════════════════════════════════════════════════════════
   // Expert mode — percentiles / quantiles
@@ -257,10 +282,22 @@ object ValidationMessages:
   // ══════════════════════════════════════════════════════════════════
   // Distribution fit failure
   // ══════════════════════════════════════════════════════════════════
-  val distributionFitFailed: String =
+  /** Why an expert shape that passed every boundary rule still could not be
+    * fitted. The remaining failure is the metalog system itself having no
+    * solution at this term count, so the sentence names the levers that change
+    * it. The fitter's own text is an internal diagnostic and stays server-side
+    * (ADR-035). */
+  val expertFitFailed: String =
     "The inputs could not be fitted to a valid distribution. " +
     "Try reducing Terms, check that quantile values are strictly increasing, " +
     "or remove conflicting estimates."
+
+  /** The lognormal counterpart. A lognormal is fitted from the two bounds
+    * alone, so the only lever is the bounds themselves. */
+  val lognormalFitFailed: String =
+    "The bounds could not be fitted to a lognormal distribution. " +
+    "Check that the minimum loss is above zero and below the maximum, " +
+    "and that the two are far enough apart to describe a spread."
 
   // ══════════════════════════════════════════════════════════════════
   // Seed identity

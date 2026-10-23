@@ -22,7 +22,6 @@ enum ValidationErrorCode(val code: String, val description: String):
   case DEPENDENCY_FAILED extends ValidationErrorCode("DEPENDENCY_FAILED", "Related field validation failed")
   case INVALID_COMBINATION extends ValidationErrorCode("INVALID_COMBINATION", "Field combination is invalid")
   case EMPTY_COLLECTION extends ValidationErrorCode("EMPTY_COLLECTION", "Collection must not be empty")
-  case DISTRIBUTION_FIT_FAILED extends ValidationErrorCode("DISTRIBUTION_FIT_FAILED", "Distribution fitting failed")
   case INVALID_EXPERT_PARAMS extends ValidationErrorCode("INVALID_EXPERT_PARAMS", "Expert opinion parameters invalid")
   case INVALID_LOGNORMAL_PARAMS extends ValidationErrorCode("INVALID_LOGNORMAL_PARAMS", "Lognormal parameters invalid")
   case UNSUPPORTED_DISTRIBUTION_TYPE extends ValidationErrorCode("UNSUPPORTED_DISTRIBUTION_TYPE", "Distribution type not supported")
