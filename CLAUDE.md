@@ -41,6 +41,13 @@ Mechanical enforcement: a PreToolUse hook gates source edits under `modules/` an
 
 Never write the protocol machinery yourself — `.claude/protocol/`, `.claude/hooks/`, `.claude/bin/`, `.claude/settings.json`, or any `*-INVENTORY.md`. The hook refuses all of it, whatever the token says; reading it is fine. **These controls are deliberately not absolute** — they catch careless mistakes and make a deliberate override unmistakable, and git-tracked inventories supply the evidence. Never attempt to get around one by any route (reshaping a command, splitting a string so a pattern misses, an equivalent tool, a different path spelling, a symlink, a subprocess, a wrapper supplying what a check tests for, or a narrower action reaching part of the same effect). Hand the blocked action to the user with what it does and why, then stop; escalating is the expected path and is welcome. A weakness found in a control is a finding to report, never a licence to use it, including to verify it. To have an inventory amended, print the two-part block (plan path on the first line, then one repo-relative path per line) and stop — the user pastes it into `.claude/protocol/pending` and runs `.claude/bin/approve-inventory`. A path must already exist; mark a file the plan will **create** as `new: <path>`, which is you stating it does not exist yet so the user can check that claim. The token names one plan, so approving a plan replaces the previous approval. Circumventing the hook by any means is a G7 violation. Flag plan completion so the user can close the token.
 
+**Tool routing under the gate.** A harness default may say Bash is preferred for file work. Where that conflicts with the gate the gate wins, and the conflict is not re-derived on each occurrence:
+
+- Reading a file — `Read`.
+- Searching — Bash `grep` and `find`, which are never gated.
+- Editing anything under `modules/` or `build.sbt` — `Edit` or `Write` only. A Bash write there reaches the filesystem without passing the inventory check, which is why it is refused.
+- Running inline code over files outside the gated region — `python3 -c`, which passes. A heredoc into an interpreter is refused whether or not it writes, so for anything longer `Write` the script into the scratchpad and run it by path.
+
 ## The Plan Quality Gate — what G3 actually requires
 
 A document confers plan coverage only if it is **implementation-grade**. All six
