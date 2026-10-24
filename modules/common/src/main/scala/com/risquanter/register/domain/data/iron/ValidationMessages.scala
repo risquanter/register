@@ -77,6 +77,22 @@ object ValidationMessages:
   def tooManyMitigations(count: Int, limit: Int): String =
     s"too many mitigations: $count exceeds the limit of $limit"
 
+  /** Why a result-stage pipeline with no steps was refused. The bound is the
+    * caller's, so the sentence cannot state one the caller does not enforce.
+    *
+    * {{{
+    * resultStagePipelineEmpty(1)
+    * // result-stage pipeline is empty: at least 1 step is required
+    * }}}
+    */
+  def resultStagePipelineEmpty(min: Int): String =
+    s"result-stage pipeline is empty: at least $min step is required"
+
+  /** Why a result-stage pipeline's step count was refused as too long, on the
+    * same terms as `resultStagePipelineEmpty`. */
+  def resultStagePipelineTooLong(count: Int, limit: Int): String =
+    s"result-stage pipeline has too many steps: $count exceeds the limit of $limit"
+
   /** Why a portfolio's direct child count was refused, with the count and the
     * limit. The limit is the caller's, so the sentence cannot state one the
     * caller does not enforce.
@@ -153,7 +169,7 @@ object ValidationMessages:
   // ══════════════════════════════════════════════════════════════════
   // Distribution type
   // ══════════════════════════════════════════════════════════════════
-  val distributionTypeInvalid: String   = "Distribution type must be 'expert' or 'lognormal'"
+  val distributionTypeInvalid: String   = "Distribution type must be 'Metalog' or 'Lognormal'"
 
   // ══════════════════════════════════════════════════════════════════
   // Workspace key (base64url, 22 chars)
@@ -214,7 +230,7 @@ object ValidationMessages:
   def mitigationLowersMinLossBelowFloor(min: Long, minFactor: Double): String =
     f"This mitigation reduces the minimum loss below 1, the smallest representable whole unit. The leaf's minimum loss is $min, so the smallest severity factor that still applies here is $minFactor%.3e (1 / $min)."
 
-  /** The expert mode's counterpart to `mitigationLowersMinLossBelowFloor`. An
+  /** The metalog mode's counterpart to `mitigationLowersMinLossBelowFloor`. An
     * anchor loss is a positive double rather than a whole unit, so its floor is
     * the smallest positive double and only underflow reaches it. The sentence
     * names the same actionable number: the smallest factor this leaf tolerates.
@@ -229,22 +245,22 @@ object ValidationMessages:
     f"This mitigation reduces the smallest anchor loss to zero, below the positive floor an anchor loss must stay above. The leaf's smallest anchor loss is $min%.3e, so the smallest severity factor that still applies here is $minFactor%.3e."
 
   // ══════════════════════════════════════════════════════════════════
-  // Expert mode — percentiles / quantiles
+  // Metalog mode — percentiles / quantiles
   // ══════════════════════════════════════════════════════════════════
-  val percentilesRequired: String       = "Percentiles are required for expert mode"
+  val percentilesRequired: String       = "Percentiles are required for metalog mode"
   val percentilesFormat: String         = "Enter comma-separated percentile values"
   val percentilesOutOfRange: String     = "Percentiles must be between 0 and 100 (exclusive)"
   val percentilesMustBeStrictlyIncreasing: String =
     "Percentiles must be strictly increasing — values must be in ascending order"
 
-  val quantilesRequired: String         = "Quantiles are required for expert mode"
+  val quantilesRequired: String         = "Quantiles are required for metalog mode"
   val quantilesFormat: String           = "Enter comma-separated quantile values (loss amounts)"
   val quantilesMustBePositive: String =
     "Quantile loss amounts must be greater than zero — the distribution fit takes their logarithm"
   val quantilesMustBeStrictlyIncreasing: String =
     "Quantiles must be strictly increasing — a higher percentile must correspond to a higher loss value"
 
-  def expertLengthMismatch(pLen: Int, qLen: Int): String =
+  def metalogLengthMismatch(pLen: Int, qLen: Int): String =
     s"Percentiles and quantiles must have same length ($pLen vs $qLen)"
 
   /** Why an anchor count was refused, with the bounds and the count supplied.
@@ -255,14 +271,14 @@ object ValidationMessages:
     *
     * {{{
     * anchorCountOutOfRange(1, 2, 20)
-    * // Expert mode takes between 2 and 20 percentile-quantile pairs (got 1)
+    * // Metalog mode takes between 2 and 20 percentile-quantile pairs (got 1)
     * }}}
     */
   def anchorCountOutOfRange(count: Int, min: Int, max: Int): String =
-    s"Expert mode takes between $min and $max percentile-quantile pairs (got $count)"
+    s"Metalog mode takes between $min and $max percentile-quantile pairs (got $count)"
 
   // ══════════════════════════════════════════════════════════════════
-  // Expert mode — Metalog terms
+  // Metalog mode — term count
   // ══════════════════════════════════════════════════════════════════
   val termsOutOfRange: String =
     "Terms must be between 2 and the number of percentile-quantile pairs"
@@ -282,12 +298,12 @@ object ValidationMessages:
   // ══════════════════════════════════════════════════════════════════
   // Distribution fit failure
   // ══════════════════════════════════════════════════════════════════
-  /** Why an expert shape that passed every boundary rule still could not be
+  /** Why a metalog shape that passed every boundary rule still could not be
     * fitted. The remaining failure is the metalog system itself having no
     * solution at this term count, so the sentence names the levers that change
     * it. The fitter's own text is an internal diagnostic and stays server-side
     * (ADR-035). */
-  val expertFitFailed: String =
+  val metalogFitFailed: String =
     "The inputs could not be fitted to a valid distribution. " +
     "Try reducing Terms, check that quantile values are strictly increasing, " +
     "or remove conflicting estimates."

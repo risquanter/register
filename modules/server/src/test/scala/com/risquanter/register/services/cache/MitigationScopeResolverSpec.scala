@@ -10,7 +10,6 @@ import com.risquanter.register.domain.data.{
   RelativeLikelihood, RelativeSeverity, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}
-import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 
 /** Tests for [[MitigationScopeResolver]] — turning each mitigation's stored
@@ -66,7 +65,7 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
   // ── Mitigation builders ──────────────────────────────────────────────
 
   private val leafSpec: MitigationSpec =
-    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep)
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep)
   private val resultSpec: MitigationSpec =
     resultStage(ResultTransformSpec.CapLosses(1000000L))
 

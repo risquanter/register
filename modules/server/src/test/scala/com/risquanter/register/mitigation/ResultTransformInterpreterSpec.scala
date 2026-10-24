@@ -6,6 +6,7 @@ import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.{ResultTransformSpec, TransformPipeline}
 import com.risquanter.register.simulation.TrialOutcomes
+import com.risquanter.register.testutil.TestHelpers.retentionFactor
 
 /**
  * ResultTransformInterpreter: equivalence between each spec case and the
@@ -25,7 +26,7 @@ object ResultTransformInterpreterSpec extends ZIOSpecDefault {
         val pairs: List[(ResultTransformSpec, RiskResultTransform)] = List(
           ApplyDeductible(10000L)       -> RiskResultTransform.applyDeductible(10000L),
           CapLosses(1000000L)           -> RiskResultTransform.capLosses(1000000L),
-          ScaleLosses(0.8)              -> RiskResultTransform.scaleLosses(0.8),
+          ScaleLosses(retentionFactor(0.8)) -> RiskResultTransform.scaleLosses(retentionFactor(0.8)),
           FilterBelowThreshold(10000L)  -> RiskResultTransform.filterBelowThreshold(10000L)
         )
         assertTrue(pairs.forall { case (spec, direct) =>
@@ -43,7 +44,7 @@ object ResultTransformInterpreterSpec extends ZIOSpecDefault {
 
     suite("TransformPipeline")(
       test("interpretation law: toTransform(a <> b) == toTransform(a) andThen toTransform(b)") {
-        val a = TransformPipeline(List(ApplyDeductible(10000L), ScaleLosses(0.5)))
+        val a = TransformPipeline(List(ApplyDeductible(10000L), ScaleLosses(retentionFactor(0.5))))
         val b = TransformPipeline(List(CapLosses(400000L)))
         val combined = Identity[TransformPipeline].combine(a, b)
         val lhs = ResultTransformInterpreter.toTransform(combined).run(outcomes)
@@ -52,8 +53,10 @@ object ResultTransformInterpreterSpec extends ZIOSpecDefault {
         assertTrue(lhs.outcomes == rhs.outcomes)
       },
       test("pipeline order is preserved (non-commutative)") {
-        val deductibleThenScale = TransformPipeline(List(ApplyDeductible(10000L), ScaleLosses(0.5)))
-        val scaleThenDeductible = TransformPipeline(List(ScaleLosses(0.5), ApplyDeductible(10000L)))
+        val deductibleThenScale =
+          TransformPipeline(List(ApplyDeductible(10000L), ScaleLosses(retentionFactor(0.5))))
+        val scaleThenDeductible =
+          TransformPipeline(List(ScaleLosses(retentionFactor(0.5)), ApplyDeductible(10000L)))
         val input = TrialOutcomes(100, Map(1 -> 100000L))
         assertTrue(
           ResultTransformInterpreter.toTransform(deductibleThenScale).run(input).outcomeOf(1) == 45000L,

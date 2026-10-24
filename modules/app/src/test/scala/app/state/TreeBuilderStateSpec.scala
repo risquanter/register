@@ -4,10 +4,10 @@ import zio.test.*
 import zio.prelude.Validation
 
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, DistributionShape}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, OccurrenceProbability, SeedVarId}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
-import com.risquanter.register.testutil.TestHelpers.{unsafeGet, expertShape, lognormalShape}
+import com.risquanter.register.testutil.TestHelpers.{unsafeGet, metalogShape, lognormalShape}
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
 
@@ -52,11 +52,11 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     seedVarId = 1L
   ), "leaf")
 
-  private val expertLeaf = unsafeGet(RiskLeaf.create(
+  private val metalogLeaf = unsafeGet(RiskLeaf.create(
     id               = leafUlid,
-    name             = "Expert Risk",
+    name             = "Metalog Risk",
     probability      = 0.2,
-    shape            = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)),
+    shape            = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)),
     parentId         = None,
     seedVarId = 2L
   ), "leaf")
@@ -108,17 +108,17 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         assertTrue(state.editingTreeId.now().isDefined)
       },
 
-      test("lone-leaf expert tree: terms field threads correctly") {
-        val tree  = mkTree(treeUlid, "Expert Tree", Seq(expertLeaf), leafId)
+      test("lone-leaf metalog tree: terms field threads correctly") {
+        val tree  = mkTree(treeUlid, "Metalog Tree", Seq(metalogLeaf), leafId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         assertTrue(state.leavesVar.now().length == 1) &&
         assertTrue(state.leavesVar.now().head.parent == ParentRef.Root) &&
         assertTrue(state.leavesVar.now().head.shape match
-          case e: DistributionShape.Expert    => e.terms.contains(3)
+          case m: DistributionShape.Metalog   => m.terms.contains(3)
           case _: DistributionShape.Lognormal => false
         ) &&
-        assertTrue(state.leavesVar.now().head.shape.distributionType == IronConstants.Expert)
+        assertTrue(state.leavesVar.now().head.shape.isInstanceOf[DistributionShape.Metalog])
       },
 
       test("root portfolio + leaf under root: parent resolved correctly") {
@@ -563,16 +563,16 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
     suite("populateLeafForm")(
 
-      test("expert mode: percentiles rescaled from 0-1 domain to 0-100 form scale") {
+      test("metalog mode: percentiles rescaled from 0-1 domain to 0-100 form scale") {
         val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
-          name             = "Expert Risk",
+          name             = "Metalog Risk",
           probability      = 0.2,
-          shape            = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)),
+          shape            = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)),
           parentId         = Some(rootId),
           seedVarId = 19L
         ), "leaf")
-        val tree  = mkTree(treeUlid, "PopulateExpert", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val tree  = mkTree(treeUlid, "PopulateMetalog", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         val formState = new RiskLeafFormState
@@ -583,8 +583,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           formState.percentilesVar.now() == "10, 50, 90",
           // domainToDisplayPct(0.2, 2) → "20" (trailing zeros stripped)
           formState.probabilityVar.now() == "20",
-          formState.nameVar.now() == "Expert Risk",
-          formState.distributionModeVar.now() == DistributionMode.Expert
+          formState.nameVar.now() == "Metalog Risk",
+          formState.distributionModeVar.now() == DistributionMode.Metalog
         )
       },
 

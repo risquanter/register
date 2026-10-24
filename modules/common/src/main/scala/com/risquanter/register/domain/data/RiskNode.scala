@@ -225,7 +225,7 @@ object RiskLeaf {
   * - Can nest arbitrarily deep (typically 5-6 levels)
   *
   * Domain Model: Uses Iron refined types for type safety
-  * - safeId: SafeId (3-30 alphanumeric chars + hyphen/underscore)
+  * - safeId: SafeId (26-character ULID)
   * - safeName: SafeName (non-blank, max 50 chars)
   * - childIds: Vector[NodeId] (references to child nodes, must be non-empty)
   *

@@ -281,7 +281,7 @@ but the result has a negative PDF on some interval and is not a probability
 distribution. Accepting such input and returning `Right(_)` is a contract error,
 not a design feature.
 
-**Correct action in `vague-quantifier-logic`:**
+**Correct action in `metalog-distribution`:**
 Add a `fromPercentiles` constructor that validates strict monotonicity of the
 supplied quantile values before fitting and returns
 `Either[MonotoneViolation, MetalogDistribution]`. The existing
@@ -293,19 +293,18 @@ The validation is a simple linear scan: for each adjacent pair
 $(q_i, q_{i+1})$, assert $q_i < q_{i+1}$. The error value should carry the
 violating pair and its indices so the caller can surface a meaningful message.
 
-**Consequence for this repo (`register`):**
-`DistributionPreviewRequest.validate()` currently enforces strict quantile
-monotonicity at the request layer *because* the library does not. Once the
-library validates its own preconditions, register's check becomes
-redundant-but-harmless defence-in-depth. It should be kept as-is (it provides
-a user-facing error message before any IO) but annotated with a comment
-explaining the layering:
+**Consequence for this repo (`register`): none left.**
+Register no longer depends on the library validating its own preconditions.
+`QuantileAnchors.create` refuses a sequence that does not strictly increase, in
+percentile and in loss, and it is the only way an anchor set comes into
+existence. Every path into a shape routes through it — the leaf's decoder on the
+store-read and request paths, and the browser's form parse — so non-monotone
+values cannot reach the fitter from this repo at all.
 
-```scala
-// Validates monotonicity before dispatching to the library.
-// vague-quantifier-logic's fromPercentiles also validates — this check
-// surfaces a structured request-layer error earlier.
-```
+That is wider than the check it replaced, which sat on the preview request
+alone and covered the quantiles only. Register's side is therefore
+defence-in-depth already, and it needs no change when the library gains its own
+guard.
 
 **Follow-up steps:**
 
@@ -320,13 +319,11 @@ explaining the layering:
    - Update `fromPercentilesUnsafe` scaladoc to state the monotonicity precondition
      explicitly.
 
-2. **`register`**
-   - Update the call site in `DistributionPreviewService` (or wherever
-     `fromPercentilesUnsafe` is called) to use `fromPercentiles` instead,
-     removing the `Unsafe` call entirely.
-   - Add the layering comment to `DistributionPreviewRequest.validate()` as above.
-   - No behaviour change; the monotonicity error is already surfaced before this
-     call site is reached.
+2. **`register`** — nothing. The two `fromPercentilesUnsafe` call sites
+   (`Simulator` and `DistributionPreviewService`) are both reached only through
+   `QuantileAnchors`, so swapping them to a validating constructor would add a
+   second check behind one that already holds. Reconsider only if the library
+   makes `fromPercentilesUnsafe` unavailable.
 
 **Status:** root cause confirmed, fix not yet started. Blocked on
 `metalog-distribution` work.
@@ -942,172 +939,6 @@ makes this full-reconcile pattern feasible at reasonable cost.
 investigation; none are committed work. Items 16a–16e concern the Scala implementation
 and should be revisited at or before Wave 0. Items 16g–16h concern the K3s rollout
 and should be reviewed at Phase K.5 / K.6 planning.
-
----
-
-## 17. Stale simulation served after tree update (PUT) without explicit invalidation — RESOLVED by Phase A (2026-07-18)
-
-**RESOLVED 2026-07-18 — milestone-2b Phase A shipped.** The content-addressed
-`ContentCache` retired the bug class as designed: leaf cache keys are
-recomputed from stored content on every read, so no diff decides invalidation.
-All three package-b deliverables landed: `AggregateFreshnessAfterLeafMoveSpec` (service-level
-combined reparent+param-change PUT → root exceedance pinned to the analytic
-`1−∏(1−pᵢ)` for the new params, 10σ away from the stale signature),
-the SSE-only `InvalidationHandler` rewrite with the ADDITIVE union in
-`computeAffectedNodes` (+ dedicated additive-union test), and
-`MutationInvalidationSpec` retired with `TreeCacheManager` (DD-20 executed in
-the same change: `invalidateWorkspaceCache` endpoint + `InvalidationResponse`
-DTO deleted). `CacheTransparencySpec` additionally pins cache-transparency:
-real cache vs pass-through cache, byte-identical figures over an edit sequence
-including this item's exact mutation shape. Original record below.
-
-**Observed (2026-07-11, `APP_VERSION` 0.3.0):** full docker-compose stack
-(`localhost:18080`, default in-memory repository). After
-`PUT /w/{key}/risk-trees/{treeId}` (full-replacement update reusing existing
-node ids) that changes a leaf's `probability` and `distributionShape`, an
-immediate `POST …/nodes/lec-multi` returns curves that do not reflect the
-update.
-
-**Evidence from the session:**
-- Baseline tree (4 leaves, Cyber Breach p=0.20, CI 500k–8M) vs "mitigated"
-  variant (Cyber Breach p=0.08, CI 300k–3M, all else identical): the
-  *mitigated* fetch returned p90 = 1 745 730 vs baseline p90 = 1 479 526
-  (mitigated strictly worse — impossible), and **byte-identical
-  p99 = 8 389 797.0 in both responses**, suggesting reuse of a previous
-  simulation.
-- In the same run, the first lec-multi after morphing a 1-leaf seed tree into
-  the 4-leaf baseline matched a hybrid state: the leaf's **new** distribution
-  shape but its **old** occurrence probability (root exceedance ≈ 0.37 ≈
-  1−(0.9·0.9·0.85·0.92), i.e. Cyber Breach still at the previous leaf's
-  p=0.10 instead of 0.20).
-
-**Workaround (confirmed):** `POST /w/{key}/risk-trees/{treeId}/invalidate/{rootId}`
-after the PUT — subsequent lec-multi results are correct (root exceedance
-0.4433 ≈ analytic 1−∏(1−pᵢ) = 0.437).
-
-**ROOT CAUSE (confirmed by live repro, 2026-07-12):**
-`InvalidationHandlerLive.computeAffectedNodes` handles "reparented" and
-"parameter-changed" as mutually exclusive branches (`if oldParent != newParent
-then … else if nodeData changed then Set(nid)`). A node that is **both
-reparented and content-changed in the same PUT** takes the reparent branch:
-its old and new parents' ancestor paths are invalidated, but the node's own
-cache entry is **not**. Because `CachedResultResolverLive.simulateNode` composes
-portfolio results from cached child entries (`cache.get(childId)`), the stale
-leaf result is folded into every "fresh" ancestor re-simulation — and **no
-amount of ancestor/root invalidation can fix it**; only invalidating the leaf
-itself flushes it.
-
-Live verification (fresh stack, in-memory repo, 4-leaf tree under root "Ops"):
-
-| Mutation via PUT | Root exceedance observed | Analytic | Verdict |
-|---|---|---|---|
-| leaf param change only (p 0.20→0.08, CI shrunk) | 0.3575 | 0.352 | correct — diff fired, log shows leaf in invalidation set |
-| leaf reparented under new portfolio **and** p 0.08→0.30, CI grown | 0.3575 (byte-identical quantiles to previous state) | 0.507 | **stale** — log shows only `[root]` + `[root → IT Systems]` invalidated, leaf absent |
-| … then explicit `invalidate/{rootId}` | 0.3575 | 0.507 | **still stale** (root recomposed from stale cached leaf) |
-| … then explicit `invalidate/{leafId}` | 0.5118 | 0.507 | correct |
-
-So the TODO's original title understates it: the documented root-invalidate
-workaround only *appeared* to work in the original session because subsequent
-non-reparenting PUTs re-triggered leaf invalidation. The reliable workaround
-is invalidating the **changed leaf**, not the root. Also verified NOT broken:
-structural equality on `RiskLeaf` (param-only changes are detected),
-`TreeIndex.ancestorPath` (includes the node itself, runs to the root,
-root-first order in logs).
-
-**Test gap:** `MutationInvalidationSpec` covers "parameter change" and "move
-node (reparent)" as separate suites but has no combined
-reparent-plus-param-change case — exactly the hole.
-
-**Fix candidates (decision needed):**
-1. Make the checks additive in `computeAffectedNodes`: compute reparent
-   contribution and content-change contribution independently and union them.
-   Note a reparented node's `parentId` is part of its node data, so checking
-   content-change first (or always) naturally includes the node itself;
-   invalidating a *purely* reparented leaf is semantically unnecessary (its
-   result doesn't depend on the parent) but harmless — decide whether to keep
-   that optimisation.
-2. Longer-term (milestone-2b Phase A, designed but unimplemented): move to the
-   content-addressed cache per `docs/archive/plans/milestone-2b-cache-and-decisions.md`,
-   which makes this whole bug class structurally impossible — see that doc's
-   Review Addendum (2026-07-12) for the audited status, a recommended
-   leaf-only-caching lean-down, and why it is the required substrate for
-   scenario branching. `ARCHITECTURE.md` correctly documents the current
-   NodeId keying; top-level claims of a "Merkle-tree cache" (CLAUDE.md/README)
-   describe the *planned* state.
-
-**Outcome wanted (superseded 2026-07-18 — see decision below):** failing test in
-`MutationInvalidationSpec` (reparent + param change in one mutation → node
-itself must be invalidated), then the fix, then re-verify with the API repro
-above.
-
-**DECIDED 2026-07-18 (user) — tactical fix will NOT be implemented ("package
-b").** Milestone-2b Phase A retires the bug class structurally: on every read
-the leaf cache key is recomputed from the leaf's stored content
-(`sha256(LeafSimContent)`), so a param change *is* a different key — no
-hand-written diff decides invalidation, hence nothing to get wrong.
-Consequences, now explicit Phase A deliverables in
-`docs/archive/plans/milestone-2b-cache-and-decisions.md` (Phase Outline):
-
-1. **End-to-end regression test** replicating this item's live repro at service
-   level (create tree → LEC → one update combining reparent + param change →
-   LEC again → root exceedance matches the analytic `1−∏(1−pᵢ)` for the *new*
-   params; the repro's stale-vs-correct gap is ≈0.3575 vs ≈0.507 — wide and
-   deterministic under fixed seeds). It is the acceptance probe for Phase A's
-   central claim and is cache-implementation-agnostic. It cannot land earlier:
-   it fails against the current design, and a failing test is a merge blocker.
-2. **`InvalidationHandler` SSE half**: when Phase A rewrites the handler
-   (SSE-only), `computeAffectedNodes` must union the reparent and
-   content-change contributions additively — the current exclusive `if/else if`
-   is this bug and would otherwise survive into the SSE node list (currently
-   harmless: `CacheInvalidated` has zero subscribers, verified 2026-07-18).
-3. `MutationInvalidationSpec` asserts cache-entry survival inside
-   `TreeCacheManager` and dies with it; the e2e test above replaces its role.
-
-**Until Phase A ships this bug stays live.** Interim workaround (reliable,
-verified): `POST …/invalidate/{leafId}` on the *changed leaf* after a combined
-reparent+param PUT. The endpoint itself retires in Phase A — DD-20, closed
-2026-07-18 → (a) in the milestone-2b doc — deleted in the same change that
-retires `TreeCacheManager`.
-
----
-
-## 18. Update `examples/demo-*.sh` to the current bootstrap wire format — DONE (2026-07-14)
-
-**Resolved 2026-07-14:** all four scripts rewritten to nest `distributionShape`
-(with `terms`); `demo-simple-curl.sh` and `demo-enterprise-curl.sh` verified
-end-to-end against the live server (bootstrap + all queries green). Also
-updated the four `docs/test/*.json` fixtures and `docs/user/API-TUTORIAL.md`
-(the tutorial's enterprise payloads additionally had `&`/`()` names that
-violate the `SafeName` pattern — normalised to the demo-script spellings, e.g.
-`Technology and Cyber`, `Data Breach - PII`, `M and A Integration Failure`).
-No BATS/`tests/` payloads were affected — the Scala test suites and frontend
-already use the nested shape. ADRs describe the *domain* model (`RiskLeaf`
-still stores flat fields) so they remain accurate and were left unchanged.
-Not touched: `docs/test/TESTING.md` uses the entire pre-workspace `/api/risk-trees`
-surface (broader rot — needs a separate reconciliation pass, see below).
-
-**Observed (2026-07-11, `APP_VERSION` 0.3.0):** all four scripts
-(`demo-simple-curl.sh`, `demo-simple-httpie.sh`, `demo-enterprise-curl.sh`,
-`demo-enterprise-httpie.sh`) still send the old flat leaf format and fail with
-400 `missing at 'leaves[0].distributionShape'`.
-
-**Current format** (see `RiskTreeDefinitionRequest.scala`): leaf fields
-`distributionType`, `minLoss`, `maxLoss`, `percentiles`, `quantiles` moved
-into a nested `distributionShape` object (which also gained `terms`):
-
-```json
-{"name": "...", "parentName": "...", "probability": 0.2,
- "distributionShape": {"distributionType": "lognormal",
-   "minLoss": 500000, "maxLoss": 8000000,
-   "percentiles": null, "quantiles": null, "terms": null}}
-```
-
-**Scope note:** also grep `tests/` (BATS) for the old flat payload shape
-before assuming only `examples/` is affected. Constraints relevant to the
-rewrite: node names allow only letters/digits/spaces/hyphens/slashes;
-`POST /workspaces` is rate-limited (`REGISTER_WORKSPACE_MAX_CREATES_PER_IP`,
-default 5/h, counted per attempt including 400s); beware item 17 if the
-scripts PUT then immediately fetch LECs.
 
 ---
 
@@ -2126,7 +1957,7 @@ Reference: `docs/dev/plans/PLAN-RISKTRANSFORM.md` §9, "Lever 2".
 
 **What it is.** Replace the plain collection fields on the domain aggregates —
 `RiskTree.nodes`, `RiskTree.mitigations`, `TransformPipeline.steps`,
-`RiskPortfolio.childIds`, `RiskLeaf.percentiles` / `RiskLeaf.quantiles` — with
+`RiskPortfolio.childIds`, `QuantileAnchors.values` — with
 Iron `MaxLength[N]`-refined collection types, so the count ceiling is carried in
 the type and enforced by the compiler at every construction site. This would be
 the codebase's first collection-level Iron refinement (all current Iron uses
@@ -2154,11 +1985,21 @@ collection refinement; the churn and round-trip-verification risk are
 disproportionate to a correctness-only (not security) marginal benefit once the
 `fromNodes` validators exist. Revisit as its own scoped change.
 
+**One of the five is now bounded by construction without an Iron type.**
+`QuantileAnchors` is a private-constructor type whose only entry point refuses a
+count outside 2 … 20 and a sequence that does not strictly increase, so no
+value of it exists that breaks either rule. That is what Lever 2 wants for this
+collection, reached through a smart constructor rather than through the type
+parameter. It does not deliver the compile-time half — a caller still writes a
+`Vector` and learns at runtime — but it narrows what the deferral is costing to
+four collections rather than five.
+
 **Status:** deferred — the runtime bounds have landed
 (`PLAN-DOMAIN-INVARIANT-HARDENING.md`: `RiskTree.fromNodes` node-count +
-node-name-uniqueness, `RiskPortfolio.create` childIds cap, `RiskLeaf.create`
-expert-point range, plus the 8 MiB request body cap). Iron `MaxLength` collection
-typing remains as a later compile-time hardening.
+node-name-uniqueness, `RiskPortfolio.create` childIds cap, plus the 8 MiB
+request body cap), and the expert-point range is enforced in
+`QuantileAnchors.create`. Iron `MaxLength` collection typing remains as a later
+compile-time hardening.
 
 ---
 
@@ -2774,3 +2615,75 @@ which is the weaker claim matching what the browser is for.
 
 **Status.** Deliberately not routed to a plan. This entry records the facts so
 the work can be scoped when it is taken up.
+
+## 61. Author-stated support bounds for an expert fit, and what a metalog's outermost anchors actually mean
+
+**The feature.** An author states a confidence interval and the ends the loss
+cannot pass: "90% confident the loss is between 20 and 30, and 10 and 40 are the
+impossible ends." The metalog fit supports it — `QPFitter` takes a lower and an
+upper bound — and the fit is then over the support `[10, 40]` with the stated
+anchors inside it.
+
+**Where it would go, and why it is not an adapter parameter.** The bounds are
+author input, so they belong on `DistributionShape`'s expert case as a support
+range with its own construction gate, carrying two rules no field type holds: the
+lower end below the upper, and every anchor loss strictly inside the pair.
+`DistributionShape.resolve` then carries the range into
+`ExpertDistributionParams`, and `MetalogDistribution.fromParams` reads it from
+there. The adapter's signature does not change, because it already takes the
+resolved parameters.
+
+**What it replaces.** The zero floor currently applied inside `fromParams`, with
+the reason that a loss cannot be negative. That stays correct as the default and
+stops being the only possibility: an author stating an impossible lower end
+states a floor above zero.
+
+**The open question, and it is the reason this entry exists.** The outermost
+anchors are not strict bounds. They are interpolation constraints — they force
+the fitted curve through those points and say nothing about where the curve may
+go beyond them. So "the smallest stated quantile" and "the lowest possible loss"
+are two different concepts, and a fit given only anchors has a support the author
+never stated. How a metalog behaves outside its outermost anchors, and what an
+author is therefore asserting when they state anchors without bounds, needs
+examining before this feature is designed.
+
+**Probably the library's work rather than this repository's.** The question is
+about what the fit means, not about how this application calls it. The
+examination belongs with `metalog-distribution`, alongside the findings already
+recorded in `FINDING-basis-function-indexing.md` at that repository's root.
+
+**Status.** Deliberately not routed to a plan. This entry records the facts so
+the work can be scoped when it is taken up.
+
+## 62. A leaf-stage mitigation whose contribution is discarded is still reported as applied
+
+**What happens.** Two parameter-stage mitigations cover one leaf. One of them
+states a figure absolutely and is ordered last, so on the component it names it
+replaces whatever the other produced. The earlier mitigation then contributed
+nothing to the answer, and nothing in the output says so.
+
+**Worked case.** A leaf sits at probability 0.40. One mitigation scales the
+probability by 0.5 at `MitigationPrecedence.default`. A second states the
+probability absolutely as 0.02 at `MitigationPrecedence.overrideFinal`.
+`MitigationApplication.effectiveTree` folds them in precedence order, so the
+scale runs first and the absolute statement discards it: the leaf resolves at
+0.02, exactly as it would with the scale absent. Both mitigations appear in
+`MitigationApplication.applicationRecords`, because that function records every
+mitigation whose scope resolved to a node and holds no figures to compare.
+
+**Why the result stage does not have this.** A result-stage layer carries both
+sets of figures on the value it produces — `LossDistribution.source` is what the
+layer was applied to and `trials` is what came out — so what that node's layer
+removed is a subtraction on one value. The leaf stage keeps no equivalent:
+`effectiveTree` folds the leaf's parameters and rebuilds the leaf from the final
+pair, so every intermediate figure is discarded.
+
+**Where it is visible today.** In the loss exceedance curve comparison. Turning
+the earlier mitigation off and seeing no curve move is the signal that it
+contributed nothing. That is a comparison the reader performs, not a statement
+the system makes.
+
+**Status.** Recorded to keep the knowledge, not routed to a plan and not a
+follow-up. The curve comparison covers it well enough that no reporting field is
+wanted; this entry exists so the reasoning does not have to be rebuilt if the
+question returns.

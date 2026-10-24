@@ -4,7 +4,6 @@ import zio.*
 import zio.json.*
 import zio.test.*
 import zio.test.Assertion.*
-import io.github.iltotore.iron.*
 
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.{
@@ -18,7 +17,7 @@ import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.testcontainers.IrminCompose
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId as treeIdOf, lognormalShape}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId as treeIdOf, lognormalShape, residualProbability}
 
 /**
   * Integration tests for `ScenarioMergeService` against live Irmin.
@@ -104,9 +103,9 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     Mitigation.create(
       id, sname(label), pred,
       MitigationSpec.LeafAbsolute(
-        // refineUnsafe rather than autoRefine: the value is a parameter here,
-        // so the refinement cannot be checked at compile time.
-        AbsoluteReplacement.Likelihood(likelihood.refineUnsafe), nodeA, stamp),
+        // The fixture helper rather than autoRefine: the value is a parameter
+        // here, so the refinement cannot be checked at compile time.
+        AbsoluteReplacement.Likelihood(residualProbability(likelihood)), nodeA, stamp),
       MitigationPrecedence.overrideFinal
     ).toEither.toOption.get
 

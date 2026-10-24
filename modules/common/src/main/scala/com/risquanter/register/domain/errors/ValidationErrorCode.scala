@@ -22,7 +22,7 @@ enum ValidationErrorCode(val code: String, val description: String):
   case DEPENDENCY_FAILED extends ValidationErrorCode("DEPENDENCY_FAILED", "Related field validation failed")
   case INVALID_COMBINATION extends ValidationErrorCode("INVALID_COMBINATION", "Field combination is invalid")
   case EMPTY_COLLECTION extends ValidationErrorCode("EMPTY_COLLECTION", "Collection must not be empty")
-  case INVALID_EXPERT_PARAMS extends ValidationErrorCode("INVALID_EXPERT_PARAMS", "Expert opinion parameters invalid")
+  case INVALID_METALOG_PARAMS extends ValidationErrorCode("INVALID_METALOG_PARAMS", "Metalog parameters invalid")
   case INVALID_LOGNORMAL_PARAMS extends ValidationErrorCode("INVALID_LOGNORMAL_PARAMS", "Lognormal parameters invalid")
   case UNSUPPORTED_DISTRIBUTION_TYPE extends ValidationErrorCode("UNSUPPORTED_DISTRIBUTION_TYPE", "Distribution type not supported")
   case ID_NOT_ALLOWED_ON_CREATE extends ValidationErrorCode("ID_NOT_ALLOWED_ON_CREATE", "IDs must not be supplied when creating a resource")

@@ -2,14 +2,12 @@ package com.risquanter.register.services.pipeline
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
 import com.risquanter.register.testutil.TestHelpers.*
-import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**
   * Tests for the SSE-only InvalidationHandler.
@@ -173,40 +171,40 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
 
     test("a freshly REBUILT identical tree publishes nothing (content comparison, not reference)") {
       // Every PUT rebuilds the tree from the request, so arrays
-      // (expert percentiles/quantiles, portfolio childIds) are fresh
+      // (metalog percentiles/quantiles, portfolio childIds) are fresh
       // instances. Case-class `==` compares arrays by reference and would
-      // report every portfolio (and every expert leaf) as changed on every
-      // mutation. Includes an expert leaf to cover the array-valued fields.
-      def buildExpertTree(): RiskTree = treeWith(Seq(
+      // report every portfolio (and every metalog leaf) as changed on every
+      // mutation. Includes a metalog leaf to cover the array-valued fields.
+      def buildMetalogTree(): RiskTree = treeWith(Seq(
         unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("ops-risk"),
           name = "Operational Risk",
-          childIds = Vector(idStr("cyber"), idStr("expert-leaf")),
+          childIds = Vector(idStr("cyber"), idStr("metalog-leaf")),
           parentId = None
         ), "portfolio"),
         cyberLeaf,
         unsafeGet(RiskLeaf.create(
-          id = idStr("expert-leaf"),
-          name = "Expert Leaf",
+          id = idStr("metalog-leaf"),
+          name = "Metalog Leaf",
           probability = 0.2,
-          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3)),
+          shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3)),
           parentId = Some(nodeId("ops-risk")),
           seedVarId = 4L
         ), "leaf")
       ))
       for {
         handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleMutation(buildExpertTree(), buildExpertTree(), BranchChoice.Main)
+        result  <- handler.handleMutation(buildMetalogTree(), buildMetalogTree(), BranchChoice.Main)
       } yield assertTrue(result.invalidatedNodes.isEmpty)
     },
 
-    test("changing only an expert leaf's quantile VALUES publishes exactly that leaf + ancestors") {
-      def expertLeaf(quantiles: Vector[Double]): RiskLeaf =
+    test("changing only a metalog leaf's quantile VALUES publishes exactly that leaf + ancestors") {
+      def metalogLeaf(quantiles: Vector[Double]): RiskLeaf =
         unsafeGet(RiskLeaf.create(
-          id = idStr("expert-leaf"),
-          name = "Expert Leaf",
+          id = idStr("metalog-leaf"),
+          name = "Metalog Leaf",
           probability = 0.2,
-          shape = expertShape(Vector(0.1, 0.5, 0.9), quantiles, Some(3)),
+          shape = metalogShape(Vector(0.1, 0.5, 0.9), quantiles, Some(3)),
           parentId = Some(nodeId("it-risk")),
           seedVarId = 4L
         ), "leaf")
@@ -216,12 +214,12 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("it-risk"),
           name = "IT Risk",
-          childIds = Vector(idStr("hardware"), idStr("software"), idStr("expert-leaf")),
+          childIds = Vector(idStr("hardware"), idStr("software"), idStr("metalog-leaf")),
           parentId = Some(nodeId("ops-risk"))
         ), "portfolio"),
         hardwareLeaf,
         softwareLeaf,
-        expertLeaf(quantiles)
+        metalogLeaf(quantiles)
       ))
       for {
         handler <- ZIO.service[InvalidationHandler]
@@ -232,7 +230,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         )
       } yield assertTrue(
         result.invalidatedNodes.map(_.value).toSet ==
-          Set(idStr("expert-leaf"), idStr("it-risk"), idStr("ops-risk"))
+          Set(idStr("metalog-leaf"), idStr("it-risk"), idStr("ops-risk"))
       )
     },
 

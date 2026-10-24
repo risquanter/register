@@ -16,8 +16,9 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
 
   private val harnessLayer = DemoSpecSupport.harnessLayer
 
-  /** Reproduces the tree from Step 1 of demo-simple-{httpie,curl}.sh.
-    * Shared with SeedReproducibilityItSpec (order-independence, PLAN-SEED-IDENTITY §11).
+  /** Reproduces the tree from Step 1 of demo-simple-{httpie,curl}.sh. Shared
+    * with `SeedReproducibilityItSpec`, which asserts that the simulated figures
+    * do not depend on the order the leaves are submitted in.
     */
   private[http] val demoTreeRequest = RiskTreeDefinitionRequest(
     name = "Operational Risk Model",

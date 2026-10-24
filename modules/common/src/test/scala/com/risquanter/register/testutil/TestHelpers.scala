@@ -5,7 +5,11 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, Field
 import com.risquanter.register.domain.data.{
   DistributionShape, MitigationSpec, ResultTransformSpec, TransformPipeline
 }
-import com.risquanter.register.domain.data.iron.{SafeId, NodeId, TreeId, MitigationId}
+import com.risquanter.register.domain.data.iron.{
+  SafeId, NodeId, TreeId, MitigationId, RetentionFactor, ResidualProbability, UnitFraction
+}
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.{Greater, LessEqual}
 import scala.annotation.tailrec
 import scala.util.hashing.MurmurHash3
 
@@ -103,23 +107,23 @@ trait TestHelpers {
     )
 
   /**
-    * An expert loss shape built from the two parallel sequences an author
+    * A metalog loss shape built from the two parallel sequences an author
     * states. Goes through the same gate the request decoder uses, so a fixture
     * that breaks a construction rule fails loudly here instead of producing a
     * value the domain cannot hold.
     *
     * {{{
-    * expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
+    * metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
     * }}}
     */
-  def expertShape(
+  def metalogShape(
     percentiles: Vector[Double],
     quantiles:   Vector[Double],
     terms:       Option[Int]
-  ): DistributionShape.Expert =
+  ): DistributionShape.Metalog =
     unsafeGet(
-      DistributionShape.Expert.fromPrimitives(percentiles, quantiles, terms, ErrorSubject.Request),
-      "expertShape"
+      DistributionShape.Metalog.fromPrimitives(percentiles, quantiles, terms, ErrorSubject.Request),
+      "metalogShape"
     )
 
   /**
@@ -131,6 +135,31 @@ trait TestHelpers {
       DistributionShape.Lognormal.fromPrimitives(minLoss, maxLoss, ErrorSubject.Request),
       "lognormalShape"
     )
+
+  /**
+    * The fraction a mitigation keeps, built from a literal through the same
+    * refinement the request decoder uses. A fixture outside (0, 1] fails here.
+    *
+    * {{{
+    * retentionFactor(0.5)
+    * }}}
+    */
+  def retentionFactor(value: Double): RetentionFactor =
+    RetentionFactor(refine(value, "retentionFactor"))
+
+  /**
+    * The probability a mitigation asserts, on the same terms. It is a distinct
+    * type from `retentionFactor`'s result although both refine one predicate,
+    * so a factor cannot reach a parameter wanting a probability.
+    */
+  def residualProbability(value: Double): ResidualProbability =
+    ResidualProbability(refine(value, "residualProbability"))
+
+  private def refine(value: Double, label: String): UnitFraction =
+    value
+      .refineEither[Greater[0.0] & LessEqual[1.0]]
+      .getOrElse(throw new IllegalArgumentException(
+        s"$label fixture outside (0, 1]: $value"))
 
   /**
     * A result-stage spec built from its steps, through the same step-count gate

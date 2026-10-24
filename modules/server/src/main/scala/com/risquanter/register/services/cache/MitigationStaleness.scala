@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, ContentHa
   * `LeafSimContent`, which excludes name and parentId.
   *
   * Diagnostic only: resolution ignores staleness, so a stale override still
-  * applies its frozen expert opinion. Nothing in production reads this yet; it
+  * applies the figures frozen into it. Nothing in production reads this yet; it
   * is built for HTTP handlers to report as `staleMitigationIds` on read and
   * update payloads, with the client rendering and never computing. */
 object MitigationStaleness:

@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.testutil.TestHelpers.{expertShape, lognormalShape}
+import com.risquanter.register.testutil.TestHelpers.{metalogShape, lognormalShape}
 
 object DistributionPreviewServiceSpec extends ZIOSpecDefault:
 
@@ -18,8 +18,8 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
   private val anchorPercentiles: Vector[Double] = Vector(0.05, 0.50, 0.95)
   private val anchorQuantiles:   Vector[Double] = Vector(1_000.0, 5_000.0, 25_000.0)
 
-  private def expert(terms: Option[Int]): DistributionShape =
-    expertShape(anchorPercentiles, anchorQuantiles, terms)
+  private def metalog(terms: Option[Int]): DistributionShape =
+    metalogShape(anchorPercentiles, anchorQuantiles, terms)
 
   /** The two bounds of a 90% confidence interval. */
   private val lognormal: DistributionShape = lognormalShape(1_000L, 50_000L)
@@ -31,17 +31,17 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
 
   def spec = suite("DistributionPreviewService")(
 
-    // ── expert mode ───────────────────────────────────────────────────────────
+    // ── metalog mode ──────────────────────────────────────────────────────────
 
-    suite("expert mode")(
+    suite("metalog mode")(
 
       test("returns exactly 200 points") {
-        for resp <- preview(expert(None))
+        for resp <- preview(metalog(None))
         yield assertTrue(resp.points.length == 200)
       },
 
       test("all pdf and cdf values are finite and non-negative") {
-        for resp <- preview(expert(None))
+        for resp <- preview(metalog(None))
         yield assertTrue(
           resp.points.forall(p => p.pdf.isFinite && p.pdf >= 0.0) &&
           resp.points.forall(p => p.cdf.isFinite && p.cdf >= 0.0 && p.cdf <= 1.0)
@@ -49,7 +49,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       },
 
       test("cdf values are strictly increasing") {
-        for resp <- preview(expert(None))
+        for resp <- preview(metalog(None))
         yield
           val cdfs = resp.points.map(_.cdf)
           val monotone = cdfs.sliding(2).forall { case Vector(a, b) => a < b; case _ => true }
@@ -57,23 +57,25 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       },
 
       test("x values (quantiles) are non-negative with lower bound 0") {
-        // The expert distribution is fitted with lower = Some(0.0)
-        for resp <- preview(expert(None))
+        // The metalog distribution is fitted with lower = Some(0.0)
+        for resp <- preview(metalog(None))
         yield assertTrue(resp.points.forall(_.x >= 0.0))
       },
 
       test("response metadata reflects resolved terms and anchor count") {
         // 3 anchors, no explicit terms → one term per anchor, so resolvedTerms = 3
-        for resp <- preview(expert(None))
+        // The label is compared against a literal rather than against the named
+        // constant, so a change to the constant fails here instead of passing.
+        for resp <- preview(metalog(None))
         yield assertTrue(
-          resp.distributionType == "expert" &&
+          resp.distributionType == "Metalog" &&
           resp.resolvedTerms    == Some(3) &&
           resp.anchorCount      == Some(3)
         )
       },
 
       test("respects explicit terms override") {
-        for resp <- preview(expert(Some(2)))
+        for resp <- preview(metalog(Some(2)))
         yield assertTrue(resp.resolvedTerms == Some(2))
       }
     ),
@@ -106,7 +108,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       test("response metadata has no resolvedTerms or anchorCount") {
         for resp <- preview(lognormal)
         yield assertTrue(
-          resp.distributionType == "lognormal" &&
+          resp.distributionType == "Lognormal" &&
           resp.resolvedTerms    == None         &&
           resp.anchorCount      == None
         )

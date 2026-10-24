@@ -7,6 +7,17 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, BranchChoice}
 
 /**
+  * Result of a mutation notification.
+  *
+  * @param invalidatedNodes Node IDs whose figures changed (nodes + ancestors)
+  * @param subscribersNotified Number of SSE subscribers who received the event
+  */
+final case class InvalidationResult(
+    invalidatedNodes: List[NodeId],
+    subscribersNotified: Int
+)
+
+/**
   * Notifies SSE subscribers which nodes' figures changed after a tree
   * mutation (ADR-004a: SSE provides unidirectional server→client push).
   *
@@ -19,20 +30,8 @@ import com.risquanter.register.domain.data.iron.{TreeId, NodeId, BranchChoice}
   * The published event is named `SSEEvent.CacheInvalidated`. For a browser the
   * meaning is "these nodes' figures are stale, re-fetch them".
   *
-  * Triggered by RiskTreeServiceLive mutations (update, delete). Future: also
-  * by Irmin watch subscription (for external mutations).
+  * Triggered by RiskTreeServiceLive mutations (update, delete).
   */
-/**
-  * Result of a mutation notification.
-  *
-  * @param invalidatedNodes Node IDs whose figures changed (nodes + ancestors)
-  * @param subscribersNotified Number of SSE subscribers who received the event
-  */
-final case class InvalidationResult(
-    invalidatedNodes: List[NodeId],
-    subscribersNotified: Int
-)
-
 trait InvalidationHandler {
 
   /**
@@ -52,10 +51,6 @@ trait InvalidationHandler {
     *
     * Each affected node expands to its ancestor path in the new tree, plus
     * removed nodes verbatim (browsers drop them after re-fetch).
-    *
-    * TODO: Review when implementing ADR-017 Phase 2 (Batch Operations / TreeOp
-    * algebra). TreeOp operations carry explicit change semantics, which may
-    * simplify or replace the old-vs-new tree diffing logic.
     *
     * @param oldTree Tree state before mutation
     * @param newTree Tree state after mutation (treeId derived from newTree.id)

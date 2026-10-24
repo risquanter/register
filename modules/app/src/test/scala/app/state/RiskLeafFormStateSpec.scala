@@ -42,9 +42,9 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         assertTrue(current(st.minLossError).isEmpty)
       },
 
-      test("a zero expert quantile shows the positivity error") {
+      test("a zero metalog quantile shows the positivity error") {
         val st = new RiskLeafFormState
-        st.distributionModeVar.set(DistributionMode.Expert)
+        st.distributionModeVar.set(DistributionMode.Metalog)
         st.quantilesVar.set("0, 5000, 20000")
         st.markTouched(RiskLeafField.Quantiles)
         assertTrue(

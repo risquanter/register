@@ -19,7 +19,7 @@ case class ValidationError(errors: List[String]) {
  * a wide variety of shapes (bounded, semi-bounded, unbounded) using percentile-quantile
  * pairs fitted with a quantile function.
  * 
- * Used for "expert" mode where user provides percentile-quantile estimates.
+ * Used for metalog mode, where the author provides percentile-quantile estimates.
  * 
  * This wrapper adds:
  * - Iron refinement type validation for percentiles (must be in (0,1) - exclusive bounds)

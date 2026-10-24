@@ -1,6 +1,6 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
 import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forLeaf, name}
 import app.components.FormInputs.*
@@ -185,7 +185,7 @@ object RiskLeafFormView:
       cls := "risk-leaf-form",
       p(
         cls := "form-description",
-        "Configure a risk leaf node with either expert distribution or lognormal distribution."
+        "Configure a risk leaf node with either a metalog or a lognormal distribution."
       ),
 
       // When the active target is this leaf, populate the form from its saved
@@ -297,7 +297,7 @@ object RiskLeafFormView:
       radioGroup(
         labelText = "Distribution Type",
         options = List(
-          (DistributionMode.Expert, "Expert Opinion"),
+          (DistributionMode.Metalog, "Metalog (expert estimate)"),
           (DistributionMode.Lognormal, "Lognormal (BCG)")
         ),
         selectedVar = state.distributionModeVar,
@@ -313,7 +313,7 @@ object RiskLeafFormView:
       // as Signals so locking/unlocking toggles the `disabled` attribute on the
       // already-mounted inputs instead of rebuilding them (Signal granularity, ADR-019).
       child <-- state.distributionModeVar.signal.map {
-        case DistributionMode.Expert    => expertFields(state, isDisabled, showLockIcon)
+        case DistributionMode.Metalog   => metalogFields(state, isDisabled, showLockIcon)
         case DistributionMode.Lognormal => lognormalFields(state, isDisabled, showLockIcon)
       },
 
@@ -353,11 +353,11 @@ object RiskLeafFormView:
       )
     )
 
-  /** Expert mode specific fields */
-  private def expertFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
+  /** Metalog mode specific fields */
+  private def metalogFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
     div(
       cls := "mode-fields",
-      div(cls := "mode-fields-title", "Expert Opinion Parameters"),
+      div(cls := "mode-fields-title", "Metalog Parameters"),
 
       textInput(
         labelText = "Percentiles",

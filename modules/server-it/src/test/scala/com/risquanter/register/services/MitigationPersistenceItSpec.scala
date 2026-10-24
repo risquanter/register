@@ -2,7 +2,6 @@ package com.risquanter.register.services
 
 import zio.*
 import zio.test.*
-import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, Mitigation,
@@ -13,7 +12,7 @@ import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceId, Sa
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.testcontainers.IrminCompose
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, lognormalShape}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, lognormalShape, residualProbability}
 
 /**
   * Integration tests for mitigation persistence through `RiskTreeRepositoryIrmin`
@@ -43,7 +42,8 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
   private def overrideMit(label: String, anchor: NodeId): Mitigation =
     Mitigation.create(
       mitigationId(label), sname(label), pred,
-      MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), anchor, stamp),
+      MitigationSpec.LeafAbsolute(
+        AbsoluteReplacement.Likelihood(residualProbability(0.05)), anchor, stamp),
       MitigationPrecedence.overrideFinal
     ).toEither.toOption.get
 

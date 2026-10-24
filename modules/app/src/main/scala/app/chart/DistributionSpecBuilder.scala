@@ -13,7 +13,7 @@ import com.risquanter.register.http.requests.{DistributionPreviewPoint, Distribu
   * Dark theme config comes from [[VegaSpecShared]], shared with the LEC chart.
   *
   * The `draft` parameter supplies the shape the author stated — the quantile
-  * anchors of an expert fit, or the two bounds of a lognormal — and the overlay
+  * anchors of a metalog fit, or the two bounds of a lognormal — and the overlay
   * annotations are drawn from it.
   */
 object DistributionSpecBuilder:
@@ -144,8 +144,8 @@ object DistributionSpecBuilder:
     val layers = js.Array[js.Any]()
     val rules = Vector.newBuilder[VegaSpecShared.VerticalRuleDatum]
     draft.foreach {
-      // Expert mode: vertical rules at each anchor's x-position
-      case DistributionShape.Expert(anchors, _) =>
+      // Metalog mode: vertical rules at each anchor's x-position
+      case DistributionShape.Metalog(anchors, _) =>
         anchors.values.foreach { anchor =>
           val percentile: Double = anchor.percentile
           val loss: Double       = anchor.loss

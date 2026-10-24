@@ -2,10 +2,12 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.prelude.Validation
-import io.github.iltotore.iron.{autoRefine, refineUnsafe}
+import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.domain.data.iron.{RetentionFactor, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
-import com.risquanter.register.testutil.TestHelpers.{expertShape, lognormalShape, nodeId}
+import com.risquanter.register.testutil.TestHelpers.{
+  metalogShape, lognormalShape, nodeId, residualProbability, retentionFactor
+}
 
 /**
  * The leaf-stage arrow: `LeafParams => Validation[ValidationError, LeafParams]`.
@@ -30,8 +32,8 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
   private def lognormalParams(prob: Double = 0.4, min: Long = 1000L, max: Long = 100000L): LeafParams =
     LeafParams(prob.refineUnsafe, lognormalShape(min, max))
 
-  private def expertParams(prob: Double = 0.4): LeafParams =
-    LeafParams(prob.refineUnsafe, expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)))
+  private def metalogParams(prob: Double = 0.4): LeafParams =
+    LeafParams(prob.refineUnsafe, metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)))
 
   private def run(spec: LeafStageSpec, params: LeafParams): Validation[ValidationError, LeafParams] =
     LeafStageSpec.applyTo(spec, params, subject)
@@ -43,14 +45,14 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
   private val keep: LeafStageSpec =
     MitigationSpec.LeafRelative(RelativeLikelihood.Keep, RelativeSeverity.Keep)
 
-  private def scaleLikelihood(f: RetentionFactor): LeafStageSpec =
-    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(f), RelativeSeverity.Keep)
+  private def scaleLikelihood(f: Double): LeafStageSpec =
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(f)), RelativeSeverity.Keep)
 
-  private def scaleSeverity(f: RetentionFactor): LeafStageSpec =
-    MitigationSpec.LeafRelative(RelativeLikelihood.Keep, RelativeSeverity.ScaleSeverity(f))
+  private def scaleSeverity(f: Double): LeafStageSpec =
+    MitigationSpec.LeafRelative(RelativeLikelihood.Keep, RelativeSeverity.ScaleSeverity(retentionFactor(f)))
 
   private def replaceLikelihood(p: Double): LeafStageSpec =
-    MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(p.refineUnsafe), anchor, stamp)
+    MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(residualProbability(p)), anchor, stamp)
 
   private def replaceSeverity(shape: DistributionShape): LeafStageSpec =
     MitigationSpec.LeafAbsolute(AbsoluteReplacement.Severity(shape), anchor, stamp)
@@ -94,15 +96,39 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
 
     suite("closure — the output always passed a shape gate")(
       test("property: every factor pair yields a valid result for both modes") {
-        val factors: Gen[Any, RetentionFactor] = Gen.double(0.1, 1.0).map(_.refineUnsafe)
+        val factors: Gen[Any, RetentionFactor] = Gen.double(0.1, 1.0).map(retentionFactor)
         check(factors, factors) { (lf, df) =>
           val both = MitigationSpec.LeafRelative(
             RelativeLikelihood.Scale(lf), RelativeSeverity.ScaleSeverity(df))
           assertTrue(
             run(both, lognormalParams()).toEither.isRight,
-            run(both, expertParams()).toEither.isRight
+            run(both, metalogParams()).toEither.isRight
           )
         }
+      }
+    ),
+
+    suite("the two fractions are distinct types")(
+      // Both refine one predicate, Double in (0, 1], so nothing but the wrapper
+      // keeps a factor out of a parameter that wants a probability. The
+      // assertion is on compilation rather than on a value, because a type
+      // confusion that compiles produces a wrong figure and no failure.
+      test("a retention factor does not satisfy a residual probability") {
+        typeCheck(
+          "AbsoluteReplacement.Likelihood(retentionFactor(0.5))"
+        ).map(result => assertTrue(result.isLeft))
+      },
+      test("a residual probability does not satisfy a retention factor") {
+        typeCheck(
+          "RelativeLikelihood.Scale(residualProbability(0.5))"
+        ).map(result => assertTrue(result.isLeft))
+      },
+      test("each satisfies its own parameter") {
+        typeCheck(
+          "AbsoluteReplacement.Likelihood(residualProbability(0.5))"
+        ).zipWith(typeCheck("RelativeLikelihood.Scale(retentionFactor(0.5))"))(
+          (likelihood, scale) => assertTrue(likelihood.isRight, scale.isRight)
+        )
       }
     ),
 
@@ -152,21 +178,21 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
           errors.exists(_.message.contains("1.000e-03"))
         )
       },
-      test("expert: anchor losses scale and percentiles do not") {
-        val out = ok(scaleSeverity(0.5), expertParams())
+      test("metalog: anchor losses scale and percentiles do not") {
+        val out = ok(scaleSeverity(0.5), metalogParams())
         out.shape match
-          case DistributionShape.Expert(anchors, _) =>
+          case DistributionShape.Metalog(anchors, _) =>
             assertTrue(
               anchors.losses == Vector(500.0, 2500.0, 10000.0),
               anchors.percentiles == Vector(0.1, 0.5, 0.9)
             )
-          case other => assertTrue(false).label(s"expected an expert shape, got $other")
+          case other => assertTrue(false).label(s"expected a metalog shape, got $other")
       },
-      test("expert: a stated term count survives scaling") {
-        val out = ok(scaleSeverity(0.5), expertParams())
+      test("metalog: a stated term count survives scaling") {
+        val out = ok(scaleSeverity(0.5), metalogParams())
         out.shape match
-          case DistributionShape.Expert(_, terms) => assertTrue(terms.map(t => t: Int) == Some(3))
-          case other                              => assertTrue(false).label(s"expected an expert shape, got $other")
+          case DistributionShape.Metalog(_, terms) => assertTrue(terms.map(t => t: Int) == Some(3))
+          case other => assertTrue(false).label(s"expected a metalog shape, got $other")
       }
     ),
 
@@ -194,20 +220,20 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
 
     suite("severity component — absolute replacement")(
       test("a replacement switches representation wholesale") {
-        val replacement = expertShape(Vector(0.1, 0.9), Vector(500.0, 8000.0), Some(2))
+        val replacement = metalogShape(Vector(0.1, 0.9), Vector(500.0, 8000.0), Some(2))
         val out         = ok(replaceSeverity(replacement), lognormalParams())
-        assertTrue(out.shape == replacement, (out.shape.distributionType: String) == "expert")
+        assertTrue(out.shape == replacement, out.shape.isInstanceOf[DistributionShape.Metalog])
       },
       test("a replacement leaves the probability untouched") {
-        val replacement = expertShape(Vector(0.1, 0.9), Vector(500.0, 8000.0), Some(2))
+        val replacement = metalogShape(Vector(0.1, 0.9), Vector(500.0, 8000.0), Some(2))
         val params      = lognormalParams(prob = 0.4)
         val out         = ok(replaceSeverity(replacement), params)
         assertTrue(out.probability == params.probability)
       },
       test("a replacement that states both components replaces both") {
-        val replacement = expertShape(Vector(0.1, 0.9), Vector(500.0, 8000.0), Some(2))
+        val replacement = metalogShape(Vector(0.1, 0.9), Vector(500.0, 8000.0), Some(2))
         val both: LeafStageSpec = MitigationSpec.LeafAbsolute(
-          AbsoluteReplacement.Both(0.05.refineUnsafe, replacement), anchor, stamp)
+          AbsoluteReplacement.Both(residualProbability(0.05), replacement), anchor, stamp)
         val out = ok(both, lognormalParams(prob = 0.4))
         assertTrue((out.probability: Double) == 0.05, out.shape == replacement)
       }

@@ -15,28 +15,25 @@ enum FormTarget:
 enum FormKind:
   case Leaf, Portfolio
 
-/** The node-editing form's state machine. Replaces the independently-mutated
-  * `selectedLeafName`/`selectedPortfolioName` pair in [[TreeBuilderState]] —
-  * folding target + mode into one sum type makes "only one target selected,
-  * and it's read-only / mid-edit / templating a new node" structural rather
-  * than a manually-maintained invariant.
+/** The node-editing form's state machine. Target and mode are one sum type, so
+  * "only one target is selected, and it is read-only, mid-edit, or templating a
+  * new node" is structural rather than an invariant a holder maintains by hand.
   */
 enum FormMode:
   case Blank
-  /** The *other* node type currently occupies `activeForm` (any of
-    * `Locked`/`Editing`/`Templating` on the other type) — as opposed to
-    * `Blank`, where nothing at all is selected anywhere. Distinct from
-    * `Blank` specifically so `forPortfolio`/`forLeaf` stop conflating the two:
-    * before this case existed, both collapsed to the same `Blank` value, so a
-    * plain submit that moved the *other* form from nothing-selected straight
-    * to its own freshly-`Locked` node was invisible to `.distinct` (`Blank ->
-    * Blank`, no change) — the reset/populate subscription keyed on that
-    * collapsed value never fired, leaving this form's fields (notably
-    * `parentVar`) holding whatever they held before, undetected because the
-    * dropdown's own display falls back to its placeholder for any value no
-    * longer among the current options (see `FormInputs.parentSelect`'s
-    * `correctedDisplay`) — so the stale value looked cleared even though
-    * `isFormDirty` correctly read it as dirty. See docs/dev/TODO.md.
+  /** The *other* node type currently occupies `activeForm` — any of
+    * `Locked`/`Editing`/`Templating` on that type — as opposed to `Blank`,
+    * where nothing at all is selected anywhere.
+    *
+    * The two are separate cases because `forPortfolio`/`forLeaf` project them
+    * to different values, and that projection feeds a `.distinct` subscription
+    * that resets and repopulates the form. Collapsing them would make a submit
+    * that takes the other form from nothing-selected to its own freshly
+    * `Locked` node project to an unchanged value, so the subscription would not
+    * fire and this form's fields — `parentVar` above all — would keep what they
+    * held. The staleness would not show in the dropdown either, because
+    * `FormInputs.parentSelect`'s `correctedDisplay` falls back to the
+    * placeholder for any value no longer among the current options.
     */
   case Inactive
   /** `kind`'s form is actively being drafted — fresh and unsaved, entered
@@ -142,12 +139,12 @@ object FormMode:
     val parent      = ParentSelection.fromSaved(leaf.parent)
     val probability = RiskLeafFormState.domainToDisplayPct(leaf.probability, 2)
     leaf.shape match
-      case DistributionShape.Expert(anchors, terms) =>
+      case DistributionShape.Metalog(anchors, terms) =>
         FieldSnapshot.LeafFields(
           name        = name,
           parent      = parent,
           probability = probability,
-          mode        = DistributionMode.Expert,
+          mode        = DistributionMode.Metalog,
           percentiles = anchors.values.map(a => RiskLeafFormState.domainToDisplayPct(a.percentile, 0)).mkString(", "),
           quantiles   = anchors.values.map(a => (a.loss: Double).toString).mkString(", "),
           terms       = terms.fold("")(_.toString),

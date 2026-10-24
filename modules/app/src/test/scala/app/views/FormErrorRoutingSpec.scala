@@ -69,7 +69,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         )
       },
       test("a mode-level mismatch goes to the banner") {
-        // "Expert mode requires percentiles and quantiles" names the
+        // "Metalog mode requires percentiles and quantiles" names the
         // distribution rather than one of its inputs.
         assertTrue(RiskLeafFormView.inputFor(draft(FieldName.DistributionType)) == None)
       },
@@ -99,7 +99,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.nameVar.set("Server outage")
         state.probabilityVar.set("10")
         state.parentVar.set(ParentSelection.Unset)
-        state.distributionModeVar.set(DistributionMode.Expert)
+        state.distributionModeVar.set(DistributionMode.Metalog)
         // Descending, so the strictly-increasing rule refuses the collection.
         state.percentilesVar.set("90, 50, 10")
         state.quantilesVar.set("1000, 5000, 25000")

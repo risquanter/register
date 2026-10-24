@@ -8,7 +8,7 @@ import zio.prelude.Validation
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError
 }
-import com.risquanter.register.testutil.TestHelpers.{expertShape, idStr, lognormalShape, nodeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{metalogShape, idStr, lognormalShape, nodeId, unsafeGet}
 
 /** What `RiskLeaf.create` refines, and nothing else.
   *
@@ -49,10 +49,10 @@ object RiskLeafSpec extends ZIOSpecDefault {
   def spec = suite("RiskLeaf Smart Constructor")(
 
     suite("Valid RiskLeaf Creation")(
-      test("creates a leaf whose shape is an expert fit") {
+      test("creates a leaf whose shape is a metalog fit") {
         val result = create(
           id = idStr("cyber-attack"), name = "Cyber Attack", probability = 0.25, seedVarId = 1L,
-          shape = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
+          shape = metalogShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
         )
         assertTrue(result.isSuccess)
       },
@@ -197,23 +197,23 @@ object RiskLeafSpec extends ZIOSpecDefault {
         assertTrue(result.map(_.name).toOption.contains("Test Risk Name"))
       },
       test("the constructed leaf carries the shape it was given, anchors intact") {
-        val shape  = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
+        val shape  = metalogShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
         val result = create(idStr("test-risk"), "Test Risk", 0.5, 37L, shape = shape)
         assertTrue(result.map(_.shape).toOption.contains(shape))
       },
       test("the constructed leaf carries a stated term count") {
-        val shape  = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), Some(2))
+        val shape  = metalogShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), Some(2))
         val result = create(idStr("terms-stated"), "Terms Stated", 0.5, 45L, shape = shape)
         result.toOption.get.shape match
-          case DistributionShape.Expert(_, terms) => assertTrue(terms.map(t => t: Int) == Some(2))
-          case other                              => assertTrue(false).label(s"expected an expert shape, got $other")
+          case DistributionShape.Metalog(_, terms) => assertTrue(terms.map(t => t: Int) == Some(2))
+          case other => assertTrue(false).label(s"expected a metalog shape, got $other")
       },
       test("the constructed leaf carries no term count when none was stated") {
-        val shape  = expertShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
+        val shape  = metalogShape(Vector(0.05, 0.5, 0.95), Vector(1000.0, 5000.0, 25000.0), None)
         val result = create(idStr("terms-absent"), "Terms Absent", 0.5, 46L, shape = shape)
         result.toOption.get.shape match
-          case DistributionShape.Expert(_, terms) => assertTrue(terms.isEmpty)
-          case other                              => assertTrue(false).label(s"expected an expert shape, got $other")
+          case DistributionShape.Metalog(_, terms) => assertTrue(terms.isEmpty)
+          case other => assertTrue(false).label(s"expected a metalog shape, got $other")
       }
     ),
 
@@ -313,10 +313,31 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val leaf = unsafeGet(create(idStr("wire-lognormal"), "Wire Lognormal", 0.3, 50L), "leaf")
         assertTrue(leaf.toJson.fromJson[RiskLeaf] == Right(leaf))
       },
-      test("an expert leaf round-trips") {
-        val shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
-        val leaf  = unsafeGet(create(idStr("wire-expert"), "Wire Expert", 0.3, 51L, shape = shape), "leaf")
+      test("a metalog leaf round-trips") {
+        val shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
+        val leaf  = unsafeGet(create(idStr("wire-metalog"), "Wire Metalog", 0.3, 51L, shape = shape), "leaf")
         assertTrue(leaf.toJson.fromJson[RiskLeaf] == Right(leaf))
+      },
+      // A round trip passes under any consistent rename, because the encoder
+      // and decoder move together. These two compare against a literal, so a
+      // change to a field name or to a shape's tag fails an assertion instead
+      // of silently changing what every stored leaf looks like. The shape's tag
+      // is its case name, which is what makes a rename reach these bytes.
+      test("a lognormal leaf's stored bytes are pinned") {
+        val leaf = unsafeGet(
+          create("01HZZZZZZZZZZZZZZZZZZZZZZ7", "Pinned Lognormal", 0.3, 50L), "leaf")
+        assertTrue(leaf.toJson ==
+          """{"id":"01HZZZZZZZZZZZZZZZZZZZZZZ7","name":"Pinned Lognormal","probability":0.3,""" +
+          """"shape":{"distributionType":"Lognormal","minLoss":100,"maxLoss":1000},"seedVarId":50}""")
+      },
+      test("a metalog leaf's stored bytes are pinned") {
+        val shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
+        val leaf  = unsafeGet(
+          create("01HZZZZZZZZZZZZZZZZZZZZZZ8", "Pinned Metalog", 0.3, 51L, shape = shape), "leaf")
+        assertTrue(leaf.toJson ==
+          """{"id":"01HZZZZZZZZZZZZZZZZZZZZZZ8","name":"Pinned Metalog","probability":0.3,""" +
+          """"shape":{"distributionType":"Metalog","percentiles":[0.1,0.5,0.9],""" +
+          """"quantiles":[1000.0,5000.0,25000.0],"terms":3},"seedVarId":51}""")
       },
       test("a leaf whose shape breaks its own rule is refused on the wire") {
         val leaf     = unsafeGet(create(idStr("wire-bad"), "Wire Bad", 0.3, 52L), "leaf")

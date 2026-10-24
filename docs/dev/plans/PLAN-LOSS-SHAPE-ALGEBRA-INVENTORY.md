@@ -66,3 +66,11 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala
 - modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala
 - modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala
+- modules/app/src/main/scala/app/views/RiskLeafFormView.scala
+- modules/app/src/main/scala/app/state/DistributionMode.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/ConflictKind.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/RejectionDetail.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala
+- modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala
+- build.sbt

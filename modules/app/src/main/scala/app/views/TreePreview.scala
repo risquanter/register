@@ -6,7 +6,7 @@ import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, FormMode, FormTar
 import app.components.{Icons, TreeNodeRow}
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, IronConstants}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
@@ -35,8 +35,14 @@ object TreePreview:
       case _: Leaf      => Icons.leaf("tree-icon")
 
     def label: String = this match
-      case Portfolio(n)  => n.value
-      case l: Leaf       => s"${l.n.value} (${l.shape.distributionType}, p=${f"${l.probability}%.2f"})"
+      case Portfolio(n) => n.value
+      case l: Leaf      => s"${l.n.value} (${modeLabel(l.shape)}, p=${f"${l.probability}%.2f"})"
+
+    /** The mode as a display word, read from the case rather than from a field,
+      * so the label and the shape cannot name different modes. */
+    private def modeLabel(shape: DistributionShape): String = shape match
+      case _: DistributionShape.Metalog   => IronConstants.Metalog
+      case _: DistributionShape.Lognormal => IronConstants.Lognormal
 
     /** Native `title` text, built by the shared [[TreeNodeRow]] helpers. A draft
       * node has no identifier and no counted children, so both are `None`. */

@@ -172,12 +172,13 @@ object RiskResultTransform {
    * }}}
    */
   def scaleLosses(factor: RetentionFactor): RiskResultTransform = RiskResultTransform { to =>
+    val fraction = factor.toFraction
     val scaled = to.outcomes.map { case (trial, loss) =>
-      val product = loss * factor
+      val product = loss * fraction
       // Narrowing would saturate silently at Long.MaxValue; throw instead, and
       // let LossDistribution.decorate convert it (ADR-033 §3).
       if (product.isNaN || product >= Long.MaxValue.toDouble)
-        throw new ArithmeticException(s"scaled loss overflow: $loss * $factor")
+        throw new ArithmeticException(s"scaled loss overflow: $loss * $fraction")
       trial -> Math.round(product)
     }.filter(_._2 > 0)  // Remove zero losses
 

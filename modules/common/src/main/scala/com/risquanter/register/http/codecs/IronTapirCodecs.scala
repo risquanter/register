@@ -2,7 +2,7 @@ package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /**
@@ -92,13 +92,8 @@ object IronTapirCodecs {
       )
     )(identity)
 
-  /** Codec for SafeId (3-30 alphanumeric chars + hyphen/underscore).
-    * Used for node identifiers in risk trees (e.g., "cyber-attack", "ops_risk_001").
-    * 
-    * Validates:
-    * - Not blank
-    * - Length: 3-30 characters
-    * - Pattern: ^[a-zA-Z0-9_-]+$
+  /** Codec for SafeId, a 26-character Crockford base32 ULID. Input is accepted
+    * in either case and normalised to uppercase by `SafeId.fromString`.
     */
   given Codec[String, SafeId.SafeId, CodecFormat.TextPlain] =
     Codec.string.mapDecode[SafeId.SafeId](raw =>
@@ -304,13 +299,17 @@ object IronTapirCodecs {
     (s: String) => ContentHash.fromString(s, codecLocation).toOption
   )(_.value)
 
-  /** Schema for the fraction-in-(0, 1] refinement, which carries a mitigation's
-    * scale factor and its asserted residual probability alike. `RetentionFactor`
-    * and `ResidualProbability` are the same underlying Iron type, so one
-    * instance serves both and a second would be ambiguous. */
+  /** Schema for the fraction a mitigation keeps, which a relative scale carries. */
   given Schema[RetentionFactor] = Schema.schemaForDouble.map[RetentionFactor](
     d => ValidationUtil.refineRetentionFactor(d, codecLocation).toOption
-  )(identity)
+  )(_.toFraction)
+
+  /** Schema for the probability a mitigation asserts, which an absolute
+    * replacement carries. It shares `RetentionFactor`'s predicate and is a
+    * distinct type, so each takes its own instance. */
+  given Schema[ResidualProbability] = Schema.schemaForDouble.map[ResidualProbability](
+    d => ValidationUtil.refineResidualProbability(d, codecLocation).toOption
+  )(_.toFraction)
 
   /** Schema for NonNegativeInt for JSON body derivation. */
   given Schema[NonNegativeInt] = Schema.schemaForInt.map[NonNegativeInt](

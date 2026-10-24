@@ -3,7 +3,7 @@ package app.components
 import com.raquo.laminar.api.L.*
 import org.scalajs.dom.MouseEvent
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{SafeName, NodeId, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{SafeName, NodeId, OccurrenceProbability, IronConstants}
 
 /** Unified tree-node row used by both TreePreview (draft state) and
   * TreeDetailView (persisted tree).
@@ -29,7 +29,7 @@ object TreeNodeRow:
     case Portfolio, Leaf
 
   /** Structured leaf tooltip for the native `title` attribute. The lines below
-    * the separator are decided by the shape's case: an expert fit renders its
+    * the separator are decided by the shape's case: a metalog fit renders its
     * quantile anchors as two parallel lists, a lognormal its two bounds. A draft
     * node has no identifier yet, and its identifier line is omitted.
     *
@@ -51,14 +51,18 @@ object TreeNodeRow:
     id:          Option[NodeId]
   ): String =
     val idLine = id.fold("")(n => s"\nID:           ${n.toSafeId.value}")
-    val base   = s"${name.value}\n─────────────────────$idLine\nType:         ${shape.distributionType}\nProbability:  $probability"
+    val base   = s"${name.value}\n─────────────────────$idLine\nProbability:  $probability"
+    // The mode and the lines describing it come from one match on the case, so
+    // the label and the fields below it cannot name different modes.
     val shapeLines = shape match
-      case DistributionShape.Expert(anchors, _) =>
+      case DistributionShape.Metalog(anchors, _) =>
         val percentiles = anchors.values.map(a => (a.percentile: Double)).mkString(", ")
         val quantiles   = anchors.values.map(a => (a.loss: Double)).mkString(", ")
-        s"\nPercentiles:  [$percentiles]\nQuantiles:    [$quantiles]"
+        s"\nType:         ${IronConstants.Metalog}" +
+          s"\nPercentiles:  [$percentiles]\nQuantiles:    [$quantiles]"
       case DistributionShape.Lognormal(bounds) =>
-        s"\nMin Loss:     ${bounds.min: Long}\nMax Loss:     ${bounds.max: Long}"
+        s"\nType:         ${IronConstants.Lognormal}" +
+          s"\nMin Loss:     ${bounds.min: Long}\nMax Loss:     ${bounds.max: Long}"
     s"$base$shapeLines"
 
   /** Structured portfolio tooltip for the native `title` attribute. A draft node

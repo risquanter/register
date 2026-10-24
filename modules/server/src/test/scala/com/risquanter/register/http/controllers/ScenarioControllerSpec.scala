@@ -127,7 +127,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
   override def spec = suite("ScenarioController")(
 
-    test("create from main: 200, response echoes name only — no branch reference (2026-07-21 redesign)") {
+    test("create from main: 200, response echoes name only — no branch reference") {
       for
         (backend, key) <- buildBackend()
         resp <- basicRequest

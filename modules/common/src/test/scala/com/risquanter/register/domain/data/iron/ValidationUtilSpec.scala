@@ -321,7 +321,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineRetentionFactor(1.0, at)
         assertTrue(
           result.isRight &&
-          result.contains(1.0)
+          result.map(f => f.toFraction: Double).contains(1.0)
         )
       },
 
@@ -360,7 +360,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineResidualProbability(1.0, at)
         assertTrue(
           result.isRight &&
-          result.contains(1.0)
+          result.map(p => p.toFraction: Double).contains(1.0)
         )
       },
 

@@ -10,7 +10,9 @@ import com.risquanter.register.domain.data.{
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
 import com.risquanter.register.simulation.TrialOutcomes
-import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, mitigationId, nodeId, resultStage, treeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{
+  idStr, lognormalShape, mitigationId, nodeId, resultStage, retentionFactor, treeId, unsafeGet
+}
 
 /**
  * MitigationApplication — the action's decomposition: per-node scoping with
@@ -115,7 +117,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
   private def minOf(t: RiskTree, label: String): Long =
     leafAt(t, label).shape match
       case DistributionShape.Lognormal(bounds) => bounds.min
-      case e: DistributionShape.Expert         => throw new AssertionError(s"expected a lognormal shape at $label, got $e")
+      case m: DistributionShape.Metalog        => throw new AssertionError(s"expected a lognormal shape at $label, got $m")
 
   private def probOf(t: RiskTree, label: String): Double =
     leafAt(t, label).probability
@@ -204,7 +206,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val dFirst = resultDeductible("m-a-ded", 10000L, MitigationPrecedence(-1))
         val scale  = Mitigation.create(
           mitigationId("m-b-scale"), name("m-b-scale"), pred,
-          resultStage(ResultTransformSpec.ScaleLosses(0.5)),
+          resultStage(ResultTransformSpec.ScaleLosses(retentionFactor(0.5))),
           MitigationPrecedence(1)).toEither.toOption.get
         val t = mkTree(dFirst, scale)
         val scoped = MitigationApplication.scoped(t, MitigationSelection.Residual,

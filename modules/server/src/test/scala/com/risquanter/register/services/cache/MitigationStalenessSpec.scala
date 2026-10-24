@@ -11,7 +11,6 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.domain.data.iron.{NodeId, SafeName, SeedVarId, ContentHash}
-import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 
 /** Tests for [[MitigationStaleness]] — the diagnostic predicate flagging an
@@ -70,14 +69,15 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
   private def absoluteMit(label: String, stamp: ContentHash, anchor: NodeId): Mitigation =
     Mitigation.create(
       mitigationId(label), sname(label), pred,
-      MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), anchor, stamp),
+      MitigationSpec.LeafAbsolute(
+        AbsoluteReplacement.Likelihood(residualProbability(0.05)), anchor, stamp),
       MitigationPrecedence.overrideFinal
     ).toEither.toOption.get
 
   private def scaleMit(label: String): Mitigation =
     Mitigation.create(
       mitigationId(label), sname(label), pred,
-      MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep),
+      MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep),
       MitigationPrecedence.default
     ).toEither.toOption.get
 

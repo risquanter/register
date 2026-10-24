@@ -4,13 +4,12 @@ import zio.test.*
 import zio.prelude.Identity
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import com.risquanter.register.domain.data.{
-  MitigationApplicationRecord, MitigationPrecedence, MitigationSpec,
-  ResultTransformSpec, TransformPipeline
+  MitigationApplicationRecord, MitigationPrecedence, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveInt, PositiveLong, RetentionFactor, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
-import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage}
+import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage, retentionFactor}
 
 /** `Identity` laws, `nTrials` preservation, and all result-stage transform strategies. */
 object RiskResultTransformSpec extends ZIOSpecDefault {
@@ -45,7 +44,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
 
   /** Generate scale factors */
   val genScaleFactor: Gen[Any, RetentionFactor] =
-    Gen.double(0.1, 1.0).map(_.refineUnsafe)
+    Gen.double(0.1, 1.0).map(retentionFactor)
 
   /** Generate simple RiskResultTransform (deductible, cap, scale, or filter) */
   val genSimpleTransform: Gen[Any, RiskResultTransform] = Gen.oneOf(
@@ -200,7 +199,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
     suite("Scale Transformation")(
       test("scaleLosses multiplies each loss by factor") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L, 2 -> 50000L))
-        val transform = RiskResultTransform.scaleLosses(0.8)
+        val transform = RiskResultTransform.scaleLosses(retentionFactor(0.8))
         val scaled = transform.run(outcomes)
 
         assertTrue(
@@ -211,7 +210,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
 
       test("scale by 1.0 is identity") {
         check(genTrialOutcomes) { outcomes =>
-          val transform = RiskResultTransform.scaleLosses(1.0)
+          val transform = RiskResultTransform.scaleLosses(retentionFactor(1.0))
           val scaled = transform.run(outcomes)
 
           assertTrue(scaled.outcomes == outcomes.outcomes)
@@ -230,7 +229,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         // 5 × 0.9 = 4.5 and 7 × 0.9 = 6.3. Truncation reports 4 and 6, both
         // understated; rounding reports 5 and 6, erring in either direction.
         val outcomes = TrialOutcomes(100, Map(1 -> 5L, 2 -> 7L))
-        val scaled   = RiskResultTransform.scaleLosses(0.9).run(outcomes)
+        val scaled   = RiskResultTransform.scaleLosses(retentionFactor(0.9)).run(outcomes)
 
         assertTrue(
           scaled.outcomeOf(1) == 5L,
@@ -242,7 +241,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         // Losses 1..20 halved land alternately on .0 and .5. True total 105;
         // truncation reports 100, every unit lost in the same direction.
         val outcomes = TrialOutcomes(100, (1 to 20).map(i => i -> i.toLong).toMap)
-        val scaled   = RiskResultTransform.scaleLosses(0.5).run(outcomes)
+        val scaled   = RiskResultTransform.scaleLosses(retentionFactor(0.5)).run(outcomes)
         val total    = scaled.outcomes.values.sum
 
         assertTrue(
@@ -256,7 +255,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         // an over-scaled loss as a real figure. A factor of exactly 1 reaches
         // the guard because Long.MaxValue.toDouble rounds up.
         val outcomes  = TrialOutcomes(100, Map(1 -> Long.MaxValue))
-        val transform = RiskResultTransform.scaleLosses(1.0)
+        val transform = RiskResultTransform.scaleLosses(retentionFactor(1.0))
 
         assertTrue(
           try { transform.run(outcomes); false }
@@ -269,7 +268,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val id      = nodeId("risk-001")
         val applied = List(MitigationApplicationRecord(
           mitigationId("scale-over"),
-          resultStage(ResultTransformSpec.ScaleLosses(1.0)),
+          resultStage(ResultTransformSpec.ScaleLosses(retentionFactor(1.0))),
           Set.empty,
           MitigationPrecedence.default
         ))
@@ -293,7 +292,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
 
       test("scale removes trials that round to zero") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100L, 2 -> 50000L))
-        val transform = RiskResultTransform.scaleLosses(0.001)  // 0.1%
+        val transform = RiskResultTransform.scaleLosses(retentionFactor(0.001))  // 0.1%
         val scaled = transform.run(outcomes)
 
         // 100 * 0.001 = 0.1 rounds to 0, removed
@@ -374,7 +373,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
 
         val deductible = RiskResultTransform.applyDeductible(10000L)
-        val scale = RiskResultTransform.scaleLosses(0.5)
+        val scale = RiskResultTransform.scaleLosses(retentionFactor(0.5))
 
         // Apply deductible (100K -> 90K), then scale (90K -> 45K)
         val combined = deductible.andThen(scale)
@@ -387,7 +386,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
 
         val deductible = RiskResultTransform.applyDeductible(10000L)
-        val scale = RiskResultTransform.scaleLosses(0.5)
+        val scale = RiskResultTransform.scaleLosses(retentionFactor(0.5))
 
         // Compose: scale first (100K -> 50K), then deductible (50K -> 40K)
         val combined = deductible.compose(scale)
@@ -400,7 +399,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
 
         val deductible = RiskResultTransform.applyDeductible(10000L)
-        val scale = RiskResultTransform.scaleLosses(0.5)
+        val scale = RiskResultTransform.scaleLosses(retentionFactor(0.5))
 
         // deductible THEN scale
         val order1 = Identity[RiskResultTransform].combine(deductible, scale)

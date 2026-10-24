@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.json.EncoderOps
-import com.risquanter.register.testutil.TestHelpers.{expertShape, lognormalShape, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{metalogShape, lognormalShape, unsafeGet}
 
 /**
   * Byte-stability snapshot for the leaf cache-key preimage.
@@ -29,21 +29,21 @@ object LeafSimContentSpec extends ZIOSpecDefault {
       ), "leaf")
       val json = LeafSimContent.from(leaf).toJson
       assertTrue(json ==
-        """{"seedVarId":7,"probability":0.3,"shape":{"distributionType":"lognormal","minLoss":1000,"maxLoss":50000}}""")
+        """{"seedVarId":7,"probability":0.3,"shape":{"distributionType":"Lognormal","minLoss":1000,"maxLoss":50000}}""")
     },
 
-    test("expert projection JSON is byte-stable (arrays and terms present)") {
+    test("metalog projection JSON is byte-stable (arrays and terms present)") {
       val leaf = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ2",
-        name = "expert-risk",
+        name = "metalog-risk",
         probability = 0.25,
-        shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3)),
+        shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3)),
         parentId = None,
         seedVarId = 9L
       ), "leaf")
       val json = LeafSimContent.from(leaf).toJson
       assertTrue(json ==
-        """{"seedVarId":9,"probability":0.25,"shape":{"distributionType":"expert","percentiles":[0.1,0.5,0.9],"quantiles":[1000.0,5000.0,25000.0],"terms":3}}""")
+        """{"seedVarId":9,"probability":0.25,"shape":{"distributionType":"Metalog","percentiles":[0.1,0.5,0.9],"quantiles":[1000.0,5000.0,25000.0],"terms":3}}""")
     },
 
     test("name, ULID, and parent do not enter the projection (rename/move preserves the key)") {
