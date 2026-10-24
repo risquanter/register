@@ -3,7 +3,6 @@ package com.risquanter.register.http.controllers
 import zio.*
 import zio.json.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.testing.SttpBackendStub
 import sttp.monad.MonadError
@@ -12,7 +11,7 @@ import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.auth.UserContextExtractor
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.http.requests.{DistributionShapeRequest, LognormalShapeRequest}
+import com.risquanter.register.http.requests.DistributionShapeRequest
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.telemetry.TelemetryLive
 
@@ -42,7 +41,7 @@ object DistributionPreviewControllerSpec extends ZIOSpecDefault:
     * Typed as the sealed parent because the JSON codec is derived there — it is
     * what writes the `distributionType` discriminator the endpoint decodes. */
   private val lognormalRequest: DistributionShapeRequest =
-    LognormalShapeRequest(minLoss = 1_000L, maxLoss = 50_000L)
+    DistributionShapeRequest.Lognormal(minLoss = 1_000L, maxLoss = 50_000L)
 
   /** A valid UUID v4 — accepted by the [[UserId]] opaque type codec. */
   private val validUserId = "550e8400-e29b-41d4-a716-446655440000"

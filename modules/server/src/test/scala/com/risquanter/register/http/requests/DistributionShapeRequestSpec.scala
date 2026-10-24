@@ -11,7 +11,7 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, Field
   * refining each into the domain shape.
   *
   * What the two cases make unrepresentable is not tested here, because there is
-  * no Scala expression for it: an expert body has no bound to omit and a
+  * no Scala expression for it: a metalog body has no bound to omit and a
   * lognormal body has no anchor sequence to omit, so a missing-field rule has
   * nothing to refuse. The wire is the one place those states can still be
   * written, so the decode suite below is where they are refused.
@@ -25,15 +25,15 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
   private val anchorPercentiles: Vector[Double] = Vector(0.05, 0.50, 0.95)
   private val anchorQuantiles:   Vector[Double] = Vector(1_000.0, 5_000.0, 25_000.0)
 
-  private def expertReq(
+  private def metalogReq(
     percentiles: Vector[Double],
     quantiles:   Vector[Double],
     terms:       Option[Int]
-  ): ExpertShapeRequest =
-    ExpertShapeRequest(percentiles, quantiles, terms)
+  ): DistributionShapeRequest.Metalog =
+    DistributionShapeRequest.Metalog(percentiles, quantiles, terms)
 
-  private def lognormalReq(minLoss: Long, maxLoss: Long): LognormalShapeRequest =
-    LognormalShapeRequest(minLoss, maxLoss)
+  private def lognormalReq(minLoss: Long, maxLoss: Long): DistributionShapeRequest.Lognormal =
+    DistributionShapeRequest.Lognormal(minLoss, maxLoss)
 
   /** `toShape` reports against the subject it is given; every test here submits
     * the request as a whole, so `ErrorLocation.requestField` is what a refusal
@@ -60,29 +60,30 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
   def spec = suite("DistributionShapeRequest.toShape")(
 
-    suite("accepted expert requests")(
+    suite("accepted metalog requests")(
 
       test("three anchors with no stated term count") {
-        assertTrue(shapeOf(expertReq(anchorPercentiles, anchorQuantiles, None)).isSuccess)
+        assertTrue(shapeOf(metalogReq(anchorPercentiles, anchorQuantiles, None)).isSuccess)
       },
 
       test("a term count equal to the anchor count") {
-        assertTrue(shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(3))).isSuccess)
+        assertTrue(shapeOf(metalogReq(anchorPercentiles, anchorQuantiles, Some(3))).isSuccess)
       },
 
       test("a term count of two, the smallest the fitter accepts") {
-        assertTrue(shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(2))).isSuccess)
+        assertTrue(shapeOf(metalogReq(anchorPercentiles, anchorQuantiles, Some(2))).isSuccess)
       },
 
       test("two anchors, the smallest count the shape accepts") {
         assertTrue(
-          shapeOf(expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), None)).isSuccess
+          shapeOf(metalogReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), None)).isSuccess
         )
       },
 
-      test("the shape carries the expert mode spelling") {
-        shapeOf(expertReq(anchorPercentiles, anchorQuantiles, None)) match
-          case Validation.Success(_, shape) => assertTrue(shape.distributionType == "expert")
+      test("the gate produces the metalog case") {
+        shapeOf(metalogReq(anchorPercentiles, anchorQuantiles, None)) match
+          case Validation.Success(_, shape) =>
+            assertTrue(shape.isInstanceOf[DistributionShape.Metalog])
           case Validation.Failure(_, errs)  =>
             assertTrue(false).label(s"expected a shape, got ${errs.map(_.message).mkString("; ")}")
       }
@@ -98,19 +99,20 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
         assertTrue(shapeOf(lognormalReq(1L, 2L)).isSuccess)
       },
 
-      test("the shape carries the lognormal mode spelling") {
+      test("the gate produces the lognormal case") {
         shapeOf(lognormalReq(1_000L, 50_000L)) match
-          case Validation.Success(_, shape) => assertTrue(shape.distributionType == "lognormal")
+          case Validation.Success(_, shape) =>
+            assertTrue(shape.isInstanceOf[DistributionShape.Lognormal])
           case Validation.Failure(_, errs)  =>
             assertTrue(false).label(s"expected a shape, got ${errs.map(_.message).mkString("; ")}")
       }
     ),
 
-    suite("expert rules the field types cannot hold")(
+    suite("metalog rules the field types cannot hold")(
 
       test("a term count of one is outside the fitter's range") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(1))),
+          shapeOf(metalogReq(anchorPercentiles, anchorQuantiles, Some(1))),
           FieldName.Terms,
           ValidationErrorCode.INVALID_RANGE
         ))
@@ -118,7 +120,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("a term count above the anchor count is refused: a fit cannot use more terms than points") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(anchorPercentiles, anchorQuantiles, Some(4))),
+          shapeOf(metalogReq(anchorPercentiles, anchorQuantiles, Some(4))),
           FieldName.Terms,
           ValidationErrorCode.INVALID_COMBINATION
         ))
@@ -126,7 +128,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("unequal sequence lengths are refused against the pairing, not against either sequence") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(anchorPercentiles, Vector(1_000.0, 5_000.0), None)),
+          shapeOf(metalogReq(anchorPercentiles, Vector(1_000.0, 5_000.0), None)),
           FieldName.PercentileQuantilePairing,
           ValidationErrorCode.INVALID_COMBINATION
         ))
@@ -134,7 +136,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("strictly decreasing quantiles are refused against the quantiles") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(anchorPercentiles, Vector(25_000.0, 5_000.0, 1_000.0), None)),
+          shapeOf(metalogReq(anchorPercentiles, Vector(25_000.0, 5_000.0, 1_000.0), None)),
           FieldName.Quantiles,
           ValidationErrorCode.INVALID_COMBINATION
         ))
@@ -142,7 +144,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("quantiles that rise then fall are refused") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(anchorPercentiles, Vector(1_000.0, 25_000.0, 5_000.0), None)),
+          shapeOf(metalogReq(anchorPercentiles, Vector(1_000.0, 25_000.0, 5_000.0), None)),
           FieldName.Quantiles,
           ValidationErrorCode.INVALID_COMBINATION
         ))
@@ -150,7 +152,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("a repeated quantile is refused: the sequence must strictly increase") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(anchorPercentiles, Vector(1_000.0, 1_000.0, 25_000.0), None)),
+          shapeOf(metalogReq(anchorPercentiles, Vector(1_000.0, 1_000.0, 25_000.0), None)),
           FieldName.Quantiles,
           ValidationErrorCode.INVALID_COMBINATION
         ))
@@ -158,7 +160,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("percentiles out of order are refused against the percentiles") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(Vector(0.9, 0.1, 0.5), anchorQuantiles, None)),
+          shapeOf(metalogReq(Vector(0.9, 0.1, 0.5), anchorQuantiles, None)),
           FieldName.Percentiles,
           ValidationErrorCode.INVALID_COMBINATION
         ))
@@ -166,7 +168,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("a repeated percentile is refused") {
         assertTrue(failsOnField(
-          shapeOf(expertReq(Vector(0.05, 0.05, 0.95), anchorQuantiles, None)),
+          shapeOf(metalogReq(Vector(0.05, 0.05, 0.95), anchorQuantiles, None)),
           FieldName.Percentiles,
           ValidationErrorCode.INVALID_COMBINATION
         ))
@@ -174,7 +176,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
       test("both sequences out of order accumulate, one refusal each") {
         val locations = locationsOf(
-          shapeOf(expertReq(Vector(0.9, 0.1, 0.5), Vector(25_000.0, 5_000.0, 1_000.0), None))
+          shapeOf(metalogReq(Vector(0.9, 0.1, 0.5), Vector(25_000.0, 5_000.0, 1_000.0), None))
         )
         assertTrue(
           locations.contains(ErrorLocation.requestField(FieldName.Percentiles)),
@@ -212,16 +214,16 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
     suite("the wire form — where a cross-mode body is still writable")(
 
-      test("a body tagged expert carrying only lognormal fields is refused") {
+      test("a body tagged metalog carrying only lognormal fields is refused") {
         val decoded = DistributionShapeRequest.codec.decodeJson(
-          """{"distributionType":"expert","minLoss":1000,"maxLoss":50000}"""
+          """{"distributionType":"Metalog","minLoss":1000,"maxLoss":50000}"""
         )
         assertTrue(decoded.isLeft)
       },
 
-      test("a body tagged lognormal carrying only expert fields is refused") {
+      test("a body tagged lognormal carrying only metalog fields is refused") {
         val decoded = DistributionShapeRequest.codec.decodeJson(
-          """{"distributionType":"lognormal","percentiles":[0.05,0.95],"quantiles":[1000.0,25000.0]}"""
+          """{"distributionType":"Lognormal","percentiles":[0.05,0.95],"quantiles":[1000.0,25000.0]}"""
         )
         assertTrue(decoded.isLeft)
       },
@@ -240,23 +242,23 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
         assertTrue(decoded.isLeft)
       },
 
-      test("a lognormal request encodes to the exact bytes the flat form produced") {
-        // The discriminator is named `distributionType` and each case's hint is
-        // the mode spelling, so the encoded object carries the same keys with
-        // the same values as the single flat product did, and no key for the
-        // other mode. A client reading either form sees the same object.
+      test("a lognormal request encodes to one object naming its mode") {
+        // The discriminator is named `distributionType` and each case's tag value
+        // is its own name, so the encoded object carries the mode and that
+        // mode's fields, with no key for the other mode. The literal is what
+        // makes a rename of either case fail here.
         val req: DistributionShapeRequest = lognormalReq(1_000L, 50_000L)
         assertTrue(
           DistributionShapeRequest.codec.encodeJson(req, None).toString ==
-            """{"distributionType":"lognormal","minLoss":1000,"maxLoss":50000}"""
+            """{"distributionType":"Lognormal","minLoss":1000,"maxLoss":50000}"""
         )
       },
 
-      test("an expert request encodes to the exact bytes the flat form produced") {
-        val req: DistributionShapeRequest = expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2))
+      test("a metalog request encodes to one object naming its mode") {
+        val req: DistributionShapeRequest = metalogReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2))
         assertTrue(
           DistributionShapeRequest.codec.encodeJson(req, None).toString ==
-            """{"distributionType":"expert","percentiles":[0.05,0.95],"quantiles":[1000.0,25000.0],"terms":2}"""
+            """{"distributionType":"Metalog","percentiles":[0.05,0.95],"quantiles":[1000.0,25000.0],"terms":2}"""
         )
       },
 
@@ -267,13 +269,13 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
         // no-extra-fields annotation treats the discriminator key as an extra
         // field and rejects every valid body along with the mixed one.
         val decoded = DistributionShapeRequest.codec.decodeJson(
-          """{"distributionType":"lognormal","minLoss":1000,"maxLoss":50000,"percentiles":[0.1,0.9],"quantiles":[1.0,2.0]}"""
+          """{"distributionType":"Lognormal","minLoss":1000,"maxLoss":50000,"percentiles":[0.1,0.9],"quantiles":[1.0,2.0]}"""
         )
-        assertTrue(decoded == Right(LognormalShapeRequest(1000L, 50000L)))
+        assertTrue(decoded == Right(DistributionShapeRequest.Lognormal(1000L, 50000L)))
       },
 
-      test("an expert request round-trips through the codec") {
-        val req: DistributionShapeRequest = expertReq(anchorPercentiles, anchorQuantiles, None)
+      test("a metalog request round-trips through the codec") {
+        val req: DistributionShapeRequest = metalogReq(anchorPercentiles, anchorQuantiles, None)
         val decoded = DistributionShapeRequest.codec.decodeJson(
           DistributionShapeRequest.codec.encodeJson(req, None).toString
         )
@@ -299,18 +301,18 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
 
         assertTrue(
           inverts(lognormalReq(1_000L, 50_000L)),
-          inverts(expertReq(anchorPercentiles, anchorQuantiles, Some(2))),
-          inverts(expertReq(anchorPercentiles, anchorQuantiles, None))
+          inverts(metalogReq(anchorPercentiles, anchorQuantiles, Some(2))),
+          inverts(metalogReq(anchorPercentiles, anchorQuantiles, None))
         )
       },
 
-      test("two structurally identical expert requests are equal") {
+      test("two structurally identical metalog requests are equal") {
         // The defect this pins: with a mutable array field these two would be
         // unequal, and every round-trip assertion above would have had to
         // compare element by element instead of comparing the value.
         assertTrue(
-          expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2)) ==
-            expertReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2))
+          metalogReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2)) ==
+            metalogReq(Vector(0.05, 0.95), Vector(1_000.0, 25_000.0), Some(2))
         )
       }
     ),

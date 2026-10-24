@@ -12,7 +12,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, LECPoint, TrialI
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, NodeId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, LognormalShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
 import com.risquanter.register.domain.data.LECNodeCurve
@@ -79,7 +79,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = LognormalShapeRequest(
+      distributionShape = DistributionShapeRequest.Lognormal(
         minLoss = 1000L, maxLoss = 50000L
       )
     )

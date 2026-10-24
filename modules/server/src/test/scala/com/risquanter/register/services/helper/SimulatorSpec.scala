@@ -2,13 +2,12 @@ package com.risquanter.register.services.helper
 
 import zio.{IO, ZIO, Task}
 import zio.test.*
-import zio.test.Assertion.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
 import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability, PositiveInt, SeedEntityId, SeedVarId}
-import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, ExpertDistributionParams}
+import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, DistributionParams}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.simulation.LossDistribution
-import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, expertShape}
+import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, metalogShape}
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import io.github.iltotore.iron.*
@@ -452,7 +451,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           id = idStr("terms-explicit"),
           name = "Terms Explicit",
           probability = 0.5,
-          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), Some(3)),
+          shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), Some(3)),
           parentId = None,
           seedVarId = 1L
         ).toOption.get
@@ -460,7 +459,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         for {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
-          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 3
+          prov.distributionParams.asInstanceOf[DistributionParams.Metalog].terms == 3
         )
       },
 
@@ -469,7 +468,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           id = idStr("terms-two"),
           name = "Terms Two",
           probability = 0.5,
-          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), Some(2)),
+          shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), Some(2)),
           parentId = None,
           seedVarId = 2L
         ).toOption.get
@@ -477,7 +476,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         for {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
-          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 2
+          prov.distributionParams.asInstanceOf[DistributionParams.Metalog].terms == 2
         )
       },
 
@@ -487,7 +486,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           id = idStr("terms-default-3"),
           name = "Terms Default 3",
           probability = 0.5,
-          shape = expertShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), None),
+          shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(100.0, 500.0, 2000.0), None),
           parentId = None,
           seedVarId = 3L
         ).toOption.get
@@ -495,7 +494,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         for {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
-          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 3
+          prov.distributionParams.asInstanceOf[DistributionParams.Metalog].terms == 3
         )
       },
 
@@ -506,7 +505,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           id = idStr("terms-default-5"),
           name = "Terms Default 5",
           probability = 0.5,
-          shape = expertShape(
+          shape = metalogShape(
             Vector(0.05, 0.25, 0.5, 0.75, 0.95),
             Vector(50.0, 200.0, 500.0, 1500.0, 5000.0),
             None
@@ -518,7 +517,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         for {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
-          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 5
+          prov.distributionParams.asInstanceOf[DistributionParams.Metalog].terms == 5
         )
       },
 
@@ -529,7 +528,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           id = idStr("terms-default-9pts"),
           name = "Terms Default 9pts",
           probability = 0.5,
-          shape = expertShape(
+          shape = metalogShape(
             Vector(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99),
             Vector(10.0, 50.0, 100.0, 300.0, 700.0, 2000.0, 5000.0, 10000.0, 30000.0),
             None
@@ -541,7 +540,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         for {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
-          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 9
+          prov.distributionParams.asInstanceOf[DistributionParams.Metalog].terms == 9
         )
       }
     )

@@ -4,10 +4,9 @@ import zio.*
 import zio.test.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, ExpertShapeRequest, LognormalShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
 import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
-import io.github.iltotore.iron.*
 
 /** Regression tests reproducing every query in demo-enterprise-{httpie,curl}.sh.
   * Verdicts and range sizes are pinned to production-equivalent simulation results
@@ -42,7 +41,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name = "Ransomware Attack", parentName = Some("Technology and Cyber"),
         probability = 0.15,
-        distributionShape = ExpertShapeRequest(
+        distributionShape = DistributionShapeRequest.Metalog(
           percentiles = Vector(0.25, 0.50, 0.75, 0.95),
           quantiles   = Vector(500000.0, 2000000.0, 8000000.0, 25000000.0),
           terms       = None
@@ -51,28 +50,28 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name = "Cloud Provider Outage", parentName = Some("Technology and Cyber"),
         probability = 0.30,
-        distributionShape = LognormalShapeRequest(minLoss = 200000L, maxLoss = 4000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 200000L, maxLoss = 4000000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Data Breach - PII", parentName = Some("Technology and Cyber"),
         probability = 0.10,
-        distributionShape = LognormalShapeRequest(minLoss = 1000000L, maxLoss = 15000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000000L, maxLoss = 15000000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Insider Threat", parentName = Some("Technology and Cyber"),
         probability = 0.05,
-        distributionShape = LognormalShapeRequest(minLoss = 2000000L, maxLoss = 20000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 2000000L, maxLoss = 20000000L)
       ),
       // ── Process and People (3 leaves) ───────────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Key Person Departure", parentName = Some("Process and People"),
         probability = 0.20,
-        distributionShape = LognormalShapeRequest(minLoss = 100000L, maxLoss = 800000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 100000L, maxLoss = 800000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Internal Fraud", parentName = Some("Process and People"),
         probability = 0.08,
-        distributionShape = ExpertShapeRequest(
+        distributionShape = DistributionShapeRequest.Metalog(
           percentiles = Vector(0.25, 0.50, 0.75, 0.95),
           quantiles   = Vector(200000.0, 1000000.0, 4000000.0, 18000000.0),
           terms       = None
@@ -81,23 +80,23 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name = "Process Failure", parentName = Some("Process and People"),
         probability = 0.25,
-        distributionShape = LognormalShapeRequest(minLoss = 50000L, maxLoss = 500000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 50000L, maxLoss = 500000L)
       ),
       // ── Third-Party and Supply Chain (3 leaves) ─────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Critical Vendor Failure", parentName = Some("Third-Party and Supply Chain"),
         probability = 0.12,
-        distributionShape = LognormalShapeRequest(minLoss = 500000L, maxLoss = 5000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 5000000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Outsourcing SLA Breach", parentName = Some("Third-Party and Supply Chain"),
         probability = 0.20,
-        distributionShape = LognormalShapeRequest(minLoss = 100000L, maxLoss = 1500000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 100000L, maxLoss = 1500000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Concentration Risk", parentName = Some("Third-Party and Supply Chain"),
         probability = 0.08,
-        distributionShape = ExpertShapeRequest(
+        distributionShape = DistributionShapeRequest.Metalog(
           percentiles = Vector(0.25, 0.50, 0.95),
           quantiles   = Vector(1000000.0, 4000000.0, 18000000.0),
           terms       = None
@@ -107,7 +106,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name = "Equity Portfolio Drawdown", parentName = Some("Market Risk"),
         probability = 0.35,
-        distributionShape = ExpertShapeRequest(
+        distributionShape = DistributionShapeRequest.Metalog(
           percentiles = Vector(0.25, 0.50, 0.75, 0.95),
           quantiles   = Vector(1000000.0, 4000000.0, 12000000.0, 28000000.0),
           terms       = None
@@ -116,18 +115,18 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name = "FX Adverse Move", parentName = Some("Market Risk"),
         probability = 0.40,
-        distributionShape = LognormalShapeRequest(minLoss = 500000L, maxLoss = 8000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 8000000L)
       ),
       // ── Credit Risk (2 leaves) ────────────────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Counterparty Default", parentName = Some("Credit Risk"),
         probability = 0.05,
-        distributionShape = LognormalShapeRequest(minLoss = 3000000L, maxLoss = 30000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 3000000L, maxLoss = 30000000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Credit Downgrade Wave", parentName = Some("Credit Risk"),
         probability = 0.15,
-        distributionShape = ExpertShapeRequest(
+        distributionShape = DistributionShapeRequest.Metalog(
           percentiles = Vector(0.25, 0.50, 0.95),
           quantiles   = Vector(800000.0, 3000000.0, 20000000.0),
           terms       = None
@@ -137,18 +136,18 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name = "Funding Squeeze", parentName = Some("Liquidity Risk"),
         probability = 0.08,
-        distributionShape = LognormalShapeRequest(minLoss = 2000000L, maxLoss = 25000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 2000000L, maxLoss = 25000000L)
       ),
       // ── Compliance and Legal Risk (3 leaves) ────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Regulatory Action", parentName = Some("Compliance and Legal Risk"),
         probability = 0.12,
-        distributionShape = LognormalShapeRequest(minLoss = 2000000L, maxLoss = 50000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 2000000L, maxLoss = 50000000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Litigation", parentName = Some("Compliance and Legal Risk"),
         probability = 0.08,
-        distributionShape = ExpertShapeRequest(
+        distributionShape = DistributionShapeRequest.Metalog(
           percentiles = Vector(0.25, 0.50, 0.75, 0.95),
           quantiles   = Vector(300000.0, 2000000.0, 8000000.0, 40000000.0),
           terms       = None
@@ -157,23 +156,23 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name = "GDPR / Data Protection Fine", parentName = Some("Compliance and Legal Risk"),
         probability = 0.15,
-        distributionShape = LognormalShapeRequest(minLoss = 500000L, maxLoss = 10000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 10000000L)
       ),
       // ── Strategic and Reputational Risk (3 leaves) ──────────────────────────
       RiskLeafDefinitionRequest(
         name = "ESG Controversy", parentName = Some("Strategic and Reputational Risk"),
         probability = 0.10,
-        distributionShape = LognormalShapeRequest(minLoss = 1000000L, maxLoss = 12000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000000L, maxLoss = 12000000L)
       ),
       RiskLeafDefinitionRequest(
         name = "M and A Integration Failure", parentName = Some("Strategic and Reputational Risk"),
         probability = 0.05,
-        distributionShape = LognormalShapeRequest(minLoss = 5000000L, maxLoss = 40000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 5000000L, maxLoss = 40000000L)
       ),
       RiskLeafDefinitionRequest(
         name = "Product Recall / Liability", parentName = Some("Strategic and Reputational Risk"),
         probability = 0.06,
-        distributionShape = ExpertShapeRequest(
+        distributionShape = DistributionShapeRequest.Metalog(
           percentiles = Vector(0.25, 0.50, 0.95),
           quantiles   = Vector(1000000.0, 5000000.0, 35000000.0),
           terms       = None

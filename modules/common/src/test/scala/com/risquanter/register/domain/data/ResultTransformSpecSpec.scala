@@ -4,6 +4,7 @@ import zio.test.*
 import zio.prelude.{Equal, Identity}
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
+import com.risquanter.register.testutil.TestHelpers.retentionFactor
 
 /**
  * ResultTransformSpec as shared data: the InsurancePolicy cross-field rule,
@@ -18,7 +19,7 @@ object ResultTransformSpecSpec extends ZIOSpecDefault {
   private val allSpecs: List[ResultTransformSpec] = List(
     ApplyDeductible(10000L),
     CapLosses(1000000L),
-    ScaleLosses(0.8),
+    ScaleLosses(retentionFactor(0.8)),
     FilterBelowThreshold(10000L),
     InsurancePolicy.create(10000L, 1000000L).toEither.toOption.get
   )
@@ -59,14 +60,14 @@ object ResultTransformSpecSpec extends ZIOSpecDefault {
         })
       },
       test("invalid parameters are rejected at decode") {
-        assertTrue("""{"op":"capLosses","cap":-5}""".fromJson[ResultTransformSpec].isLeft)
+        assertTrue("""{"op":"CapLosses","cap":-5}""".fromJson[ResultTransformSpec].isLeft)
       },
       test("a cap of zero is rejected at decode — the entity would bear nothing") {
-        assertTrue("""{"op":"capLosses","cap":0}""".fromJson[ResultTransformSpec].isLeft)
+        assertTrue("""{"op":"CapLosses","cap":0}""".fromJson[ResultTransformSpec].isLeft)
       },
       test("an insurance policy with a cap of zero is rejected at decode") {
         assertTrue(
-          """{"op":"insurancePolicy","deductible":0,"cap":0}"""
+          """{"op":"InsurancePolicy","deductible":0,"cap":0}"""
             .fromJson[ResultTransformSpec].isLeft
         )
       }
@@ -76,7 +77,7 @@ object ResultTransformSpecSpec extends ZIOSpecDefault {
       test("Identity laws: empty is identity, combine is concatenation (associative)") {
         val a = TransformPipeline(List(ApplyDeductible(10000L)))
         val b = TransformPipeline(List(CapLosses(1000000L)))
-        val c = TransformPipeline(List(ScaleLosses(0.5)))
+        val c = TransformPipeline(List(ScaleLosses(retentionFactor(0.5))))
         val I = Identity[TransformPipeline]
         assertTrue(
           I.combine(I.identity, a) == a,

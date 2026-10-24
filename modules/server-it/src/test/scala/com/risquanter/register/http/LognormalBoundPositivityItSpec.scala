@@ -12,12 +12,12 @@ import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{
   RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest,
-  RiskLeafDefinitionRequest, ExpertShapeRequest, LognormalShapeRequest
+  RiskLeafDefinitionRequest, DistributionShapeRequest
 }
 import com.risquanter.register.http.responses.WorkspaceBootstrapResponse
 import com.risquanter.register.http.support.SttpClientFixture
 
-/** A lognormal leaf's confidence-interval bounds and an expert leaf's quantile
+/** A lognormal leaf's confidence-interval bounds and a metalog leaf's quantile
   * loss amounts both feed a logarithm in the distribution fit, so each must be
   * strictly positive. Both rules are enforced by the request decoder, which
   * means a tree carrying a zero is rejected with a 400 before any handler runs
@@ -39,15 +39,15 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
       name = "Cyber",
       parentName = Some("Root"),
       probability = 0.25,
-      distributionShape = LognormalShapeRequest(minLoss = min, maxLoss = max)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = min, maxLoss = max)
     )
 
-  private def expertLeaf(quantiles: Vector[Double]): RiskLeafDefinitionRequest =
+  private def metalogLeaf(quantiles: Vector[Double]): RiskLeafDefinitionRequest =
     RiskLeafDefinitionRequest(
       name = "Outage",
       parentName = Some("Root"),
       probability = 0.25,
-      distributionShape = ExpertShapeRequest(
+      distributionShape = DistributionShapeRequest.Metalog(
         percentiles = Vector(0.05, 0.50, 0.95),
         quantiles = quantiles,
         terms = Some(3)
@@ -127,10 +127,10 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
         }
       },
 
-      test("an expert leaf with a zero quantile is rejected with 400 INVALID_RANGE") {
+      test("a metalog leaf with a zero quantile is rejected with 400 INVALID_RANGE") {
         withServer { client =>
           for
-            (code, body) <- postTree(client, treeWith(expertLeaf(Vector(0.0, 5000.0, 25000.0))))
+            (code, body) <- postTree(client, treeWith(metalogLeaf(Vector(0.0, 5000.0, 25000.0))))
             codes        <- rangeErrorCodes(body)
           yield assertTrue(
             code == 400,

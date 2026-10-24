@@ -38,12 +38,12 @@ object DistributionShapeSpec extends ZIOSpecDefault:
       case Validation.Success(_, _) =>
         assertTrue(false).label(s"Expected failure at $at with code $code but got Success")
 
-  private def expert(
+  private def metalog(
     percentiles: Vector[Double],
     quantiles:   Vector[Double],
     terms:       Option[Int]
-  ): Validation[ValidationError, DistributionShape.Expert] =
-    DistributionShape.Expert.fromPrimitives(percentiles, quantiles, terms, ErrorSubject.Request)
+  ): Validation[ValidationError, DistributionShape.Metalog] =
+    DistributionShape.Metalog.fromPrimitives(percentiles, quantiles, terms, ErrorSubject.Request)
 
   private def lognormal(minLoss: Long, maxLoss: Long): Validation[ValidationError, DistributionShape.Lognormal] =
     DistributionShape.Lognormal.fromPrimitives(minLoss, maxLoss, ErrorSubject.Request)
@@ -53,27 +53,27 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
   def spec = suite("DistributionShape")(
 
-    suite("expert — happy path")(
+    suite("metalog —happy path")(
 
       test("monotone anchors with no stated term count succeed") {
-        assertTrue(expert(threePercentiles, threeQuantiles, None).isSuccess)
+        assertTrue(metalog(threePercentiles, threeQuantiles, None).isSuccess)
       },
 
       test("a stated term count equal to the anchor count succeeds") {
-        assertTrue(expert(threePercentiles, threeQuantiles, Some(3)).isSuccess)
+        assertTrue(metalog(threePercentiles, threeQuantiles, Some(3)).isSuccess)
       },
 
       test("a stated term count below the anchor count succeeds — it smooths the fit") {
-        assertTrue(expert(threePercentiles, threeQuantiles, Some(2)).isSuccess)
+        assertTrue(metalog(threePercentiles, threeQuantiles, Some(2)).isSuccess)
       }
 
     ),
 
-    suite("expert — percentile range, carried by the anchor's field type")(
+    suite("metalog —percentile range, carried by the anchor's field type")(
 
       test("a percentile of exactly zero is refused") {
         assertFailWithCode(
-          expert(Vector(0.0, 0.50, 0.95), threeQuantiles, None),
+          metalog(Vector(0.0, 0.50, 0.95), threeQuantiles, None),
           FieldName.percentileAt(0),
           ValidationErrorCode.INVALID_RANGE
         )
@@ -81,7 +81,7 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("a percentile of exactly one is refused") {
         assertFailWithCode(
-          expert(Vector(0.05, 0.50, 1.0), threeQuantiles, None),
+          metalog(Vector(0.05, 0.50, 1.0), threeQuantiles, None),
           FieldName.percentileAt(2),
           ValidationErrorCode.INVALID_RANGE
         )
@@ -89,7 +89,7 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("a NaN percentile is refused") {
         assertFailWithCode(
-          expert(Vector(Double.NaN, 0.50, 0.95), threeQuantiles, None),
+          metalog(Vector(Double.NaN, 0.50, 0.95), threeQuantiles, None),
           FieldName.percentileAt(0),
           ValidationErrorCode.INVALID_RANGE
         )
@@ -97,11 +97,11 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
     ),
 
-    suite("expert — loss positivity, carried by the anchor's field type")(
+    suite("metalog —loss positivity, carried by the anchor's field type")(
 
       test("a quantile of exactly zero is refused — the metalog fit takes its logarithm") {
         assertFailWithCode(
-          expert(threePercentiles, Vector(0.0, 5000.0, 25000.0), None),
+          metalog(threePercentiles, Vector(0.0, 5000.0, 25000.0), None),
           FieldName.quantileAt(0),
           ValidationErrorCode.INVALID_RANGE
         )
@@ -109,13 +109,13 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("the smallest positive quantile is accepted") {
         assertTrue(
-          expert(threePercentiles, Vector(Double.MinPositiveValue, 5000.0, 25000.0), None).isSuccess
+          metalog(threePercentiles, Vector(Double.MinPositiveValue, 5000.0, 25000.0), None).isSuccess
         )
       },
 
       test("a negative quantile is refused") {
         assertFailWithCode(
-          expert(threePercentiles, Vector(-1.0, 5000.0, 25000.0), None),
+          metalog(threePercentiles, Vector(-1.0, 5000.0, 25000.0), None),
           FieldName.quantileAt(0),
           ValidationErrorCode.INVALID_RANGE
         )
@@ -123,7 +123,7 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("an infinite quantile is refused") {
         assertFailWithCode(
-          expert(threePercentiles, Vector(Double.PositiveInfinity, 5000.0, 25000.0), None),
+          metalog(threePercentiles, Vector(Double.PositiveInfinity, 5000.0, 25000.0), None),
           FieldName.quantileAt(0),
           ValidationErrorCode.INVALID_RANGE
         )
@@ -131,11 +131,11 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
     ),
 
-    suite("expert — ordering, held by QuantileAnchors.create")(
+    suite("metalog —ordering, held by QuantileAnchors.create")(
 
       test("decreasing quantiles are refused") {
         assertFailWithCode(
-          expert(threePercentiles, Vector(5000.0, 1000.0, 25000.0), None),
+          metalog(threePercentiles, Vector(5000.0, 1000.0, 25000.0), None),
           FieldName.Quantiles,
           ValidationErrorCode.INVALID_COMBINATION
         )
@@ -143,7 +143,7 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("equal adjacent quantiles are refused — strictly increasing is the rule") {
         assertFailWithCode(
-          expert(threePercentiles, Vector(1000.0, 1000.0, 25000.0), None),
+          metalog(threePercentiles, Vector(1000.0, 1000.0, 25000.0), None),
           FieldName.Quantiles,
           ValidationErrorCode.INVALID_COMBINATION
         )
@@ -151,7 +151,7 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("decreasing percentiles are refused") {
         assertFailWithCode(
-          expert(Vector(0.9, 0.1, 0.5), threeQuantiles, None),
+          metalog(Vector(0.9, 0.1, 0.5), threeQuantiles, None),
           FieldName.Percentiles,
           ValidationErrorCode.INVALID_COMBINATION
         )
@@ -159,14 +159,14 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("equal adjacent percentiles are refused") {
         assertFailWithCode(
-          expert(Vector(0.05, 0.05, 0.95), threeQuantiles, None),
+          metalog(Vector(0.05, 0.05, 0.95), threeQuantiles, None),
           FieldName.Percentiles,
           ValidationErrorCode.INVALID_COMBINATION
         )
       },
 
       test("both orderings fail together rather than short-circuiting") {
-        expert(Vector(0.9, 0.1, 0.5), Vector(5000.0, 1000.0, 25000.0), None) match
+        metalog(Vector(0.9, 0.1, 0.5), Vector(5000.0, 1000.0, 25000.0), None) match
           case Validation.Failure(_, errs) =>
             val locations = errs.map(_.location).toList
             assertTrue(
@@ -182,11 +182,11 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
     ),
 
-    suite("expert — anchor count, held by QuantileAnchors.create")(
+    suite("metalog —anchor count, held by QuantileAnchors.create")(
 
       test("a single anchor is refused — two is the floor below which there is no curve") {
         assertFailWithCode(
-          expert(Vector(0.5), Vector(5000.0), None),
+          metalog(Vector(0.5), Vector(5000.0), None),
           FieldName.Percentiles,
           ValidationErrorCode.CONSTRAINT_VIOLATION
         )
@@ -194,27 +194,27 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("no anchors at all is refused") {
         assertFailWithCode(
-          expert(Vector.empty[Double], Vector.empty[Double], None),
+          metalog(Vector.empty[Double], Vector.empty[Double], None),
           FieldName.Percentiles,
           ValidationErrorCode.CONSTRAINT_VIOLATION
         )
       },
 
       test("two anchors succeed") {
-        assertTrue(expert(Vector(0.1, 0.9), Vector(1000.0, 25000.0), None).isSuccess)
+        assertTrue(metalog(Vector(0.1, 0.9), Vector(1000.0, 25000.0), None).isSuccess)
       },
 
       test("twenty anchors succeed") {
         val ps = (1 to 20).map(_ / 21.0).toVector
         val qs = (1 to 20).map(i => i * 1000.0).toVector
-        assertTrue(expert(ps, qs, None).isSuccess)
+        assertTrue(metalog(ps, qs, None).isSuccess)
       },
 
       test("twenty-one anchors are refused") {
         val ps = (1 to 21).map(_ / 22.0).toVector
         val qs = (1 to 21).map(i => i * 1000.0).toVector
         assertFailWithCode(
-          expert(ps, qs, None),
+          metalog(ps, qs, None),
           FieldName.Percentiles,
           ValidationErrorCode.CONSTRAINT_VIOLATION
         )
@@ -222,11 +222,11 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
     ),
 
-    suite("expert — the pairing rule, held by the one place that zips")(
+    suite("metalog —the pairing rule, held by the one place that zips")(
 
       test("unequal sequence lengths are refused") {
         assertFailWithCode(
-          expert(Vector(0.1, 0.9), Vector(5000.0), None),
+          metalog(Vector(0.1, 0.9), Vector(5000.0), None),
           FieldName.PercentileQuantilePairing,
           ValidationErrorCode.INVALID_COMBINATION
         )
@@ -234,11 +234,11 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
     ),
 
-    suite("expert — term count")(
+    suite("metalog —term count")(
 
       test("a term count of zero is refused by MetalogTermCount at the boundary") {
         assertFailWithCode(
-          expert(threePercentiles, threeQuantiles, Some(0)),
+          metalog(threePercentiles, threeQuantiles, Some(0)),
           FieldName.Terms,
           ValidationErrorCode.INVALID_RANGE
         )
@@ -246,7 +246,7 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
       test("a term count of one is refused by MetalogTermCount at the boundary") {
         assertFailWithCode(
-          expert((1 to 5).map(_ / 6.0).toVector, (1 to 5).map(i => i * 1000.0).toVector, Some(1)),
+          metalog((1 to 5).map(_ / 6.0).toVector, (1 to 5).map(i => i * 1000.0).toVector, Some(1)),
           FieldName.Terms,
           ValidationErrorCode.INVALID_RANGE
         )
@@ -255,19 +255,19 @@ object DistributionShapeSpec extends ZIOSpecDefault:
       test("a term count of twenty-one is refused by MetalogTermCount at the boundary") {
         val ps = (1 to 20).map(_ / 21.0).toVector
         val qs = (1 to 20).map(i => i * 1000.0).toVector
-        assertFailWithCode(expert(ps, qs, Some(21)), FieldName.Terms, ValidationErrorCode.INVALID_RANGE)
+        assertFailWithCode(metalog(ps, qs, Some(21)), FieldName.Terms, ValidationErrorCode.INVALID_RANGE)
       },
 
-      test("a term count above the anchor count is refused by Expert.create") {
+      test("a term count above the anchor count is refused by Metalog.create") {
         assertFailWithCode(
-          expert(threePercentiles, threeQuantiles, Some(4)),
+          metalog(threePercentiles, threeQuantiles, Some(4)),
           FieldName.Terms,
           ValidationErrorCode.INVALID_COMBINATION
         )
       },
 
       test("an absent term count is always valid — termsToFit cannot exceed the anchor count") {
-        val shape = expert(threePercentiles, threeQuantiles, None)
+        val shape = metalog(threePercentiles, threeQuantiles, None)
         assertTrue(shape.isSuccess)
       }
 
@@ -320,12 +320,17 @@ object DistributionShapeSpec extends ZIOSpecDefault:
 
     suite("the case is the mode")(
 
-      test("each case states its own mode spelling") {
-        val e = expert(threePercentiles, threeQuantiles, None).toEither.toOption.get
-        val l = lognormal(1000L, 50000L).toEither.toOption.get
+      test("each case's tag is its own case name") {
+        // The tag is derived rather than declared, so this is the assertion
+        // that fails if a case is renamed — which would change every stored
+        // leaf's bytes and the cache key's preimage with it.
+        // Both are widened to the sealed type, because the tag is written by
+        // the coproduct's codec; each case's own codec writes the body alone.
+        val m: DistributionShape = metalog(threePercentiles, threeQuantiles, None).toEither.toOption.get
+        val l: DistributionShape = lognormal(1000L, 50000L).toEither.toOption.get
         assertTrue(
-          (e.distributionType: String) == "expert",
-          (l.distributionType: String) == "lognormal"
+          m.toJson.contains(""""distributionType":"Metalog""""),
+          l.toJson.contains(""""distributionType":"Lognormal"""")
         )
       }
 
@@ -349,20 +354,20 @@ object DistributionShapeSpec extends ZIOSpecDefault:
         assertTrue(json.fromJson[DistributionShape].map(_.toJson) == Right(json))
       },
 
-      test("an expert record survives decode-then-encode byte-identically") {
-        val shape: DistributionShape = expert(threePercentiles, threeQuantiles, Some(3)).toEither.toOption.get
+      test("a metalog record survives decode-then-encode byte-identically") {
+        val shape: DistributionShape = metalog(threePercentiles, threeQuantiles, Some(3)).toEither.toOption.get
         val json                     = shape.toJson
         assertTrue(json.fromJson[DistributionShape].map(_.toJson) == Right(json))
       },
 
-      test("a malformed expert record reports the expert gate's own complaint, not the lognormal one") {
-        val json = """{"distributionType":"expert","percentiles":[0.9,0.1],"quantiles":[1000.0,5000.0]}"""
+      test("a malformed metalog record reports the metalog gate's own complaint, not the lognormal one") {
+        val json = """{"distributionType":"Metalog","percentiles":[0.9,0.1],"quantiles":[1000.0,5000.0]}"""
         val message = json.fromJson[DistributionShape].swap.toOption.getOrElse("")
         assertTrue(message.contains(ValidationMessages.percentilesMustBeStrictlyIncreasing))
       },
 
-      test("an expert record is refused when it carries only the lognormal fields") {
-        val json = """{"distributionType":"expert","minLoss":1000,"maxLoss":50000}"""
+      test("a metalog record is refused when it carries only the lognormal fields") {
+        val json = """{"distributionType":"Metalog","minLoss":1000,"maxLoss":50000}"""
         assertTrue(json.fromJson[DistributionShape].isLeft)
       }
 
@@ -371,23 +376,23 @@ object DistributionShapeSpec extends ZIOSpecDefault:
     suite("resolve is total")(
 
       test("a stated term count is what the fit runs with") {
-        val shape = expert(threePercentiles, threeQuantiles, Some(2)).toEither.toOption.get
+        val shape = metalog(threePercentiles, threeQuantiles, Some(2)).toEither.toOption.get
         DistributionShape.resolve(shape) match
-          case ExpertDistributionParams(_, _, terms) => assertTrue((terms: Int) == 2)
-          case other                                 => assertTrue(false).label(s"expected expert params, got $other")
+          case DistributionParams.Metalog(_, _, terms) => assertTrue((terms: Int) == 2)
+          case other                                 => assertTrue(false).label(s"expected metalog params, got $other")
       },
 
       test("an absent term count resolves to one term per anchor") {
-        val shape = expert(threePercentiles, threeQuantiles, None).toEither.toOption.get
+        val shape = metalog(threePercentiles, threeQuantiles, None).toEither.toOption.get
         DistributionShape.resolve(shape) match
-          case ExpertDistributionParams(_, _, terms) => assertTrue((terms: Int) == 3)
-          case other                                 => assertTrue(false).label(s"expected expert params, got $other")
+          case DistributionParams.Metalog(_, _, terms) => assertTrue((terms: Int) == 3)
+          case other                                 => assertTrue(false).label(s"expected metalog params, got $other")
       },
 
       test("a lognormal resolves to its two bounds and the BCG confidence level") {
         val shape = lognormal(1000L, 50000L).toEither.toOption.get
         DistributionShape.resolve(shape) match
-          case LognormalDistributionParams(min, max, confidence) =>
+          case DistributionParams.Lognormal(min, max, confidence) =>
             assertTrue(
               (min: Long) == 1000L,
               (max: Long) == 50000L,
@@ -400,11 +405,11 @@ object DistributionShapeSpec extends ZIOSpecDefault:
         check(Gen.int(2, 20)) { anchorCount =>
           val ps    = (1 to anchorCount).map(_ / (anchorCount + 1.0)).toVector
           val qs    = (1 to anchorCount).map(i => i * 1000.0).toVector
-          val shape = expert(ps, qs, None).toEither.toOption.get
+          val shape = metalog(ps, qs, None).toEither.toOption.get
           DistributionShape.resolve(shape) match
-            case ExpertDistributionParams(_, _, terms) =>
+            case DistributionParams.Metalog(_, _, terms) =>
               assertTrue((terms: Int) == anchorCount, (terms: Int) >= 2, (terms: Int) <= 20)
-            case other => assertTrue(false).label(s"expected expert params, got $other")
+            case other => assertTrue(false).label(s"expected metalog params, got $other")
         }
       }
 

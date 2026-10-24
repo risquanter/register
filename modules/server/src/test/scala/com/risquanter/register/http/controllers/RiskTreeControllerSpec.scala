@@ -6,7 +6,7 @@ import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, LognormalShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.* // For .assert extension method
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
@@ -88,7 +88,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         name = "Test Risk",
         parentName = Some("Root Portfolio"),
         probability = 0.25,
-        distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
       )
     )
   )
@@ -112,13 +112,13 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
               name = "Cyber Attack",
               parentName = Some("Total Operational Risk"),
               probability = 0.25,
-              distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
             ),
             RiskLeafDefinitionRequest(
               name = "Data Breach",
               parentName = Some("Total Operational Risk"),
               probability = 0.15,
-              distributionShape = LognormalShapeRequest(minLoss = 500L, maxLoss = 25000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 25000L)
             )
           )
         )
@@ -142,7 +142,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
               name = "Risk B",
               parentName = Some("Root Portfolio"),
               probability = 0.3,
-              distributionShape = LognormalShapeRequest(minLoss = 500L, maxLoss = 10000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 10000L)
             )
           )
         )

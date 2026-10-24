@@ -17,7 +17,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
-import com.risquanter.register.http.requests.{LognormalShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
+import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, RiskTreeServiceLive, ScenarioService, ScenarioServiceNotSupported, ScenarioSummary}
@@ -119,7 +119,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         name = "Test Leaf",
         parentName = Some("Root"),
         probability = 0.1,
-        distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
       )
     )
   )

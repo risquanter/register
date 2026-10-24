@@ -2,16 +2,14 @@ package com.risquanter.register.http
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest, LognormalShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
 import com.risquanter.register.http.errors.{QueryProblem, RejectionDetail, WireError}
 import zio.json.*
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
-import io.github.iltotore.iron.*
 
 /** Integration tests for POST /w/{key}/risk-trees/{treeId}/query
   *
@@ -49,25 +47,25 @@ object QueryEndpointSpec extends ZIOSpecDefault:
         name             = "Cyber Breach",
         parentName       = Some("IT Risk"),
         probability      = 0.20,
-        distributionShape = LognormalShapeRequest(minLoss = 500000L, maxLoss = 8000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 8000000L)
       ),
       RiskLeafDefinitionRequest(
         name             = "Ransomware",
         parentName       = Some("IT Risk"),
         probability      = 0.10,
-        distributionShape = LognormalShapeRequest(minLoss = 200000L, maxLoss = 4000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 200000L, maxLoss = 4000000L)
       ),
       RiskLeafDefinitionRequest(
         name             = "Supply Chain Disruption",
         parentName       = Some("Third Party Risk"),
         probability      = 0.15,
-        distributionShape = LognormalShapeRequest(minLoss = 300000L, maxLoss = 3000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 300000L, maxLoss = 3000000L)
       ),
       RiskLeafDefinitionRequest(
         name             = "Regulatory Fine",
         parentName       = Some("Third Party Risk"),
         probability      = 0.08,
-        distributionShape = LognormalShapeRequest(minLoss = 100000L, maxLoss = 2000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 100000L, maxLoss = 2000000L)
       )
     )
   )

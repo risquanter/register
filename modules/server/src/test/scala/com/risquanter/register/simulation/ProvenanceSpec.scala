@@ -2,8 +2,7 @@ package com.risquanter.register.simulation
 
 import com.risquanter.register.BuildInfo
 import com.risquanter.register.domain.data.{
-  DistributionParams, ExpertDistributionParams, LognormalDistributionParams,
-  NodeProvenance, RiskLeaf, RiskPortfolio, RiskTree
+  DistributionParams, NodeProvenance, RiskLeaf, RiskPortfolio, RiskTree
 }
 import com.risquanter.register.domain.data.iron.{SafeName, SeedEntityId}
 import com.risquanter.register.configs.TestConfigs
@@ -47,7 +46,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           lossVarId = 2042L,
           globalSeed3 = 0L,
           globalSeed4 = 0L,
-          distributionParams = LognormalDistributionParams(
+          distributionParams = DistributionParams.Lognormal(
             minLoss = 1000000L.refineUnsafe,
             maxLoss = 50000000L.refineUnsafe,
             confidenceInterval = 0.90
@@ -63,18 +62,18 @@ object ProvenanceSpec extends ZIOSpecDefault {
         // is now the decoded case rather than a separate tag field.
         assertTrue(decoded.isRight) &&
         assertTrue(decoded.toOption.get.entityId == 42L) &&
-        assertTrue(decoded.toOption.get.distributionParams.isInstanceOf[LognormalDistributionParams])
+        assertTrue(decoded.toOption.get.distributionParams.isInstanceOf[DistributionParams.Lognormal])
       },
       
-      test("ExpertDistributionParams round-trips to an equal value") {
-        val params = ExpertDistributionParams(
+      test("DistributionParams.Metalog round-trips to an equal value") {
+        val params = DistributionParams.Metalog(
           percentiles = Vector(0.05, 0.5, 0.95),
           quantiles = Vector(1000.0, 5000.0, 25000.0),
           terms = 3.refineUnsafe
         )
 
         val json = params.toJson
-        val decoded = json.fromJson[ExpertDistributionParams]
+        val decoded = json.fromJson[DistributionParams.Metalog]
 
         // The anchors are compared by value, not by length: the sequences are
         // immutable, so the record's own equality is the assertion and a decoder
@@ -82,25 +81,25 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(decoded == Right(params))
       },
 
-      test("ExpertDistributionParams rejects terms = 0") {
+      test("DistributionParams.Metalog rejects terms = 0") {
         val json = """{"percentiles":[0.05,0.5,0.95],"quantiles":[1000.0,5000.0,25000.0],"terms":0}"""
-        assertTrue(json.fromJson[ExpertDistributionParams].isLeft)
+        assertTrue(json.fromJson[DistributionParams.Metalog].isLeft)
       },
 
-      test("ExpertDistributionParams rejects terms < 0") {
+      test("DistributionParams.Metalog rejects terms < 0") {
         val json = """{"percentiles":[0.05,0.5,0.95],"quantiles":[1000.0,5000.0,25000.0],"terms":-1}"""
-        assertTrue(json.fromJson[ExpertDistributionParams].isLeft)
+        assertTrue(json.fromJson[DistributionParams.Metalog].isLeft)
       },
       
-      test("LognormalDistributionParams serializes correctly") {
-        val params = LognormalDistributionParams(
+      test("DistributionParams.Lognormal serializes correctly") {
+        val params = DistributionParams.Lognormal(
           minLoss = 1000000L.refineUnsafe,
           maxLoss = 50000000L.refineUnsafe,
           confidenceInterval = 0.90
         )
         
         val json = params.toJson
-        val decoded = json.fromJson[LognormalDistributionParams]
+        val decoded = json.fromJson[DistributionParams.Lognormal]
         
         assertTrue(decoded.isRight) &&
         assertTrue(decoded.toOption.get.minLoss == 1000000L) &&
@@ -108,34 +107,34 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(decoded.toOption.get.confidenceInterval == 0.90)
       },
 
-      test("LognormalDistributionParams rejects negative minLoss") {
+      test("DistributionParams.Lognormal rejects negative minLoss") {
         val json = """{"minLoss":-1,"maxLoss":50000000,"confidenceInterval":0.9}"""
-        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+        assertTrue(json.fromJson[DistributionParams.Lognormal].isLeft)
       },
 
-      test("LognormalDistributionParams rejects a minLoss of zero") {
+      test("DistributionParams.Lognormal rejects a minLoss of zero") {
         val json = """{"minLoss":0,"maxLoss":50000000,"confidenceInterval":0.9}"""
-        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+        assertTrue(json.fromJson[DistributionParams.Lognormal].isLeft)
       },
 
-      test("LognormalDistributionParams rejects a maxLoss of zero") {
+      test("DistributionParams.Lognormal rejects a maxLoss of zero") {
         val json = """{"minLoss":1000000,"maxLoss":0,"confidenceInterval":0.9}"""
-        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+        assertTrue(json.fromJson[DistributionParams.Lognormal].isLeft)
       },
 
-      test("LognormalDistributionParams rejects negative maxLoss") {
+      test("DistributionParams.Lognormal rejects negative maxLoss") {
         val json = """{"minLoss":1000000,"maxLoss":-1,"confidenceInterval":0.9}"""
-        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+        assertTrue(json.fromJson[DistributionParams.Lognormal].isLeft)
       },
       
       test("DistributionParams sealed trait handles both subtypes") {
-        val expert: DistributionParams = ExpertDistributionParams(
+        val metalog: DistributionParams = DistributionParams.Metalog(
           percentiles = Vector(0.1, 0.9),
           quantiles = Vector(1000.0, 5000.0),
           terms = 2.refineUnsafe
         )
         
-        val lognormal: DistributionParams = LognormalDistributionParams(
+        val lognormal: DistributionParams = DistributionParams.Lognormal(
           minLoss = 1000L.refineUnsafe,
           maxLoss = 10000L.refineUnsafe,
           confidenceInterval = 0.90
@@ -146,20 +145,20 @@ object ProvenanceSpec extends ZIOSpecDefault {
         // this a test of the discriminated form: a codec that encoded both
         // cases identically would still serialize without error.
         assertTrue(
-          expert.toJson.contains("\"distributionType\":\"expert\""),
-          lognormal.toJson.contains("\"distributionType\":\"lognormal\""),
-          expert.toJson.fromJson[DistributionParams] == Right(expert),
+          metalog.toJson.contains("\"distributionType\":\"Metalog\""),
+          lognormal.toJson.contains("\"distributionType\":\"Lognormal\""),
+          metalog.toJson.fromJson[DistributionParams] == Right(metalog),
           lognormal.toJson.fromJson[DistributionParams] == Right(lognormal)
         )
       },
 
-      test("a malformed expert record reports the expert decoder's own complaint") {
-        // The term count is below `MetalogTermCount`'s floor, so the expert
+      test("a malformed metalog record reports the metalog decoder's own complaint") {
+        // The term count is below `MetalogTermCount`'s floor, so the metalog
         // decoder refuses it. The discriminator sends the body to that decoder
         // alone, so the failure names the term count rather than reporting a
         // missing lognormal field from a fall-through to the sibling case.
         val malformed =
-          """{"distributionType":"expert","percentiles":[0.1,0.9],"quantiles":[1000.0,5000.0],"terms":1}"""
+          """{"distributionType":"Metalog","percentiles":[0.1,0.9],"quantiles":[1000.0,5000.0],"terms":1}"""
 
         malformed.fromJson[DistributionParams] match
           case Left(message) =>
@@ -295,12 +294,12 @@ object ProvenanceSpec extends ZIOSpecDefault {
         } yield {
           val nodeProv = leafProvenances(result).head
           assertTrue(result.nodeId == nodeId("lognormal-risk")) &&
-          assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
+          assertTrue(nodeProv.distributionParams.isInstanceOf[DistributionParams.Lognormal]) &&
           assertTrue(
-            nodeProv.distributionParams.asInstanceOf[LognormalDistributionParams].minLoss == 1000L
+            nodeProv.distributionParams.asInstanceOf[DistributionParams.Lognormal].minLoss == 1000L
           ) &&
           assertTrue(
-            nodeProv.distributionParams.asInstanceOf[LognormalDistributionParams].maxLoss == 10000L
+            nodeProv.distributionParams.asInstanceOf[DistributionParams.Lognormal].maxLoss == 10000L
           )
         }
       },
@@ -433,7 +432,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           assertTrue(nodeProv.lossVarId != 0L) &&
           assertTrue(nodeProv.globalSeed3 == 0L) &&
           assertTrue(nodeProv.globalSeed4 == 0L) &&
-          assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
+          assertTrue(nodeProv.distributionParams.isInstanceOf[DistributionParams.Lognormal]) &&
           assertTrue(nodeProv.timestamp != null) &&
           assertTrue(nodeProv.metalogDistributionVersion.nonEmpty)
         }

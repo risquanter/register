@@ -2,19 +2,17 @@ package com.risquanter.register.http
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, LognormalShapeRequest, CreateScenarioRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, ScenarioResponse}
 import com.risquanter.register.http.errors.{RejectionDetail, WireError}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
 import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
-import io.github.iltotore.iron.*
 
 /** Integration tests exercising the live HTTP server with Irmin-backed persistence.
   *
@@ -47,13 +45,13 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           name = "Leaf 1",
           parentName = Some("Root"),
           probability = 0.1,
-          distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 2000L)
+          distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 2000L)
         ),
         RiskLeafDefinitionRequest(
           name = "Leaf 2",
           parentName = Some("Root"),
           probability = 0.2,
-          distributionShape = LognormalShapeRequest(minLoss = 1500L, maxLoss = 3000L)
+          distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1500L, maxLoss = 3000L)
         )
       )
     )

@@ -23,7 +23,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       name              = name,
       parentName        = parent,
       probability       = 0.8,
-      distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 5000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 5000L)
     )
 
   // Update request helpers use raw ULID string literals for `id` fields because
@@ -36,7 +36,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       name              = name,
       parentName        = parent,
       probability       = 0.8,
-      distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 5000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 5000L)
     )
 
   def spec = suite("RiskTreeRequests")(
@@ -50,7 +50,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             parentName        = Some("Root"),
             probability       = 0.8,
             // The bounds are the wrong way round, which `LossRange` refuses.
-            distributionShape = LognormalShapeRequest(minLoss = 5000L, maxLoss = 1000L)
+            distributionShape = DistributionShapeRequest.Lognormal(minLoss = 5000L, maxLoss = 1000L)
           )
         )
       )

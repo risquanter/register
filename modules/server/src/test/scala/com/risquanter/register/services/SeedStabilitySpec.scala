@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, LognormalShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.domain.errors.AppError
@@ -54,7 +54,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
     }
 
   private def shape(minLoss: Long, maxLoss: Long): DistributionShapeRequest =
-    LognormalShapeRequest(minLoss = minLoss, maxLoss = maxLoss)
+    DistributionShapeRequest.Lognormal(minLoss = minLoss, maxLoss = maxLoss)
 
   private def leafDef(name: String, parent: String, minLoss: Long = 1000L, seedVarId: Option[Long]): RiskLeafDefinitionRequest =
     RiskLeafDefinitionRequest(

@@ -3,7 +3,7 @@ package com.risquanter.register.services.cache
 import zio.test.*
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{
-  LognormalDistributionParams, MitigationApplicationRecord, MitigationPrecedence,
+  DistributionParams, MitigationApplicationRecord, MitigationPrecedence,
   NodeProvenance, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
@@ -40,7 +40,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
     lossVarId = 2001L,
     globalSeed3 = 0L,
     globalSeed4 = 0L,
-    distributionParams = LognormalDistributionParams(1000L.refineUnsafe, 5000L.refineUnsafe, 0.9),
+    distributionParams = DistributionParams.Lognormal(1000L.refineUnsafe, 5000L.refineUnsafe, 0.9),
     timestamp = Instant.parse("2026-01-01T00:00:00Z"),
     metalogDistributionVersion = "1.0.0"
   )

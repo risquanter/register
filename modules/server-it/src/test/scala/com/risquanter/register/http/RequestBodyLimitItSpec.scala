@@ -6,7 +6,7 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, LognormalShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.WorkspaceBootstrapResponse
 import com.risquanter.register.http.support.SttpClientFixture
 
@@ -30,7 +30,7 @@ object RequestBodyLimitItSpec extends ZIOSpecDefault:
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
     )
 
   /** Small valid tree request (well under `MaxBytes` serialized). */

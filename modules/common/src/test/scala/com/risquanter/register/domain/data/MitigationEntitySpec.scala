@@ -3,9 +3,11 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
-import com.risquanter.register.domain.data.iron.{ContentHash, NodeId, SafeName, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
-import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, mitigationId, nodeId, treeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{
+  idStr, lognormalShape, mitigationId, nodeId, residualProbability, retentionFactor, treeId, unsafeGet
+}
 
 /**
  * Mitigation entity: the result-stage pipeline's step-count rule, the wire
@@ -39,23 +41,25 @@ object MitigationEntitySpec extends ZIOSpecDefault {
     unsafeGet(resultStage(List(ResultTransformSpec.CapLosses(1000000L))), "resultSpec")
 
   private val scaleLeafSpec: MitigationSpec =
-    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep)
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep)
 
   private def absoluteLeafSpec(stamp: ContentHash, anchor: NodeId): MitigationSpec =
-    MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), anchor, stamp)
+    MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(residualProbability(0.05)), anchor, stamp)
 
   /** One spec per component case, so every case of the three component
     * coproducts appears in the round-trip. The two replacement cases that carry
     * a whole shape are what put a `DistributionShape` into a mitigation's own
     * bytes, so they are the ones a shape-level codec change would break. */
   private val everyComponentCase: List[MitigationSpec] = List(
-    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep),
-    MitigationSpec.LeafRelative(RelativeLikelihood.Keep, RelativeSeverity.ScaleSeverity(0.4)),
-    MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(0.05), nodeId("cyber"), stamp),
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep),
+    MitigationSpec.LeafRelative(RelativeLikelihood.Keep, RelativeSeverity.ScaleSeverity(retentionFactor(0.4))),
+    MitigationSpec.LeafAbsolute(
+      AbsoluteReplacement.Likelihood(residualProbability(0.05)), nodeId("cyber"), stamp),
     MitigationSpec.LeafAbsolute(
       AbsoluteReplacement.Severity(lognormalShape(2000L, 90000L)), nodeId("cyber"), stamp),
     MitigationSpec.LeafAbsolute(
-      AbsoluteReplacement.Both(0.02, lognormalShape(3000L, 80000L)), nodeId("cyber"), stamp),
+      AbsoluteReplacement.Both(residualProbability(0.02), lognormalShape(3000L, 80000L)),
+      nodeId("cyber"), stamp),
     unsafeGet(resultStage(List(ResultTransformSpec.CapLosses(1000000L))), "capSpec")
   )
 
@@ -115,7 +119,7 @@ object MitigationEntitySpec extends ZIOSpecDefault {
       },
       test("the decoder routes through create, so an over-long pipeline is refused on the wire") {
         val valid  = mk("m-result", resultSpec).toEither.toOption.get
-        val oneStep = """{"op":"capLosses","cap":1000000}"""
+        val oneStep = """{"op":"CapLosses","cap":1000000}"""
         val eleven  = List.fill(11)(oneStep).mkString("[", ",", "]")
         val tampered = valid.toJson.replace(s"[$oneStep]", eleven)
         assertTrue(valid.toJson != tampered, tampered.fromJson[Mitigation].isLeft)
@@ -165,17 +169,33 @@ object MitigationEntitySpec extends ZIOSpecDefault {
         // rather than silently selecting a sibling.
         val valid = mk("m-scale", scaleLeafSpec).toEither.toOption.get
         val json = valid.toJson
-        val tampered = json.replace("\"op\":\"scale\"", "\"op\":\"stretch\"")
+        val tampered = json.replace("\"op\":\"Scale\"", "\"op\":\"Stretch\"")
         assertTrue(json != tampered, tampered.fromJson[Mitigation].isLeft)
       },
       test("the three spec cases carry distinct stage tags") {
         val tags = List(resultSpec, scaleLeafSpec, absoluteLeafSpec(stamp, nodeId("cyber")))
           .map(s => mk("m", s).toEither.toOption.get.toJson)
         assertTrue(
-          tags(0).contains("\"stage\":\"result\""),
-          tags(1).contains("\"stage\":\"leafRelative\""),
-          tags(2).contains("\"stage\":\"leafAbsolute\"")
+          tags(0).contains("\"stage\":\"ResultStage\""),
+          tags(1).contains("\"stage\":\"LeafRelative\""),
+          tags(2).contains("\"stage\":\"LeafAbsolute\"")
         )
+      },
+      // A round trip passes under any consistent rename, because the encoder
+      // and decoder move together. This one compares against a literal, so a
+      // change to a field name, a stage tag or an operation tag fails an
+      // assertion instead of silently changing what every stored mitigation
+      // looks like. Every tag here is a case name, which is what makes a
+      // rename reach these bytes.
+      test("a mitigation's stored bytes are pinned") {
+        val id = MitigationId.fromString("01HZZZZZZZZZZZZZZZZZZZZZZ9").toOption.get
+        val pinned = Mitigation.create(
+          id, name("Pinned Mitigation"), pred, resultSpec, MitigationPrecedence.default
+        ).toEither.toOption.get
+        assertTrue(pinned.toJson ==
+          """{"id":"01HZZZZZZZZZZZZZZZZZZZZZZ9","name":"Pinned Mitigation",""" +
+          """"target":"leaf(x)","spec":{"stage":"ResultStage",""" +
+          """"pipeline":[{"op":"CapLosses","cap":1000000}]},"precedence":0}""")
       }
     ),
 

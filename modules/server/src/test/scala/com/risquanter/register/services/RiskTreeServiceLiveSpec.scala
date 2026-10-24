@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, LognormalShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, RelativeLikelihood, RelativeSeverity}
 import com.risquanter.register.domain.data.iron.{SafeName, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
@@ -15,7 +15,9 @@ import com.risquanter.register.domain.errors.{
 }
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.*
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, unsafeGet, lognormalShape}
+import com.risquanter.register.testutil.TestHelpers.{
+  safeId, nodeId, treeId, mitigationId, unsafeGet, lognormalShape, retentionFactor
+}
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
 
@@ -86,7 +88,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         name = "Test Risk",
         parentName = None,
         probability = 0.75,
-        distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
       )
     )
   )
@@ -98,7 +100,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
     )
 
   /** Two-leaf tree under "Seed Root": "Cyber Attack" and "Fraud". */
@@ -125,7 +127,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
     )
 
   // ── Per-branch uniqueness helpers ───────────────────────────────────
@@ -158,7 +160,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         id = mitigationId(label),
         name = SafeName.fromString(label).toOption.get,
         target = MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
-        spec = MitigationSpec.LeafRelative(RelativeLikelihood.Scale(0.5), RelativeSeverity.Keep),
+        spec = MitigationSpec.LeafRelative(
+          RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep),
         precedence = MitigationPrecedence.default
       ),
       "mitigation"
@@ -335,13 +338,13 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               name = "Cyber Attack",
               parentName = Some("Operational Risk"),
               probability = 0.25,
-              distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 50000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
             ),
             RiskLeafDefinitionRequest(
               name = "Fraud",
               parentName = Some("Operational Risk"),
               probability = 0.15,
-              distributionShape = LognormalShapeRequest(minLoss = 500L, maxLoss = 10000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 10000L)
             )
           )
         )
@@ -469,13 +472,13 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               name = "Leaf 1",
               parentName = Some("Multi Root"),
               probability = 0.3,
-              distributionShape = LognormalShapeRequest(minLoss = 1000L, maxLoss = 30000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 30000L)
             ),
             RiskLeafDefinitionRequest(
               name = "Leaf 2",
               parentName = Some("Multi Root"),
               probability = 0.2,
-              distributionShape = LognormalShapeRequest(minLoss = 2000L, maxLoss = 40000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 2000L, maxLoss = 40000L)
             )
           )
         )
@@ -503,13 +506,13 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               name = "Node A",
               parentName = Some("Shared Root"),
               probability = 0.3,
-              distributionShape = LognormalShapeRequest(minLoss = 5000L, maxLoss = 15000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 5000L, maxLoss = 15000L)
             ),
             RiskLeafDefinitionRequest(
               name = "Node B",
               parentName = Some("Shared Root"),
               probability = 0.2,
-              distributionShape = LognormalShapeRequest(minLoss = 10000L, maxLoss = 50000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 10000L, maxLoss = 50000L)
             )
           )
         )

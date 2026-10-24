@@ -284,7 +284,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         // `ScenarioService.create`, which would let a caller dictate the branch ref.
         resp <- basicRequest
           .post(uri"http://localhost/w/${key.reveal}/scenarios")
-          .body("""{"name":"scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.high-cyber","source":{"type":"branch","name":"main"}}""")
+          .body("""{"name":"scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.high-cyber","source":{"type":"Branch","name":"main"}}""")
           .contentType("application/json")
           .send(backend)
       yield assertTrue(resp.code.code == 400)
