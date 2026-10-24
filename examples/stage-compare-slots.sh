@@ -62,13 +62,13 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "name": "Leaf One",
         "parentName": "Root",
         "probability": 0.1,
-        "distributionShape": { "distributionType": "lognormal", "minLoss": 40000, "maxLoss": 320000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 40000, "maxLoss": 320000, "percentiles": null, "quantiles": null, "terms": null }
       },
       {
         "name": "Leaf Two",
         "parentName": "Root",
         "probability": 0.1,
-        "distributionShape": { "distributionType": "lognormal", "minLoss": 20000, "maxLoss": 150000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 20000, "maxLoss": 150000, "percentiles": null, "quantiles": null, "terms": null }
       }
     ]
   }')
@@ -99,13 +99,13 @@ TREE_B_RESP=$(curl -s -X POST "$BASE/w/$WS_KEY/risk-trees" \
         "name": "Leaf B1",
         "parentName": "Root",
         "probability": 0.3,
-        "distributionShape": { "distributionType": "lognormal", "minLoss": 400000, "maxLoss": 3000000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 400000, "maxLoss": 3000000, "percentiles": null, "quantiles": null, "terms": null }
       },
       {
         "name": "Leaf B2",
         "parentName": "Root",
         "probability": 0.2,
-        "distributionShape": { "distributionType": "lognormal", "minLoss": 150000, "maxLoss": 1200000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 150000, "maxLoss": 1200000, "percentiles": null, "quantiles": null, "terms": null }
       }
     ]
   }')

@@ -14,7 +14,7 @@
 #   Operations (portfolio)
 #   ├── IT Risk (portfolio)
 #   │   ├── Cyber Breach             lognormal  20%  $500K–$8M CI
-#   │   └── Ransomware               expert     10%  P25=$200K P50=$1M P75=$4M P95=$15M
+#   │   └── Ransomware               metalog    10%  P25=$200K P50=$1M P75=$4M P95=$15M
 #   └── Third Party Risk (portfolio)
 #       ├── Supply Chain Disruption  lognormal  15%  $300K–$3M CI
 #       └── Regulatory Fine          lognormal   8%  $100K–$2M CI
@@ -66,7 +66,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "IT Risk",
         "probability": 0.2,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 500000,
           "maxLoss": 8000000,
           "percentiles": null,
@@ -79,7 +79,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "IT Risk",
         "probability": 0.1,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -102,7 +102,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Third Party Risk",
         "probability": 0.15,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 300000,
           "maxLoss": 3000000,
           "percentiles": null,
@@ -115,7 +115,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Third Party Risk",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 100000,
           "maxLoss": 2000000,
           "percentiles": null,

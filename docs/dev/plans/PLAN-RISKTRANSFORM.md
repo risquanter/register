@@ -3013,8 +3013,9 @@ reference problems the buckets create.
 ```scala
 package com.risquanter.register.http.requests
 
-import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, JsonDecoder}
+import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 
 import com.risquanter.register.domain.data.{RiskLeafTransform, TransformPipeline}
 
@@ -3025,10 +3026,19 @@ import com.risquanter.register.domain.data.{RiskLeafTransform, TransformPipeline
   * stamp field at all, because the stamp is the content hash of the anchored
   * leaf and is computed server-side; a client cannot state it and now cannot
   * send it.
+  *
+  * The tag field is the body's only discriminator, and each case's tag value is
+  * its own name, derived rather than declared.
   */
+@jsonDiscriminator(MitigationSpecRequest.StageField)
 sealed trait MitigationSpecRequest
 
 object MitigationSpecRequest:
+
+  /** The key naming which stage a submitted spec belongs to. Read by this
+    * coproduct's decoder and published in its schema, and stated here once so
+    * the two cannot disagree. */
+  final val StageField = "stage"
 
   final case class LeafStage(
     transform: RiskLeafTransform,
@@ -3037,27 +3047,12 @@ object MitigationSpecRequest:
 
   final case class ResultStage(pipeline: TransformPipeline) extends MitigationSpecRequest
 
-  private case class Raw(
-    stage: String,
-    transform: Option[RiskLeafTransform],
-    overrideAnchorName: Option[String],
-    pipeline: Option[TransformPipeline]
-  )
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+  given codec: JsonCodec[MitigationSpecRequest] = DeriveJsonCodec.gen[MitigationSpecRequest]
 
-  given codec: JsonCodec[MitigationSpecRequest] = JsonCodec(
-    JsonEncoder[Raw].contramap {
-      case LeafStage(t, anchor) => Raw("leaf", Some(t), anchor, None)
-      case ResultStage(p)       => Raw("result", None, None, Some(p))
-    },
-    JsonDecoder[Raw].mapOrFail {
-      case Raw("leaf", Some(t), anchor, None)    => Right(LeafStage(t, anchor))
-      case Raw("result", None, None, Some(p))    => Right(ResultStage(p))
-      case other => Left(s"invalid mitigation spec: stage '${other.stage}' with mismatched fields")
-    }
-  )
-
-  given schema: Schema[MitigationSpecRequest] = Schema.any[MitigationSpecRequest]
+  given schema: Schema[MitigationSpecRequest] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = Configuration.default.withDiscriminator(StageField)
+    Schema.derived[MitigationSpecRequest]
 
 /** Create bucket: a mitigation the request is adding. No id — the server mints
   * it (ADR-017 Decision 1). */
@@ -3070,7 +3065,10 @@ final case class MitigationDefinitionRequest(
 
 object MitigationDefinitionRequest:
   given codec: JsonCodec[MitigationDefinitionRequest] = DeriveJsonCodec.gen
-  given schema: Schema[MitigationDefinitionRequest]   = Schema.any[MitigationDefinitionRequest]
+
+  given schema: Schema[MitigationDefinitionRequest] =
+    import sttp.tapir.generic.auto.*
+    Schema.derived[MitigationDefinitionRequest]
 
 /** Identity-preserving bucket: a mitigation the request is keeping, by id. */
 final case class MitigationUpdateRequest(
@@ -3083,12 +3081,30 @@ final case class MitigationUpdateRequest(
 
 object MitigationUpdateRequest:
   given codec: JsonCodec[MitigationUpdateRequest] = DeriveJsonCodec.gen
-  given schema: Schema[MitigationUpdateRequest]   = Schema.any[MitigationUpdateRequest]
+
+  given schema: Schema[MitigationUpdateRequest] =
+    import sttp.tapir.generic.auto.*
+    Schema.derived[MitigationUpdateRequest]
 ```
 
 `target` is the predicate source text, which is the only stored form of a
 targeting predicate; refinement runs `TargetingPredicate.create` at the DTO
 boundary, so a malformed predicate is a 400 before any handler runs.
+
+Three things in that block follow the approach `PLAN-LOSS-SHAPE-ALGEBRA.md`
+settled, rather than the earlier draft of this slice. The codec is derived and
+tagged by case name, so no stage spelling is written as a string and a rename of
+a case cannot leave a stale tag behind. The schema names the discriminator, so
+the published description states the key the decoder reads instead of leaving a
+reader to infer the case from which fields are present. And `Schema.any` is gone
+from all three types: it publishes an unconstrained value, which is the opposite
+of what a request body owes a generated client.
+
+One consequence is not reached by any derivation. A hand-written JSON body in a
+document or an example script carries the tag value as data, so none of the
+above updates it. Every such body this slice adds states `"stage":"LeafStage"`
+or `"stage":"ResultStage"`, and the mitigation endpoints' entries in
+`docs/user/API-TUTORIAL.md` are written the same way in the same pass.
 
 **`RiskTreeUpdateRequest` and `RiskTreeDefinitionRequest`** gain their buckets:
 

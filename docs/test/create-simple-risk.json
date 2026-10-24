@@ -12,7 +12,7 @@
       "parentName": "Root",
       "probability": 0.05,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [

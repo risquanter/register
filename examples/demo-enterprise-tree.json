@@ -52,7 +52,7 @@
       "parentName": "Technology and Cyber",
       "probability": 0.15,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "percentiles": [
           0.25,
           0.5,
@@ -75,7 +75,7 @@
       "parentName": "Technology and Cyber",
       "probability": 0.3,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -88,7 +88,7 @@
       "parentName": "Technology and Cyber",
       "probability": 0.1,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -101,7 +101,7 @@
       "parentName": "Technology and Cyber",
       "probability": 0.05,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -114,7 +114,7 @@
       "parentName": "Process and People",
       "probability": 0.2,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -127,7 +127,7 @@
       "parentName": "Process and People",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "percentiles": [
           0.25,
           0.5,
@@ -150,7 +150,7 @@
       "parentName": "Process and People",
       "probability": 0.25,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -163,7 +163,7 @@
       "parentName": "Third-Party and Supply Chain",
       "probability": 0.12,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -176,7 +176,7 @@
       "parentName": "Third-Party and Supply Chain",
       "probability": 0.2,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -189,7 +189,7 @@
       "parentName": "Third-Party and Supply Chain",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "percentiles": [
           0.25,
           0.5,
@@ -210,7 +210,7 @@
       "parentName": "Market Risk",
       "probability": 0.35,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "percentiles": [
           0.25,
           0.5,
@@ -233,7 +233,7 @@
       "parentName": "Market Risk",
       "probability": 0.4,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -246,7 +246,7 @@
       "parentName": "Credit Risk",
       "probability": 0.05,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -259,7 +259,7 @@
       "parentName": "Credit Risk",
       "probability": 0.15,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "percentiles": [
           0.25,
           0.5,
@@ -280,7 +280,7 @@
       "parentName": "Liquidity Risk",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -293,7 +293,7 @@
       "parentName": "Compliance and Legal Risk",
       "probability": 0.12,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -306,7 +306,7 @@
       "parentName": "Compliance and Legal Risk",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "percentiles": [
           0.25,
           0.5,
@@ -329,7 +329,7 @@
       "parentName": "Compliance and Legal Risk",
       "probability": 0.15,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -342,7 +342,7 @@
       "parentName": "Strategic and Reputational Risk",
       "probability": 0.1,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -355,7 +355,7 @@
       "parentName": "Strategic and Reputational Risk",
       "probability": 0.05,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "percentiles": null,
         "quantiles": null,
         "terms": null,
@@ -368,7 +368,7 @@
       "parentName": "Strategic and Reputational Risk",
       "probability": 0.06,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "percentiles": [
           0.25,
           0.5,

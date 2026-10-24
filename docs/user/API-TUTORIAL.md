@@ -17,7 +17,7 @@ This guide walks through the HTTP API step by step: parameterising leaf risks, b
 
 ## Leaf Risk Parameters: A Modeller's Guide
 
-Every leaf node requires three things: a name, an occurrence probability, and a loss characterisation. The occurrence probability is the top-level `probability` field; the loss characterisation is a nested `distributionShape` object carrying `distributionType` and its parameters (`minLoss`/`maxLoss` for lognormal, `percentiles`/`quantiles`/`terms` for expert — unused fields sent as `null`). The loss characterisation comes in two forms — pick whichever matches how your expert articulates their knowledge.
+Every leaf node requires three things: a name, an occurrence probability, and a loss characterisation. The occurrence probability is the top-level `probability` field; the loss characterisation is a nested `distributionShape` object carrying `distributionType` and its parameters (`minLoss`/`maxLoss` for lognormal, `percentiles`/`quantiles`/`terms` for metalog — unused fields sent as `null`). The loss characterisation comes in two forms — pick whichever matches how your expert articulates their knowledge.
 
 ### Confidence interval mode (`distributionType: "lognormal"`)
 
@@ -36,7 +36,7 @@ Concretely: a cyber breach team says *"we think there's a 20 % chance of a breac
   "name": "Cyber Breach",
   "probability": 0.2,
   "distributionShape": {
-    "distributionType": "lognormal",
+    "distributionType": "Lognormal",
     "minLoss": 500000,
     "maxLoss": 8000000,
     "percentiles": null,
@@ -48,7 +48,7 @@ Concretely: a cyber breach team says *"we think there's a 20 % chance of a breac
 
 The system constructs a right-skewed loss distribution from those two bounds. Nothing else is needed. The simulation will reflect not just the expected loss but the full spread — including the tail scenarios that matter for capital planning.
 
-### Quantile mode (`distributionType: "expert"`)
+### Quantile mode (`distributionType: "Metalog"`)
 
 Use this when your expert can speak to several points on the loss landscape, not just the credible range. The two fields are:
 
@@ -65,7 +65,7 @@ Concretely: a supply chain analyst says *"there's a 10 % chance of a major disru
   "name": "Ransomware",
   "probability": 0.1,
   "distributionShape": {
-    "distributionType": "expert",
+    "distributionType": "Metalog",
     "minLoss": null,
     "maxLoss": null,
     "percentiles": [
@@ -93,7 +93,7 @@ The system fits a flexible distribution that passes exactly through every stated
 
 ## 1. Bootstrap a Workspace & First Tree
 
-Create a workspace with a two-level risk tree: one portfolio ("Operations") containing four leaf risks — a cyber breach (lognormal), ransomware (expert quantiles), a supply chain disruption (lognormal), and a regulatory fine (lognormal):
+Create a workspace with a two-level risk tree: one portfolio ("Operations") containing four leaf risks — a cyber breach (lognormal), ransomware (metalog quantiles), a supply chain disruption (lognormal), and a regulatory fine (lognormal):
 
 ```bash
 http POST localhost:18080/workspaces \
@@ -118,7 +118,7 @@ http POST localhost:18080/workspaces \
       "parentName": "IT Risk",
       "probability": 0.2,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 500000,
         "maxLoss": 8000000,
         "percentiles": null,
@@ -131,7 +131,7 @@ http POST localhost:18080/workspaces \
       "parentName": "IT Risk",
       "probability": 0.1,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -154,7 +154,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Third Party Risk",
       "probability": 0.15,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 300000,
         "maxLoss": 3000000,
         "percentiles": null,
@@ -167,7 +167,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Third Party Risk",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 100000,
         "maxLoss": 2000000,
         "percentiles": null,
@@ -252,35 +252,35 @@ The following example builds a realistic 4-domain financial services risk tree (
 Enterprise Risk  (root)
 ├── Operational Risk
 │   ├── Technology and Cyber
-│   │   ├── Ransomware Attack             expert  15%  P25=$500K P50=$2M P75=$8M  P95=$25M
+│   │   ├── Ransomware Attack             metalog 15%  P25=$500K P50=$2M P75=$8M  P95=$25M
 │   │   ├── Cloud Provider Outage         lognorm 30%  $200K–$4M
 │   │   ├── Data Breach - PII               lognorm 10%  $1M–$15M
 │   │   └── Insider Threat                lognorm  5%  $2M–$20M
 │   ├── Process and People
 │   │   ├── Key Person Departure          lognorm 20%  $100K–$800K
-│   │   ├── Internal Fraud                expert   8%  P25=$200K P50=$1M P75=$4M  P95=$18M
+│   │   ├── Internal Fraud                metalog  8%  P25=$200K P50=$1M P75=$4M  P95=$18M
 │   │   └── Process Failure               lognorm 25%  $50K–$500K
 │   └── Third-Party and Supply Chain
 │       ├── Critical Vendor Failure       lognorm 12%  $500K–$5M
 │       ├── Outsourcing SLA Breach        lognorm 20%  $100K–$1.5M
-│       └── Concentration Risk            expert   8%  P25=$1M   P50=$4M          P95=$18M
+│       └── Concentration Risk            metalog  8%  P25=$1M   P50=$4M          P95=$18M
 ├── Financial Risk
 │   ├── Market Risk
-│   │   ├── Equity Portfolio Drawdown     expert  35%  P25=$1M P50=$4M P75=$12M  P95=$28M
+│   │   ├── Equity Portfolio Drawdown     metalog 35%  P25=$1M P50=$4M P75=$12M  P95=$28M
 │   │   └── FX Adverse Move               lognorm 40%  $500K–$8M
 │   ├── Credit Risk
 │   │   ├── Counterparty Default          lognorm  5%  $3M–$30M
-│   │   └── Credit Downgrade Wave         expert  15%  P25=$800K P50=$3M          P95=$20M
+│   │   └── Credit Downgrade Wave         metalog 15%  P25=$800K P50=$3M          P95=$20M
 │   └── Liquidity Risk
 │       └── Funding Squeeze               lognorm  8%  $2M–$25M
 ├── Compliance and Legal Risk
 │   ├── Regulatory Action                 lognorm 12%  $2M–$50M
-│   ├── Litigation                        expert   8%  P25=$300K P50=$2M P75=$8M  P95=$40M
+│   ├── Litigation                        metalog  8%  P25=$300K P50=$2M P75=$8M  P95=$40M
 │   └── GDPR / Data Protection Fine       lognorm 15%  $500K–$10M
 └── Strategic and Reputational Risk
     ├── ESG Controversy                   lognorm 10%  $1M–$12M
     ├── M and A Integration Failure      lognorm  5%  $5M–$40M
-    └── Product Recall / Liability        expert   6%  P25=$1M   P50=$5M          P95=$35M
+    └── Product Recall / Liability        metalog  6%  P25=$1M   P50=$5M          P95=$35M
 ```
 
 ### Bootstrap (httpie)
@@ -340,7 +340,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Technology and Cyber",
       "probability": 0.15,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -363,7 +363,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Technology and Cyber",
       "probability": 0.3,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 200000,
         "maxLoss": 4000000,
         "percentiles": null,
@@ -376,7 +376,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Technology and Cyber",
       "probability": 0.1,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 1000000,
         "maxLoss": 15000000,
         "percentiles": null,
@@ -389,7 +389,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Technology and Cyber",
       "probability": 0.05,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 2000000,
         "maxLoss": 20000000,
         "percentiles": null,
@@ -402,7 +402,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Process and People",
       "probability": 0.2,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 100000,
         "maxLoss": 800000,
         "percentiles": null,
@@ -415,7 +415,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Process and People",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -438,7 +438,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Process and People",
       "probability": 0.25,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 50000,
         "maxLoss": 500000,
         "percentiles": null,
@@ -451,7 +451,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Third-Party and Supply Chain",
       "probability": 0.12,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 500000,
         "maxLoss": 5000000,
         "percentiles": null,
@@ -464,7 +464,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Third-Party and Supply Chain",
       "probability": 0.2,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 100000,
         "maxLoss": 1500000,
         "percentiles": null,
@@ -477,7 +477,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Third-Party and Supply Chain",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -498,7 +498,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Market Risk",
       "probability": 0.35,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -521,7 +521,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Market Risk",
       "probability": 0.4,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 500000,
         "maxLoss": 8000000,
         "percentiles": null,
@@ -534,7 +534,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Credit Risk",
       "probability": 0.05,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 3000000,
         "maxLoss": 30000000,
         "percentiles": null,
@@ -547,7 +547,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Credit Risk",
       "probability": 0.15,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -568,7 +568,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Liquidity Risk",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 2000000,
         "maxLoss": 25000000,
         "percentiles": null,
@@ -581,7 +581,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Compliance and Legal Risk",
       "probability": 0.12,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 2000000,
         "maxLoss": 50000000,
         "percentiles": null,
@@ -594,7 +594,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Compliance and Legal Risk",
       "probability": 0.08,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -617,7 +617,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Compliance and Legal Risk",
       "probability": 0.15,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 500000,
         "maxLoss": 10000000,
         "percentiles": null,
@@ -630,7 +630,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Strategic and Reputational Risk",
       "probability": 0.1,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 1000000,
         "maxLoss": 12000000,
         "percentiles": null,
@@ -643,7 +643,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Strategic and Reputational Risk",
       "probability": 0.05,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 5000000,
         "maxLoss": 40000000,
         "percentiles": null,
@@ -656,7 +656,7 @@ http POST localhost:18080/workspaces \
       "parentName": "Strategic and Reputational Risk",
       "probability": 0.06,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [
@@ -734,7 +734,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Technology and Cyber",
         "probability": 0.15,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -757,7 +757,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Technology and Cyber",
         "probability": 0.3,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 200000,
           "maxLoss": 4000000,
           "percentiles": null,
@@ -770,7 +770,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Technology and Cyber",
         "probability": 0.1,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 1000000,
           "maxLoss": 15000000,
           "percentiles": null,
@@ -783,7 +783,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Technology and Cyber",
         "probability": 0.05,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 2000000,
           "maxLoss": 20000000,
           "percentiles": null,
@@ -796,7 +796,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Process and People",
         "probability": 0.2,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 100000,
           "maxLoss": 800000,
           "percentiles": null,
@@ -809,7 +809,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Process and People",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -832,7 +832,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Process and People",
         "probability": 0.25,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 50000,
           "maxLoss": 500000,
           "percentiles": null,
@@ -845,7 +845,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Third-Party and Supply Chain",
         "probability": 0.12,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 500000,
           "maxLoss": 5000000,
           "percentiles": null,
@@ -858,7 +858,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Third-Party and Supply Chain",
         "probability": 0.2,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 100000,
           "maxLoss": 1500000,
           "percentiles": null,
@@ -871,7 +871,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Third-Party and Supply Chain",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -892,7 +892,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Market Risk",
         "probability": 0.35,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -915,7 +915,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Market Risk",
         "probability": 0.4,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 500000,
           "maxLoss": 8000000,
           "percentiles": null,
@@ -928,7 +928,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Credit Risk",
         "probability": 0.05,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 3000000,
           "maxLoss": 30000000,
           "percentiles": null,
@@ -941,7 +941,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Credit Risk",
         "probability": 0.15,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -962,7 +962,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Liquidity Risk",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 2000000,
           "maxLoss": 25000000,
           "percentiles": null,
@@ -975,7 +975,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Compliance and Legal Risk",
         "probability": 0.12,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 2000000,
           "maxLoss": 50000000,
           "percentiles": null,
@@ -988,7 +988,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Compliance and Legal Risk",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -1011,7 +1011,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Compliance and Legal Risk",
         "probability": 0.15,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 500000,
           "maxLoss": 10000000,
           "percentiles": null,
@@ -1024,7 +1024,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Strategic and Reputational Risk",
         "probability": 0.1,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 1000000,
           "maxLoss": 12000000,
           "percentiles": null,
@@ -1037,7 +1037,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Strategic and Reputational Risk",
         "probability": 0.05,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 5000000,
           "maxLoss": 40000000,
           "percentiles": null,
@@ -1050,7 +1050,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "parentName": "Strategic and Reputational Risk",
         "probability": 0.06,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [

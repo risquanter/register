@@ -20,17 +20,22 @@
 
 ### 1. A Fixed Set Is an Enum in Its Owner's Companion
 
-Declare the set beside the type that owns it. Derive the codec; annotate only where the serialised spelling must differ from the case name:
+Declare the set beside the type that owns it. Derive the codec, so each case's serialised spelling is its own name. The discriminator's key is a named constant in the file that declares the set, read by the annotation and by the published schema, so the two cannot disagree:
 
 ```scala
-@jsonDiscriminator("type")
-enum ScenarioSourceDto:
-  @jsonHint("branch") case Branch(name: BranchChoice)
-  @jsonHint("commit") case Commit(hash: CommitHash)
+@jsonDiscriminator(ScenarioSourceDto.TagField)
+sealed trait ScenarioSourceDto
 
 object ScenarioSourceDto:
+  final val TagField = "type"
+
+  final case class Branch(name: BranchChoice) extends ScenarioSourceDto
+  final case class Commit(hash: CommitHash) extends ScenarioSourceDto
+
   given codec: JsonCodec[ScenarioSourceDto] = DeriveJsonCodec.gen[ScenarioSourceDto]
 ```
+
+Annotate a case's spelling only where §2 applies. The key names the field; the values come from the case names.
 
 No central constants file. A set's definition lives with its owner, so it cannot outlive the type it describes.
 
@@ -157,7 +162,8 @@ div(cls := "banner", ErrorMessages.workspaceExpired(lifetime))
 
 | Location | Pattern |
 |----------|---------|
-| `ScenarioSourceDto` | Closed set, derived codec, `@jsonHint` for differing spellings |
+| `ScenarioSourceDto` | Closed set, derived codec, tag key as a named constant |
+| `LeafSimContent`'s raw projection | Declared spellings — the bytes are a hash preimage, which owes stability rather than agreement with a decoder |
 | `ValuationBasis` | Declared spelling — contract with the query engine |
 | `FolQueryFailure.NodeSortName` | Single constant in its owner's companion, origin documented |
 | `WireError` | Closed set carrying the status per case |

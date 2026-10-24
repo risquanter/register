@@ -57,7 +57,7 @@ SHOT LIST — open $WURL, then per shot:
           matters (Masse/Tail). Full analysis: deck Backup B8.
 
 [slide 18]  Metalog / expert-quantile input
-   Click: open leaf "Ransomware Attack" (expert mode) → percentile/quantile rows
+   Click: open leaf "Ransomware Attack" (metalog mode) → percentile/quantile rows
           with the fitted curve preview.
    Clip:  the quantile table + preview.
 

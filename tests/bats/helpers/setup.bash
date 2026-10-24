@@ -96,7 +96,7 @@ create_workspace() {
         "parentName": "Root",
         "probability": 0.1,
         "distributionShape": {
-            "distributionType": "lognormal",
+            "distributionType": "Lognormal",
             "minLoss": 1000,
             "maxLoss": 50000,
             "percentiles": null,

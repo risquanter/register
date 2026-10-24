@@ -20,7 +20,7 @@
       "parentName": "Applications",
       "probability": 0.8,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 30000,
         "maxLoss": 300000,
         "percentiles": null,
@@ -33,7 +33,7 @@
       "parentName": "Infrastructure",
       "probability": 0.95,
       "distributionShape": {
-        "distributionType": "expert",
+        "distributionType": "Metalog",
         "minLoss": null,
         "maxLoss": null,
         "percentiles": [

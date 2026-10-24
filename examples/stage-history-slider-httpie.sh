@@ -51,7 +51,7 @@ for cmd in http jq; do
 done
 
 # distributionShape JSON for a lognormal leaf: $1 min, $2 max
-dist() { printf '{ "distributionType": "lognormal", "minLoss": %s, "maxLoss": %s, "percentiles": null, "quantiles": null, "terms": null }' "$1" "$2"; }
+dist() { printf '{ "distributionType": "Lognormal", "minLoss": %s, "maxLoss": %s, "percentiles": null, "quantiles": null, "terms": null }' "$1" "$2"; }
 
 # Newest commit hash on a branch (history is oldest-first, so last entry = head).
 head_hash() {
@@ -162,7 +162,7 @@ fi
 header "Step 7 — Scenario \"mitigated\" (forked from main) + edits M1, M2"
 SC=$(http --ignore-stdin POST "$BASE/w/$WS_KEY/scenarios" \
   name="mitigated" \
-  source:='{"type": "branch", "name": "main"}')
+  source:='{"type": "Branch", "name": "main"}')
 if echo "$SC" | jq -e '.name // .head // .branch' >/dev/null 2>&1; then
   ok "Scenario created : mitigated (forked from main head)"
 else

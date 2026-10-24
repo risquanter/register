@@ -73,7 +73,7 @@ echo "  HTTP $REQ_STATUS  CT: $REQ_CT  Body: $REQ_BODY"
 
 # ── Step 1: Bootstrap workspace ─────────────────────────────────────────
 echo -e "\n${CYN}=== Step 1: Bootstrap workspace ===${RST}"
-BOOT_BODY='{"name":"test-tree","portfolios":[{"name":"Root","parentName":null}],"leaves":[{"name":"Leaf","parentName":"Root","distributionType":"expert","probability":0.05,"percentiles":[0.05,0.5,0.95],"quantiles":[100000,500000,2000000]}]}'
+BOOT_BODY='{"name":"test-tree","portfolios":[{"name":"Root","parentName":null}],"leaves":[{"name":"Leaf","parentName":"Root","distributionType":"Metalog","probability":0.05,"percentiles":[0.05,0.5,0.95],"quantiles":[100000,500000,2000000]}]}'
 tmpb=$(mktemp); tmph=$(mktemp)
 curl -s -D "$tmph" -o "$tmpb" -X POST -H "Content-Type: application/json" -H "Accept: application/json" "$BASE/workspaces" -d "$BOOT_BODY"
 BOOT_STATUS=$(head -1 "$tmph" | grep -oP '\d{3}')

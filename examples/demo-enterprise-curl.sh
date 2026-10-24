@@ -17,35 +17,35 @@
 #   Enterprise Risk  (root)
 #   ├── Operational Risk
 #   │   ├── Technology and Cyber
-#   │   │   ├── Ransomware Attack             expert  15%  P25=$500K P50=$2M P75=$8M P95=$25M
+#   │   │   ├── Ransomware Attack             metalog 15%  P25=$500K P50=$2M P75=$8M P95=$25M
 #   │   │   ├── Cloud Provider Outage         lognorm 30%  $200K–$4M
 #   │   │   ├── Data Breach - PII             lognorm 10%  $1M–$15M
 #   │   │   └── Insider Threat                lognorm  5%  $2M–$20M
 #   │   ├── Process and People
 #   │   │   ├── Key Person Departure          lognorm 20%  $100K–$800K
-#   │   │   ├── Internal Fraud                expert   8%  P25=$200K P50=$1M P75=$4M P95=$18M
+#   │   │   ├── Internal Fraud                metalog  8%  P25=$200K P50=$1M P75=$4M P95=$18M
 #   │   │   └── Process Failure               lognorm 25%  $50K–$500K
 #   │   └── Third-Party and Supply Chain
 #   │       ├── Critical Vendor Failure       lognorm 12%  $500K–$5M
 #   │       ├── Outsourcing SLA Breach        lognorm 20%  $100K–$1.5M
-#   │       └── Concentration Risk            expert   8%  P25=$1M P50=$4M P95=$18M
+#   │       └── Concentration Risk            metalog  8%  P25=$1M P50=$4M P95=$18M
 #   ├── Financial Risk
 #   │   ├── Market Risk
-#   │   │   ├── Equity Portfolio Drawdown     expert  35%  P25=$1M P50=$4M P75=$12M P95=$28M
+#   │   │   ├── Equity Portfolio Drawdown     metalog 35%  P25=$1M P50=$4M P75=$12M P95=$28M
 #   │   │   └── FX Adverse Move               lognorm 40%  $500K–$8M
 #   │   ├── Credit Risk
 #   │   │   ├── Counterparty Default          lognorm  5%  $3M–$30M
-#   │   │   └── Credit Downgrade Wave         expert  15%  P25=$800K P50=$3M P95=$20M
+#   │   │   └── Credit Downgrade Wave         metalog 15%  P25=$800K P50=$3M P95=$20M
 #   │   └── Liquidity Risk
 #   │       └── Funding Squeeze               lognorm  8%  $2M–$25M
 #   ├── Compliance and Legal Risk
 #   │   ├── Regulatory Action                 lognorm 12%  $2M–$50M
-#   │   ├── Litigation                        expert   8%  P25=$300K P50=$2M P75=$8M P95=$40M
+#   │   ├── Litigation                        metalog  8%  P25=$300K P50=$2M P75=$8M P95=$40M
 #   │   └── GDPR / Data Protection Fine       lognorm 15%  $500K–$10M
 #   └── Strategic and Reputational Risk
 #       ├── ESG Controversy                   lognorm 10%  $1M–$12M
 #       ├── M and A Integration Failure       lognorm  5%  $5M–$40M
-#       └── Product Recall / Liability        expert   6%  P25=$1M P50=$5M P95=$35M
+#       └── Product Recall / Liability        metalog  6%  P25=$1M P50=$5M P95=$35M
 # =============================================================================
 set -euo pipefail
 
@@ -126,7 +126,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Technology and Cyber",
         "probability": 0.15,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -149,7 +149,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Technology and Cyber",
         "probability": 0.3,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 200000,
           "maxLoss": 4000000,
           "percentiles": null,
@@ -162,7 +162,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Technology and Cyber",
         "probability": 0.1,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 1000000,
           "maxLoss": 15000000,
           "percentiles": null,
@@ -175,7 +175,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Technology and Cyber",
         "probability": 0.05,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 2000000,
           "maxLoss": 20000000,
           "percentiles": null,
@@ -188,7 +188,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Process and People",
         "probability": 0.2,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 100000,
           "maxLoss": 800000,
           "percentiles": null,
@@ -201,7 +201,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Process and People",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -224,7 +224,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Process and People",
         "probability": 0.25,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 50000,
           "maxLoss": 500000,
           "percentiles": null,
@@ -237,7 +237,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Third-Party and Supply Chain",
         "probability": 0.12,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 500000,
           "maxLoss": 5000000,
           "percentiles": null,
@@ -250,7 +250,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Third-Party and Supply Chain",
         "probability": 0.2,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 100000,
           "maxLoss": 1500000,
           "percentiles": null,
@@ -263,7 +263,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Third-Party and Supply Chain",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -284,7 +284,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Market Risk",
         "probability": 0.35,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -307,7 +307,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Market Risk",
         "probability": 0.4,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 500000,
           "maxLoss": 8000000,
           "percentiles": null,
@@ -320,7 +320,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Credit Risk",
         "probability": 0.05,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 3000000,
           "maxLoss": 30000000,
           "percentiles": null,
@@ -333,7 +333,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Credit Risk",
         "probability": 0.15,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -354,7 +354,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Liquidity Risk",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 2000000,
           "maxLoss": 25000000,
           "percentiles": null,
@@ -367,7 +367,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Compliance and Legal Risk",
         "probability": 0.12,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 2000000,
           "maxLoss": 50000000,
           "percentiles": null,
@@ -380,7 +380,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Compliance and Legal Risk",
         "probability": 0.08,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [
@@ -403,7 +403,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Compliance and Legal Risk",
         "probability": 0.15,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 500000,
           "maxLoss": 10000000,
           "percentiles": null,
@@ -416,7 +416,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Strategic and Reputational Risk",
         "probability": 0.1,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 1000000,
           "maxLoss": 12000000,
           "percentiles": null,
@@ -429,7 +429,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Strategic and Reputational Risk",
         "probability": 0.05,
         "distributionShape": {
-          "distributionType": "lognormal",
+          "distributionType": "Lognormal",
           "minLoss": 5000000,
           "maxLoss": 40000000,
           "percentiles": null,
@@ -442,7 +442,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "parentName": "Strategic and Reputational Risk",
         "probability": 0.06,
         "distributionShape": {
-          "distributionType": "expert",
+          "distributionType": "Metalog",
           "minLoss": null,
           "maxLoss": null,
           "percentiles": [

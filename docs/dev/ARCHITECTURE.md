@@ -213,12 +213,10 @@ RiskNode (sealed trait)
 ├── RiskLeaf (terminal node - actual risk)
 │   ├── id: NodeId                              // ULID-based nominal wrapper
 │   ├── name: SafeName
-│   ├── distributionType: "expert" | "lognormal"
-│   ├── probability: Probability (0.0 < p < 1.0)
-│   ├── percentiles: Option[Array[Double]]      // Expert mode
-│   ├── quantiles: Option[Array[Double]]         // Expert mode
-│   ├── minLoss: Option[PositiveLong]            // Lognormal mode (feeds a logarithm)
-│   ├── maxLoss: Option[PositiveLong]            // Lognormal mode (feeds a logarithm)
+│   ├── probability: OccurrenceProbability (0.0 <= p <= 1.0)
+│   ├── shape: DistributionShape                 // one of the two modes below
+│   │   ├── Metalog(anchors, terms)              // percentiles paired with losses
+│   │   └── Lognormal(bounds)                    // the 90% interval's two bounds
 │   └── parentId: Option[NodeId]                 // None for root
 │
 └── RiskPortfolio (branch node - aggregation)

@@ -1496,11 +1496,18 @@ request and becomes a program that does not compile.
 #### What it does to the algebra
 
 The absorbing element of §6.3 becomes a case of the type rather than a case
-nested inside a component. `LeafAbsolute` *is* the constant map, visibly, and
-`LeafRelative` visibly is not. The monoid statement of §6.4 is unchanged — both
-cases are still arrows `LeafParams => F[LeafParams]`, and composition is still
-Kleisli — but the law `Override(s) ∘ x = Override(s)` is now provable by matching
-on the spec rather than by matching on a component inside a product.
+nested inside a component, with one qualification §6.3 did not need: §6.3's
+`Override` acted on the shape alone, while `LeafAbsolute` acts on `LeafParams`,
+which has two components. `LeafAbsolute` is the constant map on the components
+its replacement names — `Both` absorbs the whole arrow that precedes it, and
+`Likelihood` or `Severity` absorbs one component and passes the other through
+unchanged — and `LeafRelative` visibly is not constant on either. The monoid
+statement of §6.4 is unchanged — both cases are still arrows
+`LeafParams => F[LeafParams]`, and composition is still Kleisli — and the law
+`Override(s) ∘ x = Override(s)` holds per component, provable by matching on
+the spec rather than by matching on a component inside a product. The glossary's
+"How Parameter-Stage Mitigations Compose" states the pass-through and the
+commutation that follows from it.
 
 #### The one cost, which is paid rather than avoided
 
@@ -2683,9 +2690,10 @@ one.** So every coproduct in a chain needs a declared `Schema` of its own:
 theirs. `NodeProvenance` needs one on `DistributionParams`. The chain then
 bottoms out at refined types, and three were missing from `IronTapirCodecs.scala`
 — `MetalogTermCount`, `ContentHash`, and the fraction-in-(0, 1] refinement that
-`RetentionFactor` and `ResidualProbability` share. That last one takes a single
-instance, because the two names denote one Iron type and a second instance would
-be ambiguous.
+`RetentionFactor` and `ResidualProbability` are built on. That last one took a
+single instance while the two names denoted one Iron type. §17 makes them
+distinct types, so each now takes its own instance and the ambiguity that
+forbade the second one is gone.
 
 ### 16.7 What this sweep does not reach
 
@@ -2726,3 +2734,700 @@ The commands are §13's, unchanged. What this part adds to them:
   `DistributionPreviewServiceSpec` pass with no assertion edited.
 - `LeafSimContentSpec`'s byte-stability snapshot stays green, which it must,
   because this part touches no leaf projection field.
+
+## 17. Continuation — the two fractions become distinct types
+
+### 17.1 What is wrong
+
+`RetentionFactor` and `ResidualProbability` are the same type. Both are declared
+in `OpaqueTypes.scala` as `Double :| (Greater[0.0] & LessEqual[1.0])`, and a
+Scala type alias is transparent, so the compiler cannot tell one from the other.
+
+The two concepts are not the same. A retention factor is the fraction a figure is
+multiplied by, and it appears in `RelativeLikelihood.Scale`,
+`RelativeSeverity.ScaleSeverity` and `ResultTransformSpec.ScaleLosses`. A
+residual probability is the probability a mitigation asserts in place of the
+leaf's own, and it appears in `AbsoluteReplacement.Likelihood` and
+`AbsoluteReplacement.Both`. That is the glossary's own division under *Relative
+and Absolute Statements*: a relative statement changes a figure by a factor, an
+absolute statement replaces it.
+
+ADR-018 names this case directly: "Two concepts, same Iron constraint, must not
+be interchangeable → `case class` wrapper", with "Transparent Type Alias for
+Distinction" as the smell. ADR-034 §6 treats the two as distinct type-level
+enforcement points of the no-elimination rule, which a single type cannot
+deliver.
+
+The two bounds are equal by coincidence, not by derivation. The comments at both
+declarations argue the same interval from different premises — for the factor,
+that a scale may reduce and never eliminate, with an absolute replacement as the
+route to an increase; for the probability, that a mitigation may not assert a
+control cannot fail. Either premise could move without the other.
+
+The defect is reachable only from a site that constructs both from the same
+input. No such site exists: every construction today is a per-field decoder,
+where the field name supplies the meaning. The first one will be the mitigation
+editing interface, which `PLAN-RISKTRANSFORM.md` §7.4 holds as M4 and which has
+no approval. Doing the typing before that interface is written is what makes it
+a type change rather than a type change plus a rewrite of the code built on the
+old types.
+
+### 17.2 `LSA-D-6` — the shape of the distinction
+
+**Ruled: nominal wrappers over one shared refinement.** The refinement is
+declared once, because it is one predicate; the two concepts are two wrappers
+over it, because they are two concepts. The alternative considered and rejected
+was two independent aliases kept in step by review at each construction site,
+which is the state this section exists to leave.
+
+### 17.3 Signatures
+
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`
+— the two aliases are replaced by one refinement and two wrappers:
+
+```scala
+// A fraction in (0, 1]: strictly above zero and at most one. NaN fails the
+// lower constraint by IEEE 754 comparison. Two domain concepts refine to this
+// predicate and are distinguished by their wrappers below, never by it.
+type UnitFraction = Double :| (Greater[0.0] & LessEqual[1.0])
+
+// Fraction of a figure a mitigation keeps. A scale operation reduces and can
+// never eliminate — a residual risk of exactly zero is not a defensible
+// estimate, because it removes control failure from the analysis. A figure that
+// increases is stated absolutely through an AbsoluteReplacement, never as a
+// factor (ADR-034).
+final case class RetentionFactor(toFraction: UnitFraction)
+
+// Probability a mitigation may assert for a risk that remains in the tree. A
+// mitigation reduces the chance of an occurrence and can never remove the
+// possibility, because a residual of exactly zero asserts the control cannot
+// fail. Distinct from OccurrenceProbability, whose closed interval is correct
+// for a leaf's own declared probability: an author may state that an event
+// never occurs, a mitigation may not state that it has been prevented.
+final case class ResidualProbability(toFraction: UnitFraction)
+```
+
+The accessor is named `toFraction` rather than `value`, matching ADR-018's
+`case class TreeId(toSafeId: SafeId.SafeId)`, so a call site reads as a
+conversion out of the wrapper rather than as a field read.
+
+The shared JSON codecs become one pair on the refinement plus one pair per
+wrapper, because a wrapper is what crosses the wire:
+
+```scala
+given JsonEncoder[UnitFraction] = JsonEncoder[Double].contramap(identity)
+given JsonDecoder[UnitFraction] =
+  JsonDecoder[Double].mapOrFail(_.refineEither[Greater[0.0] & LessEqual[1.0]])
+
+given JsonCodec[RetentionFactor] =
+  JsonCodec[UnitFraction].transform(RetentionFactor(_), _.toFraction)
+given JsonCodec[ResidualProbability] =
+  JsonCodec[UnitFraction].transform(ResidualProbability(_), _.toFraction)
+```
+
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationUtil.scala`
+— the two refinements return the wrappers, and the one predicate is applied in
+one place:
+
+```scala
+def refineRetentionFactor(
+  value:    Double,
+  location: ErrorLocation
+): Either[List[ValidationError], RetentionFactor]
+
+def refineResidualProbability(
+  value:    Double,
+  location: ErrorLocation
+): Either[List[ValidationError], ResidualProbability]
+```
+
+Both signatures are unchanged in shape; only the right-hand type moves from the
+alias to the wrapper. Each keeps its own message, which is why they stay two
+functions rather than one over `UnitFraction`.
+
+`modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`
+— the one shared `Schema` becomes two, which is now possible because the two
+types are distinct:
+
+```scala
+given Schema[RetentionFactor] = Schema.schemaForDouble.map[RetentionFactor](
+  d => ValidationUtil.refineRetentionFactor(d, codecLocation).toOption
+)(_.toFraction)
+
+given Schema[ResidualProbability] = Schema.schemaForDouble.map[ResidualProbability](
+  d => ValidationUtil.refineResidualProbability(d, codecLocation).toOption
+)(_.toFraction)
+```
+
+The note at that site recording that one instance serves both is deleted with
+the condition it described.
+
+### 17.4 The call sites, which change type and not shape
+
+Five case declarations name one of the two types, and each keeps its parameter
+name and position:
+
+```scala
+// RiskLeafTransform.scala
+final case class Scale(factor: RetentionFactor) extends RelativeLikelihood
+final case class ScaleSeverity(factor: RetentionFactor) extends RelativeSeverity
+final case class Likelihood(probability: ResidualProbability) extends AbsoluteReplacement
+final case class Both(probability: ResidualProbability, shape: DistributionShape)
+  extends AbsoluteReplacement
+
+// ResultTransformSpec.scala
+final case class ScaleLosses(factor: RetentionFactor) extends ResultTransformSpec
+```
+
+`Mitigation.scala`'s `LeafAbsolute` holds a `ResidualProbability` and changes the
+same way.
+
+Every arithmetic use of either value gains `.toFraction`. The sites are
+`RiskLeafTransform.scala`'s `scaleSeverityBounds` and the two scaling arms, and
+`RiskResultTransform.scala`'s `scaleLosses`. That is the whole behavioural
+surface: a wrapper around a refined `Double` computes exactly what the refined
+`Double` computed.
+
+### 17.5 File inventory
+
+Every path this part edits is already a bullet line in
+[`PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md`](PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md),
+at lines 13, 15, 16, 18, 19, 49 and 67. No amendment is owed. The test sources
+are reached by the standing same-module authorization, as §12 states.
+
+### 17.6 ADR alignment
+
+| Record | Verdict |
+|---|---|
+| ADR-018 (nominal wrappers) | **This part is the record applied.** Two concepts share one Iron constraint and must not be interchangeable, which is the condition its decision rule names. |
+| ADR-034 (mitigation valuation model) | **Compliant, and it completes §6.** The record names the no-elimination rule's type-level enforcement points; two of them were one type, so the rule was carried by one bound rather than by two. |
+| ADR-037 (constants and closed sets) | **Compliant.** The interval is declared once as `UnitFraction` instead of twice, and each wrapper's comment states where its own bound comes from. |
+| ADR-038 (response wire shapes) | **Compliant.** Each wrapper has its own codec and schema, so no raw primitive crosses where a refined type exists, and the wire value is the same JSON number. |
+| ADR-001 (validation strategy) | **Compliant.** Construction stays behind `ValidationUtil`'s two refinements, and the decoder routes through the refinement exactly as before. |
+
+### 17.7 Open decisions
+
+None. `LSA-D-6` is ruled above.
+
+### 17.8 Terminology impact
+
+None. The glossary's *Relative and Absolute Statements* entry already states the
+distinction this part gives to the compiler, and its summary table names
+`RetentionFactor` nowhere — it names `LeafStageSpec` and
+`MitigationSpec.ResultStage`. No entry's wording changes.
+
+### 17.9 Verification
+
+The commands are §13's, unchanged — all four tiers. What this part adds:
+
+- `ValidationUtilSpec`'s `refineRetentionFactor` and `refineResidualProbability`
+  suites pass with their assertions unedited, each now asserting against its own
+  wrapper.
+- A new test asserting that a `RetentionFactor` cannot be passed where a
+  `ResidualProbability` is required. It is a compile-time property, so it is
+  written as a `typeCheckError` assertion rather than a runtime one — which is
+  the one assertion that is impossible to write today and is the whole point of
+  this part.
+- `RiskLeafTransformSpec`'s Kleisli law tests pass unmodified, because a wrapper
+  changes no arithmetic.
+- `MitigationEntitySpec`'s round-trip over every component case passes with its
+  fixtures rebuilt through the two refinements, and the serialised bytes are
+  unchanged: a wrapper over a refined `Double` encodes as the same JSON number.
+
+## 18. Continuation — the mode tag is derived, and the mode is named Metalog
+
+### 18.1 Two defects, one change
+
+**The mode spelling exists in six unrelated places.** Four `@jsonHint`
+annotations, one named constant and one regular expression all spell `"expert"`,
+and nothing in the build relates any of them to any other:
+
+| site | what it spells |
+|---|---|
+| `DistributionShape.scala:216` | the tag in the stored leaf blob and the tree response |
+| `DistributionShapeRequest.scala:37` | the tag in the request body a client posts |
+| `Provenance.scala:48` | the tag in the provenance record |
+| `LeafSimContent.scala:52` | the tag in the cache key's hash preimage |
+| `OpaqueTypes.scala:177` | `IronConstants.Expert`, the preview response's label |
+| `OpaqueTypes.scala:299` | `Match["^(expert|lognormal)$"]`, the label's refinement |
+
+A seventh and eighth sit in the browser: `DistributionMode.toApiString` and
+`DistributionMode.fromString` hold a hand-written mapping between the enum's
+cases and those strings, which is the mapping ADR-037 §2 says the derived codec
+replaces where the string exists only as the serialised spelling of a case.
+
+**The word is the wrong one.** "Expert" describes the author's activity — stating
+points on a curve from judgement — and it reached the code from user-facing
+prose written for a reader who does not want the mathematics. What the code holds
+is a metalog quantile function fitted through those points. The glossary's own
+Loss Shape entry says so in the sentence that introduces the mode: "A metalog
+quantile function is then fitted through those points." The mathematical family
+is the thing the type is, and `Metalog` is its name.
+
+The two defects are one change because the second decides what the first derives
+from. A derived tag takes the case name, so the case name has to be right before
+deriving is worth doing.
+
+### 18.2 `LSA-D-7` — the tag is derived from the case name
+
+**Ruled.** Three of the four `@jsonHint` annotations are removed and the tag
+becomes the case name, which zio-json's derivation writes when no hint overrides
+it. Six coproducts in `domain/errors/` and `http/errors/` already work this way,
+so the mechanism is in use rather than new here.
+
+The fourth stays, and the boundary is what the bytes are for. A tag in a message
+is read by a decoder, so deriving it is what keeps the tag and the case it names
+from disagreeing. A tag in a hash preimage is read by nothing, so what it owes
+is stability over time instead, and a declared string holds that where an
+identifier cannot. The one preimage here is the cache-key projection, and §18.4
+states its two hints in place.
+
+The cost is stated rather than hidden: a future rename of a case becomes a
+change to the stored blob and to the cache key's preimage. What makes that
+acceptable is `LSA-D-8` below — the name is being corrected now, to the
+mathematical family, which is a name with no further correction pending — and
+§18.6's pin test, which turns such a rename from a silent byte change into a
+failing assertion.
+
+The alternative rejected was keeping the four annotations. Its argument is real:
+a declared spelling decouples a persisted format from an identifier. It loses on
+the balance of what is being bought, because the decoupling protects against an
+accidental future rename while costing six unrelated spellings now.
+
+### 18.3 `LSA-D-8` — the technical name is Metalog, and the user-facing word stays
+
+**Ruled.** Every technical identifier naming the mode becomes `Metalog`. The
+phrase "expert estimate" survives only where a document explains the mode to a
+reader, and the glossary's wording for that is a terminology note presented
+separately and written only on approval.
+
+### 18.4 Signatures
+
+The case and its raw projection, in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/DistributionShape.scala`.
+The hints and the `distributionType` member go; the member was a third spelling
+of what the derivation now produces, and its two readers are browser display
+sites that match on the case instead:
+
+```scala
+@jsonDiscriminator("distributionType")
+sealed trait DistributionShape
+
+object DistributionShape:
+  /** Metalog: a quantile function fitted to the author's anchors. `terms`
+    * absent means fit with `anchors.termsToFit`. */
+  final case class Metalog private (
+    anchors: QuantileAnchors,
+    terms:   Option[MetalogTermCount]
+  ) extends DistributionShape
+
+  /** Lognormal: the BCG method fitted to a 90% confidence interval. */
+  final case class Lognormal(bounds: LossRange) extends DistributionShape
+
+  private sealed trait ShapeRaw
+
+  private case class MetalogRaw(
+    percentiles: Vector[Double],
+    quantiles:   Vector[Double],
+    terms:       Option[Int]
+  ) extends ShapeRaw
+
+  private case class LognormalRaw(minLoss: Long, maxLoss: Long) extends ShapeRaw
+```
+
+The request coproduct, in
+`modules/common/src/main/scala/com/risquanter/register/http/requests/DistributionShapeRequest.scala`:
+
+```scala
+@jsonDiscriminator("distributionType")
+sealed trait DistributionShapeRequest
+
+final case class MetalogShapeRequest(
+  percentiles: Vector[Double],
+  quantiles:   Vector[Double],
+  terms:       Option[Int]
+) extends DistributionShapeRequest
+```
+
+The provenance parameters, in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/Provenance.scala`:
+
+```scala
+@jsonDiscriminator("distributionType")
+sealed trait DistributionParams
+
+final case class MetalogDistributionParams(
+  percentiles: Vector[Double],
+  quantiles:   Vector[Double],
+  terms:       MetalogTermCount
+) extends DistributionParams
+```
+
+The cache-key projection, in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/LeafSimContent.scala`,
+keeps its own private coproduct **and keeps its two hints**, which is the one
+site where `LSA-D-7` does not reach. Two facts put it outside the rule. Its
+cases are named `MetalogRaw` and `LognormalRaw`, so a derived tag would spell
+the mode as the name of a private implementation class. And its bytes are a hash
+preimage rather than a message, so what it owes is stability over time, which a
+declared string gives independently of any Scala identifier and a derived one
+does not:
+
+```scala
+@jsonDiscriminator("distributionType")
+private sealed trait ShapeRaw
+
+@jsonHint("Metalog")
+private case class MetalogRaw(
+  percentiles: Vector[Double],
+  quantiles:   Vector[Double],
+  terms:       Option[Int]
+) extends ShapeRaw
+
+@jsonHint("Lognormal")
+private case class LognormalRaw(minLoss: Long, maxLoss: Long) extends ShapeRaw
+```
+
+The spellings match the public tag, so one mode reads the same in a stored leaf
+and in the key that leaf is cached under. Nothing in the build enforces that
+agreement, and nothing needs to: the preimage is never decoded, and
+`LeafSimContentSpec`'s byte-stability snapshots fail if either spelling moves.
+
+The browser's form enum, in
+`modules/app/src/main/scala/app/state/DistributionMode.scala`, loses both halves
+of its hand-written mapping, because the case name is now the API spelling:
+
+```scala
+/** The mode a leaf form is editing. */
+enum DistributionMode:
+  case Metalog, Lognormal
+```
+
+`toApiString` is replaced by `toString` at its call sites, and `fromString` by
+`DistributionMode.valueOf` guarded by `scala.util.Try`, which is the one place a
+string from outside is turned back into a case.
+
+The label constant and its refinement, in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`.
+One pair survives, and its comment says what it is for, because the preview
+response carries the mode as a value a client reads rather than as a tag a
+decoder matches:
+
+```scala
+// The mode as a label in a response body, not as a serialised tag — a shape's
+// tag is derived from its case name. The two spellings agree because both are
+// the case name, and DistributionPreviewServiceSpec pins each arm's value.
+val Metalog:   DistributionType = "Metalog"
+val Lognormal: DistributionType = "Lognormal"
+
+type DistributionType = String :| Match["^(Metalog|Lognormal)$"]
+```
+
+### 18.5 Every identifier that changes
+
+Twelve distinct spellings, across nineteen main-source files:
+
+```
+Expert                   → Metalog          (the case, and every match arm)
+ExpertRaw                → MetalogRaw
+ExpertDistributionParams → MetalogDistributionParams
+ExpertShapeRequest       → MetalogShapeRequest
+ExpertEdited             → MetalogEdited
+EXPERT_PARAMS            → METALOG_PARAMS    (INVALID_EXPERT_PARAMS)
+IronConstants.Expert     → IronConstants.Metalog
+expertFitFailed          → metalogFitFailed
+expertLengthMismatch     → metalogLengthMismatch
+expertCrossFieldGated    → metalogCrossFieldGated
+expertCrossFieldErrorRaw → metalogCrossFieldErrorRaw
+expertFields             → metalogFields
+```
+
+The files, by where the work falls:
+
+- `domain/data/DistributionShape.scala` — the case, its raw projection, the
+  hints, the member
+- `domain/data/Provenance.scala`, `domain/data/LeafSimContent.scala`,
+  `http/requests/DistributionShapeRequest.scala` — the three other coproducts
+- `domain/data/iron/OpaqueTypes.scala`, `domain/data/iron/ValidationUtil.scala`,
+  `domain/data/iron/ValidationMessages.scala` — the label pair, the refinement,
+  the named sentences
+- `domain/errors/ValidationErrorCode.scala` — `INVALID_EXPERT_PARAMS`
+- `domain/data/RiskLeafTransform.scala`, `services/helper/Simulator.scala`,
+  `services/DistributionPreviewService.scala`,
+  `services/cache/MitigationStaleness.scala`,
+  `simulation/MetalogDistribution.scala` — match arms and construction sites
+- `app/state/RiskLeafFormState.scala`, `app/state/DistributionMode.scala`,
+  `app/state/FormMode.scala`, `app/views/RiskLeafFormView.scala`,
+  `app/chart/DistributionSpecBuilder.scala`, `app/components/TreeNodeRow.scala`
+  — the browser's form, its mode enum and its two display sites
+
+`app/views/TreePreview.scala` loses its read of the deleted member and matches
+on the case, which is the same conversion `TreeNodeRow` makes.
+
+### 18.6 File inventory
+
+Seventeen of the nineteen paths are already bullet lines in
+[`PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md`](PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md).
+Two are not and the user amends the inventory before this part starts:
+
+- `modules/app/src/main/scala/app/views/RiskLeafFormView.scala`
+- `modules/app/src/main/scala/app/state/DistributionMode.scala`
+
+Test sources are reached by the standing same-module authorization, as §12
+states.
+
+### 18.7 ADR alignment
+
+| Record | Verdict |
+|---|---|
+| ADR-037 (constants and closed sets) | **This part is the record applied.** Its §2 keeps a hand-written string mapping only where the string contracts with something other than the serialiser. Four of the six sites and both halves of `DistributionMode`'s mapping exist only as the serialised spelling of a case, so the derived codec replaces them. The one surviving pair is a response label rather than a tag, and its comment says so. |
+| ADR-038 (response wire shapes) | **Compliant, and it closes the smell the record names.** Its "Hand-Rolled Discriminator Beside a Derived Codec" smell is the `distributionType` member, which this part deletes. |
+| ADR-032 (content equality relations) | **Compliant, and the domain-content relation's preimage changes once.** `LeafSimContent` keeps a declared tag, and the spelling it declares moves from `expert` to `Metalog`, so every leaf's cache key moves once. That costs one miss per leaf and no correctness, on the same grounds as `LSA-D-5`. What the declared tag buys is that no later rename moves it again: the preimage is a hash input, so its stability is held by a string rather than by an identifier. |
+| ADR-003 (seeding and provenance) | **Compliant.** The provenance record reports the same two figures; only its tag's spelling moves. |
+| ADR-029 (input injection defence) | **Compliant.** The mode spelling stays a compile-time literal rather than a refined field, which is the row that record carries for the Irmin GraphQL boundary. |
+| ADR-001 (validation strategy) | **Compliant.** No construction path moves; the smart constructors keep their names and shapes. |
+
+### 18.8 Open decisions
+
+None. `LSA-D-7` and `LSA-D-8` are ruled above.
+
+### 18.9 Terminology impact
+
+Settled on 2026-10-24, and wider than this part anticipated.
+`docs/user/TERMINOLOGY.md` was revised in full on the user's instruction, which
+ruled three things at once. The mode's technical name is Metalog, and the expert
+estimate is how it is explained to a reader who does not want the mathematics.
+"Loss shape" is not one of this project's terms, so the glossary defines the loss
+distribution and states the two modes inside that entry. And the glossary is
+written in the register of the explained design write-ups, so it carries no type
+signatures, no wire or serialisation discussion, and no decision-record
+citations.
+
+Nothing further is owed here. The term this plan is named after is not a term the
+project uses; the filename stays as it is, because the approval token names that
+path.
+
+### 18.10 Verification
+
+The commands are §13's, unchanged — all four tiers. What this part adds:
+
+- **A pin test on the stored leaf blob**, which does not exist today and is what
+  makes `LSA-D-7`'s cost bounded. `RiskLeafSpec`'s wire-format suite asserts
+  round-trip equality only, and a round trip passes under any consistent rename.
+  The new test compares `leaf.toJson` against a literal string, so a change to
+  the tag fails an assertion instead of changing stored bytes silently.
+- `LeafSimContentSpec`'s two byte-stability snapshots are updated to the new tag,
+  which is the one assertion edit this part makes and is a recorded consequence
+  of `LSA-D-7` rather than a weakening: the test's subject is that the preimage
+  is stable, and it is restated against the new preimage.
+- `DistributionPreviewServiceSpec`'s two label assertions move from `"expert"`
+  to `"Metalog"`, pinning the surviving constant pair against the derived tag.
+- `DistributionShapeSpec`'s round-trip-and-member test is deleted with the
+  member it related, and its refusal tests' decode inputs are restated with the
+  new tag.
+- Every other suite passes with no assertion edited. A rename changes no
+  behaviour, so a test that fails for any other reason is a defect in this part.
+
+## 19. Continuation — one spelling per tag, and the document says which key it is
+
+Ruled 2026-10-24. This part has two halves that reinforce each other. The tag a
+decoder reads becomes the case's own name everywhere, so no tag value is
+declared as a string. And every coproduct the published interface description
+contains names the key that decides its case, so a client generated from that
+description sends what the decoder reads.
+
+### 19.1 `LSA-D-9` — the two suffixed coproducts are renamed, not annotated
+
+**Ruled.** `§18.2` removed the hints and left the derived tag as the case name,
+which is correct for `DistributionShape` and wrong for two others. The submitted
+form's cases are `MetalogShapeRequest` and `LognormalShapeRequest`, and the
+provenance record's are `MetalogDistributionParams` and
+`LognormalDistributionParams`, so deriving from those names publishes a tag
+naming an implementation class rather than the mode.
+
+The cases move into their own companions and lose the suffix, so the derived tag
+is `Metalog` and `Lognormal` at every site:
+
+```scala
+object DistributionShapeRequest:
+  final case class Metalog(
+    percentiles: Vector[Double],
+    quantiles:   Vector[Double],
+    terms:       Option[Int]
+  ) extends DistributionShapeRequest
+
+  final case class Lognormal(minLoss: Long, maxLoss: Long) extends DistributionShapeRequest
+
+object DistributionParams:
+  final case class Metalog(
+    percentiles: Vector[Double],
+    quantiles:   Vector[Double],
+    terms:       MetalogTermCount
+  ) extends DistributionParams
+
+  final case class Lognormal(
+    minLoss:            PositiveLong,
+    maxLoss:            PositiveLong,
+    confidenceInterval: Double
+  ) extends DistributionParams
+```
+
+The alternative rejected was declaring the two spellings with a hint, as the
+cache-key projection does. It was rejected because it restores the state the
+whole part set out to leave: a tag value written as a string beside a case that
+could be renamed away from it.
+
+The cost is 125 references across 25 files, counted — 68 for the submitted form
+and 57 for the provenance record, most of them test fixtures. Every one is a
+compile error until it is fixed, so none can be missed.
+
+### 19.2 `LSA-D-10` — a published coproduct names its discriminator
+
+**Ruled.** Nineteen coproducts are reachable from an endpoint's request or
+response body. Each is serialised with a tag field and read back by matching on
+it, and seventeen of them published a list of alternatives naming no key.
+
+A reader of that description has to infer the case from which fields are
+present. The decoder never infers; it reads the key. So the description stated a
+contract the server does not implement, and a client generated from it can send
+a body the server refuses.
+
+Each such coproduct declares the key in its own schema. The configuration is
+scoped to the body of the `given` that needs it, which is the same containment
+`§16.6` records for the auto-derivation import:
+
+```scala
+given schema: Schema[DistributionShape] =
+  import sttp.tapir.generic.auto.*
+  given Configuration = Configuration.default.withDiscriminator(DistributionShape.TagField)
+  Schema.derived[ShapeRaw].as[DistributionShape]
+```
+
+`Configuration` is `sttp.tapir.generic.Configuration`, and `withDiscriminator`
+was verified against the tapir 1.13.4 artifact's own signatures before this was
+written.
+
+The key is stated once per concept rather than once per file.
+`DistributionShape.TagField` holds `"distributionType"` and is read by the
+submitted form and the provenance record. `ErrorLocation.scala` holds `"kind"`
+once for the five coproducts declared in it.
+
+### 19.3 `LSA-D-11` — a declared tag value that restates its case name is dropped
+
+**Ruled.** Twelve tag values are written as strings, and every one of them is a
+case name with a lowercase initial. Ten are `@jsonHint` annotations:
+`RelativeLikelihood`'s `keep` and `scale`, `RelativeSeverity`'s `keep` and
+`scaleSeverity`, `AbsoluteReplacement`'s `likelihood`, `severity` and `both`,
+and `ScenarioSourceDto`'s `branch` and `commit`, alongside `MitigationSpec`'s
+three which `LSA-D-12` takes. The hints go and the tag becomes the case name, so
+the spelling changes initial letter at each of those sites. That is a change to
+the serialised value and it is ruled rather than derived, because nothing in the
+codebase forced the lowercase initial.
+
+`ResultTransformSpec` is the one that is not a hint, and removing its five
+spellings is a different change. It has no discriminator annotation at all: each
+case carries a hand-written `Raw` with its own `op: String` field, a `requireOp`
+check against a value named in a private `Op` object, and the parent's decoder is
+an alternation over the five. Deriving the five values therefore means replacing
+that apparatus, not deleting an annotation.
+
+The route that removes them and keeps everything the apparatus was for:
+`MitigationSpec.ResultStage`'s own pattern, already in this codebase. The parent
+carries `@jsonDiscriminator` and a derived codec, which supplies the tag from the
+case name. Each case keeps a codec of its own, built on its existing `Raw`
+without the `op` field, so every refinement still runs on the decode path and
+every refusal still names the field at fault — `refineLossCap` against `Cap`,
+`refineNonNegativeLong` against `Deductible` and `Threshold`,
+`refineRetentionFactor` against `Factor`, and `InsurancePolicy.create` for the
+cross-field rule. The `Op` object, the `requireOp` function and the alternation
+go.
+
+What all of this buys is that no tag value is written as a string at all. The
+alternative was to compute the published value from the case name with a shared
+function, which keeps the spelling and leaves the hints in place; it was rejected
+because it preserves the declared strings this part exists to remove.
+
+### 19.4 `LSA-D-12` — the mitigation stage's third value loses its exception
+
+**Ruled.** `MitigationSpec`'s cases are `LeafRelative`, `LeafAbsolute` and
+`ResultStage`, and its third tag value is `result` rather than the case name.
+That is the one value `LSA-D-11`'s rule does not reach, because it is not the
+case name with a different initial.
+
+It becomes the case name too, so the three stage values are `LeafRelative`,
+`LeafAbsolute` and `ResultStage`. Three facts were checked before ruling it,
+each of which would otherwise have been a reason to keep the value:
+
+- Nothing hashes a mitigation's bytes. The staleness check compares a leaf's
+  content hash, so no cache key moves.
+- The three values appear nowhere as strings except the annotations themselves —
+  not in the browser, not in the query language, not in a document or an example
+  script.
+- No stored data exists, so a stored blob that no longer decodes costs nothing.
+
+### 19.5 The mitigation has no separate wire type
+
+Stated because it is the question the ruling above turns on. There is no
+mitigation request or response data transfer object. A mitigation crosses as the
+domain type itself, inside a tree: `RiskTree` holds `mitigations: Seq[Mitigation]`
+and its wire form holds `mitigations: Option[Seq[Mitigation]]`, absent meaning
+none.
+
+So one codec serves the stored blob and the wire, and a tag change moves both at
+once. Both sides of that wire are generated from the same codec in the same
+cross-compiled module, so the browser follows without being edited.
+
+### 19.6 File inventory
+
+Every path this part edits is a bullet line in
+[`PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md`](PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md).
+Thirteen were already there. These five were added for the remaining
+coproducts:
+
+- `modules/common/src/main/scala/com/risquanter/register/http/errors/ConflictKind.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/errors/RejectionDetail.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala`
+
+No new file is needed. `LSA-D-11` removes every declared tag value, so each
+case's published value is its own name and the derivation's default mapping is
+right everywhere. There is no shared function to house, and the key each
+coproduct names is a constant in the file that declares it.
+
+`build.sbt` is on the inventory as well, for the version bump that lands with
+this work.
+
+Three further files carry the change outside the gated region, and no derivation
+reaches any of them because each holds the tag value as data rather than as code:
+`docs/user/API-TUTORIAL.md`, the example scripts and fixtures under `examples/`
+and `docs/test/`, and `tests/bats/helpers/setup.bash`.
+
+### 19.7 Open decisions
+
+None. `LSA-D-9` through `LSA-D-12` are ruled above.
+
+### 19.8 Terminology impact
+
+None. No decision here changes what a term denotes; the mode's name was settled
+by `LSA-D-8` and the glossary was revised under it.
+
+### 19.9 Verification
+
+- **A pin on the mitigation's stored bytes**, which does not exist today and is
+  what makes `LSA-D-12` safe. It compares one authored mitigation's encoded
+  bytes against a literal string, so a later change to a stage value fails an
+  assertion instead of silently changing what every stored mitigation looks
+  like. It is the same device `RiskLeafSpec` applies to a leaf and
+  `LeafSimContentSpec` to the cache-key preimage.
+- **A pin on the published discriminator**, in
+  `modules/common/src/test/scala/com/risquanter/register/http/PublishedDiscriminatorSpec.scala`.
+  It collects every published coproduct whose schema offers alternatives without
+  naming a key, and asserts the collection is empty. The assertion is on the
+  schema rather than on a round trip, because the codec and the schema are
+  produced by different machinery and a round trip passes while the description
+  is silent.
+- `MitigationEntitySpec`'s round trips pass with their fixtures' tag values
+  restated, which is the one assertion edit `LSA-D-11` and `LSA-D-12` make
+  between them.
+- All four tiers green, per §13's commands.

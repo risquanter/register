@@ -12,7 +12,7 @@
       "parentName": "Root",
       "probability": 0.5,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 10000,
         "maxLoss": 100000,
         "percentiles": null,

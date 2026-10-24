@@ -18,7 +18,7 @@
       "parentName": "Applications",
       "probability": 0.82,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 40000,
         "maxLoss": 320000,
         "percentiles": null,
@@ -39,7 +39,7 @@
       "parentName": "Compliance",
       "probability": 0.12,
       "distributionShape": {
-        "distributionType": "lognormal",
+        "distributionType": "Lognormal",
         "minLoss": 15000,
         "maxLoss": 600000,
         "percentiles": null,
