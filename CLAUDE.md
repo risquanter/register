@@ -8,7 +8,7 @@ This repo keeps its detailed working rules in `.claude/skills/`, which is the si
 
 - `register-dev` — **before any build, test, or Docker command.** Use the exact commands defined there; do not construct sbt/npm/docker commands from first principles. It also holds what to do with a red build, and what "finished" requires.
 - `adr-constraints` — before planning or implementing new types, endpoints, or services. It is a routing map, not a summary of the rules: it names which decision records bear on the change, and those records are then read in full. It also holds the two-pass review those records are read for, and what amending one of them obliges.
-- `code-quality-review` — after completing code changes, before reporting done.
+- `code-quality-review` — register's review criteria, applied after completing code changes and before reporting done. It is criteria only and runs no review: a review is run by `/code-review-routine`, `/code-review-complex` or `/security-review-deep`, each of which reads these criteria and takes its process rules from the global `review-protocol` skill.
 - `supply-chain` — before adding/updating any dependency, bumping the project version, or preparing a release (pinning, 14-day cooldown, trust policy, signature verification, bump scheme).
 
 Six **path-scoped rule files** live in `.claude/rules/` and hold the project's coding rules: `scala-algebraic-design.md`, `scala-domain.md`, `scala-style.md`, `scala-test.md`, `laminar.md` and `security.md`. Each declares the file patterns it governs in its `paths` frontmatter, so it loads on its own when a matching file is read or edited. A reload happens before any file is touched, which is the one moment none of them is loaded — the `reload` skill therefore reads all six explicitly.
@@ -17,6 +17,7 @@ Two **global** (user-level) skills bind here as well. They live in `~/.claude/sk
 
 - `plan-writing-style` — **before writing or editing any plan document, and when reviewing one.** Plan Quality Gate item 6 checks conformance, so a plan written without it fails the gate.
 - `doc-writing-style` — **before writing or editing any user-facing document** (tutorial, guide, runbook, README, operations doc).
+- `review-protocol` — the process rules every review tier obeys: the file scope and its three sources, the write boundary, the halt after presenting, the decision-guide vehicle, the output contract, the entry triggers that decide which tiers run, the coverage entry each tier appends to `docs/dev/reviews/REVIEW-<branch>.md`, and the terminology-freshness check. The three review tiers paste its sections into their spawn prompts; it is not invoked on its own.
 
 The rules below are distilled from the skills above and apply to every edit in this repository.
 
@@ -50,7 +51,7 @@ Never write the protocol machinery yourself — `.claude/protocol/`, `.claude/ho
 
 ## The Plan Quality Gate — what G3 actually requires
 
-A document confers plan coverage only if it is **implementation-grade**. All six
+A document confers plan coverage only if it is **implementation-grade**. All seven
 items are required, and a document failing any one of them is a draft or a
 scratch note that confers nothing, however it is titled and however
 enthusiastically it was approved in chat. The pre-implementation step for a
@@ -83,9 +84,14 @@ document, halt, and get an accepted signal on the document itself.
    numbered from 1, no label borrowed from another plan, every cited path and
    label resolving or marked as not yet existing with its owner named, acronyms
    expanded on first use, and every literal constant carrying its origin.
+7. **Terminology impact** — the terms in `docs/user/TERMINOLOGY.md` the plan's
+   decisions make stale, each paired here with the decision that makes it
+   stale, or an explicit statement that none are affected. The pairing is
+   recorded in the plan; the glossary carries the current wording and no
+   provenance.
 
 **Adopting a plan** means running these checks against it before any code: read
-it in full, report which of the six items it satisfies, run the planning-phase
+it in full, report which of the seven items it satisfies, run the planning-phase
 ADR review for its scope, name its inventory document, and present any open
 decisions and halt. A quality-gated plan with no open decisions, plus a
 user-refreshed token naming it, is what authorizes a gated edit. Adopting a plan

@@ -660,6 +660,12 @@ container, and this machine's daemon runs with user-namespace remapping):
 | Irmin image / Dockerfile change | B then A |
 | Full release validation | A + B + C |
 
+**Full release validation also runs the full-surface security pass.** `A + B +
+C` covers the test tiers only. Before a release, run `/security-review-deep`
+over the whole surface rather than a diff. Every other security trigger is
+per-diff, so a defect that no diff touched and no criterion asked about is
+otherwise never looked for; this bounds that exposure at one release cycle.
+
 ---
 
 ## Health Checks

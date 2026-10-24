@@ -37,6 +37,28 @@ inventory and in §12.
 `EWB-D-10` produces a new accepted decision record and a standing cleanup rule
 whose text reaches beyond this plan; §10 states both and §12 lists the files.
 
+**Every file list in this plan is stale until re-checked, the landed phases'
+included.** A major refactor ran beside this plan and reshaped the domain types
+this plan's phases name: `PLAN-LOSS-SHAPE-ALGEBRA` replaced the loss-distribution
+shape and the mitigation specification with coproducts. It deleted a file this
+plan's inventory still lists, it moved validation out of the types the phases
+name and into new per-case companions, and it created decode sites of a kind the
+phases were written to convert. A file list written before it is therefore
+neither complete nor correct, and the two failure directions are different.
+
+A **missing** path costs a halt mid-phase: the approval hook denies the edit and
+the work stops until the inventory is amended. A **stale** path costs more,
+because nothing announces it — a phase whose list names the file a construct used
+to live in will convert that file, pass its tests, and leave the construct
+standing where the refactor moved it.
+
+So before a phase starts, re-derive its file list from the code rather than
+reading it: grep for the construct the phase converts and compare the result
+against the list. Do the same for the phases already marked landed, because the
+refactor ran after them. Phase 2b's Iron-codec conversion and Phase 3's
+`ErrorLocation` pass both touched files the refactor then rewrote, so a construct
+either phase converted may exist again in a file neither list names.
+
 **How this plan reasons.** Two sources of argument are excluded by ruling. What
 the system does today is evidence of a defect, never a constraint on the fix —
 a shape is not justified by the fact that the current client happens to accept
@@ -2517,7 +2539,25 @@ object RiskPortfolio:
    then fail with `IngressRejected` carrying the list, instead of interpolating
    it into a sentence. Files: `domain/data/RiskNode.scala`,
    `domain/data/RiskTree.scala`, `domain/data/Mitigation.scala`,
+   `domain/data/DistributionShape.scala`, `domain/data/Provenance.scala`,
    `repositories/RiskTreeRepositoryIrmin.scala`.
+
+   The shape and the provenance record hold flattening sites of their own. A
+   leaf's shape is a coproduct whose cases decode through their own
+   `JsonCodec`, so the refusal is composed there rather than in `RiskLeaf`:
+   `DistributionShape.Expert.codec` and `DistributionShape.Lognormal.codec`
+   each end `.map(_.map(_.message).mkString("; "))`, which drops the element
+   index `FieldName.PercentileAt` and `FieldName.QuantileAt` carry — the one
+   part of the refusal that locates the bad value in a twenty-anchor shape.
+   `DistributionParams`' decoder and its two-sided accumulation do the same.
+   Both are reached on the store-read path through `RiskLeaf`'s decoder, so
+   step 3 moves them with it or the accumulated list is already a string by
+   the time `decodeValidated` returns.
+
+   `Mitigation` carries both forms today and only one is correct:
+   `MitigationSpec`'s decoder flattens on messages alone while `Mitigation`'s
+   own decoder keeps `ErrorLocation.describe`. The step brings the first to
+   the second before replacing both.
 
 4. **The database classifies once, from a code rather than from prose.**
    `WorkspaceStorePostgres.db` maps every driver failure to

@@ -1,26 +1,28 @@
 ---
 name: code-quality-review
-description: "Critical code quality review for Scala 3 / ZIO / Laminar codebase. Load when performing a pre-commit review, reviewing a diff, or auditing completed implementation work. Covers: algebraic design-first pass, ADR compliance, type safety, functional design, API surface, duplication, security, compiler hygiene, test quality, plan fidelity."
+description: "Register's code review criteria for its Scala 3 / ZIO / Laminar codebase — criteria only, carrying no process rules and performing no review. Read by code-review-routine, code-review-complex and security-review-deep; the process rules are in review-protocol. Covers: algebraic design-first pass, ADR compliance, type safety, functional design, API surface, duplication, security, compiler hygiene, test quality, plan fidelity."
 user-invokable: true
 argument-hint: "files or diff to review (attach changed files, or describe the scope)"
 ---
 
 # Code Quality Review — Register
 
-Use this skill to review changed files or a diff before committing.
-For each criterion report one of:
+These are register's review criteria. This document performs no review and
+writes nothing. The process rules — the write boundary, the halt after
+presenting, the decision-guide vehicle, the output contract — are in
+`~/.claude/skills/review-protocol/SKILL.md`, and a review is run by
+`/code-review-routine`, `/code-review-complex` or `/security-review-deep`,
+which read these criteria and apply them.
+
+For each criterion a review reports one of:
 
 - **PASS** — no issues found
 - **FINDING (severity)** — issue, location, concrete fix
 
 Severities: **MUST-FIX** (blocks commit) · **SHOULD-FIX** (quality debt) · **NOTE**
 
-Do not rubber-stamp. Report PASS when clean. Report FINDING when not. Do not propose
-options without flagging which decision the user must make. **The disposition of
-every finding is the user's** — severity is yours to assess, and you never decide on
-the user's behalf that a finding is acceptable. Which choices are the user's to
-resolve is defined in the global instructions, under "What counts as a decision",
-and the project's mechanism for raising one is in `CLAUDE.md`.
+Severity is the reviewer's to assess. The disposition of every finding is the
+user's.
 
 **Convention vs. hygiene is a real finding, not a "just conform" auto-pass.** When
 an existing codebase convention conflicts with code hygiene, clean code, or a best
@@ -36,83 +38,8 @@ boundary is deliberate — `NonFatal` does not catch `UndefinedBehaviorError`). 
 recommend a hygiene change you have not verified green. Full rule: `CLAUDE.md`,
 the noise filter's convention exception.
 
-Three binding rules on the report itself (`CLAUDE.md`, G6):
-
-- The report opens with the work done — every fix made under the write boundary
-  below, one line per class of change, naming the files. It is kept separate
-  from the findings, so a reader can tell what the review changed from what it
-  is asking about.
-- Presenting the review report is a presentation — halt after it. No further
-  fixes and no commits until the user rules on the findings.
-- Never self-classify a finding as "non-blocking", "note-only-so-proceeding",
-  or "acceptable" on the user's behalf. Severity is yours to assess; the
-  disposition of every finding is the user's.
-- Any finding that needs the user's feedback is presented in decision-guide
-  format (the `decision-guide` skill's structure), and this is the default
-  vehicle for every such point — never a bare severity list or an
-  AskUserQuestion multiple-choice as the vehicle. Each decision guide states:
-  the decision goal and why it matters now; every genuinely viable option with
-  plain-English pros and cons AND a concrete example of how the defect is
-  reached and what it means from the user's perspective; and an
-  explicitly-labelled recommendation. A straightforward single-answer fix
-  still gets a one-line concrete fix; the moment there is a real choice, it is
-  a decision guide.
-
-## Write boundary — fix what was already owed, never fix a finding
-
-The review role's permissions are tiered. It binds whoever runs this review.
-
-- **Read: unrestricted.** Read any file needed to reach a verdict.
-- **Write: behavioural tests.** Test code that pins behaviour — a coverage-gap
-  pinning test, a regression test reproducing a finding.
-- **Write: the boyscout obligations, without asking.** Anything the `boyscout`
-  skill already obliges on a file the change touched — unused imports removed,
-  comments brought to style, bare literals named, a recognised set created,
-  defaulted `Option`s removed, untyped identifiers typed. These are performed,
-  not reported. They were due in the edit that touched the file, so a review
-  that finds them outstanding discharges the obligation rather than handing it
-  back.
-- **Write: a plan passage the work has already superseded.** Where the shipped
-  code is right and the plan's text is what the work moved past — a passage a
-  later section of the same plan overrules, a signature the implementation
-  improved on, a count or a name the code has left behind — sweep the document
-  in the same pass. This reaches only the plan the session is working on, and
-  only where the code is provably the later word. An ADR, a plan not yet
-  implemented, or a divergence with no ruling behind it is presented and waits.
-- **Production code, to resolve a finding: forbidden without explicit
-  authorization.** Never change production code to fix something the review
-  found — not "while it's here", not a one-line touch-up, and not a revert.
-
-The line between the two is what the change already owed against what the
-review discovered. An unused import on a touched file was owed, so remove it. A
-wrong condition is a finding, so report it and wait.
-
-A finding never authorizes its own fix. A fix or revert named inside a finding
-is describing an option for the user to weigh, never an instruction the review
-may act on.
-
-## What is not a finding
-
-Nothing the write boundary obliges you to fix is also a finding. An unused
-import is the recurring case: it is not MUST-FIX, not SHOULD-FIX and not a
-NOTE. Remove it, and account for it in the summary as work done. Reporting it
-spends the user's attention on something no decision attaches to.
-
-The same holds for a stale comment the change itself made false, and for a plan
-passage the code has superseded. Fix, then list.
-
 The criteria below are not exhaustive. Use general principles and industry best
 practices to catch issues the checklist has not yet anticipated.
-
-**Boyscout rule — whole-file scope.** A file is brought into scope by a
-single changed line — **including an import-only change** (imports swap
-implementations and widen implicit scope; when in doubt, the file is in
-scope). Review it as a whole: read every touched file in full and apply the
-criteria to the entire file, not just the diff hunks.
-Findings outside the diff are reported tagged **pre-existing (boyscout)** so
-they are distinguishable from regressions the change introduces; their
-disposition (fix now, queue, ignore) is the user's, like every other
-finding.
 
 ---
 
