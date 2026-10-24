@@ -51,7 +51,10 @@ object ResultTransformSpec {
   final case class InsurancePolicy private (deductible: NonNegativeLong, cap: PositiveLong)
       extends ResultTransformSpec
 
-  private def firstError(errors: List[ValidationError]): String =
+  /** Every refusal in one sentence, which is what a decoder's failure channel
+    * carries. All of them rather than the first, because the fields each case
+    * refines fail independently (ADR-001 §3). */
+  private def describeAll(errors: List[ValidationError]): String =
     errors.map(_.message).mkString("; ")
 
   object ApplyDeductible {
@@ -63,7 +66,7 @@ object ResultTransformSpec {
       JsonDecoder[Raw].mapOrFail(raw =>
         ValidationUtil.refineNonNegativeLong(
           raw.deductible, ErrorLocation.requestField(FieldName.Deductible))
-          .map(ApplyDeductible(_)).left.map(firstError))
+          .map(ApplyDeductible(_)).left.map(describeAll))
     )
   }
 
@@ -75,7 +78,7 @@ object ResultTransformSpec {
       JsonEncoder[Raw].contramap(s => Raw(s.cap)),
       JsonDecoder[Raw].mapOrFail(raw =>
         ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))
-          .map(CapLosses(_)).left.map(firstError))
+          .map(CapLosses(_)).left.map(describeAll))
     )
   }
 
@@ -87,7 +90,7 @@ object ResultTransformSpec {
       JsonEncoder[Raw].contramap(s => Raw(s.factor.toFraction)),
       JsonDecoder[Raw].mapOrFail(raw =>
         ValidationUtil.refineRetentionFactor(raw.factor, ErrorLocation.requestField(FieldName.Factor))
-          .map(ScaleLosses(_)).left.map(firstError))
+          .map(ScaleLosses(_)).left.map(describeAll))
     )
   }
 
@@ -100,7 +103,7 @@ object ResultTransformSpec {
       JsonDecoder[Raw].mapOrFail(raw =>
         ValidationUtil.refineNonNegativeLong(
           raw.threshold, ErrorLocation.requestField(FieldName.Threshold))
-          .map(FilterBelowThreshold(_)).left.map(firstError))
+          .map(FilterBelowThreshold(_)).left.map(describeAll))
     )
   }
 
@@ -128,10 +131,10 @@ object ResultTransformSpec {
       JsonDecoder[Raw].mapOrFail { raw =>
         (ValidationUtil.refineNonNegativeLong(raw.deductible, ErrorLocation.requestField(FieldName.Deductible)),
          ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))) match {
-          case (Right(d), Right(c)) => create(d, c).toEither.left.map(e => firstError(e.toList))
-          case (Left(e1), Left(e2)) => Left(firstError(e1 ++ e2))
-          case (Left(e), _)         => Left(firstError(e))
-          case (_, Left(e))         => Left(firstError(e))
+          case (Right(d), Right(c)) => create(d, c).toEither.left.map(e => describeAll(e.toList))
+          case (Left(e1), Left(e2)) => Left(describeAll(e1 ++ e2))
+          case (Left(e), _)         => Left(describeAll(e))
+          case (_, Left(e))         => Left(describeAll(e))
         }
       }
     )

@@ -305,12 +305,16 @@ the system records is 5 million.
 
 The rest of this part is read against that one sentence.
 
-### 3.4 The four result-stage operations
+### 3.4 The five result-stage operations
 
 Each one states what is left on your books.
 
 A **cap** says we never bear more than this figure. Everything above it is
 covered, with no ceiling on the cover.
+
+A **deductible** says we bear the first slice of every loss and nothing beyond
+it. It is the cap read from the other end: the cap keeps the top of a loss off
+our books, the deductible keeps the bottom on them.
 
 A **scale** says we bear this fraction of every loss. The rest falls elsewhere,
 by transfer or by an agreed share.
@@ -321,8 +325,8 @@ while losses at or above it are borne in full.
 An **insurance policy** says we bear the first slice, a counterparty covers the
 next band, and anything past the end of that band is ours again.
 
-The first three take one figure each. The policy takes two, and it is the only
-one of the four that can describe cover running out — which is why it exists
+The first four take one figure each. The policy takes two, and it is the only
+one of the five that can describe cover running out — which is why it exists
 beside the cap rather than as a special case of it.
 
 A mitigation holds an ordered **pipeline** of these, between one and ten steps.

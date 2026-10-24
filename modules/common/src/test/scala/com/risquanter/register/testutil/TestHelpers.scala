@@ -6,7 +6,8 @@ import com.risquanter.register.domain.data.{
   DistributionShape, MitigationSpec, ResultTransformSpec, TransformPipeline
 }
 import com.risquanter.register.domain.data.iron.{
-  SafeId, NodeId, TreeId, MitigationId, RetentionFactor, ResidualProbability, UnitFraction
+  SafeId, NodeId, TreeId, MitigationId, RetentionFactor, ResidualProbability,
+  UnitFraction, UnitFractionConstraint
 }
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.{Greater, LessEqual}
@@ -157,7 +158,7 @@ trait TestHelpers {
 
   private def refine(value: Double, label: String): UnitFraction =
     value
-      .refineEither[Greater[0.0] & LessEqual[1.0]]
+      .refineEither[UnitFractionConstraint]
       .getOrElse(throw new IllegalArgumentException(
         s"$label fixture outside (0, 1]: $value"))
 

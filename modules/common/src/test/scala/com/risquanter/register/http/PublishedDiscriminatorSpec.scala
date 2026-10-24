@@ -8,7 +8,8 @@ import com.risquanter.register.domain.data.{
   RelativeLikelihood, RelativeSeverity, ResultTransformSpec
 }
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, RequestHeaderName, SubmittedCollection
+  ErrorLocation, ErrorSubject, FieldName, MergeRefusal, RequestHeaderName,
+  SubmittedCollection
 }
 import com.risquanter.register.http.errors.{ConflictKind, QueryProblem, RejectionDetail}
 import com.risquanter.register.http.requests.{DistributionShapeRequest, ScenarioSourceDto}
@@ -59,6 +60,7 @@ object PublishedDiscriminatorSpec extends ZIOSpecDefault {
     entry[ErrorLocation]("ErrorLocation"),
     entry[RequestHeaderName]("RequestHeaderName"),
     entry[ConflictKind]("ConflictKind"),
+    entry[MergeRefusal]("MergeRefusal"),
     entry[RejectionDetail]("RejectionDetail"),
     entry[QueryProblem]("QueryProblem"),
     entry[ScenarioSourceDto]("ScenarioSourceDto"),

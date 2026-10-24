@@ -74,3 +74,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala
 - modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala
 - build.sbt
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala

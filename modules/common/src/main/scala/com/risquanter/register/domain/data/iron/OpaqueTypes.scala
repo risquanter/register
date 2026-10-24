@@ -123,7 +123,13 @@ type PositiveDouble = Double :| (Greater[0.0] & LessEqual[1.7976931348623157e308
 // constraint by IEEE 754 comparison. Two domain concepts refine to this
 // predicate, and they are distinguished by the wrappers below rather than by
 // it, because one predicate cannot tell a factor from a probability.
-type UnitFraction = Double :| (Greater[0.0] & LessEqual[1.0])
+//
+// The predicate is named so that every decoder and every refining function
+// refines against the same one the type is declared with, rather than restating
+// it.
+type UnitFractionConstraint = Greater[0.0] & LessEqual[1.0]
+
+type UnitFraction = Double :| UnitFractionConstraint
 
 // Fraction of a figure a mitigation keeps. A scale operation reduces and can
 // never eliminate — a residual risk of exactly zero is not a defensible
@@ -148,12 +154,12 @@ final case class ResidualProbability(toFraction: UnitFraction)
 given JsonEncoder[RetentionFactor] = JsonEncoder[Double].contramap(_.toFraction)
 given JsonDecoder[RetentionFactor] =
   JsonDecoder[Double].mapOrFail(
-    _.refineEither[Greater[0.0] & LessEqual[1.0]].map(RetentionFactor(_)))
+    _.refineEither[UnitFractionConstraint].map(RetentionFactor(_)))
 
 given JsonEncoder[ResidualProbability] = JsonEncoder[Double].contramap(_.toFraction)
 given JsonDecoder[ResidualProbability] =
   JsonDecoder[Double].mapOrFail(
-    _.refineEither[Greater[0.0] & LessEqual[1.0]].map(ResidualProbability(_)))
+    _.refineEither[UnitFractionConstraint].map(ResidualProbability(_)))
 
 /**
  * Common constant values for Iron refined types.

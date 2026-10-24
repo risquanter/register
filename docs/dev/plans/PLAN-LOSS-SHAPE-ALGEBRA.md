@@ -2162,7 +2162,7 @@ document and carries every path below as a bullet line; the user wrote it throug
 The paths are what the derivation reaches, measured rather than estimated, and
 they include the five files `LSA-D-1` added.
 
-The four decision records §14.2 amends are **not** on this list and do not belong
+The decision records §14.2 amends are **not** on this list and do not belong
 on it. The approval hook gates source edits under `modules/` and `build.sbt`, and
 the global instruction on inventory blocks puts decision records out of scope:
 they are "edited directly instead".
@@ -2374,15 +2374,16 @@ checked against the plan rather than assumed:
 scenario branching, and §9 is the reason the repository needs no edit:
 `RiskTreeRepositoryIrmin.scala` is deliberately absent from §12's inventory.
 
-### 14.2 The four amendments this plan carries
+### 14.2 The amendments this plan carries
 
 Each is a factual correction to a passage naming something this plan deletes or
-renames. None reverses anything a record decided, which is why they are
-amendments rather than proposals to overturn. They land in the same pass as the
-implementation, and under the `adr-constraints` skill's rule for amending the
-corpus each is checked against all three of its layers: all four are confined to
-the record's own text, because no file is renamed, no record is added or retired,
-and no new collision is created.
+renames, or an example that contradicts the record's own rule. None reverses
+anything a record decided, which is why they are amendments rather than
+proposals to overturn. They land in the same pass as the implementation, and
+under the `adr-constraints` skill's rule for amending the corpus each is checked
+against all three of its layers: every one is confined to the record's own text,
+because no file is renamed, no record is added or retired, and no new collision
+is created.
 
 1. **ADR-003 Decision 4** — the `NodeProvenance` code block loses its
    `distributionType: String` line, and the `DistributionParams` hierarchy gains
@@ -2396,6 +2397,17 @@ and no new collision is created.
 4. **ADR-029 §3** — the Irmin GraphQL row's reasoning stops citing
    `DistributionType` as a leaf field and states that the mode spelling is a
    matched literal.
+5. **ADR-003 §5** — the `DistributionParams` block becomes the two cases in
+   their companion, and a sentence states that each case's stored spelling is
+   its own name. This is the same record as item 1 and a different passage:
+   item 1 corrects what Decision 4's provenance record holds, this corrects what
+   §5's parameter-storage block shows (`LSA-D-9`, `LSA-D-11`).
+6. **ADR-037 §1 and its implementation table** — §1's example illustrated a
+   derived codec with two `@jsonHint` annotations, which §2 of the same record
+   says must be derived. The example becomes a derived codec whose discriminator
+   key is a named constant, and the table gains a row for `LeafSimContent`'s raw
+   projection, which is the one place a declared spelling is correct because the
+   bytes are a hash preimage (`LSA-D-10`, `LSA-D-11`, §18.2).
 
 ### 14.3 Terminology impact
 
@@ -3287,6 +3299,12 @@ compile error until it is fixed, so none can be missed.
 response body. Each is serialised with a tag field and read back by matching on
 it, and seventeen of them published a list of alternatives naming no key.
 
+The nineteenth is reached indirectly and is the one worth naming: `MergeRefusal`
+crosses inside `ConflictKind.MergeRefused`, so a derivation driven from that
+holder decides its published key. Its schema is declared for that reason — a
+coproduct whose key depends on where it was reached from has no single published
+contract.
+
 A reader of that description has to infer the case from which fields are
 present. The decoder never infers; it reads the key. So the description stated a
 contract the server does not implement, and a client generated from it can send
@@ -3382,7 +3400,8 @@ cross-compiled module, so the browser follows without being edited.
 Every path this part edits is a bullet line in
 [`PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md`](PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md).
 Thirteen were already there. These five were added for the remaining
-coproducts:
+coproducts, and `domain/errors/MergeRefusal.scala` was added after them, for the
+nineteenth:
 
 - `modules/common/src/main/scala/com/risquanter/register/http/errors/ConflictKind.scala`
 - `modules/common/src/main/scala/com/risquanter/register/http/errors/RejectionDetail.scala`
@@ -3403,16 +3422,35 @@ reaches any of them because each holds the tag value as data rather than as code
 `docs/user/API-TUTORIAL.md`, the example scripts and fixtures under `examples/`
 and `docs/test/`, and `tests/bats/helpers/setup.bash`.
 
-### 19.7 Open decisions
+### 19.7 ADR alignment
+
+| Record | Position |
+|---|---|
+| ADR-037 (in-code constants) | **Compliant, and this part is what makes the record's own §1 conform to its §2.** §2 says "A string that exists only as a case's serialised form is derived", and §1's example illustrated derivation with two `@jsonHint` annotations. §14.2 item 6 carries that amendment. |
+| ADR-038 (response wire shapes) | **Compliant.** Every response coproduct now publishes the alternatives it decodes plus the key that chooses between them, so the published description and the decoder state one contract rather than two. |
+| ADR-017 (tree API design) | **Compliant.** The request bodies keep their field names and their bounds; only each case's tag value changes, and `LSA-D-9` changes it by renaming the case rather than by annotating it. |
+| ADR-001 (validation strategy) | **Compliant, and `ResultTransformSpec` is where it was at risk.** Deriving that coproduct's tag meant replacing a hand-written codec that refined each field with its own message. Each case keeps a codec of its own for exactly that reason, so validation stays in the codec and every refusal still names the field at fault. |
+| ADR-039 (trust-boundary ingress validation) | **Compliant, on the same grounds.** The store-read path decodes through the same per-case codecs as the request path, so a stored blob is refined on arrival as before. `InsurancePolicy` still decodes through `create`, which is what keeps its cross-field rule on that path. |
+| ADR-032 (content equality relations) | **Compliant, and no cache key moves.** Nothing in this part touches `LeafSimContent`, whose two declared spellings §18.2 ruled stay. The mitigation's bytes are not hashed, which §19.4 states as one of the three facts checked before ruling `LSA-D-12`. |
+| ADR-034 (mitigation valuation model) | **Compliant.** The five result-stage operations and the two folds are unchanged; this part changes how an operation's name reaches the wire and nothing about what it computes. |
+| ADR-035 (error leakage prevention) | **Compliant.** `ConflictKind`, `RejectionDetail` and `QueryProblem` keep their closed sets and their payloads; naming their discriminator publishes the key a client already had to send. |
+
+### 19.8 Open decisions
 
 None. `LSA-D-9` through `LSA-D-12` are ruled above.
 
-### 19.8 Terminology impact
+### 19.9 Terminology impact
 
-None. No decision here changes what a term denotes; the mode's name was settled
-by `LSA-D-8` and the glossary was revised under it.
+One heading. No decision here changes what a term denotes — the mode's name was
+settled by `LSA-D-8` and the glossary was revised under it — but one entry was
+already inconsistent with the code and this part is what put the case in the
+diff.
 
-### 19.9 Verification
+| Glossary heading | The decision that makes it stale |
+|---|---|
+| The four result-stage operations | `LSA-D-11`. Giving each result-stage case a codec of its own put `ApplyDeductible` in the diff, and the entry enumerated four operations where the type declares five. The standalone deductible was missing while §4.1 of the glossary already relied on it, so the entry contradicted itself as well as the code. |
+
+### 19.10 Verification
 
 - **A pin on the mitigation's stored bytes**, which does not exist today and is
   what makes `LSA-D-12` safe. It compares one authored mitigation's encoded

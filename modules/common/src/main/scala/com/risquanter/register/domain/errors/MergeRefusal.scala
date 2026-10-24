@@ -1,5 +1,7 @@
 package com.risquanter.register.domain.errors
 
+import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.RiskTree.{safeNameEncoder, safeNameDecoder}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId}
@@ -13,7 +15,7 @@ import com.risquanter.register.http.responses.MergeConflictEntry
   * cannot (ADR-035). The same value serves the server's log line, which renders
   * it through `MergeConflict.logMessage`.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(MergeRefusal.TagField)
 enum MergeRefusal:
   /** Paths changed on both branches. Each entry is the same wire form the merge
     * preview reports, so a preview and a refusal name a conflict identically.
@@ -40,7 +42,25 @@ enum MergeRefusal:
   case BranchesConflict()
 
 object MergeRefusal:
+  /** The key naming which refusal a payload states. Read by this coproduct's
+    * decoder and published in its schema, and stated here once so the two
+    * cannot disagree. Each case's published value is its own name, which is
+    * what the derived codec writes. */
+  final val TagField = "kind"
+
   given codec: JsonCodec[MergeRefusal] = DeriveJsonCodec.gen[MergeRefusal]
+
+  /** Declared rather than inherited from whichever holder derives it. A
+    * refusal reaches a client inside `ConflictKind.MergeRefused`, and a
+    * derivation driven from that holder would decide this coproduct's published
+    * key, so the key it names would depend on where it was reached from.
+    * Declaring it here is what makes the published description the same from
+    * every holder. */
+  given schema: Schema[MergeRefusal] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(TagField)
+    Schema.derived[MergeRefusal]
 
   /** One line naming the refusal and its values, for a server log line.
     *

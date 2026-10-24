@@ -339,7 +339,7 @@ object ValidationUtil {
   // Refinement for a retention factor: a fraction of a figure that is kept
   def refineRetentionFactor(value: Double, location: ErrorLocation): Either[List[ValidationError], RetentionFactor] = {
     value
-      .refineEither[Greater[0.0] & LessEqual[1.0]]
+      .refineEither[UnitFractionConstraint]
       .map(RetentionFactor(_))
       .left
       .map(_ => List(ValidationError(
@@ -354,7 +354,7 @@ object ValidationUtil {
   // and in its message, which states what a mitigation may not assert.
   def refineResidualProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], ResidualProbability] = {
     value
-      .refineEither[Greater[0.0] & LessEqual[1.0]]
+      .refineEither[UnitFractionConstraint]
       .map(ResidualProbability(_))
       .left
       .map(_ => List(ValidationError(
