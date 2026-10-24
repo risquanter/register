@@ -1,12 +1,13 @@
 package com.risquanter.register.domain.data
 
 import io.github.iltotore.iron.refineUnsafe
-import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, jsonDiscriminator, jsonHint}
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, jsonDiscriminator}
 import zio.prelude.Validation
 import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 
 import com.risquanter.register.domain.data.iron.{
-  DistributionType, IronConstants, MetalogTermCount, PositiveDouble, PositiveLong,
+  MetalogTermCount, PositiveDouble, PositiveLong,
   Probability, ValidationMessages, ValidationUtil
 }
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
@@ -14,7 +15,7 @@ import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
 }
 
-/** One expert-opinion anchor: the loss at a stated percentile. The percentile is
+/** One quantile anchor: the loss at a stated percentile. The percentile is
   * strictly inside the open unit interval, which is the domain the metalog
   * quantile function is defined on. Both fields carry their own constraint and
   * neither constrains the other, so the pair needs no construction gate.
@@ -127,7 +128,7 @@ object QuantileAnchors:
       Validation.fail(ValidationError(
         location = at(FieldName.PercentileQuantilePairing),
         code = ValidationErrorCode.INVALID_COMBINATION,
-        message = ValidationMessages.expertLengthMismatch(percentiles.length, losses.length)
+        message = ValidationMessages.metalogLengthMismatch(percentiles.length, losses.length)
       ))
     else
       val anchorVs = percentiles.zip(losses).zipWithIndex.map {
@@ -193,49 +194,50 @@ object LossRange:
       .map(_ => new LossRange(min, max))
 
 /** The loss distribution of one risk leaf, in the two modes an author can
-  * declare. The case is the mode, so no value carries an expert field and a
+  * declare. The case is the mode, so no value carries a metalog field and a
   * lognormal field together, and no rule has to state which fields a mode
   * populates.
   *
   * The mode field is the serialised form's only discriminator: the two cases are
   * distinguished by it rather than by which fields are present. Discriminating
   * by field presence makes a malformed record of one case report the other
-  * case's complaint.
+  * case's complaint. Its value is the case name, derived rather than declared,
+  * so the tag cannot disagree with the case it names. `LeafSimContent`'s
+  * projection declares the same two spellings for its own hash preimage, which
+  * is the one place the spelling is written out.
   */
-@jsonDiscriminator("distributionType")
-sealed trait DistributionShape:
-  /** The mode spelling this shape carries on the wire and in storage. Each case
-    * states its own literal, so the value and the case cannot disagree and the
-    * string is a compile-time constant (ADR-029 §3). */
-  def distributionType: DistributionType
+@jsonDiscriminator(DistributionShape.TagField)
+sealed trait DistributionShape
 
 object DistributionShape:
 
-  /** Expert opinion: a metalog quantile function fitted to the author's
-    * anchors. `terms` absent means fit with `anchors.termsToFit`. */
-  @jsonHint("expert")
-  final case class Expert private (
+  /** The key naming the mode. Read by every decoder that tags a mode, published
+    * in every schema that does, and stated here once so no two of them can
+    * disagree. The submitted form and the provenance record name it from here
+    * rather than repeating the string. */
+  final val TagField = "distributionType"
+
+  /** Metalog: a quantile function fitted to the author's anchors. `terms`
+    * absent means fit with `anchors.termsToFit`. */
+  final case class Metalog private (
     anchors: QuantileAnchors,
     terms:   Option[MetalogTermCount]
-  ) extends DistributionShape:
-    override val distributionType: DistributionType = IronConstants.Expert
+  ) extends DistributionShape
 
   /** Lognormal: the BCG method fitted to a 90% confidence interval. */
-  @jsonHint("lognormal")
-  final case class Lognormal(bounds: LossRange) extends DistributionShape:
-    override val distributionType: DistributionType = IronConstants.Lognormal
+  final case class Lognormal(bounds: LossRange) extends DistributionShape
 
   /** The confidence level the lognormal bounds are read at. Fixed by the BCG
     * method rather than configurable. */
   val LognormalConfidenceInterval: Double = 0.90
 
-  /** Wire form: primitives only, one case per mode (ADR-038 §1). The expert case
-    * carries the two parallel sequences an author states rather than the domain's
-    * sequence of pairs, so the pairing rule is applied on decode and is not
-    * expressible here. */
+  /** Wire form: primitives only, one case per mode (ADR-038 §1). The metalog
+    * case carries the two parallel sequences an author states rather than the
+    * domain's sequence of pairs, so the pairing rule is applied on decode and is
+    * not expressible here. */
   private sealed trait ShapeRaw
 
-  private case class ExpertRaw(
+  private case class MetalogRaw(
     percentiles: Vector[Double],
     quantiles:   Vector[Double],
     terms:       Option[Int]
@@ -243,13 +245,13 @@ object DistributionShape:
 
   private case class LognormalRaw(minLoss: Long, maxLoss: Long) extends ShapeRaw
 
-  private object ExpertRaw:
-    given rawCodec: JsonCodec[ExpertRaw] = DeriveJsonCodec.gen[ExpertRaw]
+  private object MetalogRaw:
+    given rawCodec: JsonCodec[MetalogRaw] = DeriveJsonCodec.gen[MetalogRaw]
 
   private object LognormalRaw:
     given rawCodec: JsonCodec[LognormalRaw] = DeriveJsonCodec.gen[LognormalRaw]
 
-  object Expert:
+  object Metalog:
     /** Refuses a stated term count above the anchor count: a metalog fit cannot
       * use more terms than it has points. An absent count is always valid,
       * because `anchors.termsToFit` derives one that cannot exceed the count.
@@ -262,7 +264,7 @@ object DistributionShape:
       anchors:  QuantileAnchors,
       terms:    Option[MetalogTermCount],
       location: ErrorLocation
-    ): Validation[ValidationError, Expert] =
+    ): Validation[ValidationError, Metalog] =
       terms match
         case Some(t) if t > anchors.size =>
           Validation.fail(ValidationError(
@@ -270,7 +272,7 @@ object DistributionShape:
             code = ValidationErrorCode.INVALID_COMBINATION,
             message = ValidationMessages.termsOutOfRange
           ))
-        case _ => Validation.succeed(new Expert(anchors, terms))
+        case _ => Validation.succeed(new Metalog(anchors, terms))
 
     /** The gate from the primitives a boundary carries to the case. Two callers:
       * this case's JSON decoder, and the HTTP request type that reports against
@@ -285,7 +287,7 @@ object DistributionShape:
       quantiles:   Vector[Double],
       terms:       Option[Int],
       subject:     ErrorSubject
-    ): Validation[ValidationError, Expert] =
+    ): Validation[ValidationError, Metalog] =
       val termsV: Validation[ValidationError, Option[MetalogTermCount]] = terms match
         case Some(t) =>
           toValidation(ValidationUtil.refineMetalogTermCount(t, ErrorLocation.Field(subject, FieldName.Terms)))
@@ -304,11 +306,11 @@ object DistributionShape:
     /** Decodes through `fromPrimitives`, so a decoded value is as trustworthy as
       * a constructed one (ADR-038 §1). The subject is the request because this
       * decoder is the request and store-read boundary both. */
-    given codec: JsonCodec[Expert] = JsonCodec(
-      JsonEncoder[ExpertRaw].contramap(expert =>
-        ExpertRaw(expert.anchors.percentiles, expert.anchors.losses, expert.terms.map(t => t: Int))
+    given codec: JsonCodec[Metalog] = JsonCodec(
+      JsonEncoder[MetalogRaw].contramap(metalog =>
+        MetalogRaw(metalog.anchors.percentiles, metalog.anchors.losses, metalog.terms.map(t => t: Int))
       ),
-      ExpertRaw.rawCodec.decoder.mapOrFail { raw =>
+      MetalogRaw.rawCodec.decoder.mapOrFail { raw =>
         fromPrimitives(raw.percentiles, raw.quantiles, raw.terms, ErrorSubject.Request)
           .toEither
           .left
@@ -318,7 +320,7 @@ object DistributionShape:
 
   object Lognormal:
     /** The gate from the primitives a boundary carries to the case, with the
-      * same two callers as `Expert.fromPrimitives`. `LossRange` holds the only
+      * same two callers as `Metalog.fromPrimitives`. `LossRange` holds the only
       * rule relating the two values, so this adds nothing of its own. */
     def fromPrimitives(
       minLoss: Long,
@@ -357,6 +359,7 @@ object DistributionShape:
     * derives its schema from `RiskTreeJson`. */
   given schema: Schema[DistributionShape] =
     import sttp.tapir.generic.auto.*
+    given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[ShapeRaw].as[DistributionShape]
 
   /** The parameters a fit will actually run with: the author's shape, with every
@@ -365,7 +368,8 @@ object DistributionShape:
     * for a lognormal, which no author states.
     */
   def resolve(shape: DistributionShape): DistributionParams = shape match
-    case Expert(anchors, terms) =>
-      ExpertDistributionParams(anchors.percentiles, anchors.losses, terms.getOrElse(anchors.termsToFit))
+    case Metalog(anchors, terms) =>
+      DistributionParams.Metalog(
+        anchors.percentiles, anchors.losses, terms.getOrElse(anchors.termsToFit))
     case Lognormal(bounds) =>
-      LognormalDistributionParams(bounds.min, bounds.max, LognormalConfidenceInterval)
+      DistributionParams.Lognormal(bounds.min, bounds.max, LognormalConfidenceInterval)

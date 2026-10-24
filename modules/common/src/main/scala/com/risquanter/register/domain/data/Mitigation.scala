@@ -1,8 +1,9 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.*
-import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator, jsonHint}
+import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import com.risquanter.register.domain.data.iron.{
   ContentHash, MitigationId, NodeId, OccurrenceProbability, ResidualProbability,
   SafeName, ValidationMessages, ValidationUtil
@@ -51,9 +52,10 @@ object MitigationPrecedence {
  * to any node.
  *
  * The stage field is the serialised form's only discriminator: the cases are
- * distinguished by it rather than by which fields are present.
+ * distinguished by it rather than by which fields are present. Its value is the
+ * case name, derived rather than declared.
  */
-@jsonDiscriminator("stage")
+@jsonDiscriminator(MitigationSpec.StageField)
 sealed trait MitigationSpec
 
 /** The two param-stage specs, grouped so a caller that collects applicable
@@ -65,8 +67,10 @@ object LeafStageSpec {
   /** A leaf-stage spec as a Kleisli arrow on the parameters it can change:
     * `LeafParams => Validation[ValidationError, LeafParams]`. Composition is
     * `flatMap`, and the identity arrow is `params => Validation.succeed(params)`,
-    * which `LeafRelative(Keep, Keep)` is. An absolute replacement discards what
-    * it replaces, so it is the absorbing element.
+    * which `LeafRelative(Keep, Keep)` is. An absolute replacement is the
+    * constant arrow on the components it names: `Both` absorbs the whole arrow
+    * that precedes it, and `Likelihood` or `Severity` absorbs one component and
+    * passes the other through.
     *
     * `subject` names the leaf being transformed. `LeafParams` carries no
     * identity — identity, name, parent and seed identity are outside a
@@ -82,7 +86,7 @@ object LeafStageSpec {
         case RelativeLikelihood.Keep => Validation.succeed(params.probability)
         case RelativeLikelihood.Scale(factor) =>
           ValidationUtil.toValidation(ValidationUtil.refineOccurrenceProbability(
-            params.probability * factor,
+            params.probability * factor.toFraction,
             ErrorLocation.Field(subject, FieldName.Probability)
           ))
       }
@@ -116,16 +120,20 @@ object LeafStageSpec {
     subject:     ErrorSubject
   ): Validation[ValidationError, OccurrenceProbability] =
     ValidationUtil.toValidation(ValidationUtil.refineOccurrenceProbability(
-      probability,
+      probability.toFraction,
       ErrorLocation.Field(subject, FieldName.Probability)
     ))
 }
 
 object MitigationSpec {
 
+  /** The key naming which stage a spec belongs to. Read by this coproduct's
+    * decoder and published in its schema, and stated here once so the two
+    * cannot disagree. */
+  final val StageField = "stage"
+
   /** A relative param-stage change. The statement stays true when the leaf
     * changes, so there is nothing to stamp and nothing to anchor. */
-  @jsonHint("leafRelative")
   final case class LeafRelative(
     likelihood: RelativeLikelihood,
     severity: RelativeSeverity
@@ -133,7 +141,6 @@ object MitigationSpec {
 
   /** An absolute param-stage replacement, with the leaf it was asserted against
     * and that leaf's content hash at authoring time. */
-  @jsonHint("leafAbsolute")
   final case class LeafAbsolute(
     replacement: AbsoluteReplacement,
     anchor: NodeId,
@@ -142,7 +149,6 @@ object MitigationSpec {
 
   /** A result-stage pipeline. The step-count rule is this case's own relation
     * over its one field, so it is held here rather than one level up. */
-  @jsonHint("result")
   final case class ResultStage private (pipeline: TransformPipeline) extends MitigationSpec
 
   object ResultStage {
@@ -163,13 +169,13 @@ object MitigationSpec {
           Validation.fail(ValidationError(
             location = location,
             code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"result-stage pipeline is empty: at least $MinPipelineSteps step is required"
+            message = ValidationMessages.resultStagePipelineEmpty(MinPipelineSteps)
           ))
         case n if n > MaxPipelineSteps =>
           Validation.fail(ValidationError(
             location = location,
             code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"result-stage pipeline has too many steps: $n exceeds the limit of $MaxPipelineSteps"
+            message = ValidationMessages.resultStagePipelineTooLong(n, MaxPipelineSteps)
           ))
         case _ => Validation.succeed(new ResultStage(pipeline))
       }
@@ -198,10 +204,13 @@ object MitigationSpec {
   // reach it from a holder, because `LeafStageSpec` sits between this trait and
   // its two leaf cases and a derivation driven from the holder does not descend
   // through an intermediate sealed trait. Declaring it here is what lets every
-  // record holding a spec describe it as the coproduct it is.
+  // record holding a spec describe it as the coproduct it is. The configuration
+  // names the discriminator, so the published description states the key the
+  // decoder reads.
   given schema: Schema[MitigationSpec] =
     import sttp.tapir.generic.auto.*
     import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(StageField)
     Schema.derived[MitigationSpec]
 }
 

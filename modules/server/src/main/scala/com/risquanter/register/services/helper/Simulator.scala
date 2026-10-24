@@ -3,8 +3,7 @@ package com.risquanter.register.services.helper
 import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution, SeedDerivation}
 import com.risquanter.register.domain.data.{
-  TrialId, Loss, RiskLeaf, NodeProvenance, DistributionShape, DistributionParams,
-  ExpertDistributionParams, LognormalDistributionParams
+  TrialId, Loss, RiskLeaf, NodeProvenance, DistributionShape, DistributionParams
 }
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.PositiveInt
@@ -159,7 +158,7 @@ object Simulator {
     // carries its own code and its own sentence, and a caller is told which
     // mode's parameters to look at rather than only that fitting failed.
     val fitted: Either[FitRefusal, Distribution] = params match {
-      case ExpertDistributionParams(percentiles, quantiles, terms) =>
+      case DistributionParams.Metalog(percentiles, quantiles, terms) =>
         MetalogDistribution
           .fromPercentilesUnsafe(
             // The fitter is a Java interface taking primitive arrays, so the
@@ -171,12 +170,12 @@ object Simulator {
             lower = Some(0.0) // Loss cannot be negative
           )
           .left.map(error => FitRefusal(
-            ValidationErrorCode.INVALID_EXPERT_PARAMS,
-            ValidationMessages.expertFitFailed,
+            ValidationErrorCode.INVALID_METALOG_PARAMS,
+            ValidationMessages.metalogFitFailed,
             s"Failed to fit Metalog: ${error.message}"
           ))
 
-      case LognormalDistributionParams(minLoss, maxLoss, _) =>
+      case DistributionParams.Lognormal(minLoss, maxLoss, _) =>
         LognormalHelper
           .fromLognormal90CI(minLoss, maxLoss)
           .left.map(error => FitRefusal(

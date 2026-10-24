@@ -46,9 +46,8 @@ type PrintableAscii = Match["^[\\x21-\\x7E]+$"]
 // Named ExternalTokenStr (not service-specific) so it can be reused for any external API credential.
 type ExternalTokenStr = String :| (Not[Blank] & MaxLength[2048] & PrintableAscii)
 
-// Separator is `.` — pinned to Irmin's real branch-name charset (verified
-// against live local/irmin-prod:3.11, 2026-07-18: `/` and `~` are rejected
-// with HTTP 500; `.`, `_`, `-`, alphanumerics are accepted). Segments allow
+// Separator is `.` — pinned to Irmin's branch-name charset: `/` and `~` are
+// rejected with HTTP 500; `.`, `_`, `-` and alphanumerics are accepted. Segments allow
 // only [a-z0-9_-], never `.`, so the two-segment split is unambiguous. The
 // ref is never a URL path segment — it travels in a header or the session — so
 // Irmin validity is the only wire contract. There are TWO segments after the
@@ -120,31 +119,41 @@ type NonNegativeDouble = Double :| (GreaterEqual[0.0] & LessEqual[1.797693134862
 // fit, so zero is as unusable as a negative figure.
 type PositiveDouble = Double :| (Greater[0.0] & LessEqual[1.7976931348623157e308])
 
-// Fraction of a figure a mitigation keeps: strictly above 0 and at most 1. A
-// scale operation reduces and can never eliminate — a residual risk of exactly
-// zero is not a defensible estimate, because it removes control failure from the
-// analysis. A figure that increases is stated absolutely through an Override,
-// never as a factor. NaN fails the lower constraint by IEEE 754 comparison.
-type RetentionFactor = Double :| (Greater[0.0] & LessEqual[1.0])
+// A fraction in (0, 1]: strictly above 0 and at most 1. NaN fails the lower
+// constraint by IEEE 754 comparison. Two domain concepts refine to this
+// predicate, and they are distinguished by the wrappers below rather than by
+// it, because one predicate cannot tell a factor from a probability.
+type UnitFraction = Double :| (Greater[0.0] & LessEqual[1.0])
 
-// Probability a mitigation may assert for a risk that remains in the tree:
-// strictly above 0 and at most 1. A mitigation reduces the chance of an
-// occurrence and can never remove the possibility, because a residual of
-// exactly zero asserts the control cannot fail. Distinct from
-// OccurrenceProbability, whose closed interval is correct for a leaf's own
-// declared probability: an author may state that an event never occurs, a
-// mitigation may not state that it has been prevented.
-type ResidualProbability = Double :| (Greater[0.0] & LessEqual[1.0])
+// Fraction of a figure a mitigation keeps. A scale operation reduces and can
+// never eliminate — a residual risk of exactly zero is not a defensible
+// estimate, because it removes control failure from the analysis. A figure that
+// increases is stated absolutely through an AbsoluteReplacement, never as a
+// factor (ADR-034).
+final case class RetentionFactor(toFraction: UnitFraction)
 
-// JSON codecs for the fraction-in-(0, 1] refinement. A mitigation's relative
-// and absolute components both cross the wire carrying one, so the derived
-// codecs for those cases need an instance. `RetentionFactor` and
-// `ResidualProbability` are the same refinement, so one instance serves both.
-// The refinement is re-checked on decode: the bound is the contract, and a
-// decoded value is as trustworthy as a constructed one (ADR-038).
-given JsonEncoder[RetentionFactor] = JsonEncoder[Double].contramap(identity)
+// Probability a mitigation may assert for a risk that remains in the tree. A
+// mitigation reduces the chance of an occurrence and can never remove the
+// possibility, because a residual of exactly zero asserts the control cannot
+// fail. Distinct from OccurrenceProbability, whose closed interval is correct
+// for a leaf's own declared probability: an author may state that an event
+// never occurs, a mitigation may not state that it has been prevented.
+final case class ResidualProbability(toFraction: UnitFraction)
+
+// JSON codecs, one pair per wrapper, because a wrapper is what crosses the wire
+// and the two are distinct types. A mitigation's relative and absolute
+// components each carry one, so the derived codecs for those cases need these
+// instances. The refinement is re-checked on decode: the bound is the contract,
+// and a decoded value is as trustworthy as a constructed one (ADR-038).
+given JsonEncoder[RetentionFactor] = JsonEncoder[Double].contramap(_.toFraction)
 given JsonDecoder[RetentionFactor] =
-  JsonDecoder[Double].mapOrFail(_.refineEither[Greater[0.0] & LessEqual[1.0]])
+  JsonDecoder[Double].mapOrFail(
+    _.refineEither[Greater[0.0] & LessEqual[1.0]].map(RetentionFactor(_)))
+
+given JsonEncoder[ResidualProbability] = JsonEncoder[Double].contramap(_.toFraction)
+given JsonDecoder[ResidualProbability] =
+  JsonDecoder[Double].mapOrFail(
+    _.refineEither[Greater[0.0] & LessEqual[1.0]].map(ResidualProbability(_)))
 
 /**
  * Common constant values for Iron refined types.
@@ -174,9 +183,12 @@ object IronConstants:
   val ZeroL: NonNegativeLong = 0L
   val OneL: NonNegativeLong = 1L
 
-  // DistributionType constants — compile-time safe (Iron validates literals against the Match constraint)
-  val Expert:    DistributionType = "expert"
-  val Lognormal: DistributionType = "lognormal"
+  // The mode as a label in a response body, not as a serialised tag — a
+  // shape's tag is derived from its case name. Both spellings are the case
+  // name, and DistributionPreviewServiceSpec pins each arm's value.
+  // Compile-time safe: Iron validates the literals against the Match constraint.
+  val Metalog:   DistributionType = "Metalog"
+  val Lognormal: DistributionType = "Lognormal"
 
 // Opaque type for Metalog/HDR PRNG counters (zero-cost abstraction)
 // Used for the 4-5 Long counter parameters in HDR.generate(counter, entityId, varId, seed3, seed4)
@@ -296,8 +308,13 @@ type Probability = Double :| (Greater[0.0] & Less[1.0])
 // because a risk event is allowed to never or always occur.
 type OccurrenceProbability = Double :| (GreaterEqual[0.0] & LessEqual[1.0])
 
-// Distribution type string (must be "expert" or "lognormal")
-type DistributionType = String :| Match["^(expert|lognormal)$"]
+// The two mode spellings, named once so the decoder below refines against the
+// same pattern the type is declared with rather than restating it. Both are
+// case names of `DistributionShape`.
+type DistributionTypeConstraint = Match["^(Metalog|Lognormal)$"]
+
+// Distribution type string (must be "Metalog" or "Lognormal")
+type DistributionType = String :| DistributionTypeConstraint
 
 // JSON codecs for DistributionType. It crosses the wire as the mode field of
 // `DistributionPreviewResponse`, so a derived codec for that response needs an
@@ -306,7 +323,7 @@ type DistributionType = String :| Match["^(expert|lognormal)$"]
 // (ADR-038).
 given JsonEncoder[DistributionType] = JsonEncoder[String].contramap(identity)
 given JsonDecoder[DistributionType] =
-  JsonDecoder[String].mapOrFail(_.refineEither[Match["^(expert|lognormal)$"]])
+  JsonDecoder[String].mapOrFail(_.refineEither[DistributionTypeConstraint])
 
 // SafeName character whitelist: letters, digits, space, hyphen, forward-slash.
 // Excludes HTML/script/FOL-grammar chars. Deliberately narrow — add only when
@@ -692,8 +709,7 @@ object ContentHash:
   given JsonDecoder[ContentHash] = JsonDecoder[String].mapOrFail(s =>
     fromString(s).left.map(_.map(_.message).mkString(", ")))
 
-// CommitHash: an Irmin commit/store hash. Pinned to Irmin's real format,
-// verified against a live local/irmin-prod:3.11 instance (2026-07-18): every
+// CommitHash: an Irmin commit/store hash. Pinned to Irmin's format: every
 // GraphQL Hash scalar (commit head, set result, contents_hash) is a SHA-1
 // digest rendered as 40 lowercase hex chars, identical on main and branches.
 // Distinct from ContentHash (our SHA-256, 64 hex) by construction — the
@@ -887,26 +903,6 @@ type UuidStr = String :| UuidConstraint
 // Extraction is `.value` (not `.reveal`) — signals "not a secret, but explicit extraction required".
 //
 // @see ADR-012: Claim Header Injection — mesh-injected; app contains zero JWT code.
-/* final class UserId private (private val raw: UuidStr):
-  /** Extract the raw UUID string. Use only in SpiceDB calls, audit logs, and serialisation. */
-  def value: String = raw
-  override def toString: String = "UserId(***)"
-  override def hashCode: Int = raw.hashCode
-  override def equals(that: Any): Boolean = that match
-    case u: UserId => raw == u.raw
-    case _         => false
-
-object UserId:
-  def apply(s: UuidStr): UserId = new UserId(s)
-  def fromString(s: String): Either[List[ValidationError], UserId] =
-    ValidationUtil.refineUserId(s)
-
-  // JSON codecs (companion object placement ensures implicit scope)
-  given JsonEncoder[UserId] = JsonEncoder[String].contramap(_.value)
-  given JsonDecoder[UserId] = JsonDecoder[String].mapOrFail(s =>
-    UserId.fromString(s).left.map(_.mkString(", ")))
-*/
-
 sealed trait UserId:
   override def toString: String = "UserId(***)"
 

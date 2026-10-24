@@ -1,8 +1,9 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.*
-import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
+import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
 
@@ -13,14 +14,24 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, Validati
  * executing it belongs to the server, where `ResultTransformInterpreter` turns
  * a description into the function that carries it out.
  *
- * Wire format is discriminated by an `op` field; each case validates its own
- * `op` tag during decode, so decoding is unambiguous even where cases share
- * field shapes (e.g. `InsurancePolicy` carries a `deductible` like
- * `ApplyDeductible`).
+ * The tag field is the serialised form's only discriminator, so decoding is
+ * unambiguous even where cases share field shapes — `InsurancePolicy` carries a
+ * `deductible` like `ApplyDeductible`. Its value is the case name, derived
+ * rather than declared.
+ *
+ * Each case supplies its own codec, which is what keeps the decode path's
+ * refusals naming the field at fault: the parent derivation adds the tag and
+ * delegates the fields to the case (ADR-001 §2, ADR-039 §3).
  */
+@jsonDiscriminator(ResultTransformSpec.OpField)
 sealed trait ResultTransformSpec
 
 object ResultTransformSpec {
+
+  /** The key naming which operation a step is. Read by this coproduct's decoder
+    * and published in its schema, and stated here once so the two cannot
+    * disagree. */
+  final val OpField = "op"
 
   final case class ApplyDeductible(deductible: NonNegativeLong)     extends ResultTransformSpec
   /** The largest loss the entity bears. Strictly positive — a cap of zero would
@@ -40,6 +51,59 @@ object ResultTransformSpec {
   final case class InsurancePolicy private (deductible: NonNegativeLong, cap: PositiveLong)
       extends ResultTransformSpec
 
+  private def firstError(errors: List[ValidationError]): String =
+    errors.map(_.message).mkString("; ")
+
+  object ApplyDeductible {
+    private case class Raw(deductible: Long)
+    private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+    given codec: JsonCodec[ApplyDeductible] = JsonCodec(
+      JsonEncoder[Raw].contramap(s => Raw(s.deductible)),
+      JsonDecoder[Raw].mapOrFail(raw =>
+        ValidationUtil.refineNonNegativeLong(
+          raw.deductible, ErrorLocation.requestField(FieldName.Deductible))
+          .map(ApplyDeductible(_)).left.map(firstError))
+    )
+  }
+
+  object CapLosses {
+    private case class Raw(cap: Long)
+    private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+    given codec: JsonCodec[CapLosses] = JsonCodec(
+      JsonEncoder[Raw].contramap(s => Raw(s.cap)),
+      JsonDecoder[Raw].mapOrFail(raw =>
+        ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))
+          .map(CapLosses(_)).left.map(firstError))
+    )
+  }
+
+  object ScaleLosses {
+    private case class Raw(factor: Double)
+    private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+    given codec: JsonCodec[ScaleLosses] = JsonCodec(
+      JsonEncoder[Raw].contramap(s => Raw(s.factor.toFraction)),
+      JsonDecoder[Raw].mapOrFail(raw =>
+        ValidationUtil.refineRetentionFactor(raw.factor, ErrorLocation.requestField(FieldName.Factor))
+          .map(ScaleLosses(_)).left.map(firstError))
+    )
+  }
+
+  object FilterBelowThreshold {
+    private case class Raw(threshold: Long)
+    private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+    given codec: JsonCodec[FilterBelowThreshold] = JsonCodec(
+      JsonEncoder[Raw].contramap(s => Raw(s.threshold)),
+      JsonDecoder[Raw].mapOrFail(raw =>
+        ValidationUtil.refineNonNegativeLong(
+          raw.threshold, ErrorLocation.requestField(FieldName.Threshold))
+          .map(FilterBelowThreshold(_)).left.map(firstError))
+    )
+  }
+
   object InsurancePolicy {
     def create(
       deductible: NonNegativeLong,
@@ -52,118 +116,44 @@ object ResultTransformSpec {
           code = ValidationErrorCode.INVALID_COMBINATION,
           message = ValidationMessages.capMustExceedDeductible
         ))
+
+    private case class Raw(deductible: Long, cap: Long)
+    private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+    /** Decodes through `create`, so the cross-field rule holds on the store-read
+      * path as well as the request path (ADR-039 §3). Both refusals are
+      * accumulated, because the two fields fail independently (ADR-001 §3). */
+    given codec: JsonCodec[InsurancePolicy] = JsonCodec(
+      JsonEncoder[Raw].contramap(s => Raw(s.deductible, s.cap)),
+      JsonDecoder[Raw].mapOrFail { raw =>
+        (ValidationUtil.refineNonNegativeLong(raw.deductible, ErrorLocation.requestField(FieldName.Deductible)),
+         ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))) match {
+          case (Right(d), Right(c)) => create(d, c).toEither.left.map(e => firstError(e.toList))
+          case (Left(e1), Left(e2)) => Left(firstError(e1 ++ e2))
+          case (Left(e), _)         => Left(firstError(e))
+          case (_, Left(e))         => Left(firstError(e))
+        }
+      }
+    )
   }
 
   // Lawful: structural equality on scalar data (unlike the deleted
   // Equal[RiskTransform], whose function field compared by reference).
   given Equal[ResultTransformSpec] = Equal.default
 
-  // ── Wire format: op-discriminated per-case Raw (DistributionParams precedent) ──
-
-  private object Op {
-    val applyDeductible      = "applyDeductible"
-    val capLosses            = "capLosses"
-    val scaleLosses          = "scaleLosses"
-    val filterBelowThreshold = "filterBelowThreshold"
-    val insurancePolicy      = "insurancePolicy"
-  }
-
-  private case class RawDeductible(op: String, deductible: Long)
-  private object RawDeductible { given c: JsonCodec[RawDeductible] = DeriveJsonCodec.gen }
-  private case class RawCap(op: String, cap: Long)
-  private object RawCap { given c: JsonCodec[RawCap] = DeriveJsonCodec.gen }
-  private case class RawScale(op: String, factor: Double)
-  private object RawScale { given c: JsonCodec[RawScale] = DeriveJsonCodec.gen }
-  private case class RawThreshold(op: String, threshold: Long)
-  private object RawThreshold { given c: JsonCodec[RawThreshold] = DeriveJsonCodec.gen }
-  private case class RawPolicy(op: String, deductible: Long, cap: Long)
-  private object RawPolicy { given c: JsonCodec[RawPolicy] = DeriveJsonCodec.gen }
-
-  private def requireOp[A](expected: String, actual: String)(a: => Either[String, A]): Either[String, A] =
-    if (actual == expected) a else Left(s"expected op '$expected', found '$actual'")
-
-  private def firstError(errors: List[ValidationError]): String =
-    errors.map(_.message).mkString("; ")
-
-  private val applyDeductibleCodec: JsonCodec[ApplyDeductible] = JsonCodec(
-    JsonEncoder[RawDeductible].contramap(s => RawDeductible(Op.applyDeductible, s.deductible)),
-    JsonDecoder[RawDeductible].mapOrFail { raw =>
-      requireOp(Op.applyDeductible, raw.op) {
-        ValidationUtil.refineNonNegativeLong(raw.deductible, ErrorLocation.requestField(FieldName.Deductible))
-          .map(ApplyDeductible(_)).left.map(firstError)
-      }
-    }
-  )
-
-  private val capLossesCodec: JsonCodec[CapLosses] = JsonCodec(
-    JsonEncoder[RawCap].contramap(s => RawCap(Op.capLosses, s.cap)),
-    JsonDecoder[RawCap].mapOrFail { raw =>
-      requireOp(Op.capLosses, raw.op) {
-        ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))
-          .map(CapLosses(_)).left.map(firstError)
-      }
-    }
-  )
-
-  private val scaleLossesCodec: JsonCodec[ScaleLosses] = JsonCodec(
-    JsonEncoder[RawScale].contramap(s => RawScale(Op.scaleLosses, s.factor)),
-    JsonDecoder[RawScale].mapOrFail { raw =>
-      requireOp(Op.scaleLosses, raw.op) {
-        ValidationUtil.refineRetentionFactor(raw.factor, ErrorLocation.requestField(FieldName.Factor))
-          .map(ScaleLosses(_)).left.map(firstError)
-      }
-    }
-  )
-
-  private val filterBelowThresholdCodec: JsonCodec[FilterBelowThreshold] = JsonCodec(
-    JsonEncoder[RawThreshold].contramap(s => RawThreshold(Op.filterBelowThreshold, s.threshold)),
-    JsonDecoder[RawThreshold].mapOrFail { raw =>
-      requireOp(Op.filterBelowThreshold, raw.op) {
-        ValidationUtil.refineNonNegativeLong(raw.threshold, ErrorLocation.requestField(FieldName.Threshold))
-          .map(FilterBelowThreshold(_)).left.map(firstError)
-      }
-    }
-  )
-
-  private val insurancePolicyCodec: JsonCodec[InsurancePolicy] = JsonCodec(
-    JsonEncoder[RawPolicy].contramap(s => RawPolicy(Op.insurancePolicy, s.deductible, s.cap)),
-    JsonDecoder[RawPolicy].mapOrFail { raw =>
-      requireOp(Op.insurancePolicy, raw.op) {
-        (ValidationUtil.refineNonNegativeLong(raw.deductible, ErrorLocation.requestField(FieldName.Deductible)),
-         ValidationUtil.refineLossCap(raw.cap, ErrorLocation.requestField(FieldName.Cap))) match {
-          case (Right(d), Right(c)) => InsurancePolicy.create(d, c).toEither.left.map(e => firstError(e.toList))
-          case (Left(e1), Left(e2)) => Left(firstError(e1 ++ e2))
-          case (Left(e), _)         => Left(firstError(e))
-          case (_, Left(e))         => Left(firstError(e))
-        }
-      }
-    }
-  )
-
-  given codec: JsonCodec[ResultTransformSpec] = JsonCodec(
-    new JsonEncoder[ResultTransformSpec] {
-      override def unsafeEncode(a: ResultTransformSpec, indent: Option[Int], out: zio.json.internal.Write): Unit =
-        a match {
-          case s: ApplyDeductible      => applyDeductibleCodec.encoder.unsafeEncode(s, indent, out)
-          case s: CapLosses            => capLossesCodec.encoder.unsafeEncode(s, indent, out)
-          case s: ScaleLosses          => scaleLossesCodec.encoder.unsafeEncode(s, indent, out)
-          case s: FilterBelowThreshold => filterBelowThresholdCodec.encoder.unsafeEncode(s, indent, out)
-          case s: InsurancePolicy      => insurancePolicyCodec.encoder.unsafeEncode(s, indent, out)
-        }
-    },
-    applyDeductibleCodec.decoder.widen[ResultTransformSpec] <>
-      capLossesCodec.decoder.widen[ResultTransformSpec] <>
-      scaleLossesCodec.decoder.widen[ResultTransformSpec] <>
-      filterBelowThresholdCodec.decoder.widen[ResultTransformSpec] <>
-      insurancePolicyCodec.decoder.widen[ResultTransformSpec]
-  )
+  /** The tag comes from the case name and each case's fields from its own
+    * codec, so no operation's serialised spelling is written as a string. */
+  given codec: JsonCodec[ResultTransformSpec] = DeriveJsonCodec.gen[ResultTransformSpec]
 
   // Declared rather than left to a holder's derivation: auto-derivation driven
   // from a record holding this trait does not descend into it, so every holder
-  // would publish an unconstrained object instead of the five operations.
+  // would publish an unconstrained object instead of the five operations. The
+  // configuration names the discriminator, so the published description states
+  // the key the decoder reads.
   given schema: Schema[ResultTransformSpec] =
     import sttp.tapir.generic.auto.*
     import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(OpField)
     Schema.derived[ResultTransformSpec]
 }
 

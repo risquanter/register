@@ -3,20 +3,36 @@ package com.risquanter.register.domain.errors
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.GreaterEqual
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
+import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, NonNegativeInt, given}
+
+/** The key naming which case a value is, read by every decoder in this file and
+  * published in every schema. Stated once so the two cannot disagree. */
+private final val TagField = "kind"
+
+/** Names the discriminator in a derived schema. Each case's published value is
+  * its own name, which is what the derived codecs write. */
+private def discriminated: Configuration =
+  Configuration.default.withDiscriminator(TagField)
 
 /** Which submitted collection a node came from.
   *
   * A tree update submits four collections, each indexed from zero
   * independently, so a position alone names four different rows.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(TagField)
 enum SubmittedCollection:
   case Portfolios, Leaves, NewPortfolios, NewLeaves
 
 object SubmittedCollection:
   given codec: JsonCodec[SubmittedCollection] = DeriveJsonCodec.gen[SubmittedCollection]
+
+  given schema: Schema[SubmittedCollection] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[SubmittedCollection]
 
 /** What a failure is about.
   *
@@ -26,7 +42,7 @@ object SubmittedCollection:
   * (ADR-036): there is no case for a `BranchRef` and none for an absolute
   * storage path.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(TagField)
 enum ErrorSubject:
   /** The request body itself, where no narrower subject applies. */
   case Request
@@ -57,6 +73,12 @@ enum ErrorSubject:
 object ErrorSubject:
   given codec: JsonCodec[ErrorSubject] = DeriveJsonCodec.gen[ErrorSubject]
 
+  given schema: Schema[ErrorSubject] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = discriminated
+    Schema.derived[ErrorSubject]
+
   /** The node at a zero-based position in one of the submitted collections.
     *
     * A position is produced by iterating the collection, so it is never
@@ -86,7 +108,7 @@ object ErrorSubject:
   * fault alone and either one can be edited to satisfy the rule. Which controls
   * display such a refusal is decided where the display is, not here.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(TagField)
 enum FieldName:
   // Identity and structure
   case Id, Name, ParentId, ParentName, ChildIds, RootId, Nodes, Trees
@@ -139,6 +161,12 @@ enum FieldName:
 object FieldName:
   given codec: JsonCodec[FieldName] = DeriveJsonCodec.gen[FieldName]
 
+  given schema: Schema[FieldName] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = discriminated
+    Schema.derived[FieldName]
+
   /** The element case for a zero-based index into the submitted percentiles.
     *
     * An index is produced by iterating the collection, so it is never
@@ -165,7 +193,7 @@ object FieldName:
   * else to its submit banner, so a case added here reaches the banner until a
   * form is given an arm for it.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(TagField)
 enum ErrorLocation:
   /** A field of some subject. */
   case Field(subject: ErrorSubject, field: FieldName)
@@ -181,6 +209,11 @@ enum ErrorLocation:
 
 object ErrorLocation:
   given codec: JsonCodec[ErrorLocation] = DeriveJsonCodec.gen[ErrorLocation]
+
+  given schema: Schema[ErrorLocation] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[ErrorLocation]
 
   /** A field of the request body, which is the common case. */
   def requestField(field: FieldName): ErrorLocation = Field(ErrorSubject.Request, field)
@@ -217,7 +250,7 @@ object ErrorLocation:
   * reports a decode failure against a declared input, so the name comes from
   * the endpoint definition and never from the request.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(TagField)
 enum RequestHeaderName(val wireName: String):
   /** `authedBaseEndpoint` and the workspace bootstrap endpoint. */
   case UserId extends RequestHeaderName("x-user-id")
@@ -230,6 +263,11 @@ enum RequestHeaderName(val wireName: String):
 
 object RequestHeaderName:
   given codec: JsonCodec[RequestHeaderName] = DeriveJsonCodec.gen[RequestHeaderName]
+
+  given schema: Schema[RequestHeaderName] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[RequestHeaderName]
 
   /** The declared header carrying this wire name, or `None` for a name this
     * application does not declare. Matched without regard to case, because HTTP

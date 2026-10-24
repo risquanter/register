@@ -1,5 +1,7 @@
 package com.risquanter.register.http.errors
 
+import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.iron.{ScenarioName, TreeId}
 import com.risquanter.register.domain.errors.MergeRefusal
@@ -11,7 +13,7 @@ import com.risquanter.register.domain.errors.MergeRefusal
   * discriminates between them. Each case carries what the person needs in order
   * to act, and nothing else.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(ConflictKind.TagField)
 enum ConflictKind:
   /** A uniqueness or state conflict with no further structure. */
   case Rejected()
@@ -44,4 +46,19 @@ enum ConflictKind:
   case SimulationRequired(treeId: TreeId)
 
 object ConflictKind:
+  /** The key naming which conflict a payload states. Read by this coproduct's
+    * decoder and published in its schema, and stated here once so the two
+    * cannot disagree. Each case's published value is its own name, which is
+    * what the derived codec writes. */
+  final val TagField = "kind"
+
   given codec: JsonCodec[ConflictKind] = DeriveJsonCodec.gen[ConflictKind]
+
+  /** Declared rather than left to a holder's derivation, so the payload's
+    * published description is the seven cases rather than an unconstrained
+    * object, and names the key that decides between them. */
+  given schema: Schema[ConflictKind] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(TagField)
+    Schema.derived[ConflictKind]

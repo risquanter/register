@@ -1,8 +1,9 @@
 package com.risquanter.register.domain.data
 
-import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator, jsonHint}
+import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import zio.prelude.Validation
 import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import com.risquanter.register.domain.data.iron.{
   OccurrenceProbability, ResidualProbability, RetentionFactor, ValidationMessages
 }
@@ -17,26 +18,28 @@ import com.risquanter.register.domain.errors.{
  * `Keep` is the identity. A relative statement stays true when the leaf
  * changes, so it records nothing about the leaf's former value.
  */
-@jsonDiscriminator("op")
+@jsonDiscriminator(RiskLeafTransform.OpField)
 sealed trait RelativeLikelihood
 
 object RelativeLikelihood {
-  @jsonHint("keep")
   case object Keep extends RelativeLikelihood
 
   /** Probability × factor. The factor is at most 1 and the probability at most
     * 1, so the product stays inside the closed [0, 1] domain. */
-  @jsonHint("scale")
   final case class Scale(factor: RetentionFactor) extends RelativeLikelihood
 
   given codec: JsonCodec[RelativeLikelihood] = DeriveJsonCodec.gen[RelativeLikelihood]
 
   // Declared rather than left to a holder's derivation: auto-derivation driven
   // from a record holding this trait does not descend into it, so every holder
-  // would publish an unconstrained object instead of the cases.
+  // would publish an unconstrained object instead of the cases. The
+  // configuration names the discriminator, so the published description states
+  // the key the decoder reads rather than leaving a reader to infer the case
+  // from which fields are present.
   given schema: Schema[RelativeLikelihood] =
     import sttp.tapir.generic.auto.*
     import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.OpField)
     Schema.derived[RelativeLikelihood]
 }
 
@@ -47,28 +50,28 @@ object RelativeLikelihood {
  * control changed what it costs. It applies before simulation, so the leaf is
  * re-simulated from the scaled parameters. Lognormal: scales both confidence
  * interval bounds, multiplying every quantile by the factor and leaving the
- * spread parameter unchanged. Expert: scales the anchor losses, with the same
+ * spread parameter unchanged. Metalog: scales the anchor losses, with the same
  * effect on the fitted distribution. It broadcasts across a heterogeneous
  * target set, and applies alongside `ResultTransformSpec.ScaleLosses` on the
  * same node — that one scales what the entity bears of a loss this one has
  * already reduced.
  */
-@jsonDiscriminator("op")
+@jsonDiscriminator(RiskLeafTransform.OpField)
 sealed trait RelativeSeverity
 
 object RelativeSeverity {
-  @jsonHint("keep")
   case object Keep extends RelativeSeverity
 
-  @jsonHint("scaleSeverity")
   final case class ScaleSeverity(factor: RetentionFactor) extends RelativeSeverity
 
   given codec: JsonCodec[RelativeSeverity] = DeriveJsonCodec.gen[RelativeSeverity]
 
-  // Declared for the same reason as `RelativeLikelihood`'s.
+  // Declared, and names its discriminator, for the same reasons as
+  // `RelativeLikelihood`'s.
   given schema: Schema[RelativeSeverity] =
     import sttp.tapir.generic.auto.*
     import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.OpField)
     Schema.derived[RelativeSeverity]
 }
 
@@ -84,20 +87,17 @@ object RelativeSeverity {
  * A replacement is representation-agnostic by construction, because it names a
  * whole shape rather than adjusting the one already there.
  */
-@jsonDiscriminator("replaces")
+@jsonDiscriminator(RiskLeafTransform.ReplacesField)
 sealed trait AbsoluteReplacement
 
 object AbsoluteReplacement {
   /** Absolute post-control probability. Strictly above zero — an author may
     * declare a leaf that never occurs, but a mitigation may not assert that a
     * risk has been prevented. */
-  @jsonHint("likelihood")
   final case class Likelihood(probability: ResidualProbability) extends AbsoluteReplacement
 
-  @jsonHint("severity")
   final case class Severity(shape: DistributionShape) extends AbsoluteReplacement
 
-  @jsonHint("both")
   final case class Both(
     probability: ResidualProbability,
     shape: DistributionShape
@@ -105,11 +105,13 @@ object AbsoluteReplacement {
 
   given codec: JsonCodec[AbsoluteReplacement] = DeriveJsonCodec.gen[AbsoluteReplacement]
 
-  // Declared for the same reason as `RelativeLikelihood`'s. The two cases that
-  // carry a whole shape reach `DistributionShape`'s own schema through it.
+  // Declared, and names its discriminator, for the same reasons as
+  // `RelativeLikelihood`'s. The two cases that carry a whole shape reach
+  // `DistributionShape`'s own schema through it.
   given schema: Schema[AbsoluteReplacement] =
     import sttp.tapir.generic.auto.*
     import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.ReplacesField)
     Schema.derived[AbsoluteReplacement]
 }
 
@@ -139,6 +141,16 @@ final case class LeafParams(
  */
 object RiskLeafTransform {
 
+  /** The key naming which operation a relative statement performs. Read by both
+    * relative coproducts' decoders and published in both their schemas, and
+    * stated here once so no two of them can disagree. Each case's published
+    * value is its own name, which is what the derived codecs write. */
+  final val OpField = "op"
+
+  /** The key naming which parts an absolute replacement replaces, on the same
+    * terms as `OpField`. */
+  final val ReplacesField = "replaces"
+
   /** Severity-scaled lognormal CI bounds: lower floored, upper ceiled. Outward
     * rounding only widens the fitted interval (σ never shrinks) and preserves the
     * strict `min < max` ordering whenever the continuous scaled bounds differ. */
@@ -164,7 +176,7 @@ object RiskLeafTransform {
   /** Severity scaling interpreted onto a shape, one reading per mode.
     *
     * Lognormal: both confidence-interval bounds scale, which multiplies every
-    * quantile by the factor and leaves the spread parameter unchanged. Expert:
+    * quantile by the factor and leaves the spread parameter unchanged. Metalog:
     * the anchor losses scale and the percentiles do not, which has the same
     * effect on the fitted curve.
     *
@@ -181,7 +193,7 @@ object RiskLeafTransform {
     subject: ErrorSubject
   ): Validation[ValidationError, DistributionShape] = shape match {
     case DistributionShape.Lognormal(bounds) =>
-      scaleSeverityBounds(bounds.min, bounds.max, factor) match {
+      scaleSeverityBounds(bounds.min, bounds.max, factor.toFraction) match {
         case (scaledMin, scaledMax) if lowerBoundRepresentable(scaledMin) =>
           DistributionShape.Lognormal.fromPrimitives(scaledMin, scaledMax, subject)
 
@@ -194,10 +206,10 @@ object RiskLeafTransform {
           ))
       }
 
-    case DistributionShape.Expert(anchors, terms) =>
-      anchors.losses.map(_ * factor) match {
+    case DistributionShape.Metalog(anchors, terms) =>
+      anchors.losses.map(_ * factor.toFraction) match {
         case scaled if scaled.forall(anchorLossRepresentable) =>
-          DistributionShape.Expert.fromPrimitives(
+          DistributionShape.Metalog.fromPrimitives(
             percentiles = anchors.percentiles,
             quantiles = scaled,
             terms = terms.map(t => t: Int),
@@ -208,7 +220,7 @@ object RiskLeafTransform {
           val smallest = anchors.losses.min
           Validation.fail(ValidationError(
             location = ErrorLocation.Field(subject, FieldName.Quantiles),
-            code = ValidationErrorCode.INVALID_EXPERT_PARAMS,
+            code = ValidationErrorCode.INVALID_METALOG_PARAMS,
             message = ValidationMessages.mitigationLowersAnchorLossBelowFloor(
               smallest, minAnchorFactor(smallest))
           ))

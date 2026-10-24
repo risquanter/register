@@ -2,9 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 
-import com.risquanter.register.domain.data.{
-  DistributionShape, ExpertDistributionParams, LognormalDistributionParams
-}
+import com.risquanter.register.domain.data.{DistributionShape, DistributionParams}
 import com.risquanter.register.domain.data.iron.{
   IronConstants, MetalogTermCount, PositiveLong, ValidationMessages
 }
@@ -44,12 +42,12 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
     * client sees is the curve a run would fit. */
   override def preview(shape: DistributionShape): IO[ValidationFailed, DistributionPreviewResponse] =
     DistributionShape.resolve(shape) match
-      case ExpertDistributionParams(percentiles, quantiles, terms) =>
-        previewExpert(percentiles, quantiles, terms)
-      case LognormalDistributionParams(minLoss, maxLoss, _) =>
+      case DistributionParams.Metalog(percentiles, quantiles, terms) =>
+        previewMetalog(percentiles, quantiles, terms)
+      case DistributionParams.Lognormal(minLoss, maxLoss, _) =>
         previewLognormal(minLoss, maxLoss)
 
-  private def previewExpert(
+  private def previewMetalog(
     percentiles: Vector[Double],
     quantiles: Vector[Double],
     resolvedTerms: MetalogTermCount
@@ -67,12 +65,12 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
         )
       ).mapError(_ => ValidationFailed(List(ValidationError(
         location = ErrorLocation.Whole,
-        code    = ValidationErrorCode.INVALID_EXPERT_PARAMS,
-        message = ValidationMessages.expertFitFailed
+        code    = ValidationErrorCode.INVALID_METALOG_PARAMS,
+        message = ValidationMessages.metalogFitFailed
       ))))
       points = sampleMetalog(metalog)
     yield DistributionPreviewResponse(
-      distributionType = IronConstants.Expert,
+      distributionType = IronConstants.Metalog,
       resolvedTerms    = Some(resolvedTerms),
       anchorCount      = Some(percentiles.length),
       points           = points

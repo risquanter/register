@@ -45,18 +45,30 @@ object LeafSimContent {
   def from(leaf: RiskLeaf): LeafSimContent =
     LeafSimContent(leaf.seedVarId, leaf.probability, leaf.shape)
 
-  /** Wire form: primitives only, declaration order = emission order (ADR-001). */
+  /** Hash preimage: primitives only, declaration order = emission order
+    * (ADR-001). The tag is declared rather than taken from the case name, which
+    * is the opposite of what the shape's own codec does. These bytes are hashed
+    * into every leaf's cache key, and these classes are private implementation
+    * detail carrying a `Raw` suffix the modes do not have, so a derived tag
+    * would both spell the mode wrongly and tie the key to an identifier nothing
+    * outside this file can see.
+    *
+    * The key is spelled out here for the same reason, rather than read from
+    * `DistributionShape.TagField`: these bytes owe stability over time, and
+    * naming a constant another file owns would let a change there move every
+    * cache key. The two spellings agreeing is a fact about today, not a
+    * coupling. */
   @jsonDiscriminator("distributionType")
   private sealed trait ShapeRaw
 
-  @jsonHint("expert")
-  private case class ExpertRaw(
+  @jsonHint("Metalog")
+  private case class MetalogRaw(
     percentiles: Vector[Double],
     quantiles: Vector[Double],
     terms: Option[Int]
   ) extends ShapeRaw
 
-  @jsonHint("lognormal")
+  @jsonHint("Lognormal")
   private case class LognormalRaw(minLoss: Long, maxLoss: Long) extends ShapeRaw
 
   private object ShapeRaw {
@@ -64,8 +76,8 @@ object LeafSimContent {
 
     /** The one site that widens a shape to primitives for hashing. */
     def of(shape: DistributionShape): ShapeRaw = shape match
-      case DistributionShape.Expert(anchors, terms) =>
-        ExpertRaw(anchors.percentiles, anchors.losses, terms.map(t => t: Int))
+      case DistributionShape.Metalog(anchors, terms) =>
+        MetalogRaw(anchors.percentiles, anchors.losses, terms.map(t => t: Int))
       case DistributionShape.Lognormal(bounds) =>
         LognormalRaw(bounds.min, bounds.max)
   }

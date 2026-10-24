@@ -1,5 +1,7 @@
 package com.risquanter.register.http.responses
 
+import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.RiskTree.{safeNameEncoder, safeNameDecoder}
 import com.risquanter.register.domain.data.iron.{CommitHash, SafeName, TreeId}
@@ -22,7 +24,7 @@ object MergeConflictEntry:
   * this type is exhaustive, which is what lets the browser drop the wildcard arm
   * that renders an unrecognised status as an empty conflict list.
   */
-@jsonDiscriminator("kind")
+@jsonDiscriminator(MergePreviewStatus.TagField)
 enum MergePreviewStatus:
   /** The merge would apply with no intervention. */
   case Clean()
@@ -39,7 +41,22 @@ enum MergePreviewStatus:
   case ScenarioMissing()
 
 object MergePreviewStatus:
+  /** The key naming which outcome a response states. Read by this coproduct's
+    * decoder and published in its schema, and stated here once so the two
+    * cannot disagree. Each case's published value is its own name, which is
+    * what the derived codec writes. */
+  final val TagField = "kind"
+
   given codec: JsonCodec[MergePreviewStatus] = DeriveJsonCodec.gen[MergePreviewStatus]
+
+  /** Declared rather than left to the holder's derivation, so the response's
+    * published description is the four outcomes rather than an unconstrained
+    * object, and names the key that decides between them. */
+  given schema: Schema[MergePreviewStatus] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(TagField)
+    Schema.derived[MergePreviewStatus]
 
 /** Response DTO for `GET /w/{key}/scenarios/{name}/merge-preview`. */
 final case class MergePreviewResponse(status: MergePreviewStatus)

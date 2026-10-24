@@ -340,6 +340,7 @@ object ValidationUtil {
   def refineRetentionFactor(value: Double, location: ErrorLocation): Either[List[ValidationError], RetentionFactor] = {
     value
       .refineEither[Greater[0.0] & LessEqual[1.0]]
+      .map(RetentionFactor(_))
       .left
       .map(_ => List(ValidationError(
         location = location,
@@ -348,10 +349,13 @@ object ValidationUtil {
       )))
   }
 
-  // Refinement for a probability a mitigation may assert: above 0, at most 1
+  // Refinement for a probability a mitigation may assert: above 0, at most 1.
+  // Shares refineRetentionFactor's predicate and differs in the type it builds
+  // and in its message, which states what a mitigation may not assert.
   def refineResidualProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], ResidualProbability] = {
     value
       .refineEither[Greater[0.0] & LessEqual[1.0]]
+      .map(ResidualProbability(_))
       .left
       .map(_ => List(ValidationError(
         location = location,
@@ -374,10 +378,10 @@ object ValidationUtil {
       )))
   }
 
-  // Refinement for distribution type (must be "expert" or "lognormal")
+  // Refinement for distribution type (must be "Metalog" or "Lognormal")
   def refineDistributionType(value: String, location: ErrorLocation): Either[List[ValidationError], DistributionType] = {
     value
-      .refineEither[Match["^(expert|lognormal)$"]]
+      .refineEither[DistributionTypeConstraint]
       .left
       .map(_ => List(ValidationError(
         location = location,
