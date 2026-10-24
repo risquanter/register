@@ -17,9 +17,9 @@ This guide walks through the HTTP API step by step: parameterising leaf risks, b
 
 ## Leaf Risk Parameters: A Modeller's Guide
 
-Every leaf node requires three things: a name, an occurrence probability, and a loss characterisation. The occurrence probability is the top-level `probability` field; the loss characterisation is a nested `distributionShape` object carrying `distributionType` and its parameters (`minLoss`/`maxLoss` for lognormal, `percentiles`/`quantiles`/`terms` for metalog — unused fields sent as `null`). The loss characterisation comes in two forms — pick whichever matches how your expert articulates their knowledge.
+Every leaf node requires three things: a name, an occurrence probability, and a loss characterisation. The occurrence probability is the top-level `probability` field; the loss characterisation is a nested `distributionShape` object carrying `distributionType` and the parameters of that mode alone (`minLoss`/`maxLoss` for `Lognormal`, `percentiles`/`quantiles`/`terms` for `Metalog`). The loss characterisation comes in two forms — pick whichever matches how your expert articulates their knowledge.
 
-### Confidence interval mode (`distributionType: "lognormal"`)
+### Confidence interval mode (`distributionType: "Lognormal"`)
 
 Use this when your expert can bound the loss outcome with a confidence statement. The two fields are:
 
@@ -38,10 +38,7 @@ Concretely: a cyber breach team says *"we think there's a 20 % chance of a breac
   "distributionShape": {
     "distributionType": "Lognormal",
     "minLoss": 500000,
-    "maxLoss": 8000000,
-    "percentiles": null,
-    "quantiles": null,
-    "terms": null
+    "maxLoss": 8000000
   }
 }
 ```
@@ -66,8 +63,6 @@ Concretely: a supply chain analyst says *"there's a 10 % chance of a major disru
   "probability": 0.1,
   "distributionShape": {
     "distributionType": "Metalog",
-    "minLoss": null,
-    "maxLoss": null,
     "percentiles": [
       0.25,
       0.5,
@@ -120,10 +115,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 500000,
-        "maxLoss": 8000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 8000000
       }
     },
     {
@@ -132,8 +124,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.1,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -156,10 +146,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 300000,
-        "maxLoss": 3000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 3000000
       }
     },
     {
@@ -169,10 +156,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 100000,
-        "maxLoss": 2000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 2000000
       }
     }
   ]'
@@ -341,8 +325,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.15,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -365,10 +347,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 200000,
-        "maxLoss": 4000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 4000000
       }
     },
     {
@@ -378,10 +357,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 1000000,
-        "maxLoss": 15000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 15000000
       }
     },
     {
@@ -391,10 +367,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 2000000,
-        "maxLoss": 20000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 20000000
       }
     },
     {
@@ -404,10 +377,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 100000,
-        "maxLoss": 800000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 800000
       }
     },
     {
@@ -416,8 +386,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.08,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -440,10 +408,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 50000,
-        "maxLoss": 500000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 500000
       }
     },
     {
@@ -453,10 +418,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 500000,
-        "maxLoss": 5000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 5000000
       }
     },
     {
@@ -466,10 +428,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 100000,
-        "maxLoss": 1500000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 1500000
       }
     },
     {
@@ -478,8 +437,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.08,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -499,8 +456,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.35,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -523,10 +478,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 500000,
-        "maxLoss": 8000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 8000000
       }
     },
     {
@@ -536,10 +488,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 3000000,
-        "maxLoss": 30000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 30000000
       }
     },
     {
@@ -548,8 +497,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.15,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -570,10 +517,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 2000000,
-        "maxLoss": 25000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 25000000
       }
     },
     {
@@ -583,10 +527,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 2000000,
-        "maxLoss": 50000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 50000000
       }
     },
     {
@@ -595,8 +536,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.08,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -619,10 +558,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 500000,
-        "maxLoss": 10000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 10000000
       }
     },
     {
@@ -632,10 +568,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 1000000,
-        "maxLoss": 12000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 12000000
       }
     },
     {
@@ -645,10 +578,7 @@ http POST localhost:18080/workspaces \
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 5000000,
-        "maxLoss": 40000000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 40000000
       }
     },
     {
@@ -657,8 +587,6 @@ http POST localhost:18080/workspaces \
       "probability": 0.06,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.25,
           0.5,
@@ -735,8 +663,6 @@ curl -s -X POST http://localhost:18080/workspaces \
         "probability": 0.15,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,
@@ -759,10 +685,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 200000,
-          "maxLoss": 4000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 4000000
         }
       },
       {
@@ -772,10 +695,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 1000000,
-          "maxLoss": 15000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 15000000
         }
       },
       {
@@ -785,10 +705,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 2000000,
-          "maxLoss": 20000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 20000000
         }
       },
       {
@@ -798,10 +715,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 100000,
-          "maxLoss": 800000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 800000
         }
       },
       {
@@ -810,8 +724,6 @@ curl -s -X POST http://localhost:18080/workspaces \
         "probability": 0.08,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,
@@ -834,10 +746,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 50000,
-          "maxLoss": 500000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 500000
         }
       },
       {
@@ -847,10 +756,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 500000,
-          "maxLoss": 5000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 5000000
         }
       },
       {
@@ -860,10 +766,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 100000,
-          "maxLoss": 1500000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 1500000
         }
       },
       {
@@ -872,8 +775,6 @@ curl -s -X POST http://localhost:18080/workspaces \
         "probability": 0.08,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,
@@ -893,8 +794,6 @@ curl -s -X POST http://localhost:18080/workspaces \
         "probability": 0.35,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,
@@ -917,10 +816,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 500000,
-          "maxLoss": 8000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 8000000
         }
       },
       {
@@ -930,10 +826,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 3000000,
-          "maxLoss": 30000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 30000000
         }
       },
       {
@@ -942,8 +835,6 @@ curl -s -X POST http://localhost:18080/workspaces \
         "probability": 0.15,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,
@@ -964,10 +855,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 2000000,
-          "maxLoss": 25000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 25000000
         }
       },
       {
@@ -977,10 +865,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 2000000,
-          "maxLoss": 50000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 50000000
         }
       },
       {
@@ -989,8 +874,6 @@ curl -s -X POST http://localhost:18080/workspaces \
         "probability": 0.08,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,
@@ -1013,10 +896,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 500000,
-          "maxLoss": 10000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 10000000
         }
       },
       {
@@ -1026,10 +906,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 1000000,
-          "maxLoss": 12000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 12000000
         }
       },
       {
@@ -1039,10 +916,7 @@ curl -s -X POST http://localhost:18080/workspaces \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 5000000,
-          "maxLoss": 40000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 40000000
         }
       },
       {
@@ -1051,8 +925,6 @@ curl -s -X POST http://localhost:18080/workspaces \
         "probability": 0.06,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,

@@ -3038,14 +3038,21 @@ object DistributionShape:
 
   private sealed trait ShapeRaw
 
-  private case class MetalogRaw(
-    percentiles: Vector[Double],
-    quantiles:   Vector[Double],
-    terms:       Option[Int]
-  ) extends ShapeRaw
+  private object ShapeRaw:
+    case class Metalog(
+      percentiles: Vector[Double],
+      quantiles:   Vector[Double],
+      terms:       Option[Int]
+    ) extends ShapeRaw
 
-  private case class LognormalRaw(minLoss: Long, maxLoss: Long) extends ShapeRaw
+    case class Lognormal(minLoss: Long, maxLoss: Long) extends ShapeRaw
 ```
+
+The wire cases are nested so each one's name is its mode's name. §19.2 derives
+this coproduct's published tag values from those names, because the schema
+derives from `ShapeRaw` rather than from `DistributionShape` — the domain holds
+anchors as a sequence of pairs and the wire as two parallel sequences. A case
+named for its implementation role would publish that role as the mode.
 
 The request coproduct, in
 `modules/common/src/main/scala/com/risquanter/register/http/requests/DistributionShapeRequest.scala`:

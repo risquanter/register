@@ -22,6 +22,12 @@ object MitigationTarget {
   /** Wire format is the predicate source string; decode re-runs `TargetingPredicate.create`. */
   given codec: JsonCodec[MitigationTarget] =
     summon[JsonCodec[TargetingPredicate]].transform(Predicate(_), { case Predicate(p) => p })
+
+  /** Published as the string the codec above writes, matching
+    * `TargetingPredicate`'s own schema. Without it the target would be
+    * described as a set of alternatives, which is what the type is in code and
+    * not what the bytes are. */
+  given schema: Schema[MitigationTarget] = Schema.string[MitigationTarget]
 }
 
 /** Application order: ascending key, MitigationId tiebreak. Override presets sit at the extremes. */
@@ -35,6 +41,11 @@ object MitigationPrecedence {
   given Equal[MitigationPrecedence] = Equal.default
   given codec: JsonCodec[MitigationPrecedence] =
     JsonCodec[Int].transform(MitigationPrecedence(_), _.key)
+
+  /** Published as the integer the codec above writes. Every integer is a valid
+    * key, so the conversion cannot fail. */
+  given schema: Schema[MitigationPrecedence] =
+    Schema.schemaForInt.map[MitigationPrecedence](k => Some(MitigationPrecedence(k)))(_.key)
 }
 
 /**
@@ -191,7 +202,8 @@ object MitigationSpec {
       JsonEncoder[Raw].contramap(stage => Raw(stage.pipeline)),
       Raw.rawCodec.decoder.mapOrFail(raw =>
         create(raw.pipeline, ErrorLocation.requestField(FieldName.Spec))
-          .toEither.left.map(_.map(_.message).mkString("; "))
+          .toEither.left.map(_.map(e =>
+            s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
       )
     )
   }

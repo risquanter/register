@@ -234,22 +234,28 @@ object DistributionShape:
   /** Wire form: primitives only, one case per mode (ADR-038 §1). The metalog
     * case carries the two parallel sequences an author states rather than the
     * domain's sequence of pairs, so the pairing rule is applied on decode and is
-    * not expressible here. */
+    * not expressible here.
+    *
+    * Each case is named for its mode and nested so that name is free to be the
+    * mode's. The published schema derives from this coproduct, and a derived tag
+    * value is the case's own name, so a case named after its implementation role
+    * would publish that role as the mode. */
   private sealed trait ShapeRaw
 
-  private case class MetalogRaw(
-    percentiles: Vector[Double],
-    quantiles:   Vector[Double],
-    terms:       Option[Int]
-  ) extends ShapeRaw
+  private object ShapeRaw:
+    case class Metalog(
+      percentiles: Vector[Double],
+      quantiles:   Vector[Double],
+      terms:       Option[Int]
+    ) extends ShapeRaw
 
-  private case class LognormalRaw(minLoss: Long, maxLoss: Long) extends ShapeRaw
+    case class Lognormal(minLoss: Long, maxLoss: Long) extends ShapeRaw
 
-  private object MetalogRaw:
-    given rawCodec: JsonCodec[MetalogRaw] = DeriveJsonCodec.gen[MetalogRaw]
+    object Metalog:
+      given rawCodec: JsonCodec[Metalog] = DeriveJsonCodec.gen[Metalog]
 
-  private object LognormalRaw:
-    given rawCodec: JsonCodec[LognormalRaw] = DeriveJsonCodec.gen[LognormalRaw]
+    object Lognormal:
+      given rawCodec: JsonCodec[Lognormal] = DeriveJsonCodec.gen[Lognormal]
 
   object Metalog:
     /** Refuses a stated term count above the anchor count: a metalog fit cannot
@@ -307,10 +313,10 @@ object DistributionShape:
       * a constructed one (ADR-038 §1). The subject is the request because this
       * decoder is the request and store-read boundary both. */
     given codec: JsonCodec[Metalog] = JsonCodec(
-      JsonEncoder[MetalogRaw].contramap(metalog =>
-        MetalogRaw(metalog.anchors.percentiles, metalog.anchors.losses, metalog.terms.map(t => t: Int))
+      JsonEncoder[ShapeRaw.Metalog].contramap(metalog =>
+        ShapeRaw.Metalog(metalog.anchors.percentiles, metalog.anchors.losses, metalog.terms.map(t => t: Int))
       ),
-      MetalogRaw.rawCodec.decoder.mapOrFail { raw =>
+      ShapeRaw.Metalog.rawCodec.decoder.mapOrFail { raw =>
         fromPrimitives(raw.percentiles, raw.quantiles, raw.terms, ErrorSubject.Request)
           .toEither
           .left
@@ -340,10 +346,10 @@ object DistributionShape:
     /** Decodes through `fromPrimitives`, so the ordering rule holds for every
       * decoded value. */
     given codec: JsonCodec[Lognormal] = JsonCodec(
-      JsonEncoder[LognormalRaw].contramap(lognormal =>
-        LognormalRaw(lognormal.bounds.min, lognormal.bounds.max)
+      JsonEncoder[ShapeRaw.Lognormal].contramap(lognormal =>
+        ShapeRaw.Lognormal(lognormal.bounds.min, lognormal.bounds.max)
       ),
-      LognormalRaw.rawCodec.decoder.mapOrFail { raw =>
+      ShapeRaw.Lognormal.rawCodec.decoder.mapOrFail { raw =>
         fromPrimitives(raw.minLoss, raw.maxLoss, ErrorSubject.Request)
           .toEither
           .left

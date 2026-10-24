@@ -2,7 +2,7 @@ package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /**
@@ -144,6 +144,12 @@ object IronTapirCodecs {
     )(_.value)
 
   given Schema[NodeId] = Schema.string
+
+  /** A mitigation's identifier is published as the string its codec writes, on
+    * the same terms as the two above. A mitigation reaches a client inside a
+    * tree, so without this the description would state the wrapper's field
+    * rather than the value. */
+  given Schema[MitigationId] = Schema.string
 
   given nodeIdKeyedMapSchema[V: Schema]: Schema[Map[NodeId, V]] = Schema.schemaForMap[NodeId, V](_.value)
 

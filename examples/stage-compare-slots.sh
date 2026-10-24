@@ -62,13 +62,13 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "name": "Leaf One",
         "parentName": "Root",
         "probability": 0.1,
-        "distributionShape": { "distributionType": "Lognormal", "minLoss": 40000, "maxLoss": 320000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 40000, "maxLoss": 320000 }
       },
       {
         "name": "Leaf Two",
         "parentName": "Root",
         "probability": 0.1,
-        "distributionShape": { "distributionType": "Lognormal", "minLoss": 20000, "maxLoss": 150000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 20000, "maxLoss": 150000 }
       }
     ]
   }')
@@ -99,13 +99,13 @@ TREE_B_RESP=$(curl -s -X POST "$BASE/w/$WS_KEY/risk-trees" \
         "name": "Leaf B1",
         "parentName": "Root",
         "probability": 0.3,
-        "distributionShape": { "distributionType": "Lognormal", "minLoss": 400000, "maxLoss": 3000000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 400000, "maxLoss": 3000000 }
       },
       {
         "name": "Leaf B2",
         "parentName": "Root",
         "probability": 0.2,
-        "distributionShape": { "distributionType": "Lognormal", "minLoss": 150000, "maxLoss": 1200000, "percentiles": null, "quantiles": null, "terms": null }
+        "distributionShape": { "distributionType": "Lognormal", "minLoss": 150000, "maxLoss": 1200000 }
       }
     ]
   }')
@@ -159,9 +159,9 @@ else
       \"portfolios\": [ { \"id\": \"$ROOT_ID\", \"name\": \"Root\", \"parentName\": null } ],
       \"leaves\": [
         { \"id\": \"$LEAF1_ID\", \"name\": \"Leaf One\", \"parentName\": \"Root\", \"probability\": 0.3,
-          \"distributionShape\": { \"distributionType\": \"lognormal\", \"minLoss\": 40000, \"maxLoss\": 320000, \"percentiles\": null, \"quantiles\": null, \"terms\": null } },
+          \"distributionShape\": { \"distributionType\": \"Lognormal\", \"minLoss\": 40000, \"maxLoss\": 320000 } },
         { \"id\": \"$LEAF2_ID\", \"name\": \"Leaf Two\", \"parentName\": \"Root\", \"probability\": 0.1,
-          \"distributionShape\": { \"distributionType\": \"lognormal\", \"minLoss\": 20000, \"maxLoss\": 150000, \"percentiles\": null, \"quantiles\": null, \"terms\": null } }
+          \"distributionShape\": { \"distributionType\": \"Lognormal\", \"minLoss\": 20000, \"maxLoss\": 150000 } }
       ],
       \"newPortfolios\": [],
       \"newLeaves\": []

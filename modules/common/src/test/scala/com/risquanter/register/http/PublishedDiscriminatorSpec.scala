@@ -73,11 +73,29 @@ object PublishedDiscriminatorSpec extends ZIOSpecDefault {
     case c: SchemaType.SCoproduct[?] => c.discriminator.isEmpty
     case _                           => false
 
+  /** The values a published coproduct offers for its key, sorted. Empty where
+    * the schema names no key at all. */
+  private def publishedValues(name: String): List[String] =
+    published.find(_.name == name).toList.flatMap(_.schema.schemaType match
+      case c: SchemaType.SCoproduct[?] => c.discriminator.toList.flatMap(_.mapping.keys).sorted
+      case _                           => Nil
+    )
+
   def spec = suite("PublishedDiscriminatorSpec")(
 
     test("every published coproduct names its discriminator") {
       val offenders = published.filter(namesNoKey).map(_.name).sorted
       assertTrue(offenders == List.empty[String])
+    },
+
+    /** Every other entry's values are its own case names, which the derivation
+      * reads off the type the decoder matches on. The loss distribution is the
+      * one whose schema derives from a different type — a private coproduct
+      * holding the wire's two parallel sequences — so its values come from that
+      * type's case names and can part from the decoder's without failing
+      * anything else here. */
+    test("the loss distribution publishes its two mode names") {
+      assertTrue(publishedValues("DistributionShape") == List("Lognormal", "Metalog"))
     }
   )
 }

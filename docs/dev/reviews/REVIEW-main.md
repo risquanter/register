@@ -290,3 +290,85 @@ escalated:
     the per-case agreement between the published field list and the encoded bytes were not
     traced (wire contracts) → complex
 ```
+
+```
+COVERAGE  tier=complex  scope=the four escalation items of the routine entry above, inside
+          git diff 4320b698..HEAD plus the working tree — source 1, named by the invoking
+          session. Whole-file scope on every file an item names.
+read-in-full:
+  docs/dev/plans/PLAN-LOSS-SHAPE-ALGEBRA.md (§16–§19), PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md
+  docs/dev/plans/PLAN-ERROR-WIRE-BOUNDARY.md (:1000-1040, :1625-1665, :3870-3925 — EWB-D-25)
+  docs/dev/decision-records/ADR-001.md, ADR-010.md, ADR-014.md,
+    ADR-032-content-equality-relations.md, ADR-035-error-leakage-prevention.md,
+    ADR-037-in-code-constants.md, ADR-038-response-wire-shapes.md,
+    ADR-039-trust-boundary-ingress-validation.md
+  .claude/skills/adr-constraints/SKILL.md (Layer 3), .claude/skills/code-quality-review/SKILL.md,
+    .claude/rules/scala-algebraic-design.md, scala-domain.md, scala-style.md, scala-test.md,
+    security.md, CLAUDE.md, ~/.claude/CLAUDE.md
+  docs/user/TERMINOLOGY.md (:40-60, :300-430, :590-620, headings)
+  docs/dev/reviews/REVIEW-main.md
+  modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/ResultTransformSpec.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/RiskLeafTransform.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/LeafSimContent.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/DistributionShape.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/Provenance.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/LEC.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala (:1-120)
+  modules/common/src/main/scala/com/risquanter/register/domain/data/RiskNode.scala (:200-240)
+  modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala
+  modules/common/src/main/scala/com/risquanter/register/http/errors/ConflictKind.scala
+  modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala
+  modules/common/src/main/scala/com/risquanter/register/http/requests/DistributionShapeRequest.scala
+  modules/common/src/main/scala/com/risquanter/register/http/responses/SimulationResponse.scala
+  modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala (:95-120, :240-320)
+  modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationEntitySpec.scala
+  modules/common/src/test/scala/com/risquanter/register/domain/data/LeafSimContentSpec.scala
+  modules/common/src/test/scala/com/risquanter/register/domain/data/ResultTransformSpecSpec.scala
+  modules/common/src/test/scala/com/risquanter/register/http/PublishedDiscriminatorSpec.scala
+  modules/server/src/main/scala/com/risquanter/register/http/WireDecodeFailureHandler.scala
+  modules/server/src/main/scala/com/risquanter/register/http/HttpApi.scala
+  modules/server/src/main/scala/com/risquanter/register/services/cache/ContentHashIndex.scala
+  modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala (:265-310, mitigation read at :150-171)
+  the rendered interface description of every endpoint in WorkspaceTreeEndpoints,
+    ScenarioEndpoints, DistributionPreviewEndpoints, WorkspaceLifecycleEndpoints,
+    WorkspaceAnalysisEndpoints and WorkspaceQueryEndpoints (OpenAPIDocsInterpreter, probe)
+discharged:
+  1 Adversarial line scan — 1 finding reported (MUST-FIX, DistributionShape.scala:360-363:
+    the published discriminator values are the private raw case names LognormalRaw/MetalogRaw
+    while the decoder at :354 reads Lognormal/Metalog; rendered at the ShapeRaw component,
+    reached from RiskLeafRaw.shape and AbsoluteReplacement.Severity/Both.shape); every other
+    changed line withstood input and platform variation at its enclosing function
+  2 Removed-behaviour audit — PASS — each of the twelve deleted @jsonHint spellings is
+    re-established by zio-json's derived tag at the case name (Mitigation.scala:201,
+    RiskLeafTransform.scala:31/:67/:106, ResultTransformSpec.scala:149,
+    ScenarioRequests.scala:28), pinned by literal at MitigationEntitySpec.scala:172/:179-181/:198
+    for ResultStage, LeafRelative, LeafAbsolute, Scale and CapLosses; the other nine values
+    are held by the shared codec alone (a rename moves both sides, no finding)
+  3 Cross-module tracing — PASS — every published holder resolves the companion schema, shown
+    by reference identity: Mitigation.schema's spec field is MitigationSpec.schema,
+    RiskTree.schema's mitigations element is Mitigation.schema, ConflictKind.schema's refusal
+    field is MergeRefusal.schema (the fourth escalation item is closed); the intermediate
+    sealed trait LeafStageSpec is flattened by both derivations ("stage":"LeafStageSpec" is an
+    invalid disambiguator; the schema lists three subtypes); the decode gate for a stored
+    mitigation is RiskTreeRepositoryIrmin.scala:160 → Mitigation.scala:294 → per-case codecs
+  4 State and interleaving — PASS — the items touch no Ref, fiber or transaction boundary
+  5 Invariant reconstruction — 1 finding reported (SHOULD-FIX, pre-existing: four fields of
+    the published Mitigation description disagree with the bytes the codec writes — id,
+    target, precedence, ResultStage.pipeline); the cache-key preimage relation of ADR-032 §1
+    holds: LeafSimContent.scala:61-72 is the only input to ContentHashIndex.hashOf
+    (ContentHashIndex.scala:54-55), the wire spelling never enters it, and
+    LeafSimContentSpec.scala:32/:46 pin both modes' bytes
+  6 Design altitude — PASS — every if in scope is a comparison (DistributionShape.scala:127,
+    ResultTransformSpec.scala:115); the per-case codec pattern matches its precedent
+    MitigationSpec.ResultStage exactly
+  7 Terminology freshness (meaning level) — PASS — TERMINOLOGY.md:46 (two modes), :308-336
+    (five operations, pipeline bound 1–10 matching Mitigation.scala:157/:161), :383-421
+    (relative and absolute), :599 (alternatives) all denote what the code holds; no note owed
+  8 Inline verification — the derivation facts settled by probe (schema structure, OpenAPI
+    rendering, decode-failure strings, tapir Configuration.toDiscriminatorValue and nested
+    private cases as fix options); commonJVM/test, server/test, app/test and serverIt/test
+    (after the register_it_ cleanup) all pass
+escalated:
+  (none new) — the routine entry's first item already names the security tier
+```

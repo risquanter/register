@@ -53,9 +53,13 @@ object ResultTransformSpec {
 
   /** Every refusal in one sentence, which is what a decoder's failure channel
     * carries. All of them rather than the first, because the fields each case
-    * refines fail independently (ADR-001 §3). */
+    * refines fail independently (ADR-001 §3).
+    *
+    * Each refusal names the field it is about. A body reports at the request as
+    * a whole, so the sentence is the only place the field can be named, and
+    * each case computed that location in order to say it. */
   private def describeAll(errors: List[ValidationError]): String =
-    errors.map(_.message).mkString("; ")
+    errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")
 
   object ApplyDeductible {
     private case class Raw(deductible: Long)
@@ -184,4 +188,11 @@ object TransformPipeline {
 
   given JsonCodec[TransformPipeline] =
     JsonCodec[List[ResultTransformSpec]].transform(TransformPipeline(_), _.steps)
+
+  /** Published as the array the codec above writes. Every list of steps is a
+    * valid pipeline at this level — the length bound belongs to the mitigation
+    * spec that holds one — so the conversion cannot fail. */
+  given schema: Schema[TransformPipeline] =
+    summon[Schema[List[ResultTransformSpec]]]
+      .map[TransformPipeline](steps => Some(TransformPipeline(steps)))(_.steps)
 }
