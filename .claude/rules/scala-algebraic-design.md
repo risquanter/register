@@ -13,10 +13,10 @@ Consult this file at three points:
 
 ---
 
-## Before the signature — two things stated out loud
+## Before the signature — three things stated out loud
 
-Both are done before a signature is written, and both are written into the echo
-that precedes the edit. The echo itself, the halt, and what counts as a
+All three are done before a signature is written, and all three are written
+into the echo that precedes the edit. The echo itself, the halt, and what counts as a
 deviation from an approved plan are in `CLAUDE.md`; what follows is the design
 content that echo carries.
 
@@ -53,6 +53,46 @@ compile the same sources for two platforms, and `server` and `app` each see only
 their own side, so a type that exists is not necessarily a type in scope. State
 the import path for each one. A signature naming a type the module cannot see
 produces a compile error that reads like a design problem and is not one.
+
+### Find the family the type belongs to
+
+Before a signature names a new type, find the family that type joins and state
+three things. The answers come from the repository, never from a list in a
+document. A list goes stale as the code moves, and the code does not.
+
+**Which family it joins.** Iron refinement alias, opaque type, nominal wrapper
+(ADR-018), smart constructor, wire request or response type, Tapir codec,
+validation utility, or domain aggregate.
+
+**The file that family lives in, with one existing member quoted by name.** The
+quote is the evidence that the search ran.
+
+**The naming pattern the family follows**, read off its members.
+
+A worked example, for a new refinement holding a short non-blank label. The
+search:
+
+```bash
+grep -rn "^type .* = .*:|" modules/common/src/main/scala/
+```
+
+returns, among others,
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`
+line 11:
+
+```scala
+type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
+```
+
+The three answers follow from it. The family is the Iron refinement aliases.
+The file is `OpaqueTypes.scala`. The pattern is a purpose name with no `Type`
+suffix, and the constraint written as an intersection inside the alias rather
+than repeated at each use site. The new type is written into that file under
+that pattern, and the echo carries all three answers.
+
+Where the search finds nothing, say so — "no existing family, this is the
+first". A type with no family is a different situation from a type whose family
+was never looked for, and only the first is a reason to start a new file.
 
 ---
 

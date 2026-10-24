@@ -125,9 +125,10 @@ Before writing or changing a signature, type or file, in its own turn:
    implementation are always separate turns; an echo answered in the turn it was
    written authorizes nothing.
 
-The two design obligations that precede the echo — naming the algebraic
-structure the operation participates in, and auditing that every domain wrapper
-it names is reachable from the module being edited — are in
+The three design obligations that precede the echo — naming the algebraic
+structure the operation participates in, auditing that every domain wrapper it
+names is reachable from the module being edited, and finding the family a new
+type joins before placing it — are in
 `.claude/rules/scala-algebraic-design.md`, and their output is what the echo
 carries.
 
