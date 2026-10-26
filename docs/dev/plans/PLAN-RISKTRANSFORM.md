@@ -1053,11 +1053,10 @@ existing docs when the feature ships:
   examples** for the mitigation payloads (user ruling 2026-08-10, security
   review F5): the mitigation entity, the op-discriminated
   `ResultTransformSpec` shapes, the two leaf-stage specs, target/selection JSON —
-  worked request/response bodies. These examples are the documentation of the
-  wire format; the OpenAPI document deliberately renders these types as
-  opaque objects (`Schema.any` — a derived or hand-written schema would
-  duplicate the custom codecs and drift silently, and no external OpenAPI
-  consumer exists).
+  worked request/response bodies. These examples are the worked walkthrough of
+  the wire format; the OpenAPI document states the shape itself, because every
+  request type derives its schema from the same `Raw` its codec reads, so the
+  published description and the bytes cannot disagree (ADR-038 §1).
 
 **Seed text — dynamic predicate scope, worked example:**
 
@@ -2457,7 +2456,7 @@ import sttp.tapir.Schema
 
 import com.risquanter.register.domain.data.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** One tick on a mitigation's row beneath a node: that mitigation applies at
@@ -2520,8 +2519,7 @@ object MitigationSelectionRequest:
     * hand at decode time. */
   def create(
     fullScope: List[MitigationId],
-    nodesOnly: List[NodeMitigationEntry],
-    fieldPrefix: String = "selection"
+    nodesOnly: List[NodeMitigationEntry]
   ): Validation[ValidationError, MitigationSelectionRequest] =
     val named = fullScope.toSet ++ nodesOnly.map(_.mitigation).toSet
     val oversizedTick = nodesOnly.groupBy(_.mitigation).collectFirst {
@@ -2531,17 +2529,17 @@ object MitigationSelectionRequest:
     val countV: Validation[ValidationError, Unit] =
       if named.sizeIs <= MaxSelectedMitigations then Validation.succeed(())
       else Validation.fail(ValidationError(
-        field   = fieldPrefix,
-        code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"selection names too many mitigations: ${named.size} exceeds the limit of $MaxSelectedMitigations"
+        location = ErrorLocation.requestField(FieldName.Selection),
+        code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message  = s"selection names too many mitigations: ${named.size} exceeds the limit of $MaxSelectedMitigations"
       ))
 
     val perMitigationV: Validation[ValidationError, Unit] = oversizedTick match
       case None => Validation.succeed(())
       case Some((id, count)) => Validation.fail(ValidationError(
-        field   = s"$fieldPrefix.nodesOnly",
-        code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"mitigation ${id.value} is ticked at too many nodes: $count exceeds the limit of $MaxNodesPerMitigation"
+        location = ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.NodesOnly),
+        code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message  = s"ticked at too many nodes: $count exceeds the limit of $MaxNodesPerMitigation"
       ))
 
     Validation.validateWith(countV, perMitigationV)((_, _) =>
@@ -2556,13 +2554,25 @@ object MitigationSelectionRequest:
   /** Decode runs `create`, so no value of this type exists that breaks a bound.
     * Either list may be omitted and means the empty list. */
   given codec: JsonCodec[MitigationSelectionRequest] = JsonCodec(
-    JsonEncoder[Raw].contramap(s => Raw(Some(s.fullScope), Some(s.nodesOnly))),
+    JsonEncoder[Raw].contramap(toRaw),
     JsonDecoder[Raw].mapOrFail(raw =>
       create(raw.fullScope.getOrElse(Nil), raw.nodesOnly.getOrElse(Nil))
-        .toEither.left.map(_.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; ")))
+        .toEither.left.map(_.toChunk
+          .map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")))
   )
 
-  given schema: Schema[MitigationSelectionRequest] = Schema.any[MitigationSelectionRequest]
+  private def toRaw(s: MitigationSelectionRequest): Raw =
+    Raw(Some(s.fullScope), Some(s.nodesOnly))
+
+  /** The published description is derived from `Raw`, the shape the codec reads
+    * and writes, and mapped onto the refined type through the same smart
+    * constructor the decoder uses (ADR-038 §1). Deriving from the type itself
+    * cannot work: its constructor is private, and the optionality the codec
+    * gives both lists is a property of `Raw` rather than of the type. */
+  given schema: Schema[MitigationSelectionRequest] =
+    Schema.derived[Raw].map(raw =>
+      create(raw.fullScope.getOrElse(Nil), raw.nodesOnly.getOrElse(Nil)).toEither.toOption
+    )(toRaw)
 
 /** Body of the multi-node curve read: the nodes to draw, and the one selection
   * the answer is computed under.
@@ -2586,22 +2596,31 @@ object LECCurvesMultiRequest:
       Validation.succeed(new LECCurvesMultiRequest(nodeIds, selection))
     else
       Validation.fail(ValidationError(
-        field   = "nodeIds",
-        code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = s"too many nodes requested: ${nodeIds.size} exceeds the limit of $MaxRequestedNodes"
+        location = ErrorLocation.requestField(FieldName.NodeIds),
+        code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message  = s"too many nodes requested: ${nodeIds.size} exceeds the limit of $MaxRequestedNodes"
       ))
 
   private case class Raw(nodeIds: List[NodeId], selection: Option[MitigationSelectionRequest])
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
 
+  private def toRaw(r: LECCurvesMultiRequest): Raw = Raw(r.nodeIds, Some(r.selection))
+
   given codec: JsonCodec[LECCurvesMultiRequest] = JsonCodec(
-    JsonEncoder[Raw].contramap(r => Raw(r.nodeIds, Some(r.selection))),
+    JsonEncoder[Raw].contramap(toRaw),
     JsonDecoder[Raw].mapOrFail(raw =>
       create(raw.nodeIds, raw.selection.getOrElse(MitigationSelectionRequest.inherent))
-        .toEither.left.map(_.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; ")))
+        .toEither.left.map(_.toChunk
+          .map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")))
   )
 
-  given schema: Schema[LECCurvesMultiRequest] = Schema.any[LECCurvesMultiRequest]
+  /** Derived from `Raw` for the reason given on `MitigationSelectionRequest`:
+    * the constructor is private, and an absent `selection` means the inherent
+    * reading, neither of which a derivation from the type itself would show. */
+  given schema: Schema[LECCurvesMultiRequest] =
+    Schema.derived[Raw].map(raw =>
+      create(raw.nodeIds, raw.selection.getOrElse(MitigationSelectionRequest.inherent)).toEither.toOption
+    )(toRaw)
 
 /** Body of the exceedance-probability read. The node and the threshold stay
   * where they are — in the path and the query string — so the body carries the
@@ -2613,26 +2632,55 @@ object ProbOfExceedanceRequest:
   private case class Raw(selection: Option[MitigationSelectionRequest])
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
 
+  private def toRaw(r: ProbOfExceedanceRequest): Raw = Raw(Some(r.selection))
+
   given codec: JsonCodec[ProbOfExceedanceRequest] = JsonCodec(
-    JsonEncoder[Raw].contramap(r => Raw(Some(r.selection))),
+    JsonEncoder[Raw].contramap(toRaw),
     JsonDecoder[Raw].map(raw =>
       ProbOfExceedanceRequest(raw.selection.getOrElse(MitigationSelectionRequest.inherent)))
   )
 
-  given schema: Schema[ProbOfExceedanceRequest] = Schema.any[ProbOfExceedanceRequest]
+  /** Derived from `Raw` so the published description shows `selection` as
+    * optional, which is what the codec reads. The decode is total, so the
+    * mapping never fails. */
+  given schema: Schema[ProbOfExceedanceRequest] =
+    Schema.derived[Raw].map(raw =>
+      Some(ProbOfExceedanceRequest(raw.selection.getOrElse(MitigationSelectionRequest.inherent)))
+    )(toRaw)
 ```
 
-Three points about that file. The node-count bound on `nodeIds` is new: F5 bounded the
+Four points about that file. The node-count bound on `nodeIds` is new: F5 bounded the
 selection payload and said nothing about the requested node list, and an
 unbounded list on an endpoint that now also carries a selection is the same
 defect in a second place. The empty-`nodeIds` case is deliberately **not**
 moved into the decoder: `RiskTreeServiceLive` already fails it with
 `EMPTY_COLLECTION` and a test asserts that, and moving the check would change
-the error a caller sees for no gain. `Schema.any` is the settled treatment for
-these payloads — §7.4.1 records that the OpenAPI document renders the
-mitigation types as opaque objects and that the wire-format reference lives in
-`docs/user/API-TUTORIAL.md`, because a second hand-written schema beside the
-custom codecs would drift silently and no external OpenAPI consumer exists.
+the error a caller sees for no gain.
+
+Each refusal names a typed location rather than a field-path string.
+`ValidationError` carries `location: ErrorLocation`, so there is no `field`
+slot to build a path in and no `fieldPrefix` parameter to pass one down. The
+per-mitigation refusal puts the mitigation in the location's subject —
+`ErrorSubject.Mitigation(id)` — instead of interpolating its identifier into
+the sentence, so the identifier reaches a caller as a value of a declared case
+rather than as free text. Three `FieldName` cases do not exist yet, and this
+slice adds them to
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`
+beside the mitigation group already there:
+
+```scala
+  // The analysis request bodies
+  case Selection, NodesOnly, NodeIds
+```
+
+Each of the three schemas is derived from that type's own `Raw` and mapped onto
+the refined type, which is the convention ADR-038 §1 states and `RiskTree`
+follows. `Schema.any` is not used: it publishes an unconstrained value, so the
+two endpoints that carry the selection bounds would state neither the shape nor
+the bound, and §7.6.6 rules that out for the mitigation request types in the
+same words. Deriving from each type itself is not the alternative — two of the
+three have a private constructor, and all three give a field an optionality the
+codec supplies and the type does not show.
 
 **New file — `modules/common/src/main/scala/com/risquanter/register/http/responses/AnalysisResponses.scala`.**
 
