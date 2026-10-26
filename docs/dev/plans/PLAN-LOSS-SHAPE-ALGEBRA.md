@@ -864,9 +864,12 @@ case name, and `@jsonDiscriminator` names the tag field." Then delete
 the union, and with it the widened assignment at `Simulator.scala:113` that puts
 a `DistributionType` into a `String`.
 
-The declaration, with the tag field named `distributionType` and the two case
-spellings declared so the tagged payload carries the same key and the same two
-values the deleted field carries today:
+The declaration, with the tag field named `distributionType`. The two `@jsonHint`
+spellings and the `Expert…` case names in this block are superseded: `LSA-D-8`
+names the mode `Metalog`, `LSA-D-9` moves the cases into the companion as
+`DistributionParams.Metalog` and `DistributionParams.Lognormal`, and `LSA-D-11`
+drops the hints so the tag is the derived case name. The block is kept as the
+derivation of the tagged union; §19.1 holds the signatures the code matches:
 
 ```scala
 /** Distribution-specific parameters for loss modeling, as the simulator
@@ -1532,11 +1535,13 @@ A flat `Raw` record carrying `stage`, `transform`, `overrideBaseStamp`,
 that a decoder could read `stage: "leaf"` with the stamp and anchor present as
 `LeafAbsolute` and absent as `LeafRelative`. §13's gate refused it, so the cost
 is paid rather than avoided: the three cases are tagged by the serialiser.
-`@jsonDiscriminator("stage")` names the tag field and a `@jsonHint` per case
-gives the spelling — `leafRelative`, `leafAbsolute` and `result` — so the two
+`@jsonDiscriminator("stage")` names the tag field, and the tag value is the
+case's own name — `LeafRelative`, `LeafAbsolute` and `ResultStage` — so the two
 leaf cases are distinguishable from the tag alone rather than by which fields
-happen to be present. That is what ADR-037 prescribes for a closed set, and it
-is the device the shape and both component coproducts use.
+happen to be present. The three declared lowercase spellings this paragraph first
+carried were dropped by `LSA-D-11` and `LSA-D-12` (§19.3, §19.4). That is what
+ADR-037 prescribes for a closed set, and it is the device the shape and both
+component coproducts use.
 
 The consequence is a stored-format migration. A mitigation blob written before
 this change says `stage: "leaf"` and does not decode. `LSA-D-5` records the
@@ -1846,18 +1851,21 @@ So this is accepted today, stored, and hashed into the cache key:
 It is a third instance of this plan's own subject — the product
 over-represents — and the only one that reaches persisted bytes.
 
-**`LSA-D-5` rules that such a record is refused rather than normalised**, at both
-decode boundaries. The ruling's ground is that no such record exists: the
-environment is a development one, no simulation cache is live, and nothing stored
-predates this change, so there is no migration question to answer and the only
-question is which behaviour is right from here on.
+**`LSA-D-5` first ruled that such a record is refused rather than normalised, and
+that ruling was superseded on 2026-10-23** (§11). The refusal was conditional on
+being cheap, and it is not: the library's strictness annotation refuses the
+discriminator key itself. So the behaviour that stands is the one
+`DistributionShapeRequest`'s scaladoc records: a body naming one mode and
+carrying the other's fields decodes to the named mode and the surplus values are
+discarded. The ground that made either behaviour free of migration work is
+unchanged — the environment is a development one, no simulation cache is live,
+and nothing stored predates this change.
 
-That makes §9's claim exact rather than qualified. There is no stored leaf whose
-bytes change, because every stored leaf populates one mode; and there is no
-record that decodes to something re-encoding differently, because a record that
-would is refused at the boundary instead. **What does change is the request
-path:** a direct API client submitting off-mode fields is refused where it is
-accepted today, which §11 records as the ruling's one forward behaviour change.
+§9's claim therefore holds for every record that populates one mode, which is
+every record the browser can produce. A record carrying off-mode fields decodes
+to the named mode, so a decode-then-encode of it normalises rather than
+reproduces it; that is the one case §9's byte-identity does not cover, and the
+scaladoc states it as behaviour rather than as a guarantee.
 
 `LeafSimContentSpec`'s byte-stability snapshot pins leaves built through the
 browser's form, which populates one mode's fields and sets the other's to `None`
@@ -2276,9 +2284,9 @@ defect it exists to catch.
 encode of a stored leaf JSON and of a stored mitigation JSON must produce
 byte-identical output **for a record populating only its own mode's fields**,
 which is what makes §9's no-migration claim true rather than asserted. A record
-carrying off-mode fields is the `LSA-D-5` case, and what the test asserts there
-is decided by that ruling: under Option A it pins the normalised output, under
-Option B it pins the rejection and names the field.
+carrying off-mode fields is the `LSA-D-5` case, and what a test asserts there
+follows the supersession recorded under that decision: the body decodes to the
+named mode and the surplus values are discarded.
 
 **The two new construction gates** (§5.0). One test per rule, each asserting the
 refusal at construction rather than downstream:
@@ -2289,13 +2297,13 @@ existing assertions on `Mitigation.create`'s step-count refusal move with it and
 are not weakened — the refusal, its code and its location stay the same, only the
 constructor raising it changes.
 
-**The strictness audit's two findings each get a test, and both fail before the
+**The strictness audit's first finding gets a test, and it fails before the
 change** (§4.5). A term count of one with five anchors is refused by
 `MetalogTermCount` at the boundary; today it is accepted by `RiskLeaf.create` and
 surfaces as `DISTRIBUTION_FIT_FAILED` from the fitter on a stored node, so the
-test pins which layer refuses it as much as that it is refused. And a leaf
-submitted as lognormal with expert arrays is refused by `shapeFromRaw`
-(`LSA-D-5`); today it is accepted and persisted.
+test pins which layer refuses it as much as that it is refused. The second
+finding — a leaf submitted as lognormal with metalog arrays — has no refusal to
+test: `LSA-D-5`'s supersession keeps the decoder discarding the off-mode fields.
 
 **Every rule in §4.5's table has a test asserting the strict variant, not the
 weak one.** The table is the checklist: the element ranges, both ordering rules,
