@@ -57,7 +57,6 @@ case class NodeProvenance(
   lossVarId: Long,
   globalSeed3: Long,
   globalSeed4: Long,
-  distributionType: String,
   distributionParams: DistributionParams,
   timestamp: Instant,
   metalogDistributionVersion: String
@@ -236,9 +235,11 @@ use for.
 ### Reading the records off the results
 
 `descendantProvenances` in `CachedResultResolverLive` was private, served the
-portfolio-collapse path, and discarded the node id; the FB-F transplant deletes
-it along with that path. So the endpoint needs its own function, and it lives on
-the `LossDistribution` companion:
+portfolio-collapse path, and discarded the node id; the FB-F transplant deleted
+it along with that path. So the endpoint needs its own function, and that
+function has landed on the `LossDistribution` companion at
+`LossDistribution.scala:127`, with the signature and body below. Nothing in this
+section remains to be written:
 
 ```scala
 /** Each simulated leaf's provenance record, keyed by the node that carries it.
