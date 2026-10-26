@@ -20,10 +20,7 @@
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 40000,
-        "maxLoss": 320000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 320000
       }
     }
   ],
@@ -41,10 +38,7 @@
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 15000,
-        "maxLoss": 600000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 600000
       }
     }
   ]

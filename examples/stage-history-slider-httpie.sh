@@ -51,7 +51,7 @@ for cmd in http jq; do
 done
 
 # distributionShape JSON for a lognormal leaf: $1 min, $2 max
-dist() { printf '{ "distributionType": "Lognormal", "minLoss": %s, "maxLoss": %s, "percentiles": null, "quantiles": null, "terms": null }' "$1" "$2"; }
+dist() { printf '{ "distributionType": "Lognormal", "minLoss": %s, "maxLoss": %s }' "$1" "$2"; }
 
 # Newest commit hash on a branch (history is oldest-first, so last entry = head).
 head_hash() {

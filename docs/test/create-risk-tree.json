@@ -22,10 +22,7 @@
       "distributionShape": {
         "distributionType": "Lognormal",
         "minLoss": 30000,
-        "maxLoss": 300000,
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null
+        "maxLoss": 300000
       }
     },
     {
@@ -34,8 +31,6 @@
       "probability": 0.95,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.1,
           0.5,

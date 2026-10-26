@@ -13,8 +13,6 @@
       "probability": 0.05,
       "distributionShape": {
         "distributionType": "Metalog",
-        "minLoss": null,
-        "maxLoss": null,
         "percentiles": [
           0.05,
           0.5,

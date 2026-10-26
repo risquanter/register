@@ -65,9 +65,7 @@
           8000000,
           25000000
         ],
-        "terms": null,
-        "minLoss": null,
-        "maxLoss": null
+        "terms": null
       }
     },
     {
@@ -76,9 +74,6 @@
       "probability": 0.3,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 200000,
         "maxLoss": 4000000
       }
@@ -89,9 +84,6 @@
       "probability": 0.1,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 1000000,
         "maxLoss": 15000000
       }
@@ -102,9 +94,6 @@
       "probability": 0.05,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 2000000,
         "maxLoss": 20000000
       }
@@ -115,9 +104,6 @@
       "probability": 0.2,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 100000,
         "maxLoss": 800000
       }
@@ -140,9 +126,7 @@
           4000000,
           18000000
         ],
-        "terms": null,
-        "minLoss": null,
-        "maxLoss": null
+        "terms": null
       }
     },
     {
@@ -151,9 +135,6 @@
       "probability": 0.25,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 50000,
         "maxLoss": 500000
       }
@@ -164,9 +145,6 @@
       "probability": 0.12,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 500000,
         "maxLoss": 5000000
       }
@@ -177,9 +155,6 @@
       "probability": 0.2,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 100000,
         "maxLoss": 1500000
       }
@@ -200,9 +175,7 @@
           4000000,
           18000000
         ],
-        "terms": null,
-        "minLoss": null,
-        "maxLoss": null
+        "terms": null
       }
     },
     {
@@ -223,9 +196,7 @@
           12000000,
           28000000
         ],
-        "terms": null,
-        "minLoss": null,
-        "maxLoss": null
+        "terms": null
       }
     },
     {
@@ -234,9 +205,6 @@
       "probability": 0.4,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 500000,
         "maxLoss": 8000000
       }
@@ -247,9 +215,6 @@
       "probability": 0.05,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 3000000,
         "maxLoss": 30000000
       }
@@ -270,9 +235,7 @@
           3000000,
           20000000
         ],
-        "terms": null,
-        "minLoss": null,
-        "maxLoss": null
+        "terms": null
       }
     },
     {
@@ -281,9 +244,6 @@
       "probability": 0.08,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 2000000,
         "maxLoss": 25000000
       }
@@ -294,9 +254,6 @@
       "probability": 0.12,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 2000000,
         "maxLoss": 50000000
       }
@@ -319,9 +276,7 @@
           8000000,
           40000000
         ],
-        "terms": null,
-        "minLoss": null,
-        "maxLoss": null
+        "terms": null
       }
     },
     {
@@ -330,9 +285,6 @@
       "probability": 0.15,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 500000,
         "maxLoss": 10000000
       }
@@ -343,9 +295,6 @@
       "probability": 0.1,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 1000000,
         "maxLoss": 12000000
       }
@@ -356,9 +305,6 @@
       "probability": 0.05,
       "distributionShape": {
         "distributionType": "Lognormal",
-        "percentiles": null,
-        "quantiles": null,
-        "terms": null,
         "minLoss": 5000000,
         "maxLoss": 40000000
       }
@@ -379,9 +325,7 @@
           5000000,
           35000000
         ],
-        "terms": null,
-        "minLoss": null,
-        "maxLoss": null
+        "terms": null
       }
     }
   ]

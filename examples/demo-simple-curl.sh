@@ -68,10 +68,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 500000,
-          "maxLoss": 8000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 8000000
         }
       },
       {
@@ -80,8 +77,6 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "probability": 0.1,
         "distributionShape": {
           "distributionType": "Metalog",
-          "minLoss": null,
-          "maxLoss": null,
           "percentiles": [
             0.25,
             0.5,
@@ -104,10 +99,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 300000,
-          "maxLoss": 3000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 3000000
         }
       },
       {
@@ -117,10 +109,7 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "distributionShape": {
           "distributionType": "Lognormal",
           "minLoss": 100000,
-          "maxLoss": 2000000,
-          "percentiles": null,
-          "quantiles": null,
-          "terms": null
+          "maxLoss": 2000000
         }
       }
     ]

@@ -98,10 +98,7 @@ create_workspace() {
         "distributionShape": {
             "distributionType": "Lognormal",
             "minLoss": 1000,
-            "maxLoss": 50000,
-            "percentiles": null,
-            "quantiles": null,
-            "terms": null
+            "maxLoss": 50000
         }
     }]
 }
