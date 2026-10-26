@@ -16,6 +16,7 @@ import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.services.helper.SeedVarIdAssigner
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
+import com.risquanter.register.auth.{Checked, Permission}
 /**
  * Live implementation of RiskTreeService with telemetry instrumentation.
  * 
@@ -437,7 +438,7 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): IO[AppError,Double] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Permission]): IO[AppError,Double] =
     traced("probOfExceedance") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -458,7 +459,7 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): IO[AppError,Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Permission]): IO[AppError,Map[NodeId, LECNodeCurve]] =
     traced("getLECCurvesMulti") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)

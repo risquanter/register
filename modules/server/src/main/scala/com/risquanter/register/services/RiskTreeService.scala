@@ -5,6 +5,7 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTre
 import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.AppError
+import com.risquanter.register.auth.{Checked, Permission}
 
 /** Service layer for RiskTree business logic.
   * 
@@ -96,7 +97,7 @@ trait RiskTreeService {
     * @param rev Read coordinate — branch head or a pinned commit.
     * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): IO[AppError, Double]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Permission]): IO[AppError, Double]
 
   /** Get LEC curves for multiple nodes with shared tick domain.
     *
@@ -114,7 +115,7 @@ trait RiskTreeService {
     *                   an earlier commit).
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
-  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false): IO[AppError, Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false)(using Checked[Permission]): IO[AppError, Map[NodeId, LECNodeCurve]]
 }
 
 object RiskTreeService:

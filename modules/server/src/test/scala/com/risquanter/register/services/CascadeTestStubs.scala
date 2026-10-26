@@ -32,8 +32,8 @@ object CascadeTestStubs:
     def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Permission]): IO[AppError, RiskTree] = onDelete(wsId, id)
     def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Permission]): IO[AppError, RiskTree] = ZIO.die(new UnsupportedOperationException)
     def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Permission]): IO[AppError, Option[(RiskTree, CommitHash)]] = onGetById(wsId, id, rev).map(_.map((_, stubCommit)))
-    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): IO[AppError, Double] = ZIO.die(new UnsupportedOperationException)
-    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): IO[AppError, Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
+    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Permission]): IO[AppError, Double] = ZIO.die(new UnsupportedOperationException)
+    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Permission]): IO[AppError, Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 
   /** `delete` always fails — simulates a tree that was already manually deleted.
     *
