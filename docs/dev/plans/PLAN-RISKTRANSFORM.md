@@ -1892,7 +1892,8 @@ Written for slices 1 to 5 (§7.6.4 names the slices). Those five carry exact
 signatures, ADR alignment, a verification plan and a file inventory. Slice 6 —
 the interface and the user documentation — is not elevated here. §7.6.12 lists
 the decisions, and all of them are now closed: slice 6's two were ruled on
-2026-09-15 and the rest are ruled or void. Slices 1 to 5 carry none. The valuation type slice 1 consumes is built, specified by
+2026-09-15 and the rest are ruled or void, apart from decision 11, which gates
+M4 slice 2 and is deliberately left open. The valuation type slice 1 consumes is built, specified by
 [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
 landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
 to gate. No M4 source edit is authorized until the approval token names this
@@ -2413,7 +2414,9 @@ has landed green (G8).
 | 5 | The two decision records: the ADR-017 amendment and the new ADR-037 | §7.6.9 |
 | 6 | The interface and the user documentation | not elevated — see §7.6.12 |
 
-Slices 2 to 5 are specified below and carry no open decisions. Slice 1 consumes
+Slices 2 to 5 are specified below. Slice 2 carries one open decision — §7.6.12
+decision 11, the submitted form of a leaf-stage mitigation — and slices 3 to 5
+carry none. Slice 1 consumes
 the valuation type, which is specified by
 [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
 carries no open decisions.
@@ -2422,7 +2425,7 @@ twelve rulings do not determine. Its own two decisions were ruled on 2026-09-15,
 so what slice 6 still needs is elevation to implementation grade rather than a
 ruling. §7.6.12 records them with the rest.
 
-#### 7.6.5 Slice 1 — the analysis read path
+#### 7.6.5 M4 slice 1 — the analysis read path
 
 **What this slice changes, in plain terms.** Today both analysis endpoints
 answer one question each: the exceedance probability at a node, and the loss
@@ -3049,7 +3052,11 @@ rejected one; until then the throw is unreachable and states the invariant.
 `LECCurvesMultiRequest` exposes no total constructor deliberately, so this is
 the one place the tension shows.
 
-#### 7.6.6 Slice 2 — the tree write path carries mitigations
+#### 7.6.6 M4 slice 2 — the tree write path carries mitigations
+
+**Not started.** This is M4's slice 2, not M2's. M2 slice 2 (§8.13 — the
+mitigation scope resolver and its per-workspace registry) has landed; this one has
+not, and the two are unrelated pieces of work that share a number.
 
 **What this slice changes, in plain terms.** A mitigation can be stored today
 and read back, but no request can create one: the tree PUT has no mitigation
@@ -3066,8 +3073,16 @@ request could carry — `PLAN-LOSS-SHAPE-ALGEBRA.md` replaced it with the
 `LeafRelative`/`LeafAbsolute` pair over `RelativeLikelihood`, `RelativeSeverity`
 and `AbsoluteReplacement` (see the supersession note at §7.1.3). The stored side
 of that shape has landed; the wire side has not, so what a request carries for a
-leaf-stage mitigation is an open wire-shape question rather than a rename. It is
-a guarded modification, so it is ruled before this slice starts.
+leaf-stage mitigation is an open wire-shape question rather than a rename.
+
+**That question is deliberately left unruled.** It is §7.6.12 decision 11, and it
+is the one open decision in §7.6 — nothing below it in this section answers it,
+and nothing should until this slice is the work in hand. A request shape is a
+published contract, so ruling it early fixes a contract against a user interface
+that does not exist yet, and §7.6.12 decision 7 already ruled that M4 ships
+selection and visualisation rather than mitigation authoring. The types written
+out below are kept as the record of what slice 2 was authorized to build before
+the shape changed beneath them.
 
 **`modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`** — new file:
 
@@ -3302,7 +3317,7 @@ when they choose. Placing the check in `validateMitigations` would have put it i
 the decode path as well, since `RiskTree`'s decoder routes through `fromNodes`;
 not adding it keeps every stored tree readable.
 
-#### 7.6.7 Slice 3 — the tree read carries resolved scopes
+#### 7.6.7 M4 slice 3 — the tree read carries resolved scopes
 
 **What this slice changes, in plain terms.** The selection interface has to draw
 a mitigation's row under every node it currently scopes, and has to say which
@@ -3439,7 +3454,7 @@ response object; the minimal adaptation maps it to `_.tree` so every existing
 consumer of `selectedTree` is untouched. The scopes and the stale ids are
 carried and unused until slice 6, which is where a consumer for them exists.
 
-#### 7.6.8 Slice 4 — change notification sees mitigation edits
+#### 7.6.8 M4 slice 4 — change notification sees mitigation edits
 
 **What this slice changes, in plain terms.** When a tree is saved, the server
 tells subscribers which nodes' figures changed. It computes that from the node
@@ -3561,7 +3576,7 @@ object MitigationScopeResolverLive:
           memo <- Ref.make(Map.empty[(TreeId, BranchRef), Vector[(CommitHash, ResolvedScopes)]])
 ```
 
-#### 7.6.9 Slice 5 — the two decision records
+#### 7.6.9 M4 slice 5 — the two decision records
 
 Decision 2 ruled that the client-facing mitigation contract is split by surface.
 Both documents land with the code they describe, not after it.
@@ -3745,12 +3760,13 @@ the server image's behaviour, which is all of slices 1 to 4.
 Each slice lands with a PATCH version bump in `build.sbt`, mirrored into `.env`
 and `.env.irmin`; closing M4 is the MINOR bump.
 
-#### 7.6.12 The slice decisions, all closed
+#### 7.6.12 The slice decisions
 
-Nothing here is open. Every decision below is ruled or void, so no decision gates
-any slice; what gates slice 6 is the work itself. All of them are listed here so
-the elevation states them rather than implying them, and each records its own
-resolution in place.
+Decisions 1 to 10 are all closed — each is ruled or void, and each records its own
+resolution in place. One decision is open, and it was opened after the other ten
+by work outside this plan: decision 11, the leaf-stage mitigation's request shape,
+which gates slice 2. All of them are listed here so the elevation states them
+rather than implying them.
 
 **The `ValuationResult` sub-slice does not exist and no decision below gates
 slice 1.** §8.16 ruled a fourth case of a sealed `LossDistribution` hierarchy;
@@ -3763,6 +3779,9 @@ is sequenced, so each is void rather than answered; decision 5 was answered by
 inspection and decision 8 was ruled and has landed. Decisions 6 and 7 are slice
 6's, and both were ruled on 2026-09-15. Each records its own resolution in
 place, and the text is kept so the sequence of rulings stays readable.
+
+Decision 11 is not one of that set. It did not exist when the other ten were
+written, and it is open.
 
 Numbering is kept stable because other sections reference these by number.
 Decision 5 was answered by checking the inventory rather than by a ruling, so it
@@ -4065,7 +4084,25 @@ the rest of M4, item 40 is marked closed then rather than at the end.
     join. `LossDistribution` stops being a hierarchy and becomes the mitigated
     value itself, so neither the subtype question nor the name question exists.
 
-#### 7.6.13 File inventory — slices 1 to 5
+11. **What a request carries for a leaf-stage mitigation.** §7.6.6 writes out
+    `MitigationSpecRequest` with a `LeafStage(transform: RiskLeafTransform, …)`
+    case. `RiskLeafTransform` is no longer a type a request could carry:
+    `PLAN-LOSS-SHAPE-ALGEBRA.md` replaced the param-stage product with the
+    `LeafRelative`/`LeafAbsolute` pair over `RelativeLikelihood`,
+    `RelativeSeverity` and `AbsoluteReplacement`, and that is the stored side
+    only — no request type mentions mitigations at all today. So the submitted
+    form of a leaf-stage mitigation is undecided rather than renamed. Two
+    sub-questions sit inside it: whether the request mirrors the stored coproduct
+    case for case, and how a relative statement that names only one component is
+    submitted, since the stored form always carries both.
+
+    **OPEN, and deliberately not ruled.** A request shape is a published
+    contract. Ruling it now would fix a contract against an authoring interface
+    that does not exist, and decision 7 above ruled that M4 ships selection and
+    visualisation rather than mitigation authoring. It is ruled when M4 slice 2 is
+    the work in hand, and it gates that slice alone.
+
+#### 7.6.13 File inventory — M4 slices 1 to 5
 
 These lines append to the shared `## File inventory` section on approval. Files
 already listed there for M1, M1R, M2 or M3 are repeated only where this plan
