@@ -1165,12 +1165,30 @@ cannot say which kind of failure it was, and tapir reports every body failure as
 `DecodeResult.Error`. `toValidationError` answers `TYPE_MISMATCH`, "body could
 not be read", for a body that was read and then refused.
 
-**The design: parse, then decode.** The body gets the same two-step shape the
-twelve codecs already have. `sttp.tapir.Codec.json` takes a function from the
-raw string to a `DecodeResult`, so the failure kind is this service's to choose,
-and `zio.json.JsonDecoder.fromJsonAST` decodes from an already-parsed value, so
-the structure is parsed once and walked once. Both were checked against
-`tapir-core_3-1.13.4` and `zio-json_3-0.8.0`.
+**The design: decode once, classify from the trace.** The body is read by the
+decoder of its own type, which is the only parser untrusted bytes reach, so the
+structure a caller can make this service build is bounded by the type rather
+than by the body cap. `sttp.tapir.Codec.json` takes a function from the raw
+string to a `DecodeResult`, so the failure kind is this service's to choose.
+`JsonDecoder.unsafeDecode` throws `JsonDecoder.UnsafeJson`, which carries
+`trace: List[JsonError]`, so the kind is read from a value rather than from a
+rendered sentence. Checked against `tapir-core_3-1.13.4` and
+`zio-json_3-0.8.0`: `UnsafeJson.trace`, `JsonError.render`,
+`JsonDecoder.unsafeDecode` and `zio.json.internal.FastStringReader(CharSequence)`
+are all public.
+
+**What the trace does and does not settle.** It locates a failure; it does not
+classify one. A field name or an array index in the trace means the reader got
+that far, and a body truncated that far in leaves the same path behind as a
+refused value does. So the path alone cannot separate "could not be read" from
+"read and refused" once either happens below the first level. What separates
+them is this service's own refusal sentences: every refinement reports through
+one function that prefixes a marker no message from zio-json's lexer carries, so
+the test is a contract with `ValidationMessages` rather than with the library's
+wording, which is the carve-out ADR-037 §2 states for a string that contracts
+with something other than the encoder. The marker's literal value and the
+function that writes it are added by this phase to `WireRefusal.scala` and are
+pinned by the two tests §13 names.
 
 New file
 `modules/common/src/main/scala/com/risquanter/register/http/codecs/RequestBodyCodec.scala`:
@@ -1184,10 +1202,14 @@ New file
   * both as `DecodeResult.Error`, which `WireDecodeFailureHandler` renders as
   * "could not be read", so a refused field is reported as an unreadable body.
   *
-  * Parsing first separates them, on the same terms as the single-value codecs
-  * in `IronTapirCodecs`: a parse failure is `Error`, a refinement's refusal is
-  * `InvalidValue` carrying the refinement's own sentence and none of the
-  * submitted value (ADR-035).
+  * The decoder's own failure trace separates them, on the same terms as the
+  * single-value codecs in `IronTapirCodecs`: a lexical failure is `Error`, a
+  * refinement's refusal is `InvalidValue` carrying the refinement's own
+  * sentence and none of the submitted value (ADR-035).
+  *
+  * The body is decoded once, by the decoder of the target type. Nothing here
+  * parses it to a generic tree first, because a generic parse is bounded only
+  * by the request-size cap while a typed decoder is bounded by the type.
   */
 object RequestBodyCodec:
 
@@ -1201,14 +1223,16 @@ object RequestBodyCodec:
     Codec.json[A](decode[A])(_.toJson)
 
   private def decode[A: JsonDecoder](raw: String): DecodeResult[A] =
-    Json.decoder.decodeJson(raw) match
-      case Left(syntax) => DecodeResult.Error(raw, JsonSyntaxRefusal(syntax))
-      case Right(ast)   =>
-        summon[JsonDecoder[A]].fromJsonAST(ast) match
-          case Left(sentence) => WireRefusal.refusedWith(sentence)
-          case Right(value)   => DecodeResult.Value(value)
+    val reader = new FastStringReader(raw)
+    try DecodeResult.Value(summon[JsonDecoder[A]].unsafeDecode(Nil, reader))
+    catch
+      case JsonDecoder.UnsafeJson(trace) =>
+        val sentence = JsonError.render(trace)
+        if WireRefusal.isRefusal(sentence) then WireRefusal.refusedWith(sentence)
+        else DecodeResult.Error(raw, JsonSyntaxRefusal(sentence))
+    finally reader.close()
 
-  /** The throwable `DecodeResult.Error` requires. It carries the parser's own
+  /** The throwable `DecodeResult.Error` requires. It carries the decoder's own
     * complaint for the log and never reaches a client: `toValidationError`
     * answers an `Error` with a fixed sentence and reads nothing from it. */
   private final case class JsonSyntaxRefusal(detail: String)
@@ -1231,6 +1255,24 @@ def refusedWith(sentence: String): DecodeResult.InvalidValue =
   DecodeResult.InvalidValue(
     List(TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(sentence)))
   )
+
+/** Opens every refusal sentence this service writes, and nothing zio-json's
+  * lexer writes. It is how a body decoder tells a refused value from text it
+  * could not read once both happen below the first level: the decoder's trace
+  * says where a failure was and not which kind it was.
+  *
+  * The square brackets and the two words are a contract with this file rather
+  * than with any serialiser, so they are declared here and not derived
+  * (ADR-037). A refinement that writes its own sentence instead of calling
+  * `refusalSentence` is reported as an unreadable body, which the second test
+  * in §13 is what catches. */
+private val RefusalMarker = "[refused]"
+
+/** The sentence a refinement reports, marked as a refusal. */
+def refusalSentence(detail: String): String = s"$RefusalMarker $detail"
+
+/** Whether a rendered decoder failure is one of this service's refusals. */
+def isRefusal(sentence: String): Boolean = sentence.contains(RefusalMarker)
 ```
 
 `refused(errs: List[ValidationError])` is then `refusedWith` mapped over the
@@ -1270,13 +1312,17 @@ in `BaseEndpoint`. The helper returns the same `EndpointIO.Body`, so
 field is named inside the sentence, which is where the handler's own rule puts
 the name for every input that is not a declared header.
 
-**Verification.** Four assertions, in
+**Verification.** Five assertions, in
 `modules/server/src/test/scala/com/risquanter/register/http/WireDecodeFailureHandlerSpec.scala`
 and an endpoint-level spec. A malformed body answers `TYPE_MISMATCH` and "body
 could not be read". A well-formed body whose field fails a refinement answers
 `INVALID_FORMAT` and a message naming that field. That message contains no part
-of the submitted value. A body that is both malformed and would have been
-refused answers the malformed case, because the parse runs first.
+of the submitted value. A body truncated after its first field answers
+`TYPE_MISMATCH`, which is the case the marker exists to get right and the path
+alone would get wrong. And a body of twenty thousand opening brackets answers
+`TYPE_MISMATCH` without terminating the process, which is the assertion that
+pins the bound the ruled design rests on: the typed decoder stops at the first
+level, so nothing walks that structure.
 
 ---
 
@@ -5278,11 +5324,44 @@ fitter is called with.
 
 ### EWB-D-41 — how a request body reports a refusal — RULED 2026-10-24
 
-**Ruled: Option A. A request body is read in two steps — parsed, then decoded —
-so a value the decoders refuse reports as `DecodeResult.InvalidValue` and a body
-that is not JSON reports as `DecodeResult.Error`. The condition the ruling
-carries: the refusal's sentence travels and the submitted value does not.**
-§5.4 states the design.
+**Ruled 2026-10-26, superseding the ruling of 2026-10-24: Option D. A request
+body is decoded once, by the decoder of its own type, and the failure kind is
+read from zio-json's structured failure trace. A value the decoders refuse
+reports as `DecodeResult.InvalidValue` and a body that is not JSON reports as
+`DecodeResult.Error`. The condition the ruling carries is unchanged: the
+refusal's sentence travels and the submitted value does not.** §5.4 states the
+design.
+
+**What the earlier ruling was, and why it was replaced.** It ruled Option A
+below — parse the raw string to `zio.json.ast.Json` first, then decode that
+value into the target type. A security review of this plan found that the
+generic parse accepts a structure the target type does not bound.
+`JsonDecoder[Json]` dispatches on the next character and, for `[`, decodes each
+element through `JsonDecoder[Json]` again with no depth counter, so nesting
+depth and element count are bounded only by the 8 MiB body cap. Two consequences
+follow for any caller who can reach an endpoint that takes a body, the
+unauthenticated workspace bootstrap included. A body of nested brackets
+overflows the fibre's stack, and a `StackOverflowError` is a
+`VirtualMachineError` that ZIO treats as fatal and answers by terminating the
+process. A flat array of numbers allocates one `BigDecimal`-backed value per
+element before the typed decode rejects the shape. A typed decoder has neither
+exposure: a decoder for a flat record reads `[` where it expects `{` and stops
+at the first level.
+
+**Option D — decode typed, classify from the trace** (ruled). `JsonDecoder`
+exposes its failure as a structured value and not only as the rendered string
+`decodeJson` returns. `JsonDecoder.UnsafeJson` carries
+`trace: List[JsonError]`, and `JsonError` is a sealed four-case type —
+`Message(txt)`, `ArrayAccess(i)`, `ObjectAccess(field)` and `SumType(cons)`.
+
+*Pros:* untrusted bytes reach no parser but the one the target type drives, so
+the bound on the structure is the type itself and there is no second bound to
+write or to keep correct. The two codes then mean the same thing on a body as on
+every other input, which is what `EWB-D-25` asks for and by the same reasoning:
+the decoder owns both steps, so it knows which of them failed.
+*Cons:* `unsafeDecode` takes a `zio.json.internal.RetractReader`, so the design
+names a package whose name declares it internal and which carries no stability
+promise. A test pinning both failure kinds is required rather than optional.
 
 **Goal.** `EWB-D-25` corrects the twelve single-value codecs so a value that was
 read and then refused is coded `INVALID_FORMAT` rather than `TYPE_MISMATCH`. Its
