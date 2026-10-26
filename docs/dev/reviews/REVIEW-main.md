@@ -372,3 +372,185 @@ discharged:
 escalated:
   (none new) — the routine entry's first item already names the security tier
 ```
+
+```
+COVERAGE  tier=security  scope=the plan documents and the glossary the range 67debe49..e33c223c
+          on main changed — source 1, named by the user ("on the plans scope"); the working
+          tree was clean, so the range resolved the scope. Whole-document scope on every file.
+read-in-full:
+  docs/dev/plans/PLAN-LOSS-SHAPE-ALGEBRA.md, PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md,
+    PLAN-RISKTRANSFORM.md, PLAN-ERROR-WIRE-BOUNDARY.md, PLAN-PROVENANCE-ENDPOINT.md,
+    PLAN-CONTROL-GROUPING.md, PLAN-MITIGATION-ROI.md, PLAN-VALIDATION-IDIOM.md,
+    IMPLEMENTATION-PLAN.md
+  docs/user/TERMINOLOGY.md
+  docs/dev/reviews/REVIEW-main.md, docs/dev/TODO.md
+  .claude/rules/security.md, .claude/skills/code-quality-review/SKILL.md,
+    .claude/skills/supply-chain/SKILL.md, .claude/skills/adr-constraints/SKILL.md,
+    CLAUDE.md, ~/.claude/CLAUDE.md
+  docs/dev/decision-records/ADR-017, ADR-021, ADR-022, ADR-024, ADR-029, ADR-030, ADR-034,
+    ADR-035, ADR-036, ADR-038, ADR-039
+  modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala
+  modules/common/src/main/scala/com/risquanter/register/http/requests/DistributionShapeRequest.scala
+  modules/server/src/main/scala/com/risquanter/register/http/RequestSpanInterceptor.scala
+  modules/server/src/main/scala/com/risquanter/register/http/sse/SSEController.scala (:50-92)
+  modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala (:245-275)
+  modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala (:57-84)
+  modules/server/src/main/scala/com/risquanter/register/Application.scala (:355-370)
+  zio-json 0.8.0 ast.scala (:445-456, :524-530, :594-613) and ZIO 2.1.24 FiberRuntime.scala
+    (:468-470, :686-690) and RuntimePlatformSpecific.scala (:37-44), from the coursier
+    sources jars — third-party, no sibling checkout
+discharged:
+  1 Project checklist — 2 findings reported — the hard rule on WorkspaceId holds in every
+    specified wire type (WireError.scala as specified in PLAN-ERROR-WIRE-BOUNDARY §3;
+    ErrorLocation.scala:37-71 declares no BranchRef and no storage path); R1-R8 unchanged,
+    no plan introduces a credential type
+  2 Input boundaries and injection — 1 finding reported (MUST-FIX, PLAN-ERROR-WIRE-BOUNDARY
+    §5.4 RequestBodyCodec: an untyped AST parse ahead of the typed decode); every other
+    parser boundary the plans specify is one ADR-029 §3 already lists, and no plan builds a
+    parser input by interpolation
+  3 Authentication, authorization, tenancy — PASS — every specified endpoint binds
+    `given Checked[Permission]` before the service call and resolves the tree through
+    `workspaceStore.resolveTreeWorkspace(key, treeId)` (PLAN-PROVENANCE-ENDPOINT Phase 2;
+    PLAN-RISKTRANSFORM §7.6.5, §7.6.7), and the selection names MitigationId values that are
+    looked up inside the already-resolved tree (§7.6.5 requireKnownMitigations); the SSE
+    revocation gap is reported as pre-existing against the shipped controller
+    (SSEController.scala:58-62)
+  4 Web API surface — 2 findings reported — the selection bounds are specified as decoder
+    smart constructors, which is the ADR-017 §6 vehicle, and are not implemented
+    (AnalysisRequests.scala absent; WorkspaceAnalysisEndpoints.scala:48 still
+    `jsonBody[List[NodeId]]`, TODO item 40 open); `Schema.any` on the three request types
+    in §7.6.5 contradicts §7.6.6 and ADR-038
+  5 SPA output paths — PASS — no plan specifies an output path other than Laminar's typed
+    interface; no plan persists anything in browser storage (grep of modules/app for
+    localStorage/sessionStorage/indexedDB/cookie is empty)
+  6 Distributed and asynchronous computation — 1 finding reported (NOTE, the uncached
+    double resolution on the write path in PLAN-RISKTRANSFORM §7.6.8); the scope memo key
+    carries (TreeId, BranchRef, CommitHash) inside a per-WorkspaceId instance (§8.13); the
+    staged merge publishes under compare-and-set (§8.19.9)
+  7 Secrets, credentials, errors, logging — PASS — the key crosses in the two minting
+    responses only (WorkspaceResponse.scala:8, :18); the span name and the server log read one
+    redacted definition (RequestSpanInterceptor.scala:89-94, Application.scala:361-364); the
+    merge guard logs the repository's reason and sends the tree ids alone
+    (ScenarioMergeService.scala:256-259, MergeRefusal.scala:36)
+  8 Containers and pipeline — not applicable — no document in scope specifies a container,
+    compose, entrypoint or workflow change
+  9 Supply chain — not applicable — no document in scope specifies a dependency change;
+    the one version change in the range is the PATCH bump in build.sbt
+  10 Inline verification — the depth recursion and the memory amplification are read from
+    zio-json's and ZIO's own sources and not executed; the single check is named in the
+    finding
+escalated:
+  (none) — every item needing deeper analysis is reported here with its verdict; the
+  items needing a ruling are in the decision guides
+```
+
+```
+COVERAGE  tier=security  scope=the source files PLAN-LOSS-SHAPE-ALGEBRA touched — the union of
+          `git diff 4320b698..HEAD --name-only -- modules/` and the bullet lines of
+          PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md — with the routine entry's first escalation
+          item (the twelve derived discriminator tags) as the focus; source 1, named by the
+          user. Whole-file scope on every file. The inventory names
+          modules/common/src/main/scala/com/risquanter/register/domain/data/Distribution.scala,
+          which does not exist.
+read-in-full:
+  .claude/rules/security.md, .claude/skills/code-quality-review/SKILL.md,
+    .claude/skills/supply-chain/SKILL.md, .claude/skills/adr-constraints/SKILL.md,
+    CLAUDE.md, ~/.claude/CLAUDE.md, docs/dev/TODO.md (headings; items 15, 40-43, 46, 60, 62)
+  docs/dev/decision-records/ADR-001.md, ADR-001-appendix.md, ADR-010.md, ADR-017-tree-api-design.md,
+    ADR-017-NOTES.md, ADR-022, ADR-029, ADR-032, ADR-034, ADR-035, ADR-036, ADR-037, ADR-038, ADR-039
+  docs/dev/reviews/REVIEW-main.md; docs/dev/plans/PLAN-RISKTRANSFORM.md (:2814-2838);
+    docs/dev/plans/PLAN-ERROR-WIRE-BOUNDARY.md (:2671, :5347)
+  modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala,
+    RiskLeafTransform.scala, ResultTransformSpec.scala, DistributionShape.scala,
+    LeafSimContent.scala, Provenance.scala, RiskNode.scala, RiskTree.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala,
+    ValidationMessages.scala, ValidationUtil.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala,
+    MergeRefusal.scala, ValidationErrorCode.scala
+  modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala
+  modules/common/src/main/scala/com/risquanter/register/http/errors/ConflictKind.scala,
+    QueryProblem.scala, RejectionDetail.scala
+  modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala,
+    DistributionShapeRequest.scala, DistributionPreviewResponse.scala, RiskTreeRequests.scala,
+    RiskTreeUpdateRequest.scala, RiskTreeDefinitionRequest.scala
+  modules/common/src/main/scala/com/risquanter/register/http/endpoints/DistributionPreviewEndpoints.scala
+  modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala
+  modules/server/src/main/scala/com/risquanter/register/mitigation/RiskResultTransform.scala,
+    MitigationApplication.scala, ResultTransformInterpreter.scala
+  modules/server/src/main/scala/com/risquanter/register/services/DistributionPreviewService.scala,
+    RiskTreeServiceLive.scala, ScenarioServiceLive.scala,
+    ScenarioMergeService.scala (:268-330), TreeHistoryService.scala (grep)
+  modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationStaleness.scala,
+    MitigationScopeResolverLive.scala, CachedResultResolverLive.scala, ContentHashIndex.scala
+  modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala
+  modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala
+  modules/server/src/main/scala/com/risquanter/register/simulation/MetalogDistribution.scala
+  modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
+  modules/server/src/main/scala/com/risquanter/register/http/WireDecodeFailureHandler.scala
+  modules/server/src/main/scala/com/risquanter/register/http/controllers/DistributionPreviewController.scala,
+    ScenarioController.scala (:47-49), WorkspaceAnalysisController.scala (grep)
+  modules/app/src/main/scala/app/chart/DistributionSpecBuilder.scala, components/TreeNodeRow.scala,
+    state/DistributionMode.scala, state/FormMode.scala, state/RiskLeafFormState.scala,
+    state/TreeBuilderState.scala, state/DistributionChartState.scala,
+    views/RiskLeafFormView.scala, views/TreePreview.scala, views/DistributionChartView.scala,
+    views/TreeDetailView.scala
+  modules/common/src/test/scala/com/risquanter/register/http/PublishedDiscriminatorSpec.scala,
+    domain/data/MitigationEntitySpec.scala (:150-220), domain/data/LeafSimContentSpec.scala (:20-60)
+  build.sbt (diff: version only); the remaining test files in the diff as a grep for
+    realistic secrets and for removed assertions
+  zio-json 0.8.0 macros.scala (:585-704, the disambiguator and missing-hint refusals) from the
+    coursier sources jar — third-party, no sibling checkout
+discharged:
+  1 Project checklist — PASS — WorkspaceId has no codec and no schema (OpaqueTypes.scala:951-953),
+    so no derived schema in scope can publish it; ErrorLocation.scala:37-44 declares no BranchRef
+    case; MergeConflictEntry.path is workspace-relative (ScenarioMergeResponse.scala:9-15);
+    R1-R8 unchanged at OpaqueTypes.scala:849-869; no new credential type
+  2 Input boundaries and injection — PASS — every discriminated coproduct decodes through a
+    per-case refining codec (ResultTransformSpec.scala:68-144, Mitigation.scala:201-208 and
+    :306-315, DistributionShape.scala:315-325 and :348-358, OpaqueTypes.scala:154-162 and
+    :714-716); an unknown or absent tag is refused by zio-json (macros.scala:585, :650); the
+    only parser inputs in scope are the targeting predicate, re-run through
+    TargetingPredicate.create on decode (Mitigation.scala:23-24), and the Irmin documents,
+    whose interpolated values are refined (ADR-029 §3)
+  3 Authentication, authorization, tenancy — 2 findings reported (SHOULD-FIX pre-existing:
+    RiskTreeService.probOfExceedance and getLECCurvesMulti carry no `using Checked[Permission]`
+    while the five mutating methods do, RiskTreeServiceLive.scala:441 and :462; NOTE
+    pre-existing: ScenarioSource.AtCommit forks at any commit in the shared store,
+    ScenarioServiceLive.scala:83-94); no request body in scope carries a Mitigation
+    (endpoint grep; RiskTreeServiceLive.scala:374-380 carries stored mitigations over), so no
+    mitigation arm is caller-selectable; LeafAbsolute.anchor resolves only inside the loaded
+    tree (MitigationStaleness.scala:26-27)
+  4 Web API surface — PASS — a body decode failure answers "body could not be read" and never
+    the zio-json text (WireDecodeFailureHandler.scala:134-135, :156-159); every bound a request
+    carries is in a type or a gate (QuantileAnchors 2..20 at DistributionShape.scala:61-62,
+    MetalogTermCount 2..20, pipeline 1..10 at Mitigation.scala:168-172, 1 000 mitigations and
+    10 000 nodes at RiskTree.scala:106/:169); the unbounded List[NodeId] body is TODO 40
+  5 SPA output paths — PASS — every render site is Laminar's typed interface; the one
+    non-text sink is `styleAttr` built from HexColor, whose refinement is
+    `^#[0-9a-fA-F]{6}$` (TreeDetailView.scala:83, :318; OpaqueTypes.scala:1011), which is
+    ADR-029 §2's approved alternative; no browser storage (grep of modules/app empty)
+  6 Distributed and asynchronous computation — PASS — the cache key's only input is
+    LeafSimContent's own bytes (ContentHashIndex.scala:50-51), the mode spelling is declared
+    there by hand (LeafSimContent.scala:61-72) and pinned (LeafSimContentSpec.scala:32, :46,
+    pass); leaf-stage mitigations are baked into the hashed tree
+    (CachedResultResolverLive.scala:69-73) and the cache is per workspace (:72); the scope memo
+    serves an entry only on an exact revision match (MitigationScopeResolverLive.scala:38-39)
+  7 Secrets, credentials, errors, logging — PASS — the fitter's own text is logged and never
+    sent (Simulator.scala:121-130, :195-203); a stored-value refusal is a typed
+    RepositoryFailure (RiskTreeRepositoryIrmin.scala:160) projected to InternalFault; the
+    WorkspaceId in those reasons stays server-side (ADR-036 §3); no realistic secret in any
+    touched fixture (grep empty)
+  8 Containers and pipeline — not applicable — no file in scope is a container, compose,
+    entrypoint or workflow definition
+  9 Supply chain — not applicable — the only build.sbt hunk is the version bump
+    0.10.59 → 0.11.4; no dependency changed
+  10 Inline verification — the escalated item settled by executing
+    `sbt commonJVM/testOnly *PublishedDiscriminatorSpec *MitigationEntitySpec *LeafSimContentSpec
+    *ResultTransformSpecSpec` (pass): the published mode values are Lognormal/Metalog
+    (PublishedDiscriminatorSpec.scala:97-99), so the complex tier's MUST-FIX on the private raw
+    case names is closed at DistributionShape.scala:243-258; the other tiers were not re-run
+escalated:
+  (none)
+```
