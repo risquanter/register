@@ -18,6 +18,7 @@ import vql.logic.ParsedQuery
 import vql.semantics.VagueSemantics
 import vql.sampling.{SamplingParams, HDRConfig}
 import vql.typed.{FolModel, QueryBinder, BoundQuery, BoundFormula, BoundTerm, BoundVar}
+import com.risquanter.register.auth.{Checked, Permission}
 
 /** Live implementation of [[QueryService]] using the `vql.typed` many-sorted pipeline.
   *
@@ -68,7 +69,7 @@ class QueryServiceLive private (
       )
     ).unit
 
-  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): IO[AppError, QueryResponse] =
+  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Permission]): IO[AppError, QueryResponse] =
     traced("evaluate") {
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)
