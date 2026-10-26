@@ -4132,6 +4132,30 @@ each build `RiskTreeServiceLive.layer`, which now also requires
 two browser call sites of the endpoints whose signatures change, and without
 them the Scala.js module does not compile.
 
+#### 7.6.14 Terminology impact
+
+One term is affected, and the rest of the glossary's mitigation vocabulary is
+already current.
+
+**Affected: Part 4's framing, and the selection concept it does not name.** The
+decision is design anchor A7 — a selection is any subset of the tree's
+mitigations, each with its own scope restriction, and one selection yields one
+mitigated valuation per node. The glossary presented inherent and residual as the
+two valuations. Under A7 they are the empty and the full selection, and a
+selection between them is reachable in a screening query that names a single
+mitigation. Part 4 is reframed and a Part 4.5 defines selection and restriction.
+
+**Not affected, checked against the shipped code rather than against this plan.**
+A mitigation's three parts; predicate targeting replacing the explicit set
+(§8.4-1); the pipeline's one-to-ten bound; precedence's three named values and
+its identifier tiebreak; the five result-stage operations; scope-disjoint
+mitigations commuting; the parameter-stage arrow over a leaf's two parts; one
+control that is relative in one part and absolute in the other being two
+mitigations; layer; the raw valuation; the trial default; the mitigation ceiling.
+
+**M5 cannot be assessed.** §7.7 records a problem space with no design, so it has
+no decisions to pair a term against. The assessment is owed when M5 is designed.
+
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 
 Ruled on OD-4 (2026-08-08): this is the plan's **last deliverable**, to be

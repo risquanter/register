@@ -255,7 +255,8 @@ leaf is added there.
 
 Because the reduction is held apart from the node, the same tree can be valued
 with mitigations applied or without them. Those two valuations are inherent risk
-and residual risk, and Part 4 defines both.
+and residual risk, and the same tree can also be valued with any set of its
+mitigations in between. Part 4 defines all three terms.
 
 ### 3.2 The two stages
 
@@ -436,7 +437,7 @@ change different parts of it.
 
 ---
 
-## Part 4 — The two valuations
+## Part 4 — Valuing a tree with and without mitigation
 
 ### 4.1 The obstruction
 
@@ -463,10 +464,10 @@ same reason, and both are ordinary things for an author to write.
 
 ### 4.2 The resolution
 
-So two valuations are computed rather than one. The raw valuation of Part 2 is
-untouched, and it is what the cache holds. A second fold — the **mitigated
-valuation** — runs over the same tree with one extra step in its rule: combine
-the children, then apply this node's own transform.
+So a tree is valued twice over. The raw valuation of Part 2 is untouched, and it
+is what the cache holds. A second fold — the **mitigated valuation** — runs over
+the same tree with one extra step in its rule: combine the children, then apply
+this node's own transform.
 
 ```
 mitigated(leaf)      = f_leaf( simulate the leaf )
@@ -538,8 +539,34 @@ tree whose only mitigations have no effect: a scale factor of exactly 1 is a val
 mitigation and changes no figure, and the residual valuation is then the inherent
 one rather than something that resembles it.
 
-In a screening query the two are written as the words `inherent` and `residual`,
-as in `p95(x, "residual")`.
+### 4.5 Selection
+
+A **selection** is the set of mitigations a valuation applies, and each
+mitigation in it may be restricted to some of the nodes it targets rather than
+all of them. One selection produces one mitigated figure per node: several
+simultaneously selected mitigations covering a node compose into a single figure,
+not one figure each.
+
+Inherent risk and residual risk are the two ends of that range. Inherent risk is
+the empty selection, and residual risk is the selection holding every mitigation
+at its full target set. Everything between is also a selection, and it is how a
+question about one control on its own is asked.
+
+Say a tree carries three mitigations and an author wants to know what the
+backups control is worth by itself. The selection holding that one mitigation,
+at its full target set, values the tree with it applied and the other two not.
+Comparing that figure against the inherent figure is what attributes a benefit
+to that one control.
+
+A restriction narrows a mitigation within a selection. An insurance policy
+targeting every leaf under Technology can be selected for two of those leaves
+only, which answers what the policy would be worth if it covered just them.
+
+In a screening query a selection is the second argument to a figure. The words
+`inherent` and `residual` name the two ends, as in `p95(x, "residual")`. A
+mitigation named directly, or bound by a quantifier, names the selection holding
+that one mitigation: `p95(x, m)` under `∃m : mitigation` asks the question the
+example above asks.
 
 ---
 
