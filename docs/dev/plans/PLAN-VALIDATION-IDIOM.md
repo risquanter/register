@@ -203,19 +203,19 @@ either way.
 
 ```scala
   /** Succeeds with no payload when `condition` holds, and otherwise fails with
-    * a single `ValidationError` carrying the field path, code and message.
+    * a single `ValidationError` carrying the location, code and message.
     * `message` is evaluated only on failure, so a call site may interpolate the
     * offending values into it without paying for that on the success path.
     * Combine several of these with `Validation.validateAll`.
     */
   def requireThat(
     condition: Boolean,
-    field: String,
+    location: ErrorLocation,
     code: ValidationErrorCode,
     message: => String
   ): Validation[ValidationError, Unit] =
     if condition then Validation.succeed(())
-    else Validation.fail(ValidationError(field, code, message))
+    else Validation.fail(ValidationError(location, code, message))
 ```
 
 **Why this does not delegate to `Validation.fromPredicateWith`.** zio-prelude

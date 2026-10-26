@@ -1773,7 +1773,7 @@ This would reduce each call site from ~5 lines to 1 line while preserving identi
 1. **Reactive validation signals** — per-field `Signal[Option[String]]` from `RiskLeafFormState` / `PortfolioFormState` (e.g., `nameError`, `probabilityError`). These drive both error messages *and* red border CSS (`cls.toggle("error") <-- errorSignal.map(_.isDefined)`).
 2. **Submit-time topology errors** — validation failures from `TreeBuilderLogic` (e.g., duplicate node name, missing parent, root conflict). These are caught in `handleSubmit` and routed to a `submitError: Var[Option[String]]` rendered as text at the form bottom.
 
-**Problem:** When a submit-time error has a `field` attribute (e.g., `ValidationError("tree.names", DUPLICATE_VALUE, "Duplicate names: Server")`) that corresponds to a form field, the user sees the error message at the bottom of the form but the offending field has **no red border** — because the error is not injected into the per-field `errorSignal`.
+**Problem:** When a submit-time error names a location that corresponds to a form field (e.g., `ValidationError(ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.Name), DUPLICATE_VALUE, "Duplicate names: Server")`) the user sees the error message at the bottom of the form but the offending field has **no red border** — because the error is not injected into the per-field `errorSignal`. A `ValidationError` carries a typed `ErrorLocation` rather than a field string, so matching an error to a control is a match on that location rather than a string comparison.
 
 **Reproduction:**
 1. Create a tree with a leaf node named "Server".

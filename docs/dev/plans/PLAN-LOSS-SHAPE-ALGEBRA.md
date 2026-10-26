@@ -2,14 +2,23 @@
 
 **Plan code `LSA`.** Decisions in this document are labelled `LSA-D-1` upward.
 
-**Status: derivation complete, all five decisions ruled, inventory and token in
-place, awaiting the accepted signal on this document.** The replacement type is
-derived and its signatures are written out below. `LSA-D-1` to `LSA-D-5` are
-ruled (2026-10-22), with their consequences written into §4.5, §5.6, §6.6, §8,
+**Status: implemented and landed green.** The replacement type is derived, its
+signatures are written out below, and the code matches them. `LSA-D-1` to `LSA-D-5`
+are ruled (2026-10-22), with their consequences written into §4.5, §5.6, §6.6, §8,
 §9.1, §12, §13 and §14. `PLAN-LOSS-SHAPE-ALGEBRA-INVENTORY.md` exists beside this
-document and carries all 25 paths as bullet lines, and
-`.claude/protocol/approved` names this plan. What remains before any source edit
-is the accepted signal on this document.
+document and carries the paths as bullet lines, and `.claude/protocol/approved`
+names this plan. Every tier that can run in this environment is green: the shared
+module, the server, the Scala.js application and the integration tier. The BATS
+smoke suites have not run against it, because they need application images built at
+the current version.
+
+**One item of scope is outstanding: the `RiskTreeJson` → `RiskTreeRaw` rename.**
+`RiskTreeJson` is the single wire-shape name that does not follow the convention
+the rest of this plan established, and it is the name ADR-038 §1's own worked
+example uses. The inventory now names
+`modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`,
+so the gate is clear. Until that lands, this plan is not done and its token stays
+open.
 
 **Two things the plan-gate pass added, both from checking a claim rather than
 from the derivation.** §4.5 inventories every rule across all five current rule

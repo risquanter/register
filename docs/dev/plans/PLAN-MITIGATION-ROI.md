@@ -49,11 +49,15 @@ Confirmed by reading the current sources:
   per-trial loss vector; a commutative monoid whose `combine` is a per-trial
   pointwise sum via `Math.addExact` (overflow → `ArithmeticException` →
   `ValidationError` at `RiskResultGroup.create`, ADR-010/033).
-- `RiskResult` / `RiskResultGroup` extend the sealed `LossDistribution`. The
-  full per-trial sample is retained, so **any read-side statistic (mean, any
-  quantile, any tail mean, base-minus-mitigated difference) is computable
+- `LossDistribution` is one concrete `final case class` with a private
+  constructor, carrying figures only; the aggregate claim that a total equals the
+  combine of its children sits on a `private[cache]` family beneath it, where
+  `RiskResult` and `RiskResultGroup` now live. `PLAN-FBF-VALUATION-TRANSPLANT.md`
+  landed that shape in place of the sealed hierarchy those two used to extend. The
+  full per-trial sample is retained either way, so **any read-side statistic (mean,
+  any quantile, any tail mean, base-minus-mitigated difference) is computable
   without re-simulation** — this is the ADR-014 "cache outcomes, not curves"
-  guarantee.
+  guarantee, and it is what this plan depends on.
 
 **`modules/server/.../simulation/LECGenerator.scala`**
 - `averageAnnualLoss(result): Double` — the mean of the unconditional loss

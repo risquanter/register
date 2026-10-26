@@ -291,6 +291,10 @@ and keeping only a metadata trace is rejected.
   on the probability and a `DistributionTransform` on the distribution, either
   component the identity. Product (disjoint fields, commuting), unlike the
   result-stage pipeline, which is an ordered, non-commutative composition.
+  (`PLAN-LOSS-SHAPE-ALGEBRA.md` has since replaced the product with a coproduct of
+  a relative and an absolute case, and the arrow's object with `LeafParams` rather
+  than the whole leaf — see the supersession note at §7.1.3. The relative case is
+  still a product of two commuting components.)
 - **Explicit representation, stored in versioned tree content** — either on the
   affected node or associated with the tree with a transparent node mapping.
 - **Effective node derived at resolution:** parameter-stage before simulation,
@@ -485,7 +489,31 @@ object TransformPipeline {
 
 #### 7.1.3 Param-stage: `RiskLeafTransform` product
 
-New file `domain/data/RiskLeafTransform.scala`:
+**SUPERSEDED by `PLAN-LOSS-SHAPE-ALGEBRA.md`, which has landed. The signatures
+below must not be implemented; they are the record of what M1 was authorized to
+build.** What ships in `domain/data/RiskLeafTransform.scala` is three coproducts in
+place of the product, and the relative and absolute kinds are now separate types
+rather than an `Override` case inside each component:
+
+```scala
+sealed trait RelativeLikelihood        // Keep | Scale(factor: RetentionFactor)
+sealed trait RelativeSeverity          // Keep | ScaleSeverity(factor: RetentionFactor)
+sealed trait AbsoluteReplacement       // Likelihood(probability) | Severity(shape) | Both(probability, shape)
+final case class LeafParams(probability: OccurrenceProbability, shape: DistributionShape)
+object RiskLeafTransform               // no constructor: the severity-scaling arithmetic only
+```
+
+Four consequences for reading the rest of this plan. `LikelihoodTransform` is
+`RelativeLikelihood` and `DistributionTransform` splits into `RelativeSeverity` and
+`AbsoluteReplacement`. `OverrideDistributionParams` is gone, and an absolute
+replacement names a whole `DistributionShape` instead of six optional fields, so
+there is no mode invariant left for it to re-validate. `RiskLeafTransform` is no
+longer a product case class, so it has no `identity` value and no codec; the
+identity arrow is `MitigationSpec.LeafRelative(Keep, Keep)`. And `applyTo` moved to
+`LeafStageSpec` and now transforms `LeafParams` rather than a whole `RiskLeaf`,
+because identity, name, parent and seed identity are outside a transform's reach.
+`RetentionFactor` and `ResidualProbability` are `case class` wrappers rather than
+the Iron aliases the comment below names.
 
 ```scala
 sealed trait LikelihoodTransform
@@ -597,9 +625,15 @@ object MitigationPrecedence {
 
 sealed trait MitigationSpec
 object MitigationSpec {
-  /** Param-stage; leaves only. overrideBaseStamp = ContentHash of the target leaf's
-    * LeafSimContent (DD-16 projection) at authoring time — REQUIRED iff either component
-    * is an Override (staleness layer 1); renames/reparents do not change it by construction. */
+  /** SUPERSEDED by PLAN-LOSS-SHAPE-ALGEBRA.md, which has landed: the one LeafStage
+    * case is now two, and the stamp is required by the type rather than by a rule.
+    * What ships is a `sealed trait LeafStageSpec extends MitigationSpec` grouping
+    * `LeafRelative(likelihood: RelativeLikelihood, severity: RelativeSeverity)` and
+    * `LeafAbsolute(replacement: AbsoluteReplacement, anchor: NodeId, baseStamp: ContentHash)`.
+    * Because only the absolute case carries the anchor and the stamp, and carries
+    * both unconditionally, the "REQUIRED iff either component is an Override" rule
+    * below no longer exists: a relative statement has nowhere to put a stamp and an
+    * absolute one cannot be written without one. Param-stage; leaves only. */
   final case class LeafStage(transform: RiskLeafTransform, overrideBaseStamp: Option[ContentHash]) extends MitigationSpec
   /** Result-stage; any node. */
   final case class ResultStage(pipeline: TransformPipeline) extends MitigationSpec
@@ -728,6 +762,20 @@ finished `TrialOutcomes` (operand or finished aggregate) — never inside
 `TrialOutcomes.combine`.
 
 #### 7.1.6 Shared mode-fields invariant
+
+**SUPERSEDED by `PLAN-LOSS-SHAPE-ALGEBRA.md`, which has landed. This helper must
+not be implemented, and nothing is left for it to do.** The mode rule it shares was
+a rule because one type held both modes' fields as `Option`s. `DistributionShape`
+is a coproduct whose `Metalog` case holds `QuantileAnchors` and whose `Lognormal`
+case holds a `LossRange`, so neither case has an absent field to check for and the
+"present" half of the rule is not expressible. The ordering half lives in
+`LossRange`'s own smart constructor, and the percentile-quantile pairing half in
+`QuantileAnchors`'s. `validateModeFields` and the four `RiskNode.validate*` helpers
+are gone, and so is the second caller the extraction existed for —
+`OverrideDistributionParams` no longer exists, and an absolute replacement names a
+whole validated `DistributionShape`.
+
+The original text follows as the record of what was authorized:
 
 The RiskLeaf mode rule (expert ⇒ percentiles+quantiles present; lognormal ⇒
 minLoss < maxLoss) currently lives in `RiskLeaf` (require + create). It is
@@ -1004,7 +1052,7 @@ existing docs when the feature ships:
 - `docs/user/API-TUTORIAL.md` (same section) → **wire-format reference
   examples** for the mitigation payloads (user ruling 2026-08-10, security
   review F5): the mitigation entity, the op-discriminated
-  `ResultTransformSpec` shapes, `RiskLeafTransform`, target/selection JSON —
+  `ResultTransformSpec` shapes, the two leaf-stage specs, target/selection JSON —
   worked request/response bodies. These examples are the documentation of the
   wire format; the OpenAPI document deliberately renders these types as
   opaque objects (`Schema.any` — a derived or hand-written schema would
@@ -1843,8 +1891,8 @@ Ammendment:
 Written for slices 1 to 5 (§7.6.4 names the slices). Those five carry exact
 signatures, ADR alignment, a verification plan and a file inventory. Slice 6 —
 the interface and the user documentation — is not elevated here. §7.6.12 lists
-the decisions: two gate slice 6, and the rest are closed. Slices 1 to 5 carry
-none. The valuation type slice 1 consumes is built, specified by
+the decisions, and all of them are now closed: slice 6's two were ruled on
+2026-09-15 and the rest are ruled or void. Slices 1 to 5 carry none. The valuation type slice 1 consumes is built, specified by
 [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
 landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
 to gate. No M4 source edit is authorized until the approval token names this
@@ -2370,7 +2418,9 @@ the valuation type, which is specified by
 [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
 carries no open decisions.
 Slice 6 is not elevated in this pass: it is the one part of M4 whose shape the
-twelve rulings do not determine. §7.6.12 lists the remaining open decisions.
+twelve rulings do not determine. Its own two decisions were ruled on 2026-09-15,
+so what slice 6 still needs is elevation to implementation grade rather than a
+ruling. §7.6.12 records them with the rest.
 
 #### 7.6.5 Slice 1 — the analysis read path
 
@@ -3007,6 +3057,17 @@ field, and `RiskTreeServiceLive.update` carries the previous version's
 mitigations forward so that the omission does not delete them. This slice gives
 the request both mitigation buckets, deletes the carry-over, and closes the two
 reference problems the buckets create.
+
+**The request types below name the superseded param-stage shape, and the slice
+cannot be implemented from them as written.** `MitigationSpecRequest`,
+`ResolvedMitigationStage` and their `LeafStage(transform: RiskLeafTransform, …)`
+case do not exist in the code, and `RiskLeafTransform` is no longer a type a
+request could carry — `PLAN-LOSS-SHAPE-ALGEBRA.md` replaced it with the
+`LeafRelative`/`LeafAbsolute` pair over `RelativeLikelihood`, `RelativeSeverity`
+and `AbsoluteReplacement` (see the supersession note at §7.1.3). The stored side
+of that shape has landed; the wire side has not, so what a request carries for a
+leaf-stage mitigation is an open wire-shape question rather than a rename. It is
+a guarded modification, so it is ruled before this slice starts.
 
 **`modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`** — new file:
 
@@ -3684,10 +3745,12 @@ the server image's behaviour, which is all of slices 1 to 4.
 Each slice lands with a PATCH version bump in `build.sbt`, mirrored into `.env`
 and `.env.irmin`; closing M4 is the MINOR bump.
 
-#### 7.6.12 Open decisions
+#### 7.6.12 The slice decisions, all closed
 
-Two decisions gate slice 6. Slices 1 to 5 carry none. All of them are listed here
-so the elevation states them rather than implying them.
+Nothing here is open. Every decision below is ruled or void, so no decision gates
+any slice; what gates slice 6 is the work itself. All of them are listed here so
+the elevation states them rather than implying them, and each records its own
+resolution in place.
 
 **The `ValuationResult` sub-slice does not exist and no decision below gates
 slice 1.** §8.16 ruled a fourth case of a sealed `LossDistribution` hierarchy;
@@ -3697,8 +3760,8 @@ landed one concrete `LossDistribution` carrying figures only, with the aggregate
 claim on a `private[cache]` family beneath it. Decisions 1, 2, 3, 4, 9 and 10
 below all ask where that fourth case lives, what it extends, or how its removal
 is sequenced, so each is void rather than answered; decision 5 was answered by
-inspection and decision 8 was ruled and has landed. Decisions 6 and 7 are the
-two that remain open, and both are slice 6's. Each records its own resolution in
+inspection and decision 8 was ruled and has landed. Decisions 6 and 7 are slice
+6's, and both were ruled on 2026-09-15. Each records its own resolution in
 place, and the text is kept so the sequence of rulings stays readable.
 
 Numbering is kept stable because other sections reference these by number.
@@ -4345,7 +4408,8 @@ drift signal; the M1 write-time rule "LeafStage targets are leaves"
 (§7.1.4) is superseded by this definition, which unlike the write check
 holds on every stored tree state, including merge results no PUT ever
 validated. The type level already makes the wrong application
-unrepresentable (`RiskLeafTransform.applyTo` accepts only `RiskLeaf`;
+unrepresentable (`LeafStageSpec.applyTo` accepts only `LeafParams`, which holds a
+leaf's probability and shape and nothing else;
 `effectiveTree` transforms leaf positions of the sealed `RiskNode` ADT),
 so the definition and the types agree — the resolver computes what the
 algebra could apply anyway. Consequences: an Override whose anchor node
@@ -4717,6 +4781,18 @@ final case class LeafStage(               // in object MitigationSpec
   overrideAnchor: Option[NodeId]          // required iff `transform` has an Override component
 ) extends MitigationSpec
 ```
+**The `LeafStage` case above is superseded and has landed in a different shape**
+(`PLAN-LOSS-SHAPE-ALGEBRA.md`; see the note at §7.1.3). What ships is
+`LeafAbsolute(replacement: AbsoluteReplacement, anchor: NodeId, baseStamp: ContentHash)`
+beside `LeafRelative(likelihood, severity)`. Both fields are non-optional and sit
+only on the absolute case, so the two cross-field rules stated next are enforced by
+the type: a relative statement has nowhere to put an anchor or a stamp, and an
+absolute one cannot be constructed without both. The anchor is named `anchor` and
+the stamp `baseStamp`. Everything this plan says about what the anchor is *for* —
+the scope-drift staleness layer, the resolution-equals-`{overrideAnchor}` check —
+is unaffected, because that design is about the anchored leaf rather than the
+field's name or its optionality.
+
 `Mitigation.create` (signature unchanged) cross-field rules become:
 LeafStage + Override component ⇒ `overrideBaseStamp` AND `overrideAnchor` both
 defined; LeafStage without an Override ⇒ both empty. The former "target
@@ -6651,8 +6727,8 @@ the read-side predicate and its tests only (§7.2.2a).
 
 #### Part 1 — what staleness means, from first principles
 
-A `LeafStage` mitigation with an Override component (`LikelihoodTransform.Override`
-or `DistributionTransform.Override`) asserts a fixed probability/distribution
+A `LeafAbsolute` mitigation (`AbsoluteReplacement.Likelihood`, `.Severity` or
+`.Both`) asserts a fixed probability/distribution
 against a *specific base state* of one leaf. `Mitigation.create` already enforces
 that such a mitigation carries both `overrideBaseStamp` (the `ContentHash` of that
 leaf's `LeafSimContent` at authoring time — the DD-16 simulation-relevant
@@ -10042,7 +10118,7 @@ originating design record.
 pre-existing, neither introduced by M1R:
 1. `RiskTree` and `TreeIndex` are the **only two aggregate types with public
    constructors** — `RiskLeaf`, `RiskPortfolio`, `Mitigation`,
-   `ResultTransformSpec`, `RiskLeafTransform`, `LossDistribution` all use
+   `ResultTransformSpec`, `LossDistribution` all use
    `private` + a smart constructor. So every invariant `RiskTree.fromNodes` /
    `TreeIndex.fromNodes` validates (unique ids, root-exists, and the new
    mitigation/step counts) is **bypassable** via `apply` / `.copy`.
@@ -10164,9 +10240,9 @@ offers no guidance at the point of authoring.
 | What the author means | Mechanism | Stage |
 |---|---|---|
 | every loss is proportionally smaller | `ScaleSeverity(f)` | parameter |
-| the bad case is much better, the typical case less so | `Override` with new bounds | parameter |
+| the bad case is much better, the typical case less so | `AbsoluteReplacement.Severity` with a new shape | parameter |
 | there is now a hard maximum | `capLosses(c)` | result |
-| it happens less often | `LikelihoodTransform.Scale(f)` | parameter |
+| it happens less often | `RelativeLikelihood.Scale(f)` | parameter |
 | the entity bears a fraction; the rest is transferred | `ScaleLosses(f)` | result |
 | the entity retains the first amount and transfers above it | `applyDeductible(d)`, `insurancePolicy(d, c)` | result |
 | smaller and hard-capped together | `ScaleSeverity(f)` with `capLosses(c)` | both |
@@ -10348,6 +10424,8 @@ recomputed against the code as it stands at the time of writing, not copied from
 the table above. The figures here were computed from
 `LognormalHelper.fromLognormal90CI` and the lognormal mean identity
 `exp(μ + σ² / 2)`; the construction assumes the parameter-stage transform still
-reaches the bounds through `RiskLeafTransform.distributionFields`. Re-verify both
+reaches the bounds. It now reaches them through `RiskLeafTransform.scaleSeverity`,
+which matches on `DistributionShape.Lognormal(bounds)` and scales
+`bounds.min`/`bounds.max`; `distributionFields` no longer exists. Re-verify both
 at documentation time. The documents follow the project's user-documentation style
 rules, which differ from this plan's.

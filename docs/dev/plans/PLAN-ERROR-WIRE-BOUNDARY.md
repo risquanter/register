@@ -2,8 +2,8 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All forty decisions, `EWB-D-1` to `EWB-D-40`, are ruled and recorded
-in §10. Nothing is open. Approval is in place: the token names this document and
+**Status.** All forty-one decisions, `EWB-D-1` to `EWB-D-41`, are ruled and
+recorded in §10. Nothing is open. Approval is in place: the token names this document and
 the file inventory exists beside it. Phases 1, 1a, 1b, 2, 2b, 2c and 3 have landed, and `EWB-D-27`'s
 projection change landed with them. What remains is Phase 3a, then Phase 3b, then
 Phases 4 to 7.
@@ -274,6 +274,8 @@ import com.risquanter.register.domain.errors.ValidationError
   * type and uses it, exactly as it does with a response type in
   * `http/responses` (ADR-035).
   */
+```
+
 Every case carries `trace`, projected from `AppError.trace`, so a failure the
 user sees names the trace it came from. It is last in every parameter list, so
 the case's own content reads first.
@@ -1144,6 +1146,137 @@ Both existing definitions are deleted and their call sites read `ActiveTrace.id`
 (`EWB-D-24`). The interceptor and the decode-failure handler hold `Tracing` as an
 ordinary parameter, so each supplies it explicitly: `ActiveTrace.id(using
 tracing)`.
+
+### 5.4 A request body reports a refusal as a refusal
+
+`EWB-D-25` corrects the twelve single-value codecs. A request body is the same
+defect through a different codec, and `EWB-D-41` rules that it is corrected the
+same way. This section states the design.
+
+**Why the twelve codecs' fix does not reach a body.** `EWB-D-25` rests on one
+property: "The parse step handles unreadable input on its own, so reaching the
+smart constructor already proves the value was readable." Each of the twelve
+parses with `Codec.int`, `Codec.long` or `Codec.string` and refines afterwards,
+so the two failures happen in two places. A body has one place. `jsonBody[T]` is
+`TapirJsonZio.jsonBody`, which builds `EndpointIO.Body[String, T]` from
+`zioCodec[T]`, and that codec hands the whole string to one zio-json decoder.
+zio-json's failure channel is a `String`, so a refinement inside `mapOrFail`
+cannot say which kind of failure it was, and tapir reports every body failure as
+`DecodeResult.Error`. `toValidationError` answers `TYPE_MISMATCH`, "body could
+not be read", for a body that was read and then refused.
+
+**The design: parse, then decode.** The body gets the same two-step shape the
+twelve codecs already have. `sttp.tapir.Codec.json` takes a function from the
+raw string to a `DecodeResult`, so the failure kind is this service's to choose,
+and `zio.json.JsonDecoder.fromJsonAST` decodes from an already-parsed value, so
+the structure is parsed once and walked once. Both were checked against
+`tapir-core_3-1.13.4` and `zio-json_3-0.8.0`.
+
+New file
+`modules/common/src/main/scala/com/risquanter/register/http/codecs/RequestBodyCodec.scala`:
+
+```scala
+/** A request body whose refusals are reported as refusals.
+  *
+  * Reading a body is two questions, and the answers are different failures. Is
+  * the text JSON at all — a client that truncated its request. Do the values
+  * satisfy the type — a client that sent a cap of -5. One decode call answers
+  * both as `DecodeResult.Error`, which `WireDecodeFailureHandler` renders as
+  * "could not be read", so a refused field is reported as an unreadable body.
+  *
+  * Parsing first separates them, on the same terms as the single-value codecs
+  * in `IronTapirCodecs`: a parse failure is `Error`, a refinement's refusal is
+  * `InvalidValue` carrying the refinement's own sentence and none of the
+  * submitted value (ADR-035).
+  */
+object RequestBodyCodec:
+
+  /** The body input every endpoint that takes one declares, in place of
+    * `jsonBody`. A response body keeps `jsonBody`: nothing decodes it here, so
+    * it has no refusal to report. */
+  def jsonRequestBody[A: JsonEncoder: JsonDecoder: Schema]: EndpointIO.Body[String, A] =
+    stringBodyUtf8AnyFormat(codec[A])
+
+  private def codec[A: JsonEncoder: JsonDecoder: Schema]: Codec[String, A, CodecFormat.Json] =
+    Codec.json[A](decode[A])(_.toJson)
+
+  private def decode[A: JsonDecoder](raw: String): DecodeResult[A] =
+    Json.decoder.decodeJson(raw) match
+      case Left(syntax) => DecodeResult.Error(raw, JsonSyntaxRefusal(syntax))
+      case Right(ast)   =>
+        summon[JsonDecoder[A]].fromJsonAST(ast) match
+          case Left(sentence) => WireRefusal.refusedWith(sentence)
+          case Right(value)   => DecodeResult.Value(value)
+
+  /** The throwable `DecodeResult.Error` requires. It carries the parser's own
+    * complaint for the log and never reaches a client: `toValidationError`
+    * answers an `Error` with a fixed sentence and reads nothing from it. */
+  private final case class JsonSyntaxRefusal(detail: String)
+      extends RuntimeException(detail)
+```
+
+**The three shared definitions move.** `EWB-D-25` places
+`ClientInputRedaction`, `NoTapirValidator` and `refused` as private values in
+`IronTapirCodecs.scala`. They are about how this service reports a refusal
+rather than about Iron, and a second caller now exists, so they move to
+`modules/common/src/main/scala/com/risquanter/register/http/codecs/WireRefusal.scala`
+and `IronTapirCodecs` reads them from there. The object gains one constructor
+for a caller whose refusal is already a sentence:
+
+```scala
+/** One `DecodeResult.InvalidValue` for a refusal that arrived as a sentence
+  * rather than as a located error, which is what a zio-json decoder's failure
+  * channel carries. */
+def refusedWith(sentence: String): DecodeResult.InvalidValue =
+  DecodeResult.InvalidValue(
+    List(TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(sentence)))
+  )
+```
+
+`refused(errs: List[ValidationError])` is then `refusedWith` mapped over the
+errors, so one construction serves both and the rejected-value slot holds the
+same constant on every path.
+
+**The non-disclosure condition, and what satisfies it.** The sentence travels
+and the submitted value does not. On the twelve codecs this holds because no
+`ValidationUtil` message interpolates the submitted value. On a body the
+sentence is zio-json's, which prefixes the decoder's path —
+`(ResultStage).pipeline[0](CapLosses)([request field cap] Loss cap must be
+greater than 0 …)` — and a path names fields and case names rather than values.
+Two obligations follow, and both are verification items rather than
+assumptions. A test asserts that a body carrying a distinctive value is refused
+with a message not containing it. The parser's own complaint is kept out: a
+syntax error is the one failure whose text could quote the input, which is why
+it takes the `Error` branch, where `toValidationError` answers a fixed sentence.
+
+**The call sites.** Eight endpoint declarations change from `jsonBody` to
+`jsonRequestBody`:
+
+- `WorkspaceLifecycleEndpoints.scala:30` and `:50` — `RiskTreeDefinitionRequest`
+- `ScenarioEndpoints.scala:31` — `CreateScenarioRequest`
+- `WorkspaceAnalysisEndpoints.scala:48` — `List[NodeId]`
+- `DistributionPreviewEndpoints.scala:32` — `DistributionShapeRequest`
+- `WorkspaceQueryEndpoints.scala:31` — `QueryRequest`
+- `WorkspaceTreeEndpoints.scala:95` — `RevertTreeRequest`
+- `WorkspaceTreeEndpoints.scala:105` — `RiskTreeUpdateRequest`
+
+Every response body keeps `jsonBody`, including the three outputs §5.3 declares
+in `BaseEndpoint`. The helper returns the same `EndpointIO.Body`, so
+`.description(…)` on the node-identifier body is unaffected.
+
+**What the handler needs.** Nothing. `constraintBroken` already reads
+`customMessage` off an `InvalidValue`, and `locationOf` already answers
+`ErrorLocation.Whole` for a body, which is the location a body refusal has: the
+field is named inside the sentence, which is where the handler's own rule puts
+the name for every input that is not a declared header.
+
+**Verification.** Four assertions, in
+`modules/server/src/test/scala/com/risquanter/register/http/WireDecodeFailureHandlerSpec.scala`
+and an endpoint-level spec. A malformed body answers `TYPE_MISMATCH` and "body
+could not be read". A well-formed body whose field fails a refinement answers
+`INVALID_FORMAT` and a message naming that field. That message contains no part
+of the submitted value. A body that is both malformed and would have been
+refused answers the malformed case, because the parse runs first.
 
 ---
 
@@ -2545,7 +2678,7 @@ object RiskPortfolio:
    The shape and the provenance record hold flattening sites of their own. A
    leaf's shape is a coproduct whose cases decode through their own
    `JsonCodec`, so the refusal is composed there rather than in `RiskLeaf`:
-   `DistributionShape.Expert.codec` and `DistributionShape.Lognormal.codec`
+   `DistributionShape.Metalog.codec` and `DistributionShape.Lognormal.codec`
    each end `.map(_.map(_.message).mkString("; "))`, which drops the element
    index `FieldName.PercentileAt` and `FieldName.QuantileAt` carry — the one
    part of the refusal that locates the bad value in a twenty-anchor shape.
@@ -5039,6 +5172,12 @@ describes.
 
 ### EWB-D-40 — the loss-distribution shape is declared three times — RULED 2026-10-21
 
+**Carried out. `PLAN-LOSS-SHAPE-ALGEBRA.md` has landed, and every type named below
+is gone — the three declarations are now one `DistributionShape` coproduct.** This
+decision is kept as the record of what was found and ruled, so read the code
+citations in it as the state on 2026-10-21. The closing paragraph states what holds
+now.
+
 **How it surfaced.** Implementing `EWB-D-39` turned `RiskLeafSpec` red.
 `RiskLeaf.create` does not reach `Distribution.scala:100`, because the
 minimum-under-maximum rule is implemented twice and the leaf's own path runs the
@@ -5062,12 +5201,12 @@ used by RiskLeaf". Neither holds in the code — `RiskLeaf` has no `Distribution
 field and no accessor returning one.
 
 **Why the rules duplicate rather than merely repeat.** Four of the six rules are
-statements that a particular `Option` is populated: expert requires percentiles,
-expert requires quantiles, lognormal requires both bounds, collections must not
+statements that a particular `Option` is populated: metalog requires percentiles,
+metalog requires quantiles, lognormal requires both bounds, collections must not
 be empty. They exist only because the type admits combinations that are not
 valid. A fourth type in the same package already shows the shape that removes
-them — `DistributionParams` at `Provenance.scala:35-49`, a sealed trait whose two
-cases, `ExpertDistributionParams` and `LognormalDistributionParams`, each carry
+them — `DistributionParams` in `Provenance.scala`, a sealed trait whose two
+cases, `DistributionParams.Metalog` and `DistributionParams.Lognormal`, each carry
 exactly their own fields with no `Option` anywhere. Under that shape those four
 rules cannot be written, because there is no absent field to check for. The two
 that survive — the minimum below the maximum, and percentiles matching quantiles
@@ -5121,6 +5260,77 @@ in `~/.claude/CLAUDE.md`, requiring every design assessment to name the algebrai
 structure in play and show the operation preserves its laws. Placing it is the
 user's, and the document carries the proposed wording.
 
+**Part 3 is discharged, and the code shape above no longer exists.** The separate
+plan this ruling called for is `docs/dev/plans/PLAN-LOSS-SHAPE-ALGEBRA.md`, and it
+has landed. The three declarations are now one: `DistributionShape`, a sealed trait
+in `DistributionShape.scala` with a `Metalog` case holding `QuantileAnchors` and an
+optional `MetalogTermCount`, and a `Lognormal` case holding a `LossRange`. Each case
+carries exactly its own fields, so none of the four populated-`Option` rules the
+paragraph above describes can be written, and the two that survive sit inside the
+case that owns them. The table's `Declared at` column records where the three types
+stood when this was ruled, and every entry in it is gone: `Distribution.scala`,
+`OverrideDistributionParams`, and the four `RiskNode.validate*` helpers together
+with `validateModeFields`. `DistributionPreviewService.preview` now takes
+`DistributionShape` rather than `Distribution`, which is how a validated shape
+exists with no leaf around it. `DistributionParams` in `Provenance.scala` stays, in
+a narrower role: `DistributionShape.resolve` returns it as the resolved parameters a
+fitter is called with.
+
+### EWB-D-41 — how a request body reports a refusal — RULED 2026-10-24
+
+**Ruled: Option A. A request body is read in two steps — parsed, then decoded —
+so a value the decoders refuse reports as `DecodeResult.InvalidValue` and a body
+that is not JSON reports as `DecodeResult.Error`. The condition the ruling
+carries: the refusal's sentence travels and the submitted value does not.**
+§5.4 states the design.
+
+**Goal.** `EWB-D-25` corrects the twelve single-value codecs so a value that was
+read and then refused is coded `INVALID_FORMAT` rather than `TYPE_MISMATCH`. Its
+reasoning rests on the parse step having already proved readability, which a
+request body does not have: `jsonBody` hands the whole string to one zio-json
+decoder, whose failure channel is a `String`, so every body failure arrives as
+`DecodeResult.Error` and is answered "body could not be read". A client that
+sends a well-formed body with one bad value is told its body was unreadable.
+
+**Option A — two steps** (ruled). Parse to `zio.json.ast.Json` first, then decode
+that value into the target type. The two failures then happen in two places, as
+they already do for the twelve codecs, so the kinds can be reported separately.
+
+*Pros:* the two codes mean the same thing on a body as on every other input, so
+one rule describes the whole API. The field the refusal is about reaches the
+client, which is what lets a form display it. The fix is the reading step split
+into the two things it does.
+*Cons:* this service declares its own body input in place of `jsonBody`, which
+is the first tapir input constructor it replaces rather than configures.
+
+**Option B — leave it.** The body's refusals stay coded `TYPE_MISMATCH` and the
+field and sentence appear in the server log only.
+
+*Cost:* a client outside this project cannot tell a typing mistake from a
+malformed request, and the two codes continue to mean the same thing for bodies.
+
+**Option C — one step, relabelled.** Report every body failure as
+`InvalidValue`, carrying zio-json's string.
+
+*Cost:* a malformed body is then reported as a value that was read and refused.
+This is the choice `EWB-D-25` rejected as Option A, for the same reason: it
+relabels the genuinely-unreadable case rather than correcting the other one.
+
+*Concretely:* a client sends `{"stage":"ResultStage","pipeline":[{"op":"CapLosses","cap":-5}]}`.
+Today the response says the body could not be read, coded `TYPE_MISMATCH`. After
+the change it names the cap field and the rule it broke, coded `INVALID_FORMAT`,
+and a truncated body still answers `TYPE_MISMATCH`.
+
+**Trade-off.** Whether the distinction the two codes draw is worth this service
+owning its body input. What settles it is that the alternative leaves one input
+kind reporting by a different rule from every other, which is the state
+`EWB-D-25` exists to end.
+
+**What this amends.** `EWB-D-25` places `ClientInputRedaction`,
+`NoTapirValidator` and `refused` as private values in `IronTapirCodecs.scala`.
+A second caller now exists, so §5.4 moves the three to `WireRefusal` and adds
+`refusedWith`. The shape of what they produce is unchanged.
+
 ---
 
 ## 11. ADR alignment
@@ -5158,6 +5368,8 @@ below are what the phases need. Paths marked `new:` do not exist yet.
 - `new: modules/common/src/main/scala/com/risquanter/register/domain/errors/TreeLoadProblem.scala`
 - `new: modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala`
 - `new: modules/common/src/main/scala/com/risquanter/register/common/ValuationBasis.scala`
+- `new: modules/common/src/main/scala/com/risquanter/register/http/codecs/WireRefusal.scala`
+- `new: modules/common/src/main/scala/com/risquanter/register/http/codecs/RequestBodyCodec.scala`
 - `new: modules/server/src/main/scala/com/risquanter/register/http/controllers/WireEither.scala`
 - `new: modules/common/src/test/scala/com/risquanter/register/http/errors/WireErrorSpec.scala`
 
@@ -5188,6 +5400,13 @@ deleted:
 - `modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationExtensions.scala`
 - `modules/common/src/main/scala/com/risquanter/register/http/endpoints/BaseEndpoint.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceLifecycleEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceTreeEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceQueryEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/ScenarioEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/DistributionPreviewEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationUtil.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`

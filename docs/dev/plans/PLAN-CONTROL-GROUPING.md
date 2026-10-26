@@ -116,10 +116,12 @@ relation across members. That correction is its own work and is not part of this
 plan.
 
 **The two-layer stage split is compatible with this plan.**
-`PLAN-LOSS-SHAPE-ALGEBRA.md` rules a symmetric
-`MitigationSpec` → `LeafStageSpec` / `ResultStageSpec` shape. Under this plan
-`ResultStageSpec` would hold one operation per case instead of a pipeline, and the
-layer itself stays.
+`PLAN-LOSS-SHAPE-ALGEBRA.md` has landed, and the split it shipped is not symmetric:
+`MitigationSpec` has a `sealed trait LeafStageSpec` grouping `LeafRelative` and
+`LeafAbsolute`, and one `ResultStage` case holding a `TransformPipeline`. There is
+no `ResultStageSpec`. Under this plan the result-stage side would hold one
+operation per case instead of a pipeline, which is where that grouping trait would
+come from; the layer itself stays either way.
 
 ---
 
