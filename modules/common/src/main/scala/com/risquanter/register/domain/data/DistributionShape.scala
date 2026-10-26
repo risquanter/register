@@ -362,7 +362,7 @@ object DistributionShape:
   /** The documented shape is the wire form, not the domain field list: the
     * domain holds anchors as a sequence of pairs and the wire as two parallel
     * sequences. Derived from the raw coproduct for the same reason `RiskTree`
-    * derives its schema from `RiskTreeJson`. */
+    * derives its schema from `RiskTreeRaw`. */
   given schema: Schema[DistributionShape] =
     import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)

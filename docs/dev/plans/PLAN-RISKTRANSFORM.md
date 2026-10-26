@@ -133,7 +133,7 @@ composition is associative; order is never touched. The rejected recursive
 alternative (`Sequence` as a case of the trait) gave the same ordered sequence
 multiple representations, required special recursive serialization
 (trigger #7), and departed from the repo's flatten-recursion storage strategy
-(`RiskPortfolio.childIds`, `RiskTreeJson`). Full ADR-by-ADR constraint sweep:
+(`RiskPortfolio.childIds`, `RiskTree`'s private wire shape). Full ADR-by-ADR constraint sweep:
 conversation record 2026-07-17; every accepted ADR is satisfied without
 exception or workaround.
 
@@ -697,7 +697,7 @@ final case class RiskTree(
   mitigations: Seq[Mitigation] = Nil          // new field, default keeps all call sites source-compatible
 )
 
-// RiskTreeJson gains  mitigations: Option[Seq[Mitigation]]  (absent in pre-existing blobs → Nil)
+// RiskTreeRaw gains  mitigations: Option[Seq[Mitigation]]  (absent in pre-existing blobs → Nil)
 // fromNodes / fromNodesUnsafe gain  mitigations: Seq[Mitigation] = Nil  and validate:
 //  - mitigation ids unique;  names unique among mitigations (future VQL constants)
 //  - every MitigationTarget.Nodes id resolves in the TreeIndex

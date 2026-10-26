@@ -209,7 +209,7 @@ object RiskLeaf {
   /** The OpenAPI shape is the wire form the codec emits, not the domain field
     * list: the identifier and name are refined types in the domain and strings
     * here. Derived from the raw type for the same reason `RiskTree` derives its
-    * schema from `RiskTreeJson`. */
+    * schema from `RiskTreeRaw`. */
   given schema: Schema[RiskLeaf] = {
     import sttp.tapir.generic.auto.*
     Schema.derived[RiskLeafRaw].as[RiskLeaf]

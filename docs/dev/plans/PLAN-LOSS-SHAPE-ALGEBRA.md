@@ -12,13 +12,16 @@ module, the server, the Scala.js application and the integration tier. The BATS
 smoke suites have not run against it, because they need application images built at
 the current version.
 
-**One item of scope is outstanding: the `RiskTreeJson` → `RiskTreeRaw` rename.**
-`RiskTreeJson` is the single wire-shape name that does not follow the convention
-the rest of this plan established, and it is the name ADR-038 §1's own worked
-example uses. The inventory now names
-`modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`,
-so the gate is clear. Until that lands, this plan is not done and its token stays
-open.
+**The last item of scope has landed: the `RiskTreeJson` → `RiskTreeRaw` rename.**
+It was the single wire-shape name that did not follow the convention the rest of
+this plan established, and it was the name ADR-038 §1's own worked example used.
+The private case class, its companion, its codec and the schema derivation are
+renamed, the projection function with them — `toJsonShape` is `toRawShape` — and
+the two scaladoc comments in `RiskNode.scala` and `DistributionShape.scala` that
+cite it as the precedent follow. ADR-038's worked example and its implementation
+table are amended to match. No field name changed, so the serialised form is
+byte-identical and no stored tree is affected. The name survives only in
+`docs/archive/plans/`, which is the historical record.
 
 **Two things the plan-gate pass added, both from checking a claim rather than
 from the derivation.** §4.5 inventories every rule across all five current rule

@@ -24,15 +24,15 @@ The endpoint declares the domain type. That type owns a private case class whose
 
 ```scala
 object RiskTree:
-  private case class RiskTreeJson(
+  private case class RiskTreeRaw(
     id: TreeId, name: SafeName.SafeName, nodes: Seq[RiskNode],
     rootId: NodeId, seedVarHighWater: SeedVarId.SeedVarId,
     mitigations: Option[Seq[Mitigation]]   // absent decodes to Nil; TreeIndex is not serialised
   )
 
   given codec: JsonCodec[RiskTree] = JsonCodec(
-    JsonEncoder[RiskTreeJson].contramap[RiskTree](toJsonShape),
-    JsonDecoder[RiskTreeJson].mapOrFail(json => fromNodes(...).toEither.left.map(...))
+    JsonEncoder[RiskTreeRaw].contramap[RiskTree](toRawShape),
+    JsonDecoder[RiskTreeRaw].mapOrFail(json => fromNodes(...).toEither.left.map(...))
   )
 ```
 
@@ -167,7 +167,7 @@ given JsonCodec[NodeChangeType] = DeriveJsonCodec.gen[NodeChangeType]
 
 | Location | Pattern |
 |----------|---------|
-| `RiskTree.RiskTreeJson`, and the `Raw` projections in `Mitigation`, `Provenance`, `RiskLeafTransform` | Private wire shape in the owner's companion |
+| `RiskTree.RiskTreeRaw`, and the `Raw` projections in `Mitigation`, `Provenance`, `RiskLeafTransform` | Private wire shape in the owner's companion |
 | `MergePreviewStatus` | Public sealed enum, derived discriminated codec |
 | `WorkspaceId` | No serialiser |
 | `WorkspaceKeySecret` | The credential exception — codec retained |

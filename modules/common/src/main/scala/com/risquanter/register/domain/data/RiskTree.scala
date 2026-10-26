@@ -10,7 +10,8 @@ import zio.prelude.Validation
   * 
   * Stores risk nodes as a flat collection with references (childIds, parentId).
   * The TreeIndex provides O(1) node lookup and O(depth) ancestor path.
-  * LEC data is computed on-demand via GET /risk-trees/:id/lec
+  * Loss exceedance curves are computed on demand by the workspace analysis
+  * endpoints and are not held here.
   * 
   * **Note:** Simulation parameters (nTrials, parallelism, seeds) come from
   * SimulationConfig, not the RiskTree itself. This enables service-wide
@@ -47,10 +48,13 @@ object RiskTree {
   import sttp.tapir.generic.auto.*
   import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
-  // Wire-shape DTO: mirrors JSON wire format (omits non-serialized TreeIndex).
-  // `mitigations` is optional on the wire: absent (pre-mitigation payloads and
-  // mitigation-less trees) decodes to Nil; Nil encodes as absent.
-  private case class RiskTreeJson(
+  /** Wire form: the tree's serialised fields, omitting the index, which is
+    * rebuilt from the nodes on decode (ADR-038 §1).
+    *
+    * `mitigations` is optional on the wire. Absent decodes to `Nil`, which is
+    * what a mitigation-less tree and a payload predating mitigations both send,
+    * and `Nil` encodes as absent so the two round-trip to the same bytes. */
+  private case class RiskTreeRaw(
     id: TreeId,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
@@ -58,17 +62,17 @@ object RiskTree {
     seedVarHighWater: SeedVarId.SeedVarId,
     mitigations: Option[Seq[Mitigation]]
   )
-  private object RiskTreeJson:
-    given jsonCodec: JsonCodec[RiskTreeJson] = DeriveJsonCodec.gen[RiskTreeJson]
+  private object RiskTreeRaw:
+    given jsonCodec: JsonCodec[RiskTreeRaw] = DeriveJsonCodec.gen[RiskTreeRaw]
 
-  private def toJsonShape(t: RiskTree): RiskTreeJson =
-    RiskTreeJson(t.id, t.name, t.nodes, t.rootId, t.seedVarHighWater,
+  private def toRawShape(t: RiskTree): RiskTreeRaw =
+    RiskTreeRaw(t.id, t.name, t.nodes, t.rootId, t.seedVarHighWater,
       if (t.mitigations.isEmpty) None else Some(t.mitigations))
 
   given schema: Schema[RiskTree] =
-    Schema.derived[RiskTreeJson]
+    Schema.derived[RiskTreeRaw]
       .map(w => RiskTree.fromNodes(w.id, w.name, w.nodes, w.rootId, Some(w.seedVarHighWater), w.mitigations.getOrElse(Nil)).toEither.toOption)(
-        toJsonShape
+        toRawShape
       )
 
   // JSON codecs for Iron refined types
@@ -87,9 +91,9 @@ object RiskTree {
   given codec: JsonCodec[RiskTree] = {
     JsonCodec(
       // Encoder: Serialize without index
-      JsonEncoder[RiskTreeJson].contramap[RiskTree](toJsonShape),
+      JsonEncoder[RiskTreeRaw].contramap[RiskTree](toRawShape),
       // Decoder: Deserialize via the smart constructor (rebuilds index, re-validates)
-      JsonDecoder[RiskTreeJson].mapOrFail { json =>
+      JsonDecoder[RiskTreeRaw].mapOrFail { json =>
         fromNodes(json.id, json.name, json.nodes, json.rootId, Some(json.seedVarHighWater), json.mitigations.getOrElse(Nil)).toEither.left.map(errors =>
           s"Invalid tree structure: ${errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")}"
         )
