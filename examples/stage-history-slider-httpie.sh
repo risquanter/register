@@ -172,7 +172,7 @@ fi
 # Fork-from-history (E5): a scenario rooted at C2, before Insider Threat existed.
 SCH=$(http --ignore-stdin POST "$BASE/w/$WS_KEY/scenarios" \
   name="pre-insider-audit" \
-  source:="{\"type\": \"commit\", \"hash\": \"$C2_HASH\"}")
+  source:="{\"type\": \"Commit\", \"hash\": \"$C2_HASH\"}")
 if echo "$SCH" | jq -e '.name // .head // .branch' >/dev/null 2>&1; then
   ok "Scenario created : pre-insider-audit (forked from commit C2)"
 else
