@@ -2,7 +2,8 @@ package app.state
 
 import com.raquo.laminar.api.L.*
 
-import com.risquanter.register.domain.errors.ErrorSubject
+import com.risquanter.register.domain.errors.{ErrorSubject, ValidationError, ValidationErrorCode}
+import zio.prelude.Validation
 
 /**
  * FormState trait — reactive form infrastructure with error display timing control.
@@ -14,7 +15,7 @@ import com.risquanter.register.domain.errors.ErrorSubject
  * - The subject every refusal of the form names: `subjectVar`
  * - Error display timing: `markTouched`, `shouldShowError`, `triggerValidation`
  * - Error aggregation: `errorSignals`, `hasErrors`
- * - Parse helpers: `parseDouble`, `parseLong`, `parseDoubleList`
+ * - Parse helpers: `parseDouble`, `parseLong`, `parseDoubleList`, `parseRequired`
  *
  * Subclasses define `subjectVar` and `errorSignals`, and use `shouldShowError`
  * to gate display.
@@ -116,4 +117,28 @@ trait FormState[F]:
   protected def parseDoubleList(s: String): List[Double] =
     if s.isBlank then Nil
     else s.split(",").toList.flatMap(part => parseDouble(part.trim))
+
+  /** A required text input parsed into a value. Blank text is refused as
+    * missing (`REQUIRED_FIELD`), and text `parse` cannot read is refused as
+    * unreadable (`TYPE_MISMATCH`) — the codes the wire uses for the same two
+    * situations. The parsed value keeps the input's location, so a refinement
+    * applied to it next refuses at the same field.
+    *
+    * {{{
+    * parseRequired(Located(" 12 ", at), parseLong, required, unreadable)  // Success(Located(12L, at))
+    * parseRequired(Located("abc", at), parseLong, required, unreadable)   // Failure: TYPE_MISMATCH at `at`
+    * }}}
+    */
+  protected def parseRequired[A](
+    input:      Located[String],
+    parse:      String => Option[A],
+    required:   String,
+    unreadable: String
+  ): Validation[ValidationError, Located[A]] =
+    if input.value.isBlank then
+      Validation.fail(input.reject(ValidationErrorCode.REQUIRED_FIELD, required))
+    else
+      parse(input.value).fold[Validation[ValidationError, Located[A]]](
+        Validation.fail(input.reject(ValidationErrorCode.TYPE_MISMATCH, unreadable))
+      )(value => Validation.succeed(input.as(value)))
 

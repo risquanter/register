@@ -94,7 +94,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     val allValidChars = s.forall(c => c.isDigit || c == '.')
     val maxTwoDp = s.indexOf('.') match
       case -1  => true
-      case idx => s.length - idx - 1 <= 2
+      case idx => s.length - idx - 1 <= RiskLeafFormState.probabilityDecimals
     hasSingleDot && allValidChars && maxTwoDp
   }
 
@@ -145,9 +145,14 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   private def locatedNow[A](input: Var[A], field: FieldName): Located[A] =
     Located(input.now(), ErrorLocation.Field(subjectVar.now(), field))
 
-  /** The first refusal a refinement reported, or none if it accepted. */
-  private def firstRefusal[B](result: Either[List[ValidationError], B]): Option[ValidationError] =
-    result.left.toOption.flatMap(_.headOption)
+  /** The first refusal a check reported, or none if it accepted. */
+  private def firstRefusal[B](result: Validation[ValidationError, B]): Option[ValidationError] =
+    result.toEither.left.toOption.map(_.head)
+
+  /** A comma-separated field read as a list, readable when at least one entry
+    * parses as a number. */
+  private val parseNonEmptyList: String => Option[List[Double]] =
+    s => Some(parseDoubleList(s)).filter(_.nonEmpty)
 
   /** A located check's sentence, for the display signals and `errorSignals`,
     * which still carry text. */
@@ -160,43 +165,43 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
 
   /** Name validation using Iron SafeName rules */
   private val nameErrorRaw: Signal[Option[ValidationError]] =
-    located(nameVar, nameField).map(input => firstRefusal(input.refine(ValidationUtil.refineName)))
+    located(nameVar, nameField).map(input =>
+      firstRefusal(ValidationUtil.toValidation(input.refine(ValidationUtil.refineName)))
+    )
 
-  /** Probability validation. The field is entered on the 0–100 (percent) scale
-    * without the `%` sign; it is divided by 100 before being refined against the
-    * Iron `OccurrenceProbability` type (closed interval 0 ≤ p ≤ 1). The refusal
-    * shown is therefore expressed on the entered 0–100 scale, not the internal
-    * 0–1 scale. */
-  private val probabilityErrorRaw: Signal[Option[ValidationError]] =
-    located(probabilityVar, probabilityField).map { input =>
-      if input.value.isBlank then
-        Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.probabilityRequired))
-      else parseDouble(input.value) match
-        case None =>
-          Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.probabilityNotANumber))
-        case Some(pct) =>
-          input.as(RiskLeafFormState.pctToDomain(pct))
+  /** The probability field's check, on the 0–100 scale it is entered on:
+    * present, a number, and inside the closed interval 0 ≤ p ≤ 1 once divided
+    * by 100. The range refusal is worded on the entered scale. The live check
+    * and the submit both call it, so they refuse the same input with the same
+    * sentence. */
+  private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, OccurrenceProbability] =
+    parseRequired(input, parseDouble, ValidationMessages.probabilityRequired, ValidationMessages.probabilityNotANumber)
+      .flatMap { pct =>
+        Validation.fromEither(
+          pct.map(RiskLeafFormState.pctToDomain)
             .refine(ValidationUtil.refineOccurrenceProbability)
-            .fold(
-              _ => Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.probabilityPercentOutOfRange)),
-              _ => None
-            )
-    }
+            .left.map(_ => pct.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.probabilityPercentOutOfRange))
+        )
+      }
+
+  private val probabilityErrorRaw: Signal[Option[ValidationError]] =
+    located(probabilityVar, probabilityField).map(input => firstRefusal(refineProbabilityInput(input)))
 
   /** Metalog mode: percentiles validation (0-100, but Metalog needs 0 < p < 100) */
   private val percentilesErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(percentilesVar, percentilesField)).map {
       case (DistributionMode.Metalog, input) =>
-        val values = parseDoubleList(input.value)
-        if input.value.isBlank then
-          Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.percentilesRequired))
-        else if values.isEmpty then
-          Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.percentilesFormat))
-        else if values.exists(p => p <= 0 || p >= 100) then
-          Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.percentilesOutOfRange))
-        else if !ValidationUtil.isStrictlyIncreasing(values) then
-          Some(input.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.percentilesMustBeStrictlyIncreasing))
-        else None
+        parseRequired(input, parseNonEmptyList, ValidationMessages.percentilesRequired, ValidationMessages.percentilesFormat)
+          .toEither
+          .fold(
+            refusals => Some(refusals.head),
+            percentiles =>
+              if percentiles.value.exists(p => p <= 0 || p >= RiskLeafFormState.percentScale) then
+                Some(percentiles.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.percentilesOutOfRange))
+              else if !ValidationUtil.isStrictlyIncreasing(percentiles.value) then
+                Some(percentiles.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.percentilesMustBeStrictlyIncreasing))
+              else None
+          )
       case _ => None
     }
 
@@ -204,16 +209,17 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   private val quantilesErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(quantilesVar, quantilesField)).map {
       case (DistributionMode.Metalog, input) =>
-        val values = parseDoubleList(input.value)
-        if input.value.isBlank then
-          Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.quantilesRequired))
-        else if values.isEmpty then
-          Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.quantilesFormat))
-        else if values.exists(_ <= 0) then
-          Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.quantilesMustBePositive))
-        else if !ValidationUtil.isStrictlyIncreasing(values) then
-          Some(input.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.quantilesMustBeStrictlyIncreasing))
-        else None
+        parseRequired(input, parseNonEmptyList, ValidationMessages.quantilesRequired, ValidationMessages.quantilesFormat)
+          .toEither
+          .fold(
+            refusals => Some(refusals.head),
+            quantiles =>
+              if quantiles.value.exists(_ <= 0) then
+                Some(quantiles.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.quantilesMustBePositive))
+              else if !ValidationUtil.isStrictlyIncreasing(quantiles.value) then
+                Some(quantiles.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.quantilesMustBeStrictlyIncreasing))
+              else None
+          )
       case _ => None
     }
 
@@ -252,24 +258,29 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       case _                                   => None
     }
 
-  /** One lognormal bound's own check: present, a whole number, and positive. */
+  /** One lognormal bound's own check: present, a whole number, and positive.
+    * The submit parses the bound the same way, so both refuse the same text
+    * with the same sentence. */
   private def boundError(input: Located[String], required: String, notWhole: String): Option[ValidationError] =
-    if input.value.isBlank then Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, required))
-    else parseLong(input.value) match
-      case None    => Some(input.reject(ValidationErrorCode.INVALID_FORMAT, notWhole))
-      case Some(n) => firstRefusal(input.as(n).refine(ValidationUtil.refinePositiveLong))
+    firstRefusal(
+      parseRequired(input, parseLong, required, notWhole)
+        .flatMap(bound => ValidationUtil.toValidation(bound.refine(ValidationUtil.refinePositiveLong)))
+    )
 
-  /** Metalog mode: terms validation — blank means one term per anchor; otherwise integer in [2, n] */
+  /** Metalog mode: terms validation — blank means one term per anchor;
+    * otherwise an integer from the fit's minimum up to the anchor count. The
+    * anchors are counted as the shape counts them, so an entry that is not a
+    * number is not counted here either. */
   private val termsErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(termsVar, termsField), percentilesVar.signal).map {
-      case (DistributionMode.Metalog, input, pStr) =>
-        if input.value.isBlank then None
-        else input.value.toIntOption match
-          case None    => Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.termsMustBeWholeNumber))
+      case (DistributionMode.Metalog, input, pStr) if !input.value.isBlank =>
+        input.value.toIntOption match
+          case None    => Some(input.reject(ValidationErrorCode.TYPE_MISMATCH, ValidationMessages.termsMustBeWholeNumber))
           case Some(t) =>
-            val n = pStr.split(",").count(_.trim.nonEmpty)
-            if t < 2 || t > n then Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.termsOutOfRange))
-            else None
+            val anchors = parseDoubleList(pStr).length
+            Option.when(t < RiskLeafFormState.minMetalogTerms || t > anchors)(
+              input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.termsOutOfRange)
+            )
       case _ => None
     }
 
@@ -464,9 +475,9 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       case DistributionMode.Lognormal =>
         Validation
           .validateWith(
-            requireBound(minLoss, ValidationMessages.minLossRequired),
-            requireBound(maxLoss, ValidationMessages.maxLossRequired)
-          )((min, max) => (min, max))
+            parseRequired(minLoss, parseLong, ValidationMessages.minLossRequired, ValidationMessages.minLossNotWholeNumber),
+            parseRequired(maxLoss, parseLong, ValidationMessages.maxLossRequired, ValidationMessages.maxLossNotWholeNumber)
+          )((min, max) => (min.value, max.value))
           .flatMap { case (min, max) =>
             DistributionShape.Lognormal.fromPrimitives(min, max, subject)
           }
@@ -483,15 +494,6 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       subjectVar.now()
     )
 
-  /** A lognormal bound that is absent, blank, or not a whole number. All three
-    * reach this as unparseable and are reported as the field being required, so
-    * the inline field signal is where a non-numeric entry is named as such.
-    * Reported per field, so both bounds surface at once. */
-  private def requireBound(bound: Located[String], message: String): Validation[ValidationError, Long] =
-    parseLong(bound.value) match
-      case Some(value) => Validation.succeed(value)
-      case None        => Validation.fail(bound.reject(ValidationErrorCode.REQUIRED_FIELD, message))
-
   /** Every value a submission needs, refined, with every field's refusal
     * accumulated rather than only the first.
     *
@@ -503,15 +505,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, DistributionShape)] =
     val nameV = ValidationUtil.toValidation(locatedNow(nameVar, nameField).refine(ValidationUtil.refineName))
     val parentV = ParentSelection.toParentRef(locatedNow(parentVar, parentField))
-    val probability = locatedNow(probabilityVar, probabilityField)
-    val probabilityV = probability.value.toDoubleOption match
-      case None =>
-        Validation.fail(probability.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.probabilityNotANumber))
-      case Some(pct) =>
-        // The field is entered on the 0–100 scale; convert before refining.
-        ValidationUtil.toValidation(
-          probability.as(RiskLeafFormState.pctToDomain(pct)).refine(ValidationUtil.refineOccurrenceProbability)
-        )
+    val probabilityV = refineProbabilityInput(locatedNow(probabilityVar, probabilityField))
     Validation.validateWith(nameV, parentV, probabilityV, currentShapeValidation()) {
       (name, parent, probability, shape) => (name, parent, probability, shape)
     }
@@ -534,36 +528,54 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       }
 
   /** Signal emitting an advisory warning when the implied P90/P10 loss ratio is
-    * unusually high (> 100×), suggesting the expert estimates encode extreme tail
-    * behaviour. Visible only in metalog mode; None in lognormal mode or when
-    * insufficient data is available to compute the ratio.
+    * unusually high (above `impliedRatioLimit`), suggesting the expert
+    * estimates encode extreme tail behaviour. Visible only in metalog mode;
+    * None in lognormal mode or when insufficient data is available to compute
+    * the ratio.
     */
   val impliedRatioWarning: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(quantilesVar.signal, percentilesVar.signal).map {
       case (DistributionMode.Metalog, qStr, pStr) =>
-        val qs = qStr.split(",").flatMap(_.trim.toDoubleOption)
-        val ps = pStr.split(",").flatMap(_.trim.toDoubleOption)
-        if qs.length >= 2 && qs.length == ps.length then
-          val p10idx = ps.indexWhere(_ <= 10)
-          val p90idx = ps.lastIndexWhere(_ >= 90)
-          if p10idx >= 0 && p90idx >= 0 && p10idx != p90idx && qs(p10idx) > 0 then
-            val ratio = qs(p90idx) / qs(p10idx)
-            if ratio > 100 then Some(RiskLeafFormState.impliedRatioTooHigh(ratio))
-            else None
-          else None
-        else None
+        val qs = parseDoubleList(qStr)
+        val ps = parseDoubleList(pStr)
+        (ps.indexWhere(_ <= RiskLeafFormState.lowerTailPercentile), ps.lastIndexWhere(_ >= RiskLeafFormState.upperTailPercentile)) match
+          case (p10, p90) if qs.length == ps.length && p10 >= 0 && p90 >= 0 && p10 != p90 && qs(p10) > 0 =>
+            val ratio = qs(p90) / qs(p10)
+            Option.when(ratio > RiskLeafFormState.impliedRatioLimit)(RiskLeafFormState.impliedRatioTooHigh(ratio))
+          case _ => None
       case _ => None
     }
 
 
 object RiskLeafFormState:
+  /** The scale the form enters probabilities and percentiles on: out of 100,
+    * where the domain uses 0–1. */
+  val percentScale: Double = 100.0
+
+  /** The most decimal places the probability field accepts. Chosen by this
+    * project: a likelihood is stated to a hundredth of a percent at most. */
+  val probabilityDecimals: Int = 2
+
+  /** The fewest metalog terms a fit may use. The lower bound of
+    * `MetalogTermCount` in OpaqueTypes, which a type-level literal cannot share. */
+  val minMetalogTerms: Int = 2
+
+  /** The anchors the implied-ratio advisory compares, on the form's percent
+    * scale: the lowest at or below P10 against the highest at or above P90. */
+  val lowerTailPercentile: Double = 10.0
+  val upperTailPercentile: Double = 90.0
+
+  /** The P90/P10 loss ratio above which the advisory is shown. Chosen by this
+    * project as the point where a spread suggests extreme tail behaviour. */
+  val impliedRatioLimit: Double = 100.0
+
   /** Convert a 0–100 percent-scale value (as entered in the form) to the
     * 0–1 domain scale used in [[DistributionShape]].
     *
     * Used for scalar probability (`pctToDomain(pct)`) and per-element
     * percentile arrays (`arr.map(pctToDomain)`).
     */
-  def pctToDomain(pct: Double): Double = pct / 100.0
+  def pctToDomain(pct: Double): Double = pct / percentScale
 
   /** Convert a 0–1 domain value to its 0–100 display string — the shared
     * [[app.core.NumberFormat.percentValue]] under this form-facing name. */

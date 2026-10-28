@@ -51,6 +51,12 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
 
   private def at(field: FieldName): ErrorLocation = ErrorLocation.Field(editedSubject, field)
 
+  /** The sentences a submission reports at one field. */
+  private def submittedAt(st: RiskLeafFormState, field: FieldName): List[String] =
+    st.toDraft match
+      case Validation.Failure(_, es) => es.toList.filter(_.location == at(field)).map(_.message)
+      case Validation.Success(_, _)  => Nil
+
   def spec = suite("RiskLeafFormState")(
 
     suite("a submitted refusal names its own field and the form's subject")(
@@ -125,6 +131,54 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         st.subjectVar.set(ErrorSubject.DraftNode)
         st.nameVar.set("")
         assertTrue(refusalLocations(st) == Set(ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.Name)))
+      }
+
+    ),
+
+    suite("the live check and the submit refuse an input alike")(
+
+      test("probability out of range, blank, and not a number give one sentence on both paths") {
+        val cases = List("150", "", "abc").map { entered =>
+          val st = validLognormalForm()
+          st.probabilityVar.set(entered)
+          st.markTouched(RiskLeafField.Probability)
+          (current(st.probabilityError).toList, submittedAt(st, FieldName.Probability))
+        }
+        assertTrue(cases.forall((live, submitted) => live.nonEmpty && live == submitted))
+      },
+
+      test("a loss bound that is not a whole number gives one sentence on both paths") {
+        val st = validLognormalForm()
+        st.minLossVar.set("abc")
+        st.markTouched(RiskLeafField.MinLoss)
+        val live = current(st.minLossError).toList
+        assertTrue(live.nonEmpty, live == submittedAt(st, FieldName.MinLoss))
+      },
+
+      test("probability accepts both ends of the closed interval") {
+        val atZero = validLognormalForm()
+        atZero.probabilityVar.set("0")
+        val atHundred = validLognormalForm()
+        atHundred.probabilityVar.set("100")
+        assertTrue(
+          refusalLocations(atZero).isEmpty,
+          refusalLocations(atHundred).isEmpty,
+          current(atZero.probabilityError).isEmpty,
+          current(atHundred.probabilityError).isEmpty
+        )
+      },
+
+      test("the term count is judged against the anchors that parse") {
+        // "abc" is not an anchor, so two anchors remain and three terms is too many.
+        val st = validMetalogForm()
+        st.percentilesVar.set("10, abc, 90")
+        st.quantilesVar.set("1000, 25000")
+        st.termsVar.set("3")
+        st.markTouched(RiskLeafField.Terms)
+        assertTrue(
+          current(st.termsError).isDefined,
+          refusalLocations(st).contains(at(FieldName.Terms))
+        )
       }
 
     ),

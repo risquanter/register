@@ -2530,6 +2530,13 @@ the browser's refusals through `Located.reject` and so collapses the browser's
 construction sites onto one method this phase then changes once, and because both
 phases rewrite the same argument list. No work on it starts before then.
 
+`FieldProblem` as `EWB-D-38` lists it has no case for text that could not be
+read. The browser needs one. `FormState.parseRequired` refuses such text with
+`TYPE_MISMATCH`, which is the meaning `EWB-D-25` gives that code on the wire, and
+the leaf form uses it for "must be a number" and "must be a whole number". Phase
+3b adds that case, with `FieldProblem.code` mapping it to `TYPE_MISMATCH`, and
+`parseRequired` then takes the case in place of its two sentences.
+
 **Phase 4 — typed load problems and the rename.** `TreeLoadProblem` replacing
 `TreeLoadFailure.reason: String`; `SimError` renamed to `DomainError`.
 
@@ -6115,26 +6122,34 @@ without it the two readers each name the field, which is two assertions per
 field and the thing `EWB-P-3` statement 3 forbids. `FieldName.Probability`
 appears in that one declaration and nowhere else on the browser side.
 
-The live check then reads:
+The live check and the submit then call one function, so they refuse the same
+input with the same sentence. Decision 1 of step 3 ruled that they must. The
+function reads the text through `FormState.parseRequired`, which refuses blank
+text as `REQUIRED_FIELD` and unreadable text as `TYPE_MISMATCH`, the meanings
+`EWB-D-25` gives those codes. It words the range refusal on the 0–100 scale the
+field is entered on:
 
 ```scala
-  private val probabilityErrorRaw: Signal[Option[ValidationError]] =
-    probabilityLocated.map { input =>
-      if input.value.isBlank then
-        Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.probabilityRequired))
-      else this.parseDouble(input.value) match
-        case None => Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.probabilityNotANumber))
-        case Some(pct) =>
-          input.as(RiskLeafFormState.pctToDomain(pct))
+  private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, OccurrenceProbability] =
+    parseRequired(input, parseDouble, ValidationMessages.probabilityRequired, ValidationMessages.probabilityNotANumber)
+      .flatMap { pct =>
+        Validation.fromEither(
+          pct.map(RiskLeafFormState.pctToDomain)
             .refine(ValidationUtil.refineOccurrenceProbability)
-            .fold(errors => Some(errors.head), _ => None)
-    }
+            .left.map(_ => pct.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.probabilityPercentOutOfRange))
+        )
+      }
+
+  private val probabilityErrorRaw: Signal[Option[ValidationError]] =
+    located(probabilityVar, probabilityField).map(input => firstRefusal(refineProbabilityInput(input)))
 ```
 
-`as` is `map`'s constant form, for the step where the new value is already in
+`parseRequired` returns the parsed value still located, by
+`Located.as`, `map`'s constant form for a step where the new value is already in
 hand: `def as[B](b: B): Located[B] = Located(b, location)`. It is on `Located`
 beside `map` for the same reason `map` is — the location is carried rather than
-rebuilt.
+rebuilt. The two lognormal bounds and the opening of the percentile and quantile
+checks read through `parseRequired` the same way.
 
 The signal's type changes from `Signal[Option[String]]` to
 `Signal[Option[ValidationError]]`, which is the change that lets the live
@@ -6144,9 +6159,9 @@ string, so the location `at(FieldName.Probability)` builds at
 
 **`.now()` stays, and that is correct.** `.claude/rules/laminar.md` forbids
 `.now()` in a rendering pipeline, and a submit handler is an event rather than a
-pipeline. The ten `.now()` calls in `RiskLeafFormState.scala` are all in
-`currentShapeValidation` and `toDraft`, lines 393 to 459. What is wrong with them is
-not that they read a snapshot but that they return a bare value with no field.
+pipeline. The `.now()` calls in `RiskLeafFormState.scala` are all on the submit
+path, in `locatedNow` and `currentShapeValidation`. Each read is located before a
+check sees it, so no snapshot returns a bare value with no field.
 
 **The raw `Var` stays reachable, because the input element needs it.**
 `FormInputs.textInput` takes `valueVar: Var[String]` at `FormInputs.scala:29` and
