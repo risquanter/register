@@ -90,8 +90,9 @@ invent ad-hoc logic that a Monoid / Functor / Validation would have eliminated?
 
 ### `if/else` checklist — run on every `if` or `if/else` encountered
 
-Every `if/else` in new or changed code must pass all of the following before being
-accepted as clean:
+Every `if/else` in a file in scope — written, changed or pre-existing, the last
+tagged **pre-existing (boyscout)** per `review-protocol`'s File scope — must pass
+all of the following before being accepted as clean:
 
 1. **Single value produced?** If the branches compute *multiple* related values
    (e.g. `code` and `message` both depend on the same condition), the values are

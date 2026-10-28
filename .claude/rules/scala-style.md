@@ -103,3 +103,10 @@ val result = state match
 // ✅ COMPOSITION — call map
 val result = state.map(f)
 ```
+
+## Branching on a value's cases
+
+A branch that classifies one value is a `match`, not an `if`/`else` chain. The
+rule, its carve-out and its scope are in the global instructions' code-style
+section, and an existing occurrence in a file being edited is the `boyscout`
+skill's obligation 7.
