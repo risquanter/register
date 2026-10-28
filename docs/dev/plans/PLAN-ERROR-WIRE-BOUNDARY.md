@@ -1228,7 +1228,8 @@ object RequestBodyCodec:
     catch
       case JsonDecoder.UnsafeJson(trace) =>
         val sentence = JsonError.render(trace)
-        if WireRefusal.isRefusal(sentence) then WireRefusal.refusedWith(sentence)
+        if WireRefusal.isRefusal(sentence) then
+          WireRefusal.refusedWith(WireRefusal.withoutMarker(sentence))
         else DecodeResult.Error(raw, JsonSyntaxRefusal(sentence))
     finally reader.close()
 
@@ -1273,6 +1274,12 @@ def refusalSentence(detail: String): String = s"$RefusalMarker $detail"
 
 /** Whether a rendered decoder failure is one of this service's refusals. */
 def isRefusal(sentence: String): Boolean = sentence.contains(RefusalMarker)
+
+/** The sentence with the marker removed, which is what a client is told. The
+  * marker is this service's own plumbing and has no meaning to a caller, so it
+  * is stripped at the one point the sentence crosses to the wire. */
+def withoutMarker(sentence: String): String =
+  sentence.replace(RefusalMarker + " ", "").replace(RefusalMarker, "")
 ```
 
 `refused(errs: List[ValidationError])` is then `refusedWith` mapped over the
