@@ -6,7 +6,7 @@ import zio.test.Assertion.*
 
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt, StoreBranch}
-import com.risquanter.register.domain.errors.{DataConflict, ScenarioHeadStale, ValidationFailed, IrminError}
+import com.risquanter.register.domain.errors.{DataConflict, ErrorLocation, FieldName, ScenarioHeadStale, ValidationFailed, ValidationErrorCode, IrminError}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.testutil.TestHelpers.safeId
@@ -68,7 +68,17 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
     override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def listAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    /** Ancestry in this fake is one level deep: a commit counts as reachable
+      * from a branch when it is that branch's head. `ScenarioServiceLive` reads
+      * only whether the commit appears among the ancestors, so one level is
+      * enough to exercise the gate, and a deeper model would add a commit graph
+      * no assertion here reads. */
+    override def lca(branch: BranchRef, commit: CommitHash) =
+      state.get.map { m =>
+        if m.get(branch.name).contains(commit) then
+          List(IrminCommit(commit.value, "", Nil, IrminInfo("2026-01-01T00:00:00Z", "test", "test")))
+        else Nil
+      }
     override def healthCheck = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
 
@@ -180,6 +190,55 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
           assertTrue(exit.causeOption.flatMap(_.failureOption) match
             case Some(ScenarioHeadStale(_, _, actual)) => actual == None
             case _                                      => false
+          )
+      },
+
+      test("create AtCommit forks a commit reachable from main") {
+        val wsId = ws("ws-alpha")
+        for
+          svc     <- makeService(Map("main" -> hash('a')))
+          branch  <- svc.create(wsId, name("draft-v1"), ScenarioSource.AtCommit(hash('a')))
+          fetched <- svc.list(wsId)
+        yield assertTrue(
+          branch.toBranchRef == s"scenarios.${wsId.value.toLowerCase}.draft-v1",
+          fetched == List(ScenarioSummary(name("draft-v1"), hash('a')))
+        )
+      },
+
+      test("create AtCommit forks a commit reachable from one of this workspace's own scenarios") {
+        val wsId     = ws("ws-alpha")
+        val ownDraft = s"scenarios.${wsId.value.toLowerCase}.draft-v1"
+        for
+          svc     <- makeService(Map("main" -> hash('a'), ownDraft -> hash('b')))
+          branch  <- svc.create(wsId, name("draft-v2"), ScenarioSource.AtCommit(hash('b')))
+          fetched <- svc.list(wsId)
+        yield assertTrue(
+          branch.toBranchRef == s"scenarios.${wsId.value.toLowerCase}.draft-v2",
+          fetched.contains(ScenarioSummary(name("draft-v2"), hash('b')))
+        )
+      },
+
+      /** The commit exists in the store and belongs to another workspace's
+        * scenario branch. Forking at it would point this workspace's branch at
+        * a snapshot of the whole repository, so a later merge would carry the
+        * other workspace's unpublished edits onto main. The answer is the same
+        * not-found a hash that was never issued gets, so the two cases are not
+        * distinguishable from outside. */
+      test("create AtCommit refuses a commit that exists only in another workspace's history") {
+        val wsId        = ws("ws-alpha")
+        val foreignDraft = s"scenarios.${ws("ws-beta").value.toLowerCase}.secret-plan"
+        for
+          svc  <- makeService(Map("main" -> hash('a'), foreignDraft -> hash('e')))
+          exit <- svc.create(wsId, name("draft-v1"), ScenarioSource.AtCommit(hash('e'))).exit
+          list <- svc.list(wsId)
+        yield assert(exit)(fails(isSubtype[ValidationFailed](anything))) &&
+          assertTrue(
+            exit.causeOption.flatMap(_.failureOption) match
+              case Some(ValidationFailed(errs)) =>
+                errs.exists(e => e.code == ValidationErrorCode.NOT_FOUND &&
+                  e.location == ErrorLocation.requestField(FieldName.Source))
+              case _ => false,
+            list.isEmpty
           )
       }
     ) @@ TestAspect.sequential

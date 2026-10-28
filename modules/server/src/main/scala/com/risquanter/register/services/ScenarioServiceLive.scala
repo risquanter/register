@@ -81,17 +81,53 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                              ))))
         yield head
       case ScenarioSource.AtCommit(commit) =>
-        // Fork-from-history: verify the commit exists (absent → NOT_FOUND,
-        // oracle-constant with any other not-found), then fork at it directly.
-        irmin.getCommit(commit).flatMap {
-          case Some(_) => ZIO.succeed(commit)
-          case None =>
+        // Fork-from-history: the commit must be in this workspace's own
+        // history. A commit that exists elsewhere is answered as not found,
+        // oracle-constant with a hash that was never issued.
+        reachableFromOwnHistory(wsId, commit).flatMap {
+          case true => ZIO.succeed(commit)
+          case false =>
             ZIO.fail(ValidationFailed(List(ValidationError(
               location = ErrorLocation.requestField(FieldName.Source),
               code = ValidationErrorCode.NOT_FOUND,
               message = s"Commit not found: ${commit.value}"
             ))))
         }
+
+  /** Whether the commit lies in the history this workspace may fork from: the
+    * shared main branch, or one of this workspace's own scenario branches.
+    *
+    * A commit names a snapshot of the whole repository and not of one
+    * workspace, because every workspace lives under its own path prefix inside
+    * one store and `main` is shared by all of them. So a branch pointed at an
+    * arbitrary commit holds every other workspace's data as it stood at that
+    * commit, and merging that branch carries their unpublished edits onto
+    * `main`: the pre-merge scan compares only paths under the caller's own
+    * prefix, so it cannot see them. Requiring the commit to be in this
+    * workspace's history closes that, because the merge base then equals the
+    * fork point on every foreign path and the merge has nothing foreign to
+    * apply.
+    *
+    * `lca` answers the question directly. The lowest common ancestor of a
+    * branch and a commit is the commit itself exactly when the commit is an
+    * ancestor of that branch.
+    */
+  private def reachableFromOwnHistory(wsId: WorkspaceId, commit: CommitHash): IO[AppError, Boolean] =
+    for
+      rawNames    <- irmin.branches
+      ownNames     = rawNames.flatMap(scenarioNameOf(wsId, _))
+      ownBranches <- ZIO.foreach(ownNames)(scenarioBranch(wsId, _))
+      reachable   <- ZIO.exists(BranchRef.Main :: ownBranches)(isAncestorOf(_, commit))
+    yield reachable
+
+  /** Whether `commit` is an ancestor of `branch`, read off the lowest common
+    * ancestors Irmin reports for the pair. A branch Irmin does not know is not
+    * a history this commit can be reached from, so a failure to read it is
+    * false rather than an error. */
+  private def isAncestorOf(branch: BranchRef, commit: CommitHash): IO[AppError, Boolean] =
+    irmin.lca(branch, commit)
+      .map(_.exists(_.hash == commit.value))
+      .orElseSucceed(false)
 
   private def summaryFor(wsId: WorkspaceId, name: ScenarioName.ScenarioName): IO[AppError, ScenarioSummary] =
     for
