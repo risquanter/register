@@ -2687,3 +2687,40 @@ the system makes.
 follow-up. The curve comparison covers it well enough that no reporting field is
 wanted; this entry exists so the reasoning does not have to be rebuilt if the
 question returns.
+
+## 63. One Irmin store per workspace, instead of one store with a path prefix per workspace
+
+Today there is one Irmin repository for every workspace. `irmin graphql` serves
+one store, named by `--root`, and the container's entrypoint in
+`containers/prod/Dockerfile.irmin-prod` is
+`["/usr/local/bin/irmin", "graphql"]` with
+`["--port", "8080", "--address", "0.0.0.0", "--root", "/data"]`. No GraphQL
+query carries a repository argument, which is why `IrminClient.mainBranch` takes
+no workspace parameter: `main` is shared by every workspace, and what separates
+them is the path prefix `workspaces/{wsId}` from `WorkspaceStoragePaths`.
+
+**What follows from that.** A commit is a snapshot of the whole store, so it
+spans every workspace at once. A branch pointed at a commit therefore holds
+every workspace's data as it stood at that commit, and a whole-tree merge of
+that branch carries whatever it holds. `ScenarioServiceLive.reachableFromOwnHistory`
+is the check that closes the one path which reached that: a scenario may be
+forked only at a commit already in the workspace's own history.
+
+**What a store per workspace would change.** The tenant boundary would be the
+store boundary, so a commit would span one workspace and the path prefix and the
+workspace identifier inside `BranchRef` would both become redundant. The check
+named above would have nothing to defend against.
+
+**What it would cost.** Irmin's unit of isolation is the process, so a store per
+workspace is a process per workspace — in one container with a supervisor and a
+port each, or in a container each. Workspaces are minted on demand by the
+bootstrap endpoint and expire after 72 hours or an hour idle, so the set is
+dynamic: a process, a port and a volume would be created and reaped on that
+schedule, and the server would need to resolve a workspace to an address where
+it now reads one operator-set `IRMIN_URL`.
+
+**Status.** Open for investigation, with no preference recorded on whether to do
+it and none on which hosting shape to use. `ADR-004a-proposal.md` assumes one
+repository without stating why, so there is no ruling to overturn — the single
+store is an unexamined default rather than a decision. The deployment half
+belongs to `register-infra`.
