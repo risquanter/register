@@ -554,3 +554,53 @@ discharged:
 escalated:
   (none)
 ```
+
+```
+COVERAGE  tier=routine  scope=commits 141300d1 and 4acbfc9f (git diff 141300d1~1 4acbfc9f
+          -- modules/ docs/dev/decision-records/), named by the user (File scope source 1);
+          plan documents excluded as targets
+read-in-full:
+  modules/app/src/main/scala/app/state/FormState.scala
+  modules/app/src/main/scala/app/state/ParentSelection.scala
+  modules/app/src/main/scala/app/state/PortfolioFormState.scala
+  modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+  modules/app/src/main/scala/app/state/TreeBuilderState.scala
+  modules/app/src/main/scala/app/views/PortfolioFormView.scala
+  modules/app/src/main/scala/app/views/RiskLeafFormView.scala
+  modules/app/src/test/scala/app/state/FormModeSpec.scala
+  modules/app/src/test/scala/app/state/PortfolioFormStateSpec.scala
+  modules/app/src/test/scala/app/state/RiskLeafFormStateSpec.scala
+  modules/app/src/test/scala/app/views/TreePreviewSpec.scala
+  modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala
+  docs/dev/decision-records/ADR-001.md
+  docs/dev/decision-records/ADR-019-frontend-component-architecture.md
+discharged:
+  1 plan conformance — 1 finding (tree-name live check still Signal[Option[String]],
+    TreeBuilderState.scala:128-129) — echoes matched at FormState.scala:27,132-143,
+    ParentSelection.scala:51-58, RiskLeafFormState.scala:177-188,457-495,522-528,
+    TreeBuilderState.scala:16,23,217,233,487-488; inventory checked against
+    PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md (ADR-001.md not on it)
+  2 mechanical bug scan — 1 finding (terms live/submit sentences diverge,
+    RiskLeafFormState.scala:274-285 vs DistributionShape.scala:279,299)
+  3 convention conformance — 3 findings (ADR-019 GOOD example, RiskLeafFormView.scala:57-75
+    .now() in a signal map, RiskLeafFormView.scala:414 "80% CI"); if/else->match converted at
+    RiskLeafFormView.scala and PortfolioFormView.scala Templating arms
+  4 test presence — PASS after pinning tests added to TreeBuilderStateSpec.scala (subject from
+    populate*Form, tree-name refusal location); app/test, commonJVM/test, server/test,
+    serverIt/test pass
+  5 drive-by changes — 1 finding (ADR-001.md example rewrite)
+  6 boyscout pass — performed: stale and history comments in RiskLeafFormState.scala,
+    TreeBuilderState.scala, RiskLeafFormView.scala, PortfolioFormView.scala; two matches
+  7 terminology freshness — PASS — no new name in the diff names a concept that has a
+    heading in docs/user/TERMINOLOGY.md; §1.1 "a number between 0 and 1" and §1.4 "one term
+    per anchor" agree with RiskLeafFormState.scala:24,61
+escalated:
+  modules/app/src/main/scala/app/state/RiskLeafFormState.scala:522-528 + RiskLeafFormView.scala
+    Templating arm — subject now feeds draftSignal; populate sets ExistingNode then the view
+    resets to DraftNode, so draftSignal re-emits into currentDraftVar (subscription ordering)
+    → complex
+  modules/app/src/main/scala/app/state/RiskLeafFormState.scala, FormState.scala:132-143 —
+    refusal codes change (blank probability INVALID_FORMAT->REQUIRED_FIELD, unreadable bound
+    REQUIRED_FIELD->TYPE_MISMATCH) and edit-path subject DraftNode->ExistingNode
+    (changed error-path semantics) → complex
+```

@@ -168,6 +168,16 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         )
       },
 
+      test("a term count below the fit's range, and one that is not a number, give one sentence on both paths") {
+        val cases = List("1", "abc").map { entered =>
+          val st = validMetalogForm()
+          st.termsVar.set(entered)
+          st.markTouched(RiskLeafField.Terms)
+          (current(st.termsError).toList, submittedAt(st, FieldName.Terms))
+        }
+        assertTrue(cases.forall((live, submitted) => live.nonEmpty && live == submitted))
+      },
+
       test("the term count is judged against the anchors that parse") {
         // "abc" is not an anchor, so two anchors remain and three terms is too many.
         val st = validMetalogForm()

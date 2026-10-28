@@ -25,8 +25,9 @@ enum RiskLeafField:
  * - Metalog mode: requires percentiles + quantiles of equal length
  * - Lognormal mode: requires minLoss < maxLoss (both positive)
  *
- * Every check reads a located accessor, so a refusal names the field its value
- * came from and the subject `subjectVar` holds.
+ * Every single-field check reads a located accessor, so a refusal names the
+ * field its value came from and the subject `subjectVar` holds. The two
+ * cross-field checks locate their refusal at the pair they constrain.
  */
 final class RiskLeafFormState extends FormState[RiskLeafField]:
   import RiskLeafField.*
@@ -135,9 +136,8 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   private val pairingField: FieldName     = FieldName.PercentileQuantilePairing
   private val lossRangeField: FieldName   = FieldName.LossRange
 
-  /** An input's live value, located at `field` of the current subject. The
-    * only reader the checks use; the input `Var`s are read raw by nothing but
-    * their input bindings. */
+  /** An input's live value, located at `field` of the current subject. Every
+    * single-field check reads its input through this. */
   private def located[A](input: Var[A], field: FieldName): Signal[Located[A]] =
     input.signal.combineWith(subject).map((v, s) => Located(v, ErrorLocation.Field(s, field)))
 
@@ -267,20 +267,35 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         .flatMap(bound => ValidationUtil.toValidation(bound.refine(ValidationUtil.refinePositiveLong)))
     )
 
-  /** Metalog mode: terms validation — blank means one term per anchor;
-    * otherwise an integer from the fit's minimum up to the anchor count. The
-    * anchors are counted as the shape counts them, so an entry that is not a
-    * number is not counted here either. */
+  /** The terms input read as a count. Blank text means one term per anchor and
+    * reads as no count; text that is not a whole number is refused as
+    * unreadable. The live check and the shape builder both read terms through
+    * this, so they refuse the same text with the same sentence. */
+  private def readTerms(input: Located[String]): Validation[ValidationError, Option[Int]] =
+    if input.value.isBlank then Validation.succeed(None)
+    else
+      input.value.toIntOption.fold[Validation[ValidationError, Option[Int]]](
+        Validation.fail(input.reject(ValidationErrorCode.TYPE_MISMATCH, ValidationMessages.termsMustBeWholeNumber))
+      )(t => Validation.succeed(Some(t)))
+
+  /** A stated term count checked as the shape's own gate checks it: first the
+    * fit's range, by the shared refinement, then against the anchor count, with
+    * the same codes and sentences. */
+  private def termsWithinFit(input: Located[String], terms: Int, anchors: Int): Validation[ValidationError, Unit] =
+    ValidationUtil.toValidation(input.as(terms).refine(ValidationUtil.refineMetalogTermCount)).flatMap { count =>
+      if count > anchors then
+        Validation.fail(input.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
+      else Validation.unit
+    }
+
+  /** Metalog mode: terms validation. The anchors are counted as the shape
+    * counts them, so an entry that is not a number is not counted here either. */
   private val termsErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(termsVar, termsField), percentilesVar.signal).map {
-      case (DistributionMode.Metalog, input, pStr) if !input.value.isBlank =>
-        input.value.toIntOption match
-          case None    => Some(input.reject(ValidationErrorCode.TYPE_MISMATCH, ValidationMessages.termsMustBeWholeNumber))
-          case Some(t) =>
-            val anchors = parseDoubleList(pStr).length
-            Option.when(t < RiskLeafFormState.minMetalogTerms || t > anchors)(
-              input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.termsOutOfRange)
-            )
+      case (DistributionMode.Metalog, input, pStr) =>
+        firstRefusal(
+          readTerms(input).flatMap(_.fold(Validation.unit)(t => termsWithinFit(input, t, parseDoubleList(pStr).length)))
+        )
       case _ => None
     }
 
@@ -306,8 +321,9 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   val nameError: Signal[Option[String]] = withSubmitErrors(Name, messageOf(nameErrorRaw))
 
   /** Parent has no continuous reactive validation of its own (unlike name) —
-    * only submit-time errors (`parentDraft` returning `None`, or a topology
-    * error from the server) ever populate this, via `setSubmitFieldError`. */
+    * only submit-time errors (`ParentSelection.toParentRef` refusing the
+    * selection in `toDraft`, or a topology error from the server) ever
+    * populate this, via `setSubmitFieldError`. */
   val parentError: Signal[Option[String]] = withSubmitErrors(Parent, Val(None))
   val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, messageOf(probabilityErrorRaw))
 
@@ -458,19 +474,21 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     mode:        DistributionMode,
     percentiles: String,
     quantiles:   String,
-    terms:       String,
+    terms:       Located[String],
     minLoss:     Located[String],
     maxLoss:     Located[String],
     subject:     ErrorSubject
   ): Validation[ValidationError, DistributionShape] =
     mode match
       case DistributionMode.Metalog =>
-        DistributionShape.Metalog.fromPrimitives(
-          parseDoubleList(percentiles).map(RiskLeafFormState.pctToDomain).toVector,
-          parseDoubleList(quantiles).toVector,
-          if terms.isBlank then None else terms.toIntOption,
-          subject
-        )
+        readTerms(terms).flatMap { count =>
+          DistributionShape.Metalog.fromPrimitives(
+            parseDoubleList(percentiles).map(RiskLeafFormState.pctToDomain).toVector,
+            parseDoubleList(quantiles).toVector,
+            count,
+            subject
+          )
+        }
 
       case DistributionMode.Lognormal =>
         Validation
@@ -488,7 +506,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       distributionModeVar.now(),
       percentilesVar.now(),
       quantilesVar.now(),
-      termsVar.now(),
+      locatedNow(termsVar, termsField),
       locatedNow(minLossVar, minLossField),
       locatedNow(maxLossVar, maxLossField),
       subjectVar.now()
@@ -521,7 +539,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     */
   val draftSignal: Signal[Option[DistributionShape]] =
     distributionModeVar.signal
-      .combineWith(percentilesVar.signal, quantilesVar.signal, termsVar.signal)
+      .combineWith(percentilesVar.signal, quantilesVar.signal, located(termsVar, termsField))
       .combineWith(located(minLossVar, minLossField), located(maxLossVar, maxLossField), subject)
       .map { (mode, percentiles, quantiles, terms, minLoss, maxLoss, s) =>
         shapeFrom(mode, percentiles, quantiles, terms, minLoss, maxLoss, s).toOption
@@ -555,10 +573,6 @@ object RiskLeafFormState:
   /** The most decimal places the probability field accepts. Chosen by this
     * project: a likelihood is stated to a hundredth of a percent at most. */
   val probabilityDecimals: Int = 2
-
-  /** The fewest metalog terms a fit may use. The lower bound of
-    * `MetalogTermCount` in OpaqueTypes, which a type-level literal cannot share. */
-  val minMetalogTerms: Int = 2
 
   /** The anchors the implied-ratio advisory compares, on the form's percent
     * scale: the lowest at or below P10 against the highest at or above P90. */

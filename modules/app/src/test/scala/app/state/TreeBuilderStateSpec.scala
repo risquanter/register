@@ -7,6 +7,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, R
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
 import com.risquanter.register.testutil.TestHelpers.{unsafeGet, metalogShape, lognormalShape}
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
@@ -607,6 +608,48 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           formState.minLossVar.now() == "1000",
           formState.maxLossVar.now() == "50000"
         )
+      }
+
+    ),
+
+    suite("a populated form names the node it was populated from")(
+
+      test("a loaded leaf is named by its identifier") {
+        val tree  = mkTree(treeUlid, "SubjectLeaf", Seq(rootPortfolioWithChild, childPortfolio, leafUnderChild), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val formState = new RiskLeafFormState
+        state.populateLeafForm(formState, state.leavesVar.now().head)
+        assertTrue(formState.subjectVar.now() == ErrorSubject.ExistingNode(leafId))
+      },
+
+      test("a loaded portfolio is named by its identifier") {
+        val tree  = mkTree(treeUlid, "SubjectPortfolio", Seq(rootPortfolioWithChild, childPortfolio, leafUnderChild), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val formState = new PortfolioFormState
+        state.populatePortfolioForm(formState, state.portfoliosVar.now().find(_.id.contains(childId)).get)
+        assertTrue(formState.subjectVar.now() == ErrorSubject.ExistingNode(childId))
+      },
+
+      test("a node added this session is named as the draft node") {
+        val state     = new TreeBuilderState()
+        val formState = new PortfolioFormState
+        formState.subjectVar.set(ErrorSubject.ExistingNode(rootId))
+        state.populatePortfolioForm(formState, PortfolioDraft(n("Operations"), ParentRef.Root, None))
+        assertTrue(formState.subjectVar.now() == ErrorSubject.DraftNode)
+      }
+
+    ),
+
+    suite("tree name refusal")(
+
+      test("a blank tree name is refused at the request's name field") {
+        val state = new TreeBuilderState()
+        val locations = state.toRequest() match
+          case Validation.Failure(_, es) => es.toList.map(_.location).toSet
+          case Validation.Success(_, _)  => Set.empty[ErrorLocation]
+        assertTrue(locations.contains(ErrorLocation.requestField(FieldName.Name)))
       }
 
     )

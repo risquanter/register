@@ -207,12 +207,14 @@ def handleSubmit(): Unit =
 ```
 
 ```scala
-// GOOD: Reactive validation signals, always current
-private val nameErrorRaw: Signal[Option[String]] = nameVar.signal.map { v =>
-  ValidationUtil.refineName(v, ErrorLocation.Field(subject, FieldName.Name)) match
-    case Right(_) => None
-    case Left(errors) => Some(errors.head.message)
-}
+// GOOD: Reactive validation signals, always current. The located reader
+// names the field once; the check never names it.
+private val nameErrorRaw: Signal[Option[ValidationError]] =
+  located(nameVar, nameField).map { input =>
+    input.refine(ValidationUtil.refineName) match
+      case Right(_)     => None
+      case Left(errors) => Some(errors.head)
+  }
 ```
 
 ### ❌ Child Mutating Parent State Directly

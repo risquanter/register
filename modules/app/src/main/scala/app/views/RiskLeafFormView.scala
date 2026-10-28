@@ -26,9 +26,9 @@ object RiskLeafFormView:
     // `.distinct` — see the matching comment in `PortfolioFormView`: without
     // it, the portfolio form moving between two of its own non-Blank states
     // re-fires this form's populate/reset subscription and wipes an unrelated,
-    // unsaved leaf draft. `Blank` and `Inactive` being distinct values (not
-    // both collapsing to `Blank`) is what fixed the "dirty after submitting
-    // the other form" bug — see `FormMode.Inactive`'s own doc comment.
+    // unsaved leaf draft. `Blank` and `Inactive` are distinct values, so
+    // submitting the other form does not leave this one reading as dirty —
+    // see `FormMode.Inactive`'s own doc comment.
     val leafMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forLeaf).distinct
     // Fields are disabled while genuinely Locked (viewing a saved leaf),
     // while Inactive (a saved portfolio is selected instead), and while the
@@ -51,24 +51,11 @@ object RiskLeafFormView:
       case _                                     => None
     }
 
-    // Same combine-as-trigger, read-via-.now()-inside-map idiom as `draftSignal`
-    // above: the combined signals only decide *when* to recompute, the actual
-    // values are read fresh from the Vars at that moment.
     val currentSnapshot: Signal[FieldSnapshot.LeafFields] =
       state.nameVar.signal.combineWith(state.parentVar.signal, state.probabilityVar.signal, state.distributionModeVar.signal)
         .combineWith(state.percentilesVar.signal, state.quantilesVar.signal, state.termsVar.signal, state.minLossVar.signal, state.maxLossVar.signal)
-        .map { _ =>
-          FieldSnapshot.LeafFields(
-            name        = state.nameVar.now(),
-            parent      = state.parentVar.now(),
-            probability = state.probabilityVar.now(),
-            mode        = state.distributionModeVar.now(),
-            percentiles = state.percentilesVar.now(),
-            quantiles   = state.quantilesVar.now(),
-            terms       = state.termsVar.now(),
-            minLoss     = state.minLossVar.now(),
-            maxLoss     = state.maxLossVar.now()
-          )
+        .map { (name, parent, probability, mode, percentiles, quantiles, terms, minLoss, maxLoss) =>
+          FieldSnapshot.LeafFields(name, parent, probability, mode, percentiles, quantiles, terms, minLoss, maxLoss)
         }
     val isDirty: Signal[Boolean] = leafMode.combineWith(currentSnapshot).map { (mode, snapshot) =>
       FormMode.isFormDirty(mode, snapshot, builderState.leavesVar.now(), builderState.portfoliosVar.now())
@@ -208,7 +195,9 @@ object RiskLeafFormView:
             // A template is a new node, so its refusals name the draft rather
             // than the source it was copied from.
             state.subjectVar.set(ErrorSubject.DraftNode)
-            if source.parent == ParentRef.Root then state.parentVar.set(ParentSelection.Unset)
+            source.parent match
+              case ParentRef.Root     => state.parentVar.set(ParentSelection.Unset)
+              case ParentRef.Under(_) => ()
           }
         case _ =>
           // parentVar and subjectVar reset here too, not just resetFields() —
@@ -259,12 +248,11 @@ object RiskLeafFormView:
         state.clearSubmitFieldError(RiskLeafField.Parent)
       },
 
-      // Push reactive draft up to TreeBuilderState for DistributionChartState to observe.
-      // draftSignal already returns None when distribution fields are invalid (via
-      // Distribution.create) — no additional hasErrors gate needed here. Removing the
-      // gate allows the preview to render when distribution params are valid even if
-      // name/probability are still empty (submit validation is separate and unchanged).
-      // Cleared on unmount so the chart returns to Idle when the leaf form is not active.
+      // Push the reactive draft up to TreeBuilderState for DistributionChartState
+      // to observe. draftSignal is None while the distribution fields do not form
+      // a shape, so the preview renders as soon as they do, whether or not the
+      // name and probability are filled. Cleared on unmount so the chart returns
+      // to Idle when the leaf form is not active.
       state.draftSignal --> builderState.currentDraftVar.writer,
       // Written to this form's own dirty flag, not the shared isEditDirtyVar
       // directly — see the matching comment in PortfolioFormView. isEditDirtyVar
@@ -411,7 +399,7 @@ object RiskLeafFormView:
   private def lognormalFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
     div(
       cls := "mode-fields",
-      div(cls := "mode-fields-title", "Lognormal Parameters (80% CI)"),
+      div(cls := "mode-fields-title", "Lognormal Parameters (90% CI)"),
 
       textInput(
         labelText = "Minimum Loss",

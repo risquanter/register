@@ -125,14 +125,14 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   private def treeNameLocatedNow: Located[String] =
     Located(treeNameVar.now(), ErrorLocation.Field(subjectVar.now(), treeNameField))
 
-  private val treeNameErrorRaw: Signal[Option[String]] =
-    treeNameLocated.map(_.refine(ValidationUtil.refineName).left.toOption.flatMap(_.headOption).map(_.message))
+  private val treeNameErrorRaw: Signal[Option[ValidationError]] =
+    treeNameLocated.map(_.refine(ValidationUtil.refineName).left.toOption.flatMap(_.headOption))
 
   /** Display-controlled tree-name error (only shows after blur or submit trigger). */
-  val treeNameError: Signal[Option[String]] = withDisplayControl(TreeName, treeNameErrorRaw)
+  val treeNameError: Signal[Option[String]] = withDisplayControl(TreeName, treeNameErrorRaw.map(_.map(_.message)))
 
   /** Raw errors for hasErrors check — tree-name is the only builder-level field. */
-  override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw)
+  override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw.map(_.map(_.message)))
 
   /** Parent dropdown options: root sentinel (if unclaimed) + current portfolio
     * names, excluding `excludeSelf` — a node can never be its own parent, and
@@ -168,7 +168,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * genuinely stale selection (the parent it pointed at got renamed/deleted
     * by the other sub-form) without also firing — and clobbering a
     * still-good selection — on a plain target switch. See `parentSelect`'s
-    * own doc comment for the bug this replaced.
+    * own doc comment.
     */
   val allPortfolioNames: Signal[Set[String]] = portfoliosVar.signal.map(_.map(_.name.value).toSet)
 
@@ -237,7 +237,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   /** Update an existing leaf in-place. Preserves the node's server identity (`id`).
     *
     * Validates the new name/parent, then runs `preValidateTopology` on the post-substitution
-    * node set. On success, replaces the draft in `leavesVar` and clears `selectedLeafName`.
+    * node set. On success, replaces the draft in `leavesVar` and locks `activeForm` on it.
     * Mirrors the `addLeaf` pattern: match on result, then update Var.
     */
   def updateLeaf(

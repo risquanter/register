@@ -34,10 +34,9 @@ object PortfolioFormView:
     // same-target `Templating` → `Locked` transition (this form's own "Clear
     // Form" revert) still fires, since those are different values — and so
     // does the transition into `Inactive` from `Blank`, or from this form's
-    // own target, since those are different values too (this is what fixed
-    // the "dirty after submitting the other form" bug: `Blank` and
-    // `Inactive` no longer collapse into the same value the way `Blank` and
-    // the old undifferentiated "not mine" case used to).
+    // own target, since those are different values too. `Blank` and
+    // `Inactive` being distinct is what keeps this form from reading as dirty
+    // after the other form submits.
     val portfolioMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forPortfolio).distinct
     // Fields are disabled while genuinely Locked (viewing a saved portfolio),
     // while Inactive (a saved leaf is selected instead), and while the
@@ -202,7 +201,9 @@ object PortfolioFormView:
             // A template is a new node, so its refusals name the draft rather
             // than the source it was copied from.
             form.subjectVar.set(ErrorSubject.DraftNode)
-            if source.parent == ParentRef.Root then form.parentVar.set(ParentSelection.Unset)
+            source.parent match
+              case ParentRef.Root     => form.parentVar.set(ParentSelection.Unset)
+              case ParentRef.Under(_) => ()
           }
         case _ =>
           form.reset()
@@ -230,10 +231,10 @@ object PortfolioFormView:
       },
 
       // Written to this form's own dirty flag, not the shared isEditDirtyVar
-      // directly — writing there directly let this form's "not dirty" (when
+      // directly — a shared write would let this form's "not dirty" (when
       // portfolioMode collapses to Blank while the leaf form is active)
-      // clobber a genuinely dirty leaf draft. isEditDirtyVar itself is the OR
-      // of both forms' flags (see TreeBuilderState).
+      // clobber a dirty leaf draft. isEditDirtyVar itself is the OR of both
+      // forms' flags (see TreeBuilderState).
       isDirty --> builderState.portfolioFormDirtyVar.writer,
 
       FormInputs.textInput(
