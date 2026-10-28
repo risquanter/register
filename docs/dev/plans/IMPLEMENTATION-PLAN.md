@@ -933,7 +933,7 @@ This tier replaces the standalone Phase X by combining:
 | A10 | Add `lastAccessedAt` to `Workspace` model | Low | W.2 | Bake into initial domain model |
 | A11 | Dual timeout logic (idle + absolute) in `resolve()` | Medium | W.2 | Single branch in resolve |
 | A12 | *(reserved)* | — | — | — |
-| A13 | Constant response for not-found vs not-yours | Low | W.3 | Collapse to single opaque 404 at HTTP layer. **Narrowed on 2026-10-10 by TES-D-9 in `docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md`:** expiry leaves this item and gets its own response. `WorkspaceNotFound` and `TreeNotInWorkspace` still share one body, which is what keeps a caller from learning whether a tree exists in a workspace that is not theirs. Expiry was never that case — a caller who presents an expired key held it — and the key is 128-bit `SecureRandom`, so by A28's own reasoning only a holder can present one. The lifetime the expiry response states is already returned to that holder by `WorkspaceBootstrapResponse.expiresAt` at creation and again on rotation |
+| A13 | Constant response for not-found vs not-yours | Low | W.3 | Collapse to single opaque 404 at HTTP layer. **Narrowed on 2026-10-10 by TES-D-9 in `docs/archive/plans/DONE-PLAN-TYPED-ERROR-STRUCTURE.md`:** expiry leaves this item and gets its own response. `WorkspaceNotFound` and `TreeNotInWorkspace` still share one body, which is what keeps a caller from learning whether a tree exists in a workspace that is not theirs. Expiry was never that case — a caller who presents an expired key held it — and the key is 128-bit `SecureRandom`, so by A28's own reasoning only a holder can present one. The lifetime the expiry response states is already returned to that holder by `WorkspaceBootstrapResponse.expiresAt` at creation and again on rotation |
 | A14 | Constant-time workspace lookup | Low | W.2/W.3 | `Map.get` already O(1); document principle |
 | A15 | SSE scope to workspace key | Low | W.3 | ✅ SSE endpoint moved to `/w/{key}/events/tree/{treeId}`, validates workspace ownership |
 | A16 | Close SSE on workspace expiry/revocation | Medium | Deferred | Client-side `WorkspaceExpired` error handling is the reliability mechanism; SSE notification deferred |
@@ -1265,7 +1265,7 @@ never existed" from "this key existed but expired." The `WorkspaceError` ADT ret
 distinction for internal logging (A30). Deleted workspaces simply don't exist → `WorkspaceNotFound`.
 
 **Narrowed on 2026-10-10 — read A13's index row above and TES-D-9 in
-`docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md` before relying on this
+`docs/archive/plans/DONE-PLAN-TYPED-ERROR-STRUCTURE.md` before relying on this
 paragraph.** Expiry leaves A13 and gets its own response; not-found and
 tree-not-in-workspace keep sharing one body. Step 5 above and the W.3
 verification item that asserts identical 404s change with it. The passages in

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-01
 **Audience:** `register-infra` agent — implement as BATS tests against the deployed K8s stack
-**Companion:** [AUTHORIZATION-IMPLEMENTATION-PLAN.md](./AUTHORIZATION-IMPLEMENTATION-PLAN.md) — Scala `server-it` tests (T-S1–T-S10) for the SpiceDB HTTP adapter; overlap is intentional (defense in depth)
+**Companion:** [DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md](../../archive/plans/DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md) — Scala `server-it` tests (T-S1–T-S10) for the SpiceDB HTTP adapter; overlap is intentional (defense in depth)
 **Related:** [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md) — master plan; [ADR-012](./ADR-012.md) — mesh trust; [ADR-024](./ADR-024-externalized-authorization-pep-pattern.md) — PEP pattern
 
 ---
@@ -262,7 +262,7 @@ status=$(curl -s -o /dev/null -w "%{http_code}" \
 ## Section K5 — Header Spoofing (K.5 Exit Criterion)
 
 > These verify that the Istio waypoint strips external `x-user-*` headers before injecting
-> validated claim headers. See AUTHORIZATION-PLAN.md Phase K.5 and AUTHORIZATION-IMPLEMENTATION-PLAN.md §K.5 Amendment.
+> validated claim headers. See AUTHORIZATION-PLAN.md Phase K.5 and DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §K.5 Amendment.
 
 ### B-K5-1 — Spoofed `x-user-id` header is stripped; identity is not accepted
 
@@ -346,7 +346,7 @@ zed permission check \
 ## Section K6 — Drift Detection (K.6 Exit Criterion)
 
 > These verify the bidirectional reconcile algorithm in the provisioning CI job.
-> See AUTHORIZATION-PLAN.md Phase K.6 and AUTHORIZATION-IMPLEMENTATION-PLAN.md §K.6 Amendment.
+> See AUTHORIZATION-PLAN.md Phase K.6 and DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §K.6 Amendment.
 
 ### B-K6-1 — Provisioning job with clean state reports no drift
 

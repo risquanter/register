@@ -671,7 +671,7 @@ object Mitigation {
   * `NodeProvenance`, which carries no identity. It does not cross the wire:
   * a response tags each reading with the mitigation ids that shaped it, and the
   * client already holds each mitigation's spec and resolved scope from the tree
-  * read. (Placement specified by `PLAN-FBF-VALUATION-TRANSPLANT.md` §3.2.) */
+  * read. (Placement specified by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` §3.2.) */
 final case class MitigationApplicationRecord(
   mitigationId: MitigationId,
   spec: MitigationSpec,
@@ -1893,7 +1893,7 @@ the interface and the user documentation — is not elevated here. §7.6.12 list
 the decisions, and all of them are now closed: slice 6's two were ruled on
 2026-09-15 and the rest are ruled or void, apart from decision 11, which gates
 M4 slice 2 and is deliberately left open. The valuation type slice 1 consumes is built, specified by
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and
 landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
 to gate. No M4 source edit is authorized until the approval token names this
 plan and the edited file appears in the shared `## File inventory`.
@@ -2417,7 +2417,7 @@ Slices 2 to 5 are specified below. Slice 2 carries one open decision — §7.6.1
 decision 11, the submitted form of a leaf-stage mitigation — and slices 3 to 5
 carry none. Slice 1 consumes
 the valuation type, which is specified by
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and
 carries no open decisions.
 Slice 6 is not elevated in this pass: it is the one part of M4 whose shape the
 twelve rulings do not determine. Its own two decisions were ruled on 2026-09-15,
@@ -3667,7 +3667,7 @@ for a client's view to diverge from.
 **Scope of the ADR amendments — RULED 2026-09-15 (user).** Slice 5 amends the
 records marked "Amended, slice 5" in §7.6.10, which are now ADR-015 and ADR-017.
 ADR-003, ADR-009 and ADR-034 were amended ahead of this slice by
-`PLAN-FBF-VALUATION-TRANSPLANT.md`, because the type change made parts of them
+`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`, because the type change made parts of them
 uncompilable and the sweep landed with it. ADR-033 was renamed to the new
 constructor in that sweep and has since gained `LossDistribution.decorate` as
 its second conversion site, so it too needs nothing from slice 5.
@@ -3703,9 +3703,9 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-001 (validate once, at the boundary) | The request types carry smart constructors and their decoders run them, so a handler receives a selection that already satisfies both bounds. The one check deliberately outside the decoder — whether a named mitigation exists — is a lookup against a loaded tree, not a field format rule, and the plan says so where it is placed | Compliant |
 | ADR-001 §2 (Iron types in JSON bodies need an explicit Tapir schema) | `Schema[MitigationId]` is added beside the existing `Schema[NodeId]` | Compliant |
 | ADR-002 (drift signals, not failures) | A predicate that no longer binds makes one mitigation a no-op and is logged; it never fails a read | Compliant |
-| ADR-003 (provenance and reproducibility) | A leaf's record sits on its own `LossDistribution` in `provenance`, and a subtree's records are read by resolving each leaf under its own identifier — no walk descends through a returned value. ADR-003's Implementation table claimed optional provenance capture was implemented via `includeProvenance`, which sets a tracing attribute only | Amended by `PLAN-FBF-VALUATION-TRANSPLANT.md` |
+| ADR-003 (provenance and reproducibility) | A leaf's record sits on its own `LossDistribution` in `provenance`, and a subtree's records are read by resolving each leaf under its own identifier — no walk descends through a returned value. ADR-003's Implementation table claimed optional provenance capture was implemented via `includeProvenance`, which sets a tracing attribute only | Amended by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` |
 | ADR-004a (storage mapping) | Unchanged: mitigations are already stored as `mitigations/{id}` blobs and this plan adds no storage shape | Compliant |
-| ADR-009 (associativity of the aggregate) | Result-stage transforms still apply to a finished node value, never inside the summation — compliant and unchanged. §2 enumerated two subtypes of a sealed hierarchy that no longer exists, and §5 published a `children.collect { case r: RiskResult => … }` pattern that no longer compiles; both now describe the one concrete value and the `private[cache]` family beneath it | Amended by `PLAN-FBF-VALUATION-TRANSPLANT.md` |
+| ADR-009 (associativity of the aggregate) | Result-stage transforms still apply to a finished node value, never inside the summation — compliant and unchanged. §2 enumerated two subtypes of a sealed hierarchy that no longer exists, and §5 published a `children.collect { case r: RiskResult => … }` pattern that no longer compiles; both now describe the one concrete value and the `private[cache]` family beneath it | Amended by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` |
 
 | ADR-010 (typed errors, accumulated) | Every new validation returns `ValidationError` with a code, and independent checks accumulate through `Validation.validateWith` | Compliant |
 | ADR-014 (render-time curve computation) | Both valuations of every requested node go through one `generateCurvePointsMulti` call, so the shared tick domain covers them together | Compliant |
@@ -3717,7 +3717,7 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-024 (application as a pure enforcement point) | Both analysis handlers keep their `AnalyzeRun` check and the structure handler keeps `ViewTree`; the method change on one endpoint moves no check | Compliant |
 | ADR-032 (two equality relations) | The mitigation diff compares encoded content, not values, for the same array-equality reason the node diff already does | Compliant |
 | ADR-033 (narrowest sound catch) | `LossDistribution.decorate` catches `ArithmeticException` from the layer's own arithmetic and converts it to a `ValidationError`; `PortfolioLosses.create` does the same for the combine. Both catches name the exception the code they wrap is documented to raise, and ADR-033's Implementation table lists both sites | Amended |
-| ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. Its Decision 4 now writes out the shipped five-field `LossDistribution`, and its §6 carries the rule that no mitigation may eliminate a risk | Amended by `PLAN-FBF-VALUATION-TRANSPLANT.md` and `DONE-PLAN-LOGNORMAL-BOUND-POSITIVITY.md` |
+| ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. Its Decision 4 now writes out the shipped five-field `LossDistribution`, and its §6 carries the rule that no mitigation may eliminate a risk | Amended by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` and `DONE-PLAN-LOGNORMAL-BOUND-POSITIVITY.md` |
 | ADR-035 (error leakage prevention) | The internal-error resolution failure reaches the wire as a fixed message with no detail | Compliant |
 | ADR-036 (confidential internal identifiers) | `WorkspaceId` and `BranchRef` stay on internal service signatures and never cross the client boundary. `TreeId`, `NodeId` and `MitigationId` are not confined by this record: it names `WorkspaceId` as its subject and shows `nodeId` as a client-safe reporting field, and every lookup taking a client-supplied node id resolves it inside a tree the caller is already authorized for | Compliant |
 
@@ -3819,7 +3819,7 @@ rather than implying them.
 **The `ValuationResult` sub-slice does not exist and no decision below gates
 slice 1.** §8.16 ruled a fourth case of a sealed `LossDistribution` hierarchy;
 that shape was superseded first by §8.17 and then by
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md), which
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md), which
 landed one concrete `LossDistribution` carrying figures only, with the aggregate
 claim on a `private[cache]` family beneath it. Decisions 1, 2, 3, 4, 9 and 10
 below all ask where that fourth case lives, what it extends, or how its removal
@@ -3838,7 +3838,7 @@ keeps its slot and records the answer in place.
 The two decisions opened in place of 9 and 10 — what happens to
 `LossDistribution.merge`, and what `Equal[LossDistribution]` compares — are
 decisions 4 and 5 of
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) §10. Both
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) §10. Both
 were ruled there and both have landed.
 
 **What the following asked of the §8.16 design.** §8.16 ruled that design; none
@@ -4108,7 +4108,7 @@ the rest of M4, item 40 is marked closed then rather than at the end.
    `RiskResult` and `RiskResultGroup` are the **computed value** types. Only the
    second pair is in question.
 
-   **Answered by decision 2 of [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) §10.**
+   **Answered by decision 2 of [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) §10.**
    The two internal cases are `LeafLosses` and `PortfolioLosses`, cases of a
    `private[cache]` `NodeLosses` living beside the resolver in
    `services/cache/NodeLosses.scala`. The package split that follows is on the
@@ -7462,7 +7462,7 @@ assertions; §8.18 writes out what replaces them.
 ### 8.17 The mitigated value's type — Option FB (RULED 2026-09-25)
 
 > **Superseded as a specification by
-> [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md),
+> [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md),
 > which is the specification for the four valuation types.** This section is
 > retained as informative material: how the work sits in the M4 epic, and the
 > side effects identified while it was being specified. The shape it writes out
@@ -7691,7 +7691,7 @@ reading convenience at the price of two ways to combine.
 ### 8.18 Option FB — implementation-grade elevation (2026-09-25)
 
 > **Superseded as a specification by
-> [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md).**
+> [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md).**
 > Retained as informative material for what it identified along the way and
 > carried forward: the `recordsByNode` / `run` split, the scale-overflow fix,
 > the documentation sweep list and the test blast radius. Its two open decisions
@@ -9879,7 +9879,7 @@ interruption window to be closed as its own separate change.
 **Why this is asked rather than chosen.** Shape 1 subsumes a decision that was
 presented separately, and it deletes the undo path §8.19.2a specifies. It also
 deletes the only producer of `MergeUndoFailed`, whose typed form
-`docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md` §3.2 specifies, so that plan's
+`docs/archive/plans/DONE-PLAN-TYPED-ERROR-STRUCTURE.md` §3.2 specifies, so that plan's
 Phase 1 has different content depending on this ruling and should not start
 first. All three are changes to approved plan text, so they are the user's to
 rule rather than a detail of implementing M2-D9.
@@ -10046,7 +10046,7 @@ because no existing code distinguishes these from an ordinary version conflict:
 
 Both errors encode to 409 with the scenario in a detail row, and
 `GlobalError.scala` classifies both as the conflict banner alongside the other
-merge outcomes. `PLAN-TYPED-ERROR-STRUCTURE.md` §3.1 folds `MergeTargetMoved`
+merge outcomes. `DONE-PLAN-TYPED-ERROR-STRUCTURE.md` §3.1 folds `MergeTargetMoved`
 into `MergeRefusal.ConcurrentChange`, which is the same information in that
 plan's shape.
 
@@ -10144,7 +10144,7 @@ deletes. The removals are `AppError.scala:193`, the `encode` case at
 `ErrorResponse.scala:335`, the `decode` reconstruction at
 `ErrorResponse.scala:88`, the classification at `GlobalError.scala:96`, and the
 four assertions in `ErrorResponseSpec.scala` at `:200`, `:295`, `:298` and
-`:301`–`:303`. `PLAN-TYPED-ERROR-STRUCTURE.md` §3.2 drops the type from its own
+`:301`–`:303`. `DONE-PLAN-TYPED-ERROR-STRUCTURE.md` §3.2 drops the type from its own
 specification in consequence.
 
 **Tests.** `ScenarioMergeServiceSpec.scala`'s `FakeMergeIrmin` gains the branch

@@ -427,7 +427,7 @@ about the no-transform case: it is the identity instance of one uniform rule.
 Four candidate shapes were written out and run as code in
 `docs/scratch/valuation-prototypes/`, then compared against each other rather
 than argued about. **FB-F** was evaluated as the best fit, and
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](../dev/plans/PLAN-FBF-VALUATION-TRANSPLANT.md)
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md)
 is the plan that implements it. What follows is the reasoning the choice rests
 on, not the specification; that plan carries the exact signatures.
 
@@ -616,7 +616,7 @@ figures.
 - The fold returns a value at every node carrying what was applied there, with
   the empty list as the identity.
 - The type is `LossDistribution`, the FB-F shape, specified by
-  [`PLAN-FBF-VALUATION-TRANSPLANT.md`](../dev/plans/PLAN-FBF-VALUATION-TRANSPLANT.md):
+  [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md):
   one concrete type carrying figures only, with the aggregate claim held one
   level below on an internal type no consumer can name.
 - One method, not two; a raw reading is the identity instance.
@@ -630,7 +630,7 @@ figures.
 - Nothing. Every question this design raised has been ruled.
 
 **Built.** The specification is
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](../dev/plans/PLAN-FBF-VALUATION-TRANSPLANT.md)
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md)
 — exact signatures, file inventory, ADR alignment, verification plan — and the
 code it specifies is in the tree.
 

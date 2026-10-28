@@ -15,7 +15,7 @@ single list.
 | # | Plan | Why here |
 |---|---|---|
 | 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | no technical dependency; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
-| 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 7 |
+| 2 | `docs/archive/plans/DONE-PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 7 |
 | 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
 | ~~4~~ | ~~`docs/dev/plans/PLAN-TELEMETRY-EXPORT.md`~~ | **Landed in 0.10.37** (`docs/archive/plans/DONE-PLAN-TELEMETRY-EXPORT.md`). Metrics and traces now reach the collector by default, so 5's prerequisite is met |
 | 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`). Its other dependency, 4, has landed: the saturation gauge it publishes can now be read |
@@ -828,7 +828,7 @@ validating whether ZIO's environment model makes this straightforward or impract
 
 ### 16b. Anonymous sentinel `UserId` may bypass the type-level guarantee
 
-**Status: Design decision taken — Wave 0B pending implementation (AUTHORIZATION-IMPLEMENTATION-PLAN.md §B)**
+**Status: Design decision taken — Wave 0B pending implementation (DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §B)**
 
 `UserContextExtractor.noOp` returns the sentinel `UserId("00000000-...")`. If the mode
 selection logic in `AppLayer` has a bug and NoOp is wired in a production environment,
@@ -840,7 +840,7 @@ surface the mistake.
 variants. `AuthorizationService.check()` accepts only `Authenticated`. Passing the sentinel
 to `check()` is then a compile error. The `UserContextExtractor.scala` code comment has been
 updated with the two-layer mitigation model. Full migration scope listed in
-`AUTHORIZATION-IMPLEMENTATION-PLAN.md §B` — 14 files across `common`, auth, HTTP controllers,
+`DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §B` — 14 files across `common`, auth, HTTP controllers,
 Tapir codec, and tests.
 
 **Wave 3 (still required after Wave 0B):** The SpiceDB CEL caveat / schema-level subject
@@ -2092,7 +2092,7 @@ PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS),
 `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` carries the mechanism, a
 worked example with timings, the deadlock argument for acquiring permits only at
 leaves, and the exact signatures. One plan still lands before it,
-`PLAN-CACHE-REGISTRY-RENAME.md`, because both change
+`DONE-PLAN-CACHE-REGISTRY-RENAME.md`, because both change
 `CachedResultResolverLive.scala`. Its other prerequisite,
 `PLAN-TELEMETRY-EXPORT.md`, landed in 0.10.37, so the ruled saturation gauge can
 now be read. Nothing is implemented until that plan is approved.

@@ -307,7 +307,7 @@ All four tiers green is the acceptance condition. Report pass or fail only.
 ## Sequencing
 
 Independent of every other open plan. It touches no file that
-`PLAN-CACHE-REGISTRY-RENAME`, `PLAN-SIMULATION-CONCURRENCY-BOUNDS`,
+`DONE-PLAN-CACHE-REGISTRY-RENAME`, `PLAN-SIMULATION-CONCURRENCY-BOUNDS`,
 `PLAN-NGINX-WORKSPACE-ROUTING` or `PLAN-TELEMETRY-EXPORT` touch, so it can land
 in any order relative to them.
 

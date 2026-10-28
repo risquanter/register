@@ -52,7 +52,7 @@ Confirmed by reading the current sources:
 - `LossDistribution` is one concrete `final case class` with a private
   constructor, carrying figures only; the aggregate claim that a total equals the
   combine of its children sits on a `private[cache]` family beneath it, where
-  `RiskResult` and `RiskResultGroup` now live. `PLAN-FBF-VALUATION-TRANSPLANT.md`
+  `RiskResult` and `RiskResultGroup` now live. `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`
   landed that shape in place of the sealed hierarchy those two used to extend. The
   full per-trial sample is retained either way, so **any read-side statistic (mean,
   any quantile, any tail mean, base-minus-mitigated difference) is computable

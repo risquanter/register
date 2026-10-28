@@ -354,7 +354,7 @@ All four tiers green is the acceptance condition. Report pass or fail only.
 
 ## Sequencing
 
-**After `PLAN-CACHE-REGISTRY-RENAME`.** That plan renames both registries and
+**After `DONE-PLAN-CACHE-REGISTRY-RENAME`.** That plan renames both registries and
 both their accessor methods. Adding a method to a type that is about to be
 renamed means writing it twice and resolving a conflict for no reason. This plan
 is written against the post-rename names throughout.

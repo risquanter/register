@@ -315,7 +315,7 @@ mechanically against every plan document, counting bullets that name a
 | Plan | `## File inventory` present | Authorizing bullets |
 |---|---|---|
 | PLAN-NGINX-WORKSPACE-ROUTING (order 1) | yes | 0 — touches no Scala, so this is correct |
-| PLAN-CACHE-REGISTRY-RENAME (order 2) | yes | **0** |
+| DONE-PLAN-CACHE-REGISTRY-RENAME (order 2) | yes | **0** |
 | PLAN-WORKSPACE-CACHE-RELEASE (order 3) | yes | **0** |
 | PLAN-TELEMETRY-EXPORT (order 4) | yes | **0** |
 | PLAN-SIMULATION-CONCURRENCY-BOUNDS (order 5) | yes | 15 |
@@ -339,7 +339,7 @@ it.
 Overlap between the M4 file inventory amendment (43 paths) and each ordered
 plan, computed mechanically:
 
-- **PLAN-CACHE-REGISTRY-RENAME — 15 shared files**, including all three
+- **DONE-PLAN-CACHE-REGISTRY-RENAME — 15 shared files**, including all three
   scope-resolver sources (`MitigationScopeResolver.scala`,
   `MitigationScopeResolverLive.scala`, `MitigationScopeResolverRegistry.scala`),
   `Application.scala`, `QueryServiceLive.scala`, and six test files.
@@ -357,7 +357,7 @@ slice 4 rewrites `MitigationScopeResolverLive`'s memo. So one of these holds:
     names that will not exist by the time they are typed.
 Neither is recorded anywhere. This needs a ruling before M4 slice 1 starts.
 
-Related and smaller: PLAN-CACHE-REGISTRY-RENAME line 312 budgets "29
+Related and smaller: DONE-PLAN-CACHE-REGISTRY-RENAME line 312 budgets "29
 occurrences" in PLAN-RISKTRANSFORM.md. The elevation written this session added
 more, so that count is stale whichever order is chosen.
 
@@ -635,7 +635,7 @@ on and is still open.
 
 ## Acted on
 
-- **1A / S3-1.** The four table-shaped inventories in PLAN-CACHE-REGISTRY-RENAME,
+- **1A / S3-1.** The four table-shaped inventories in DONE-PLAN-CACHE-REGISTRY-RENAME,
   PLAN-WORKSPACE-CACHE-RELEASE, PLAN-TELEMETRY-EXPORT and PLAN-IRMIN-RECURSIVE-READ
   are bullets under `## File inventory`, each keeping its description after an
   em dash. Re-counting with the hook's own rule: 21, 15, 5 and 7 authorizing
@@ -646,7 +646,7 @@ on and is still open.
   constraint 6, ordered after the registry rename with the fifteen shared files
   as the reason. PLAN-RISKTRANSFORM §7.6 gains the matching sequencing paragraph
   and states that §7.6.5's and §7.6.8's signatures are written in pre-rename
-  vocabulary on purpose. PLAN-CACHE-REGISTRY-RENAME's stale "29 occurrences"
+  vocabulary on purpose. DONE-PLAN-CACHE-REGISTRY-RENAME's stale "29 occurrences"
   budget is replaced — the counts were wrong for three of the five rows and drift
   every time those documents are edited, so the plan now says to grep for the
   four symbols instead of trusting a number.
@@ -717,7 +717,7 @@ label "M3 analytics VQL".
 - **The `examples/` scripts have no automated coverage.** No BATS suite and no
   test tier executes them, which is how 60 broken query calls survived the M3
   arity change. The scripts are the documented first step for a new user.
-- **PLAN-CACHE-REGISTRY-RENAME's occurrence counts were wrong** for three of
+- **DONE-PLAN-CACHE-REGISTRY-RENAME's occurrence counts were wrong** for three of
   five rows even before this session's edits.
 
 ## Still open, no ruling

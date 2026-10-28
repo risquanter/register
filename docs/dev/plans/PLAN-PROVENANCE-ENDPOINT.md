@@ -12,7 +12,7 @@
 `modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala`
 is one concrete type carrying `nodeId`, `trials`, `source`, `applied` and
 `provenance`, with no subtypes. It is specified by
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and was
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and was
 chosen from four candidates written out and run as code in
 `docs/scratch/valuation-prototypes/`.
 
@@ -281,7 +281,7 @@ changes.
 
 ## Interaction with the valuation design
 
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) replaces
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) replaces
 old-LossDistribution with a flat type carrying `provenance` as an ordinary
 field. **Ruled 2026-09-27, and Phase 2 above is written for it** — that is why
 `leafProvenances` has no type test.

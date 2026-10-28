@@ -3,7 +3,7 @@
 **Date:** February 19, 2026
 **Status:** Register app implementation complete through Wave 6 (2026-07-09). Phase K infra (k3s, Keycloak, Istio) and BATS smoke tests remain in register-infra. Open app-side gap: `evictExpired` missing `AdminSystem` check (Wave 5 partial). L1.3/L1.4 frontend login flow blocked on Keycloak infra.
 **Related:** [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) (Tier 1.5 = Layer 0)
-**Implementation amendments:** [AUTHORIZATION-IMPLEMENTATION-PLAN.md](./AUTHORIZATION-IMPLEMENTATION-PLAN.md) — type corrections, `Checked[P]` proof token, `BootstrapProvisioner`, K8s CI hardening
+**Implementation amendments:** [DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md](../../archive/plans/DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md) — type corrections, `Checked[P]` proof token, `BootstrapProvisioner`, K8s CI hardening
 **ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs), [ADR-023](./ADR-023-local-dev-tls-and-trust-material-policy.md) (Local Dev TLS & Trust Policy), [ADR-024](./ADR-024-externalized-authorization-pep-pattern.md) (Externalized Authorization / PEP Pattern)
 
 ---
@@ -541,7 +541,7 @@ SpiceDB is the selected Layer 2 backend. This phase establishes the implementati
 - Deploy SpiceDB on k3s (Helm) with persistent storage — see [ADR-INFRA-010](../register-infra/docs/adr/ADR-INFRA-010.md)
 - Apply initial `.zed` schema (`workspace`, `risk_tree`, inherited permissions)
 - Implement `AuthorizationServiceSpiceDB` with `check` and `listAccessible` only — pure PEP, no tuple writes
-- Implement `BootstrapProvisionerSpiceDB` for workspace ownership lifecycle writes — see AUTHORIZATION-IMPLEMENTATION-PLAN.md §D
+- Implement `BootstrapProvisionerSpiceDB` for workspace ownership lifecycle writes — see DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §D
 - `AuthorizationService` contains zero write operations; `BootstrapProvisioner` is scoped to bootstrap handler only (see ADR-024)
 - Implement `AuthzProvisioning` job in CI/CD (idempotent reconcile, drift detection, audit logs) — delivery via in-cluster CI runner, see [ADR-INFRA-011](../register-infra/docs/adr/ADR-INFRA-011.md)
 - Ensure app runtime never writes authorization data — no `grant`/`revoke`/tuple writes in application code (see ADR-024)
@@ -886,7 +886,7 @@ Start with `minimize-latency`. Add `fully-consistent` as a config option for env
 | SpiceDB: HTTP 4xx (config/auth) | 403 Forbidden | Fail-closed; don't reveal infra |
 | SpiceDB: HTTP 5xx / timeout | 403 Forbidden | Fail-closed; 503 would reveal SpiceDB is down |
 | SpiceDB: network error | 403 Forbidden | Fail-closed |
-| Missing `Checked[P]` at a protected call site | Does not compile | Proof token pattern enforces check() was called — see AUTHORIZATION-IMPLEMENTATION-PLAN.md Wave 1 |
+| Missing `Checked[P]` at a protected call site | Does not compile | Proof token pattern enforces check() was called — see DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md Wave 1 |
 
 #### Observability
 
@@ -916,7 +916,7 @@ authz.check user=8f14e45f-... permission=design_write resource=risk_tree:01HXY r
 
 ```scala
 final case class SpiceDbConfig(
-  url:            MeshServiceUrl,               // mesh-mTLS endpoint (http/https) — see AUTHORIZATION-IMPLEMENTATION-PLAN.md §C
+  url:            MeshServiceUrl,               // mesh-mTLS endpoint (http/https) — see DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §C
   token:          SpiceDbToken,             // API bearer token — redacted in toString (WorkspaceKeySecret pattern)
   consistency:    SpiceDbConsistency = SpiceDbConsistency.MinimizeLatency,
   timeoutSeconds: PositiveInt = 10          // PositiveInt — 0 or negative is a config error
@@ -1234,7 +1234,7 @@ trait UserContextExtractor:
     *
     * `UserId` is a sum type (`Anonymous | Authenticated`). `AuthorizationService.check()` accepts only
     * `Authenticated`; the compiler prevents anonymous identities from reaching SpiceDB call sites.
-    * See AUTHORIZATION-IMPLEMENTATION-PLAN.md §B for the sum type design.
+    * See DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §B for the sum type design.
     */
   def extract(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId]
   def requireAuthenticated(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated]
@@ -1383,7 +1383,7 @@ _New tests:_
 
 `POST /workspaces/bootstrap` creates a new workspace — no prior resource exists to check permissions against.
 After creation, the creator's ownership is recorded in SpiceDB as a resource lifecycle write (not a PAP action
-— see ADR-024 updated clarification and AUTHORIZATION-IMPLEMENTATION-PLAN.md §Pre-Wave).
+— see ADR-024 updated clarification and DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §Pre-Wave).
 
 _Flow in `fine-grained` mode:_
 
@@ -1411,7 +1411,7 @@ In `capability-only` and `identity` modes, `BootstrapProvisionerNoOp` is wired �
 _Design rationale:_ Resource lifecycle writes (recording creator ownership at creation time) are
 categorically different from policy administration. The Zanzibar paper models this pattern explicitly.
 `AuthorizationService` retains zero write operations. The service account’s write permission is scoped
-to `owner_user`/`owner_team` on `workspace` definitions only. See AUTHORIZATION-IMPLEMENTATION-PLAN.md
+to `owner_user`/`owner_team` on `workspace` definitions only. See DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md
 §Wave 6 and ADR-024 updated §1 for full justification.
 
 _New tests:_

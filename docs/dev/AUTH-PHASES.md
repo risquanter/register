@@ -3,7 +3,7 @@
 **Date:** 2026-07-01
 **References:**
 - [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md) — strategic design, wave structure, route matrix
-- [AUTHORIZATION-IMPLEMENTATION-PLAN.md](./AUTHORIZATION-IMPLEMENTATION-PLAN.md) — type corrections, `Checked[P]`, `BootstrapProvisioner`, K8s hardening
+- [DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md](../archive/plans/DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md) — type corrections, `Checked[P]`, `BootstrapProvisioner`, K8s hardening
 - [AUTH-TESTING-PLAN.md](./AUTH-TESTING-PLAN.md) — BATS end-to-end tests (infra) and Scala `server-it` test cases
 
 ---

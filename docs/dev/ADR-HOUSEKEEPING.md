@@ -174,7 +174,7 @@ in ADR-003 as a decision taken, in the ADR-00X shape:
 
 **Follow-up: closed.** Two statements in ADR-003 were wrong and are now
 corrected, by the documentation sweep of
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](plans/PLAN-FBF-VALUATION-TRANSPLANT.md) §6:
+[`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) §6:
 
 - The Implementation table's row on provenance capture now says what the code
   does — capture is unconditional, and `includeProvenance` sets a tracing
@@ -263,7 +263,7 @@ ADR-005's resolver signature block is **not** in scope here; that is T5.
 
 ## T7 — the registry rename's documentation sweep — DONE
 
-**Done.** `PLAN-CACHE-REGISTRY-RENAME` landed; current-state docs and code name
+**Done.** `DONE-PLAN-CACHE-REGISTRY-RENAME` landed; current-state docs and code name
 `ContentCacheRegistry` (per-workspace `ContentCache` resolution) and
 `MitigationScopeResolverRegistry` (per-workspace `MitigationScopeResolver`
 resolution). ADR-005-proposal is untouched: it names the method on

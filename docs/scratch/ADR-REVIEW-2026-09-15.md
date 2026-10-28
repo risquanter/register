@@ -225,7 +225,7 @@ ADR-031. One paragraph, no dependants.
 
 ### D7 — the registry rename's ADR mentions — DONE
 
-`PLAN-CACHE-REGISTRY-RENAME` landed. ADR-015's retirement banner and ADR-014's
+`DONE-PLAN-CACHE-REGISTRY-RENAME` landed. ADR-015's retirement banner and ADR-014's
 Implementation-block table row name the current `ContentCacheRegistry`
 (per-workspace `ContentCache` resolution).
 
