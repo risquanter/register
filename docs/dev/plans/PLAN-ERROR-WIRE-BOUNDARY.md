@@ -6144,8 +6144,8 @@ string, so the location `at(FieldName.Probability)` builds at
 
 **`.now()` stays, and that is correct.** `.claude/rules/laminar.md` forbids
 `.now()` in a rendering pipeline, and a submit handler is an event rather than a
-pipeline. The nine `.now()` calls in `RiskLeafFormState.scala` are all in
-`buildDistribution` and `toDraft`, lines 388 to 431. What is wrong with them is
+pipeline. The ten `.now()` calls in `RiskLeafFormState.scala` are all in
+`currentShapeValidation` and `toDraft`, lines 393 to 459. What is wrong with them is
 not that they read a snapshot but that they return a bare value with no field.
 
 **The raw `Var` stays reachable, because the input element needs it.**
@@ -6229,20 +6229,19 @@ that mentions it follows. Three enums instantiate it: `RiskLeafField`,
 `PortfolioField`, and `TreeBuilderField` at `TreeBuilderState.scala:27`.
 
 **Why `None` is a bypass today.** It carries two meanings at once: "this form
-has no control for that location", and "nobody decided where this goes". Five of
-the nine multi-field refusals in `Distribution.create` name
-`FieldName.DistributionType`, which `inputFor` has no arm for, so they reach the
-banner through `case _ => None` rather than by a decision anyone made.
-`EWB-D-39` removes one of those five — the length mismatch at
-`Distribution.scala:91` now names `PercentileQuantilePairing` and maps to
-`Set(Percentiles, Quantiles)` — and leaves four that are genuinely about the
-chosen distribution type rather than about any input.
+has no control for that location", and "nobody decided where this goes". One
+refusal names `FieldName.DistributionType`: a fit the mode's parameters do not
+admit, at `Simulator.scala:200`. `inputFor` has no arm for it, so it reaches the
+banner through `case _ => None` rather than by a decision anyone made. It is
+about the mode's parameters taken together rather than about any one input. The
+length mismatch names `PercentileQuantilePairing` and maps to
+`Set(Percentiles, Quantiles)`.
 
 **What removes the conflation.** The per-form display enum is the set of display
 targets the form owns, onto which several conceptual locations collapse — that is
 why it exists and is not replaceable by `FieldName`, as §15.6 states. A form's
 own line is such a target: it is a place inside the form where a message renders,
-and the four remaining `DistributionType` refusals all belong on it. So each
+and the fit refusal at `DistributionType` belongs on it. So each
 per-form enum gains one case for it:
 
 ```scala

@@ -165,6 +165,9 @@ object ValidationMessages:
   // Occurrence probability (closed interval 0 ≤ p ≤ 1)
   // ══════════════════════════════════════════════════════════════════
   val occurrenceProbabilityOutOfRange: String = "Occurrence probability must be between 0 and 1 (inclusive)"
+  /** The same interval on the 0–100 scale the leaf form's probability input is
+    * entered on. */
+  val probabilityPercentOutOfRange: String = "Probability must be between 0 and 100 (inclusive)"
 
   // ══════════════════════════════════════════════════════════════════
   // Distribution type
@@ -197,8 +200,10 @@ object ValidationMessages:
   // ══════════════════════════════════════════════════════════════════
   val minLossRequired: String           = "Minimum loss is required for lognormal mode"
   val maxLossRequired: String           = "Maximum loss is required for lognormal mode"
-  def lossMustBeWholeNumber(field: String): String =
+  private def lossMustBeWholeNumber(field: String): String =
     s"$field must be a whole number"
+  val minLossNotWholeNumber: String     = lossMustBeWholeNumber("Minimum loss")
+  val maxLossNotWholeNumber: String     = lossMustBeWholeNumber("Maximum loss")
   val minMustBeLessThanMax: String      = "Minimum loss must be less than maximum loss"
 
   /** Why a loss range was refused, naming both bounds. The pair is the subject
@@ -282,6 +287,7 @@ object ValidationMessages:
   // ══════════════════════════════════════════════════════════════════
   val termsOutOfRange: String =
     "Terms must be between 2 and the number of percentile-quantile pairs"
+  val termsMustBeWholeNumber: String = "Terms must be a whole number"
 
   /** Why a stated term count was refused as outside the fit's own range.
     *

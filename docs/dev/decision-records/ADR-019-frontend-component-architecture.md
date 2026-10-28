@@ -209,7 +209,7 @@ def handleSubmit(): Unit =
 ```scala
 // GOOD: Reactive validation signals, always current
 private val nameErrorRaw: Signal[Option[String]] = nameVar.signal.map { v =>
-  ValidationUtil.refineName(v) match
+  ValidationUtil.refineName(v, ErrorLocation.Field(subject, FieldName.Name)) match
     case Right(_) => None
     case Left(errors) => Some(errors.head.message)
 }

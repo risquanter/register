@@ -223,3 +223,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala
 - modules/app/src/main/scala/app/state/FormState.scala
 - modules/app/src/main/scala/app/state/Located.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/DistributionShape.scala

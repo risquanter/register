@@ -1,13 +1,13 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forPortfolio, name}
 import app.components.FormInputs
 import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
@@ -166,6 +166,7 @@ object PortfolioFormView:
         case FormMode.Blank =>
           form.reset()
           form.parentVar.set(ParentSelection.Unset)
+          form.subjectVar.set(ErrorSubject.DraftNode)
           // The folded Blank can be this form's own Drafting(Portfolio) —
           // clearing it must also end the draft, otherwise activeForm stays
           // Drafting and the leaf form's controls remain disabled with no
@@ -198,11 +199,15 @@ object PortfolioFormView:
         case FormMode.Templating(FormTarget.Portfolio(n)) =>
           builderState.portfoliosVar.now().find(_.name == n).foreach { source =>
             builderState.populatePortfolioForm(form, source)
+            // A template is a new node, so its refusals name the draft rather
+            // than the source it was copied from.
+            form.subjectVar.set(ErrorSubject.DraftNode)
             if source.parent == ParentRef.Root then form.parentVar.set(ParentSelection.Unset)
           }
         case _ =>
           form.reset()
           form.parentVar.set(ParentSelection.Unset)
+          form.subjectVar.set(ErrorSubject.DraftNode)
       },
       // Explicit "clear regardless of mode" signal from startNewTree/loadFromTree
       // — see resetFormFieldsBus's doc comment. Needed because a same-to-same
@@ -211,6 +216,7 @@ object PortfolioFormView:
       builderState.resetFormFieldsBus.events --> { _ =>
         form.reset()
         form.parentVar.set(ParentSelection.Unset)
+        form.subjectVar.set(ErrorSubject.DraftNode)
       },
 
       // Clear stale submit error whenever the user edits a field

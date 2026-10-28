@@ -1,8 +1,8 @@
 package app.state
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.domain.data.{DistributionShape, RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
@@ -13,14 +13,14 @@ import com.risquanter.register.frontend.TreeBuilderLogic
 final case class PortfolioDraft(
   name: SafeName.SafeName,
   parent: ParentRef,
-  id: Option[NodeId] = None
+  id: Option[NodeId]
 )
 final case class LeafDraft(
   name:        SafeName.SafeName,
   parent:      ParentRef,
   shape:       DistributionShape,
   probability: OccurrenceProbability,
-  id:          Option[NodeId] = None
+  id:          Option[NodeId]
 )
 
 /** Type-safe field identifiers for the tree builder form. */
@@ -60,10 +60,10 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * `isDirty --> ...writer` binding — see [[app.views.PortfolioFormView]] /
     * [[app.views.RiskLeafFormView]]. Kept separate (not both writing into
     * `isEditDirtyVar` directly) because a form's own dirty check goes false
-    * the moment its target is Locked (nothing to save), which used to
-    * overwrite whatever the *other*, untouched form had legitimately set —
-    * e.g. typing into a blank portfolio form, then merely clicking to view
-    * an unrelated leaf, silently cleared the portfolio draft's dirty flag.
+    * the moment its target is Locked (nothing to save), and a shared flag
+    * would then overwrite whatever the *other*, untouched form had set —
+    * typing into a blank portfolio form, then clicking to view an unrelated
+    * leaf, would clear the portfolio draft's dirty flag.
     */
   val portfolioFormDirtyVar: Var[Boolean] = Var(false)
   val leafFormDirtyVar: Var[Boolean] = Var(false)
@@ -91,9 +91,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
   /** The node-editing form's current state — nothing selected, viewing a saved
     * node read-only, editing one in place, or templating a new node from one.
-    * Replaces the former independently-mutated `selectedLeafName`/
-    * `selectedPortfolioName` pair; only one target can be represented at all,
-    * so mutual exclusivity is structural rather than hand-maintained.
+    * Only one target can be represented at all, so mutual exclusivity is
+    * structural rather than hand-maintained.
     */
   val activeForm: Var[FormMode] = Var(FormMode.Blank)
 
@@ -111,15 +110,23 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
   // ── Tree-name validation ──────────────────────────────────────
   /** The tree's own name belongs to the request being assembled, not to any
-    * one draft node. */
-  private val treeNameLocation: ErrorLocation =
-    ErrorLocation.requestField(FieldName.Name)
+    * one draft node, so this form's subject is the request and never changes. */
+  val subjectVar: Var[ErrorSubject] = Var(ErrorSubject.Request)
 
-  private val treeNameErrorRaw: Signal[Option[String]] = treeNameVar.signal.map { v =>
-    ValidationUtil.refineName(v, treeNameLocation) match
-      case Right(_) => None
-      case Left(errors) => Some(errors.head.message)
-  }
+  /** The field a refusal about the tree name names. Declared once; the two
+    * located readers below refer to it. */
+  private val treeNameField: FieldName = FieldName.Name
+
+  /** The tree-name input's live value, located. */
+  private def treeNameLocated: Signal[Located[String]] =
+    treeNameVar.signal.combineWith(subjectVar.signal).map((v, s) => Located(v, ErrorLocation.Field(s, treeNameField)))
+
+  /** The tree-name input's current value, located, for the submit read. */
+  private def treeNameLocatedNow: Located[String] =
+    Located(treeNameVar.now(), ErrorLocation.Field(subjectVar.now(), treeNameField))
+
+  private val treeNameErrorRaw: Signal[Option[String]] =
+    treeNameLocated.map(_.refine(ValidationUtil.refineName).left.toOption.flatMap(_.headOption).map(_.message))
 
   /** Display-controlled tree-name error (only shows after blur or submit trigger). */
   val treeNameError: Signal[Option[String]] = withDisplayControl(TreeName, treeNameErrorRaw)
@@ -166,7 +173,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   val allPortfolioNames: Signal[Set[String]] = portfoliosVar.signal.map(_.map(_.name.value).toSet)
 
   def addPortfolio(name: SafeName.SafeName, parent: ParentRef): Validation[ValidationError, PortfolioDraft] =
-    val draft = PortfolioDraft(name, parent)
+    val draft = PortfolioDraft(name, parent, None)
     val result = TreeBuilderLogic.preValidateTopology(
       (portfoliosVar.now() :+ draft).map(p => p.name -> p.parent),
       leavesVar.now().map(l => l.name -> l.parent)
@@ -184,7 +191,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     shape:       DistributionShape,
     probability: OccurrenceProbability
   ): Validation[ValidationError, LeafDraft] =
-    val draft = LeafDraft(name, parent, shape, probability)
+    val draft = LeafDraft(name, parent, shape, probability, None)
     val result = TreeBuilderLogic.preValidateTopology(
       portfoliosVar.now().map(p => p.name -> p.parent),
       (leavesVar.now() :+ draft).map(l => l.name -> l.parent)
@@ -207,6 +214,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     */
   def populateLeafForm(state: RiskLeafFormState, leaf: LeafDraft): Unit =
     val snapshot = FormMode.leafDraftToFieldSnapshot(leaf)
+    state.subjectVar.set(subjectOf(leaf.id))
     state.distributionModeVar.set(snapshot.mode)
     state.nameVar.set(snapshot.name)
     state.probabilityVar.set(snapshot.probability)
@@ -222,6 +230,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     */
   def populatePortfolioForm(state: PortfolioFormState, portfolio: PortfolioDraft): Unit =
     val snapshot = FormMode.portfolioDraftToFieldSnapshot(portfolio)
+    state.subjectVar.set(subjectOf(portfolio.id))
     state.nameVar.set(snapshot.name)
     state.parentVar.set(snapshot.parent)
 
@@ -306,7 +315,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   def toRequest(): Validation[ValidationError, RiskTreeDefinitionRequest] =
     val portfolios = portfoliosVar.now()
     val leaves = leavesVar.now()
-    val treeNameV = validateName(treeNameVar.now(), treeNameLocation)
+    val treeNameV = refinedTreeName
     val portfoliosV = Validation.succeed(portfolios.map(toPortfolioRequest))
     val leavesV = Validation.succeed(leaves.map(toLeafRequest))
     val topologyV = TreeBuilderLogic.fullValidateTopology(
@@ -318,8 +327,9 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       RiskTreeDefinitionRequest(treeName.value, ports, leafs)
     }
 
-  /** Build update request — full replacement with all nodes as "new"
-    * (server regenerates IDs; tree ID is preserved).
+  /** Build update request — the whole tree, with each loaded node submitted
+    * under its own identifier and each node added this session submitted as
+    * new. The tree ID is preserved.
     */
   def toUpdateRequest(): Validation[ValidationError, RiskTreeUpdateRequest] =
     val portfolios = portfoliosVar.now()
@@ -334,7 +344,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val existingLeaves: List[(NodeId, LeafDraft)]          = leaves.flatMap(d => d.id.map(_ -> d))
     val newLeafDrafts: List[LeafDraft]                     = leaves.filter(_.id.isEmpty)
 
-    val treeNameV = validateName(treeNameVar.now(), treeNameLocation)
+    val treeNameV = refinedTreeName
     // Topology is validated over the full node set (existing + new), exactly as in the
     // create flow — correctness-by-construction is whole-graph, independent of bucketing.
     val topologyV = TreeBuilderLogic.fullValidateTopology(
@@ -384,7 +394,6 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * `loadedSnapshotVar` itself (e.g. after `markJustSaved`), which the
     * plain `isDirty` def above can't reflect on its own since it's
     * pull-based (read via `.now()` on demand) rather than push-based.
-    * Existing callers of `isDirty` are unaffected — this is an addition.
     */
   val isDirtySignal: Signal[Boolean] =
     treeNameVar.signal.combineWith(portfoliosVar.signal, leavesVar.signal, loadedSnapshotVar.signal)
@@ -468,8 +477,15 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   // Helpers
   // ------------------------------------------------------------
 
-  private def validateName(value: String, location: ErrorLocation): Validation[ValidationError, SafeName.SafeName] =
-    toValidation(ValidationUtil.refineName(value, location))
+  /** The tree name, refined from its current value. */
+  private def refinedTreeName: Validation[ValidationError, SafeName.SafeName] =
+    toValidation(treeNameLocatedNow.refine(ValidationUtil.refineName))
+
+  /** The subject a form's refusals name for a draft: a node the server has
+    * stored is named by its identifier, and one added in this session has none
+    * yet. */
+  private def subjectOf(id: Option[NodeId]): ErrorSubject =
+    id.fold(ErrorSubject.DraftNode)(ErrorSubject.ExistingNode(_))
 
   /** A loaded node's parent as the drafts hold it: the name of the node its
     * `parentId` points at, or the root when it has no parent. An identifier

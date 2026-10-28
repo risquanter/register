@@ -1,8 +1,12 @@
 package app.state
 
 import zio.test.*
+import zio.prelude.Validation
 import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
+
+import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
 
 object RiskLeafFormStateSpec extends ZIOSpecDefault:
 
@@ -14,7 +18,131 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
     owner.killSubscriptions()
     seen.get
 
-  def spec = suite("RiskLeafFormState companion")(
+  private val editedSubject: ErrorSubject =
+    ErrorSubject.ExistingNode(NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get)
+
+  /** A leaf form that would submit cleanly in lognormal mode, opened on an
+    * existing node so a refusal's subject is distinguishable from the
+    * default. Each test breaks one field. */
+  private def validLognormalForm(): RiskLeafFormState =
+    val st = new RiskLeafFormState
+    st.subjectVar.set(editedSubject)
+    st.nameVar.set("Server outage")
+    st.parentVar.set(ParentSelection.Root)
+    st.probabilityVar.set("10")
+    st.distributionModeVar.set(DistributionMode.Lognormal)
+    st.minLossVar.set("1000")
+    st.maxLossVar.set("50000")
+    st
+
+  /** The same, in metalog mode. */
+  private def validMetalogForm(): RiskLeafFormState =
+    val st = validLognormalForm()
+    st.distributionModeVar.set(DistributionMode.Metalog)
+    st.percentilesVar.set("10, 50, 90")
+    st.quantilesVar.set("1000, 5000, 25000")
+    st
+
+  /** The locations of every refusal a submission reports. */
+  private def refusalLocations(st: RiskLeafFormState): Set[ErrorLocation] =
+    st.toDraft match
+      case Validation.Failure(_, es) => es.toList.map(_.location).toSet
+      case Validation.Success(_, _)  => Set.empty
+
+  private def at(field: FieldName): ErrorLocation = ErrorLocation.Field(editedSubject, field)
+
+  def spec = suite("RiskLeafFormState")(
+
+    suite("a submitted refusal names its own field and the form's subject")(
+
+      test("the valid forms submit cleanly") {
+        assertTrue(
+          refusalLocations(validLognormalForm()).isEmpty,
+          refusalLocations(validMetalogForm()).isEmpty
+        )
+      },
+
+      test("name") {
+        val st = validLognormalForm()
+        st.nameVar.set("")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.Name)))
+      },
+
+      test("parent") {
+        val st = validLognormalForm()
+        st.parentVar.set(ParentSelection.Unset)
+        assertTrue(refusalLocations(st) == Set(at(FieldName.ParentName)))
+      },
+
+      test("probability that is not a number") {
+        val st = validLognormalForm()
+        st.probabilityVar.set("abc")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.Probability)))
+      },
+
+      test("probability refused after parsing and rescaling keeps the field it was read from") {
+        // "150" is parsed, divided by 100 and only then refused against the
+        // closed interval, so the location crosses two transformations.
+        val st = validLognormalForm()
+        st.probabilityVar.set("150")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.Probability)))
+      },
+
+      test("both lognormal bounds, reported together") {
+        val st = validLognormalForm()
+        st.minLossVar.set("")
+        st.maxLossVar.set("")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.MinLoss), at(FieldName.MaxLoss)))
+      },
+
+      test("an unordered loss range names the pair") {
+        val st = validLognormalForm()
+        st.minLossVar.set("50000")
+        st.maxLossVar.set("1000")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.LossRange)))
+      },
+
+      test("percentiles that do not increase") {
+        val st = validMetalogForm()
+        st.percentilesVar.set("90, 50, 10")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.Percentiles)))
+      },
+
+      test("unequal percentile and quantile counts name the pairing") {
+        val st = validMetalogForm()
+        st.quantilesVar.set("1000, 5000")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.PercentileQuantilePairing)))
+      },
+
+      test("a term count outside the fitter's range") {
+        val st = validMetalogForm()
+        st.termsVar.set("1")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.Terms)))
+      },
+
+      test("a new form names the draft node") {
+        val st = validLognormalForm()
+        st.subjectVar.set(ErrorSubject.DraftNode)
+        st.nameVar.set("")
+        assertTrue(refusalLocations(st) == Set(ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.Name)))
+      }
+
+    ),
+
+    suite("draftSignal")(
+
+      test("builds the shape the submit builds") {
+        val st = validMetalogForm()
+        assertTrue(current(st.draftSignal) == st.currentShapeValidation().toOption)
+      },
+
+      test("is empty while the fields do not form a shape") {
+        val st = validLognormalForm()
+        st.maxLossVar.set("")
+        assertTrue(current(st.draftSignal).isEmpty)
+      }
+
+    ),
 
     suite("lognormal bound positivity")(
 

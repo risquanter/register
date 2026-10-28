@@ -58,24 +58,24 @@ object TreePreviewSpec extends ZIOSpecDefault:
       },
 
       test("lone-leaf: 0 portfolios, 1 leaf → 1 child row (+ root = 2 total)") {
-        val leaf = LeafDraft(sn("Cyber Risk"), ParentRef.Root, leafShape, lognormalProb)
+        val leaf = LeafDraft(sn("Cyber Risk"), ParentRef.Root, leafShape, lognormalProb, None)
         val state = makeState("My Tree", Nil, List(leaf))
         val totalNodes = 1 + state.portfoliosVar.now().size + state.leavesVar.now().size
         assertTrue(totalNodes == 2)
       },
 
       test("root portfolio + leaf: 1 portfolio, 1 leaf → 3 rows total") {
-        val portfolio = PortfolioDraft(sn("Operational Risk"), ParentRef.Root)
-        val leaf      = LeafDraft(sn("Cyber Risk"), ParentRef.Under(sn("Operational Risk")), leafShape, lognormalProb)
+        val portfolio = PortfolioDraft(sn("Operational Risk"), ParentRef.Root, None)
+        val leaf      = LeafDraft(sn("Cyber Risk"), ParentRef.Under(sn("Operational Risk")), leafShape, lognormalProb, None)
         val state     = makeState("My Tree", List(portfolio), List(leaf))
         val totalNodes = 1 + state.portfoliosVar.now().size + state.leavesVar.now().size
         assertTrue(totalNodes == 3)
       },
 
       test("nested portfolios + leaf: 2 portfolios, 1 leaf → 4 rows total") {
-        val root  = PortfolioDraft(sn("Root"), ParentRef.Root)
-        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")))
-        val leaf  = LeafDraft(sn("Hardware Failure"), ParentRef.Under(sn("IT Risk")), leafShape, lognormalProb)
+        val root  = PortfolioDraft(sn("Root"), ParentRef.Root, None)
+        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")), None)
+        val leaf  = LeafDraft(sn("Hardware Failure"), ParentRef.Under(sn("IT Risk")), leafShape, lognormalProb, None)
         val state = makeState("My Tree", List(root, child), List(leaf))
         val totalNodes = 1 + state.portfoliosVar.now().size + state.leavesVar.now().size
         assertTrue(totalNodes == 4)
@@ -86,15 +86,15 @@ object TreePreviewSpec extends ZIOSpecDefault:
     suite("parent-child grouping")(
 
       test("root portfolio has no parent → grouped under None key") {
-        val portfolio = PortfolioDraft(sn("Operational Risk"), ParentRef.Root)
+        val portfolio = PortfolioDraft(sn("Operational Risk"), ParentRef.Root, None)
         val state     = makeState("My Tree", List(portfolio), Nil)
         val grouping  = expectedGrouping(state.portfoliosVar.now(), state.leavesVar.now())
         assertTrue(grouping.getOrElse(None, 0) == 1)
       },
 
       test("child portfolio has parent → grouped under parent-name key") {
-        val root  = PortfolioDraft(sn("Root"), ParentRef.Root)
-        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")))
+        val root  = PortfolioDraft(sn("Root"), ParentRef.Root, None)
+        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")), None)
         val state = makeState("My Tree", List(root, child), Nil)
         val grouping = expectedGrouping(state.portfoliosVar.now(), state.leavesVar.now())
         assertTrue(grouping.getOrElse(Some("Root"), 0) == 1) &&
@@ -102,9 +102,9 @@ object TreePreviewSpec extends ZIOSpecDefault:
       },
 
       test("leaf under child portfolio → correct parent group") {
-        val root  = PortfolioDraft(sn("Root"), ParentRef.Root)
-        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")))
-        val leaf  = LeafDraft(sn("Hardware Failure"), ParentRef.Under(sn("IT Risk")), leafShape, lognormalProb)
+        val root  = PortfolioDraft(sn("Root"), ParentRef.Root, None)
+        val child = PortfolioDraft(sn("IT Risk"), ParentRef.Under(sn("Root")), None)
+        val leaf  = LeafDraft(sn("Hardware Failure"), ParentRef.Under(sn("IT Risk")), leafShape, lognormalProb, None)
         val state = makeState("My Tree", List(root, child), List(leaf))
         val grouping = expectedGrouping(state.portfoliosVar.now(), state.leavesVar.now())
         assertTrue(grouping.getOrElse(Some("IT Risk"), 0) == 1) &&

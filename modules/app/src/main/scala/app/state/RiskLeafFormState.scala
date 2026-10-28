@@ -13,17 +13,20 @@ enum RiskLeafField:
 
 /**
  * Reactive form state for creating a RiskLeaf.
- * 
+ *
  * Features:
  * - Input filters: prevent invalid characters from being typed
  * - Reactive validation signals: auto-update on field changes (using ValidationUtil from common)
  * - Error display timing: controlled by showErrors flag (set on blur/submit)
- * 
+ *
  * Validation rules use Iron types from common module (same as backend):
  * - SafeName: non-blank, max 50 chars
- * - Probability: 0.0 < p < 1.0 (exclusive - open interval)
+ * - Probability: 0 ≤ p ≤ 1 (closed interval), entered on the 0–100 scale
  * - Metalog mode: requires percentiles + quantiles of equal length
  * - Lognormal mode: requires minLoss < maxLoss (both positive)
+ *
+ * Every check reads a located accessor, so a refusal names the field its value
+ * came from and the subject `subjectVar` holds.
  */
 final class RiskLeafFormState extends FormState[RiskLeafField]:
   import RiskLeafField.*
@@ -31,10 +34,10 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // ============================================================
   // Form Field Vars (mutable reactive state)
   // ============================================================
-  
+
   /** Distribution mode toggle */
   val distributionModeVar: Var[DistributionMode] = Var(DistributionMode.Metalog)
-  
+
   // Common fields
   val nameVar: Var[String] = Var("")
   val probabilityVar: Var[String] = Var("")
@@ -46,17 +49,24 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * from under an already-chosen value.
     */
   val parentVar: Var[ParentSelection] = Var(ParentSelection.Unset)
-  
+
   // Metalog mode fields
   val percentilesVar: Var[String] = Var("")  // Placeholder text "e.g., 10, 50, 90" is on the input element
   val quantilesVar: Var[String] = Var("")              // User must provide quantiles
-  
+
   // Lognormal mode fields
   val minLossVar: Var[String] = Var("")
   val maxLossVar: Var[String] = Var("")
 
-  // Metalog terms (metalog mode only; blank = server applies min(n, 4) default)
+  // Metalog terms (metalog mode only; blank = one term per anchor)
   val termsVar: Var[String] = Var("")
+
+  /** The node this form's refusals are about. Set when the form is opened:
+    * `DraftNode` for a new leaf, `ExistingNode(id)` for one the server has
+    * stored. Like `parentVar`, it is not reset by [[resetFields]] — the view
+    * sets it at each call site that opens or clears the form. */
+  val subjectVar: Var[ErrorSubject] = Var(ErrorSubject.DraftNode)
+  private def subject: StrictSignal[ErrorSubject] = subjectVar.signal
 
   /** Reset all form fields and error display to initial state. */
   def resetFields(): Unit =
@@ -73,10 +83,10 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // ============================================================
   // Input Filters (prevent invalid characters - UX only)
   // ============================================================
-  
+
   /** Filter for name field: any printable characters */
   val nameFilter: String => Boolean = _ => true
-  
+
   /** Filter for probability field: digits and single decimal point, max 2 dp.
     * Enforced at the character level so the user cannot type a third decimal place. */
   val probabilityFilter: String => Boolean = { s =>
@@ -87,7 +97,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       case idx => s.length - idx - 1 <= 2
     hasSingleDot && allValidChars && maxTwoDp
   }
-  
+
   /** Filter for percentile field: digits, commas, and spaces only.
     * Percentiles are entered as integers (0 dp); decimal points are rejected
     * per decision-analysis convention (Cooke, SHELF, Keelin 2016). */
@@ -103,136 +113,177 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     val noConsecutiveDots = !s.contains("..")
     validChars && noConsecutiveDots
   }
-  
+
   /** Filter for loss values: digits only */
   val lossFilter: String => Boolean = _.forall(_.isDigit)
 
   // ============================================================
+  // Located Accessors
+  // ============================================================
+
+  /** The field a refusal about each input names. Declared once; the located
+    * readers refer to these and no other site in this form names a field.
+    * The two pair fields name a rule over two inputs rather than either one. */
+  private val nameField: FieldName        = FieldName.Name
+  private val parentField: FieldName      = FieldName.ParentName
+  private val probabilityField: FieldName = FieldName.Probability
+  private val percentilesField: FieldName = FieldName.Percentiles
+  private val quantilesField: FieldName   = FieldName.Quantiles
+  private val minLossField: FieldName     = FieldName.MinLoss
+  private val maxLossField: FieldName     = FieldName.MaxLoss
+  private val termsField: FieldName       = FieldName.Terms
+  private val pairingField: FieldName     = FieldName.PercentileQuantilePairing
+  private val lossRangeField: FieldName   = FieldName.LossRange
+
+  /** An input's live value, located at `field` of the current subject. The
+    * only reader the checks use; the input `Var`s are read raw by nothing but
+    * their input bindings. */
+  private def located[A](input: Var[A], field: FieldName): Signal[Located[A]] =
+    input.signal.combineWith(subject).map((v, s) => Located(v, ErrorLocation.Field(s, field)))
+
+  /** An input's current value, located, for the submit read. */
+  private def locatedNow[A](input: Var[A], field: FieldName): Located[A] =
+    Located(input.now(), ErrorLocation.Field(subjectVar.now(), field))
+
+  /** The first refusal a refinement reported, or none if it accepted. */
+  private def firstRefusal[B](result: Either[List[ValidationError], B]): Option[ValidationError] =
+    result.left.toOption.flatMap(_.headOption)
+
+  /** A located check's sentence, for the display signals and `errorSignals`,
+    * which still carry text. */
+  private def messageOf(check: Signal[Option[ValidationError]]): Signal[Option[String]] =
+    check.map(_.map(_.message))
+
+  // ============================================================
   // Raw Validation Signals (using ValidationUtil from common)
   // ============================================================
-  
-  /** Every refusal this form produces is about a node with no identifier yet,
-    * so they all name the draft node and differ only in the field. */
-  private def at(field: FieldName): ErrorLocation =
-    ErrorLocation.Field(ErrorSubject.DraftNode, field)
 
   /** Name validation using Iron SafeName rules */
-  private val nameErrorRaw: Signal[Option[String]] = nameVar.signal.map { v =>
-    ValidationUtil.refineName(v, at(FieldName.Name)) match
-      case Right(_) => None
-      case Left(errors) => Some(errors.head.message)
-  }
-  
+  private val nameErrorRaw: Signal[Option[ValidationError]] =
+    located(nameVar, nameField).map(input => firstRefusal(input.refine(ValidationUtil.refineName)))
+
   /** Probability validation. The field is entered on the 0–100 (percent) scale
     * without the `%` sign; it is divided by 100 before being refined against the
-    * Iron `OccurrenceProbability` type (closed interval 0 ≤ p ≤ 1). The error message is
-    * therefore expressed on the entered 0–100 scale, not the internal 0–1 scale. */
-  private val probabilityErrorRaw: Signal[Option[String]] = probabilityVar.signal.map { v =>
-    if v.isBlank then Some(ValidationMessages.probabilityRequired)
-    else this.parseDouble(v) match
-      case None => Some(ValidationMessages.probabilityNotANumber)
-      case Some(pct) =>
-        ValidationUtil.refineOccurrenceProbability(RiskLeafFormState.pctToDomain(pct), at(FieldName.Probability)) match
-          case Right(_) => None
-          case Left(_)  => Some("Probability must be between 0 and 100 (inclusive)")
-  }
-  
+    * Iron `OccurrenceProbability` type (closed interval 0 ≤ p ≤ 1). The refusal
+    * shown is therefore expressed on the entered 0–100 scale, not the internal
+    * 0–1 scale. */
+  private val probabilityErrorRaw: Signal[Option[ValidationError]] =
+    located(probabilityVar, probabilityField).map { input =>
+      if input.value.isBlank then
+        Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.probabilityRequired))
+      else parseDouble(input.value) match
+        case None =>
+          Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.probabilityNotANumber))
+        case Some(pct) =>
+          input.as(RiskLeafFormState.pctToDomain(pct))
+            .refine(ValidationUtil.refineOccurrenceProbability)
+            .fold(
+              _ => Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.probabilityPercentOutOfRange)),
+              _ => None
+            )
+    }
+
   /** Metalog mode: percentiles validation (0-100, but Metalog needs 0 < p < 100) */
-  private val percentilesErrorRaw: Signal[Option[String]] = 
-    distributionModeVar.signal.combineWith(percentilesVar.signal).map {
-      case (DistributionMode.Metalog, v) =>
-        if v.isBlank then Some(ValidationMessages.percentilesRequired)
-        else
-          val values = parseDoubleList(v)
-          if values.isEmpty then Some(ValidationMessages.percentilesFormat)
-          else if values.exists(p => p <= 0 || p >= 100) then 
-            Some(ValidationMessages.percentilesOutOfRange)
-          else if !ValidationUtil.isStrictlyIncreasing(values) then
-            Some(ValidationMessages.percentilesMustBeStrictlyIncreasing)
-          else None
+  private val percentilesErrorRaw: Signal[Option[ValidationError]] =
+    distributionModeVar.signal.combineWith(located(percentilesVar, percentilesField)).map {
+      case (DistributionMode.Metalog, input) =>
+        val values = parseDoubleList(input.value)
+        if input.value.isBlank then
+          Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.percentilesRequired))
+        else if values.isEmpty then
+          Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.percentilesFormat))
+        else if values.exists(p => p <= 0 || p >= 100) then
+          Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.percentilesOutOfRange))
+        else if !ValidationUtil.isStrictlyIncreasing(values) then
+          Some(input.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.percentilesMustBeStrictlyIncreasing))
+        else None
       case _ => None
     }
-  
+
   /** Metalog mode: quantiles validation (positive loss amounts) */
-  private val quantilesErrorRaw: Signal[Option[String]] =
-    distributionModeVar.signal.combineWith(quantilesVar.signal).map {
-      case (DistributionMode.Metalog, v) =>
-        if v.isBlank then Some(ValidationMessages.quantilesRequired)
-        else
-          val values = parseDoubleList(v)
-          if values.isEmpty then Some(ValidationMessages.quantilesFormat)
-          else if values.exists(_ <= 0) then Some(ValidationMessages.quantilesMustBePositive)
-          else if !ValidationUtil.isStrictlyIncreasing(values) then
-            Some(ValidationMessages.quantilesMustBeStrictlyIncreasing)
-          else None
+  private val quantilesErrorRaw: Signal[Option[ValidationError]] =
+    distributionModeVar.signal.combineWith(located(quantilesVar, quantilesField)).map {
+      case (DistributionMode.Metalog, input) =>
+        val values = parseDoubleList(input.value)
+        if input.value.isBlank then
+          Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.quantilesRequired))
+        else if values.isEmpty then
+          Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.quantilesFormat))
+        else if values.exists(_ <= 0) then
+          Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.quantilesMustBePositive))
+        else if !ValidationUtil.isStrictlyIncreasing(values) then
+          Some(input.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.quantilesMustBeStrictlyIncreasing))
+        else None
       case _ => None
     }
-  
-  /** Metalog mode: cross-field validation (equal length) */
-  private val metalogCrossFieldErrorRaw: Signal[Option[String]] =
+
+  /** Metalog mode: cross-field validation (equal length). Located at the pair,
+    * as the shared shape factory reports the same rule. */
+  private val metalogCrossFieldErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal
-      .combineWith(percentilesVar.signal, quantilesVar.signal)
+      .combineWith(percentilesVar.signal, quantilesVar.signal, subject)
       .map {
-        case (DistributionMode.Metalog, pStr, qStr) =>
+        case (DistributionMode.Metalog, pStr, qStr, s) =>
+          val pair  = Located((pStr, qStr), ErrorLocation.Field(s, pairingField))
           val pList = parseDoubleList(pStr)
           val qList = parseDoubleList(qStr)
-          if pList.nonEmpty && qList.nonEmpty && pList.length != qList.length then
-            Some(ValidationMessages.metalogLengthMismatch(pList.length, qList.length))
-          else None
+          Option.when(pList.nonEmpty && qList.nonEmpty && pList.length != qList.length)(
+            pair.reject(
+              ValidationErrorCode.INVALID_COMBINATION,
+              ValidationMessages.metalogLengthMismatch(pList.length, qList.length)
+            )
+          )
         case _ => None
       }
-  
+
   /** Lognormal mode: minLoss validation using Iron PositiveLong */
-  private val minLossErrorRaw: Signal[Option[String]] =
-    distributionModeVar.signal.combineWith(minLossVar.signal).map {
-      case (DistributionMode.Lognormal, v) =>
-        if v.isBlank then Some(ValidationMessages.minLossRequired)
-        else parseLong(v) match
-          case None => Some(ValidationMessages.lossMustBeWholeNumber("Minimum loss"))
-          case Some(n) => 
-            ValidationUtil.refinePositiveLong(n, at(FieldName.MinLoss)) match
-              case Right(_) => None
-              case Left(errors) => Some(errors.head.message)
-      case _ => None
+  private val minLossErrorRaw: Signal[Option[ValidationError]] =
+    distributionModeVar.signal.combineWith(located(minLossVar, minLossField)).map {
+      case (DistributionMode.Lognormal, input) =>
+        boundError(input, ValidationMessages.minLossRequired, ValidationMessages.minLossNotWholeNumber)
+      case _                                   => None
     }
-  
+
   /** Lognormal mode: maxLoss validation using Iron PositiveLong */
-  private val maxLossErrorRaw: Signal[Option[String]] =
-    distributionModeVar.signal.combineWith(maxLossVar.signal).map {
-      case (DistributionMode.Lognormal, v) =>
-        if v.isBlank then Some(ValidationMessages.maxLossRequired)
-        else parseLong(v) match
-          case None => Some(ValidationMessages.lossMustBeWholeNumber("Maximum loss"))
-          case Some(n) =>
-            ValidationUtil.refinePositiveLong(n, at(FieldName.MaxLoss)) match
-              case Right(_) => None
-              case Left(errors) => Some(errors.head.message)
-      case _ => None
+  private val maxLossErrorRaw: Signal[Option[ValidationError]] =
+    distributionModeVar.signal.combineWith(located(maxLossVar, maxLossField)).map {
+      case (DistributionMode.Lognormal, input) =>
+        boundError(input, ValidationMessages.maxLossRequired, ValidationMessages.maxLossNotWholeNumber)
+      case _                                   => None
     }
-  
-  /** Metalog mode: terms validation — blank means use server default; otherwise integer in [2, n] */
-  private val termsErrorRaw: Signal[Option[String]] =
-    distributionModeVar.signal.combineWith(termsVar.signal, percentilesVar.signal).map {
-      case (DistributionMode.Metalog, tStr, pStr) =>
-        if tStr.isBlank then None
-        else tStr.toIntOption match
-          case None    => Some("Terms must be a whole number")
+
+  /** One lognormal bound's own check: present, a whole number, and positive. */
+  private def boundError(input: Located[String], required: String, notWhole: String): Option[ValidationError] =
+    if input.value.isBlank then Some(input.reject(ValidationErrorCode.REQUIRED_FIELD, required))
+    else parseLong(input.value) match
+      case None    => Some(input.reject(ValidationErrorCode.INVALID_FORMAT, notWhole))
+      case Some(n) => firstRefusal(input.as(n).refine(ValidationUtil.refinePositiveLong))
+
+  /** Metalog mode: terms validation — blank means one term per anchor; otherwise integer in [2, n] */
+  private val termsErrorRaw: Signal[Option[ValidationError]] =
+    distributionModeVar.signal.combineWith(located(termsVar, termsField), percentilesVar.signal).map {
+      case (DistributionMode.Metalog, input, pStr) =>
+        if input.value.isBlank then None
+        else input.value.toIntOption match
+          case None    => Some(input.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.termsMustBeWholeNumber))
           case Some(t) =>
             val n = pStr.split(",").count(_.trim.nonEmpty)
-            if t < 2 || t > n then Some(ValidationMessages.termsOutOfRange)
+            if t < 2 || t > n then Some(input.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.termsOutOfRange))
             else None
       case _ => None
     }
 
-  /** Lognormal mode: cross-field validation (minLoss < maxLoss) */
-  private val lognormalCrossFieldErrorRaw: Signal[Option[String]] =
+  /** Lognormal mode: cross-field validation (minLoss < maxLoss). Located at
+    * the pair, as the shared shape factory reports the same rule. */
+  private val lognormalCrossFieldErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal
-      .combineWith(minLossVar.signal, maxLossVar.signal)
+      .combineWith(minLossVar.signal, maxLossVar.signal, subject)
       .map {
-        case (DistributionMode.Lognormal, minStr, maxStr) =>
+        case (DistributionMode.Lognormal, minStr, maxStr, s) =>
+          val pair = Located((minStr, maxStr), ErrorLocation.Field(s, lossRangeField))
           (parseLong(minStr), parseLong(maxStr)) match
             case (Some(min), Some(max)) if min >= max =>
-              Some(ValidationMessages.minMustBeLessThanMax)
+              Some(pair.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.minMustBeLessThanMax))
             case _ => None
         case _ => None
       }
@@ -240,14 +291,14 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // ============================================================
   // Display-controlled Error Signals (for UI binding)
   // ============================================================
-  
-  val nameError: Signal[Option[String]] = withSubmitErrors(Name, nameErrorRaw)
+
+  val nameError: Signal[Option[String]] = withSubmitErrors(Name, messageOf(nameErrorRaw))
 
   /** Parent has no continuous reactive validation of its own (unlike name) —
     * only submit-time errors (`parentDraft` returning `None`, or a topology
     * error from the server) ever populate this, via `setSubmitFieldError`. */
   val parentError: Signal[Option[String]] = withSubmitErrors(Parent, Val(None))
-  val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, probabilityErrorRaw)
+  val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, messageOf(probabilityErrorRaw))
 
   // Cross-field errors use a content-presence gate, NOT the per-field touch gate.
   //
@@ -312,46 +363,46 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       .map { (show, err) => if show then err else None }
 
   private val metalogCrossFieldGated_Pct: Signal[Option[String]] =
-    crossFieldGated(Percentiles, percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited)
+    crossFieldGated(Percentiles, percentilesVar, quantilesVar, messageOf(metalogCrossFieldErrorRaw), lastMetalogEdited)
 
   private val metalogCrossFieldGated_Qt: Signal[Option[String]] =
-    crossFieldGated(Quantiles, percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited.map(!_))
+    crossFieldGated(Quantiles, percentilesVar, quantilesVar, messageOf(metalogCrossFieldErrorRaw), lastMetalogEdited.map(!_))
 
   private val lognormalCrossFieldGated_Min: Signal[Option[String]] =
-    crossFieldGated(MinLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited)
+    crossFieldGated(MinLoss, minLossVar, maxLossVar, messageOf(lognormalCrossFieldErrorRaw), lastLognormalEdited)
 
   private val lognormalCrossFieldGated_Max: Signal[Option[String]] =
-    crossFieldGated(MaxLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited.map(!_))
+    crossFieldGated(MaxLoss, minLossVar, maxLossVar, messageOf(lognormalCrossFieldErrorRaw), lastLognormalEdited.map(!_))
 
   /** Percentiles: own error (touch-gated) ∪ metalog cross-field (last-edited-gated) */
   val percentilesError: Signal[Option[String]] =
-    withSubmitErrors(Percentiles, percentilesErrorRaw)
+    withSubmitErrors(Percentiles, messageOf(percentilesErrorRaw))
       .combineWith(metalogCrossFieldGated_Pct)
       .map { (own, cross) => own.orElse(cross) }
 
   /** Quantiles: own error (touch-gated) ∪ metalog cross-field (last-edited-gated) */
   val quantilesError: Signal[Option[String]] =
-    withSubmitErrors(Quantiles, quantilesErrorRaw)
+    withSubmitErrors(Quantiles, messageOf(quantilesErrorRaw))
       .combineWith(metalogCrossFieldGated_Qt)
       .map { (own, cross) => own.orElse(cross) }
 
   /** Min loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
   val minLossError: Signal[Option[String]] =
-    withSubmitErrors(MinLoss, minLossErrorRaw)
+    withSubmitErrors(MinLoss, messageOf(minLossErrorRaw))
       .combineWith(lognormalCrossFieldGated_Min)
       .map { (own, cross) => own.orElse(cross) }
 
   /** Max loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
   val maxLossError: Signal[Option[String]] =
-    withSubmitErrors(MaxLoss, maxLossErrorRaw)
+    withSubmitErrors(MaxLoss, messageOf(maxLossErrorRaw))
       .combineWith(lognormalCrossFieldGated_Max)
       .map { (own, cross) => own.orElse(cross) }
-  val termsError: Signal[Option[String]] = withSubmitErrors(Terms, termsErrorRaw)
+  val termsError: Signal[Option[String]] = withSubmitErrors(Terms, messageOf(termsErrorRaw))
 
   // ============================================================
   // FormState Implementation
   // ============================================================
-  
+
   /** Raw errors for hasErrors check (ignores display timing).
    *  Cross-field errors are already folded into the per-field composed signals,
    *  but we still include the standalone cross-field raws here so that
@@ -366,16 +417,18 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     minLossErrorRaw,
     maxLossErrorRaw,
     lognormalCrossFieldErrorRaw
-  )
+  ).map(messageOf)
 
   // ============================================================
   // Form Submission
   // ============================================================
-  
+
   /** Check if form is valid (for submit button) */
   val isValid: Signal[Boolean] = hasErrors.map(!_)
 
-  /** The form's two text fields parsed, zipped and gated into one shape.
+  /** The form's text fields parsed, zipped and gated into one shape. A pure
+    * function of its arguments, so the live preview and the submit build the
+    * shape the same way from where each reads its values.
     *
     * The mode selects which case is built, so the fields of the other mode are
     * not read at all and cannot reach the shape. For metalog mode the zip is
@@ -390,42 +443,54 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * of `0.1, abc, 0.9` therefore arrives as two percentiles, and pairs
     * successfully with a two-entry loss field.
     */
-  def currentShapeValidation(): Validation[ValidationError, DistributionShape] =
-    distributionModeVar.now() match
+  private def shapeFrom(
+    mode:        DistributionMode,
+    percentiles: String,
+    quantiles:   String,
+    terms:       String,
+    minLoss:     Located[String],
+    maxLoss:     Located[String],
+    subject:     ErrorSubject
+  ): Validation[ValidationError, DistributionShape] =
+    mode match
       case DistributionMode.Metalog =>
-        // UI uses 0-100 scale; the domain requires 0-1.
-        val percentiles = parseDoubleList(percentilesVar.now()).map(RiskLeafFormState.pctToDomain).toVector
-        val quantiles   = parseDoubleList(quantilesVar.now()).toVector
-        val terms       = if termsVar.now().isBlank then None else termsVar.now().toIntOption
-        DistributionShape.Metalog.fromPrimitives(percentiles, quantiles, terms, ErrorSubject.DraftNode)
+        DistributionShape.Metalog.fromPrimitives(
+          parseDoubleList(percentiles).map(RiskLeafFormState.pctToDomain).toVector,
+          parseDoubleList(quantiles).toVector,
+          if terms.isBlank then None else terms.toIntOption,
+          subject
+        )
 
       case DistributionMode.Lognormal =>
         Validation
           .validateWith(
-            requireBound(parseLong(minLossVar.now()), FieldName.MinLoss, ValidationMessages.minLossRequired),
-            requireBound(parseLong(maxLossVar.now()), FieldName.MaxLoss, ValidationMessages.maxLossRequired)
+            requireBound(minLoss, ValidationMessages.minLossRequired),
+            requireBound(maxLoss, ValidationMessages.maxLossRequired)
           )((min, max) => (min, max))
           .flatMap { case (min, max) =>
-            DistributionShape.Lognormal.fromPrimitives(min, max, ErrorSubject.DraftNode)
+            DistributionShape.Lognormal.fromPrimitives(min, max, subject)
           }
 
-  /** A lognormal bound that is absent, blank, or not a whole number. All three
-    * reach this as `None` and are reported as the field being required, so the
-    * inline field signal is where a non-numeric entry is named as such.
-    * Reported per field, so both bounds surface at once. */
-  private def requireBound(
-    parsed: Option[Long],
-    field: FieldName,
-    message: String
-  ): Validation[ValidationError, Long] =
-    parsed match
-      case Some(value) => Validation.succeed(value)
-      case None        => Validation.fail(ValidationError(at(field), ValidationErrorCode.REQUIRED_FIELD, message))
+  /** The shape the fields currently hold, read as a snapshot for the submit. */
+  def currentShapeValidation(): Validation[ValidationError, DistributionShape] =
+    shapeFrom(
+      distributionModeVar.now(),
+      percentilesVar.now(),
+      quantilesVar.now(),
+      termsVar.now(),
+      locatedNow(minLossVar, minLossField),
+      locatedNow(maxLossVar, maxLossField),
+      subjectVar.now()
+    )
 
-  private def currentShapeDraft(): Option[DistributionShape] =
-    currentShapeValidation() match
-      case Validation.Success(_, shape) => Some(shape)
-      case _                            => None
+  /** A lognormal bound that is absent, blank, or not a whole number. All three
+    * reach this as unparseable and are reported as the field being required, so
+    * the inline field signal is where a non-numeric entry is named as such.
+    * Reported per field, so both bounds surface at once. */
+  private def requireBound(bound: Located[String], message: String): Validation[ValidationError, Long] =
+    parseLong(bound.value) match
+      case Some(value) => Validation.succeed(value)
+      case None        => Validation.fail(bound.reject(ValidationErrorCode.REQUIRED_FIELD, message))
 
   /** Every value a submission needs, refined, with every field's refusal
     * accumulated rather than only the first.
@@ -436,23 +501,16 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * field's inline slot and the banner stays empty.
     */
   def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, DistributionShape)] =
-    val nameV = ValidationUtil.toValidation(
-      ValidationUtil.refineName(nameVar.now(), at(FieldName.Name))
-    )
-    val parentV = ParentSelection.toParentRef(parentVar.now())
-    val probabilityV = probabilityVar.now().toDoubleOption match
+    val nameV = ValidationUtil.toValidation(locatedNow(nameVar, nameField).refine(ValidationUtil.refineName))
+    val parentV = ParentSelection.toParentRef(locatedNow(parentVar, parentField))
+    val probability = locatedNow(probabilityVar, probabilityField)
+    val probabilityV = probability.value.toDoubleOption match
       case None =>
-        Validation.fail(ValidationError(
-          at(FieldName.Probability),
-          ValidationErrorCode.INVALID_FORMAT,
-          ValidationMessages.probabilityNotANumber
-        ))
+        Validation.fail(probability.reject(ValidationErrorCode.INVALID_FORMAT, ValidationMessages.probabilityNotANumber))
       case Some(pct) =>
         // The field is entered on the 0–100 scale; convert before refining.
         ValidationUtil.toValidation(
-          ValidationUtil.refineOccurrenceProbability(
-            RiskLeafFormState.pctToDomain(pct), at(FieldName.Probability)
-          )
+          probability.as(RiskLeafFormState.pctToDomain(pct)).refine(ValidationUtil.refineOccurrenceProbability)
         )
     Validation.validateWith(nameV, parentV, probabilityV, currentShapeValidation()) {
       (name, parent, probability, shape) => (name, parent, probability, shape)
@@ -462,15 +520,18 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     *
     * Emits `Some(shape)` when the mode's own fields gate into a
     * [[DistributionShape]], `None` when incomplete or invalid. Does not include
-    * probability — that is a leaf-level field separate from the shape.
+    * probability — that is a leaf-level field separate from the shape. Built
+    * from the values the signals carry, so it reads no snapshot.
     *
     * Used by [[app.state.DistributionChartState]] to trigger debounced preview fetches.
     */
   val draftSignal: Signal[Option[DistributionShape]] =
     distributionModeVar.signal
-      .combineWith(percentilesVar.signal, quantilesVar.signal, minLossVar.signal)
-      .combineWith(maxLossVar.signal, termsVar.signal)
-      .map(_ => currentShapeDraft())
+      .combineWith(percentilesVar.signal, quantilesVar.signal, termsVar.signal)
+      .combineWith(located(minLossVar, minLossField), located(maxLossVar, maxLossField), subject)
+      .map { (mode, percentiles, quantiles, terms, minLoss, maxLoss, s) =>
+        shapeFrom(mode, percentiles, quantiles, terms, minLoss, maxLoss, s).toOption
+      }
 
   /** Signal emitting an advisory warning when the implied P90/P10 loss ratio is
     * unusually high (> 100×), suggesting the expert estimates encode extreme tail
@@ -487,8 +548,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
           val p90idx = ps.lastIndexWhere(_ >= 90)
           if p10idx >= 0 && p90idx >= 0 && p10idx != p90idx && qs(p10idx) > 0 then
             val ratio = qs(p90idx) / qs(p10idx)
-            if ratio > 100 then
-              Some(f"P90/P10 ratio is $ratio%.0f\u00d7 \u2014 very high. Review whether this reflects expert judgment.")
+            if ratio > 100 then Some(RiskLeafFormState.impliedRatioTooHigh(ratio))
             else None
           else None
         else None
@@ -509,3 +569,13 @@ object RiskLeafFormState:
     * [[app.core.NumberFormat.percentValue]] under this form-facing name. */
   def domainToDisplayPct(p: Double, decimals: Int): String =
     app.core.NumberFormat.percentValue(p, decimals)
+
+  /** The advisory shown when the implied P90/P10 loss ratio exceeds 100×.
+    *
+    * {{{
+    * impliedRatioTooHigh(250.0)
+    * // P90/P10 ratio is 250× — very high. Review whether this reflects expert judgment.
+    * }}}
+    */
+  def impliedRatioTooHigh(ratio: Double): String =
+    f"P90/P10 ratio is $ratio%.0f× — very high. Review whether this reflects expert judgment."

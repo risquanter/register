@@ -7,7 +7,7 @@ import app.components.FormInputs.*
 import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
@@ -167,6 +167,7 @@ object RiskLeafFormView:
         case FormMode.Blank =>
           state.resetFields()
           state.parentVar.set(ParentSelection.Unset)
+          state.subjectVar.set(ErrorSubject.DraftNode)
           // The folded Blank can be this form's own Drafting(Leaf) — clearing
           // it must also end the draft, otherwise activeForm stays Drafting
           // and the portfolio form's controls remain disabled with no draft
@@ -204,15 +205,19 @@ object RiskLeafFormView:
         case FormMode.Templating(FormTarget.Leaf(n)) =>
           builderState.leavesVar.now().find(_.name == n).foreach { source =>
             builderState.populateLeafForm(state, source)
+            // A template is a new node, so its refusals name the draft rather
+            // than the source it was copied from.
+            state.subjectVar.set(ErrorSubject.DraftNode)
             if source.parent == ParentRef.Root then state.parentVar.set(ParentSelection.Unset)
           }
         case _ =>
-          // parentVar reset here too, not just resetFields() — otherwise a
-          // stale parent left over from a previously-locked leaf survives
-          // (resetFields() never touches it). Set explicitly to Unset, not a
-          // computed guess — see `ParentSelection`'s own doc.
+          // parentVar and subjectVar reset here too, not just resetFields() —
+          // otherwise a stale value left over from a previously-locked leaf
+          // survives (resetFields() never touches either). Set explicitly to
+          // Unset, not a computed guess — see `ParentSelection`'s own doc.
           state.resetFields()
           state.parentVar.set(ParentSelection.Unset)
+          state.subjectVar.set(ErrorSubject.DraftNode)
       },
       // Explicit "clear regardless of mode" signal from startNewTree/loadFromTree
       // — see the matching comment in PortfolioFormView / resetFormFieldsBus's
@@ -220,6 +225,7 @@ object RiskLeafFormView:
       builderState.resetFormFieldsBus.events --> { _ =>
         state.resetFields()
         state.parentVar.set(ParentSelection.Unset)
+        state.subjectVar.set(ErrorSubject.DraftNode)
       },
 
       // Clear stale submit + per-field errors whenever the user edits a field

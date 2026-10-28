@@ -17,8 +17,8 @@ object FormModeSpec extends ZIOSpecDefault:
   private val lognormalDistribution = lognormalShape(1000L, 50000L)
   private val savedProbability: OccurrenceProbability = 0.3
 
-  private val savedLeaf = LeafDraft(leafName, ParentRef.Root, lognormalDistribution, savedProbability)
-  private val savedPortfolio = PortfolioDraft(portName, ParentRef.Root)
+  private val savedLeaf = LeafDraft(leafName, ParentRef.Root, lognormalDistribution, savedProbability, None)
+  private val savedPortfolio = PortfolioDraft(portName, ParentRef.Root, None)
 
   private val savedLeafSnapshot: FieldSnapshot.LeafFields = FormMode.leafDraftToFieldSnapshot(savedLeaf)
   private val savedPortfolioSnapshot: FieldSnapshot.PortfolioFields = FormMode.portfolioDraftToFieldSnapshot(savedPortfolio)

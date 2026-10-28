@@ -4,9 +4,7 @@ import zio.prelude.Validation
 
 import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
-}
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /** A form's in-progress parent-field selection.
@@ -28,11 +26,6 @@ enum ParentSelection:
   case Unset
 
 object ParentSelection:
-  /** Every refusal a form produces is about a node with no identifier yet, so
-    * they all name the draft node and differ only in the field. */
-  private val parentLocation: ErrorLocation =
-    ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.ParentName)
-
   /** A saved node's own parent is always a definite, already-made choice —
     * never `Unset`. Used when populating a form from a saved leaf or
     * portfolio, and as the baseline `isFormDirty` compares the live form
@@ -47,22 +40,19 @@ object ParentSelection:
     *
     * This is the one place the parent field crosses from text to a refined
     * value, so both forms' `toDraft` call it and neither refines a parent of
-    * its own.
+    * its own. The selection arrives with its location, so a refusal names the
+    * form that submitted it.
     *
     * {{{
-    * toParentRef(Under("IT"))  // Success(ParentRef.Under(SafeName("IT")))
-    * toParentRef(Unset)        // Failure — the parent is required
+    * toParentRef(Located(Under("IT"), at))  // Success(ParentRef.Under(SafeName("IT")))
+    * toParentRef(Located(Unset, at))        // Failure at `at` — the parent is required
     * }}}
     */
-  def toParentRef(selection: ParentSelection): Validation[ValidationError, ParentRef] =
-    selection match
+  def toParentRef(selection: Located[ParentSelection]): Validation[ValidationError, ParentRef] =
+    selection.value match
       case ParentSelection.Root =>
         Validation.succeed(ParentRef.Root)
       case ParentSelection.Under(name) =>
-        toValidation(ValidationUtil.refineName(name, parentLocation)).map(ParentRef.Under(_))
+        toValidation(selection.as(name).refine(ValidationUtil.refineName)).map(ParentRef.Under(_))
       case ParentSelection.Unset =>
-        Validation.fail(ValidationError(
-          parentLocation,
-          ValidationErrorCode.REQUIRED_FIELD,
-          ValidationMessages.parentRequired
-        ))
+        Validation.fail(selection.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.parentRequired))

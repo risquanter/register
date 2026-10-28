@@ -1,6 +1,8 @@
 package app.state
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
+
+import com.risquanter.register.domain.errors.ErrorSubject
 
 /**
  * FormState trait — reactive form infrastructure with error display timing control.
@@ -9,13 +11,19 @@ import com.raquo.laminar.api.L.{*, given}
  * for field references (markTouched, withDisplayControl, setSubmitFieldError, etc.).
  *
  * Provides:
+ * - The subject every refusal of the form names: `subjectVar`
  * - Error display timing: `markTouched`, `shouldShowError`, `triggerValidation`
  * - Error aggregation: `errorSignals`, `hasErrors`
  * - Parse helpers: `parseDouble`, `parseLong`, `parseDoubleList`
  *
- * Subclasses define `errorSignals` and use `shouldShowError` to gate display.
+ * Subclasses define `subjectVar` and `errorSignals`, and use `shouldShowError`
+ * to gate display.
  */
 trait FormState[F]:
+
+  /** The node this form's refusals are about. A `Var` rather than a signal,
+    * because the submit path reads a snapshot of it. */
+  def subjectVar: Var[ErrorSubject]
 
   // ============================================================
   // Error Display Timing (shared infrastructure)
@@ -27,7 +35,7 @@ trait FormState[F]:
   /** Per-field "touched" state for showing errors on blur */
   private val touchedFields: Var[Set[F]] = Var(Set.empty)
 
-  /** Per-field submit-time errors routed from topology validation (W.10) */
+  /** Per-field submit-time errors routed from the topology checks and the server */
   private val submitFieldErrors: Var[Map[F, String]] = Var(Map.empty)
 
   def markTouched(field: F): Unit =
