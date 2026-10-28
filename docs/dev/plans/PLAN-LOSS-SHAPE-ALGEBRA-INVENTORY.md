@@ -76,3 +76,7 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - build.sbt
 - modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala
 - modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala
+- modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/QueryService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceLive.scala
