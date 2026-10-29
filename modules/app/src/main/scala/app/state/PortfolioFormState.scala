@@ -12,6 +12,10 @@ import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 enum PortfolioField:
   case Name, Parent
 
+  /** The form's own line, for a refusal about a combination of its inputs
+    * rather than about one of them. */
+  case FormLevel
+
 /**
  * Reactive form state for creating a portfolio.
  * Validates name eagerly (Iron SafeName) and exposes parent selection as a ParentSelection.
@@ -54,10 +58,14 @@ final class PortfolioFormState extends FormState[PortfolioField]:
   val nameError: Signal[Option[String]] = withSubmitErrors(Name, nameErrorRaw.map(_.map(_.message)))
 
   /** Parent has no continuous reactive validation of its own (unlike name) —
-    * only submit-time errors (`Validation.Failure` from `toDraft`, or a
-    * topology error from the server) ever populate this, via
+    * only submit-time errors (`Validation.Failure` from `toDraft`, or the
+    * builder's topology check) ever populate this, via
     * `setSubmitFieldError`. */
   val parentError: Signal[Option[String]] = withSubmitErrors(Parent, Val(None))
+
+  /** The form's own line: a submit refusal about a combination of this form's
+    * inputs rather than about one of them. */
+  val formLevelError: Signal[Option[String]] = withSubmitErrors(FormLevel, Val(None))
 
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] = List(nameErrorRaw.map(_.map(_.message)))

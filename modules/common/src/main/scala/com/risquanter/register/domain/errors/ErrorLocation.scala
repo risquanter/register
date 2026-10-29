@@ -188,10 +188,9 @@ object FieldName:
 
 /** Where an error is.
   *
-  * The browser matches on these cases to route an error to the control that
-  * failed. Each form maps only the locations it renders and sends everything
-  * else to its submit banner, so a case added here reaches the banner until a
-  * form is given an arm for it.
+  * The browser matches on these cases to route an error to the controls that
+  * show it. Each form assigns every case by name, so a case added here, or a
+  * `FieldName` case, fails the build until each form is given an arm for it.
   */
 @jsonDiscriminator(TagField)
 enum ErrorLocation:

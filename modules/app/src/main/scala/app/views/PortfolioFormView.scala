@@ -271,7 +271,9 @@ object PortfolioFormView:
           onClickCallback = () => onEditSaveClick()
         )
       ),
-      // Builder-level error (e.g., duplicate name or root constraint)
+      // The form's own line: the builder's topology check of this submit, then
+      // any refusal no input of this form claims.
+      child.maybe <-- form.formLevelError.map(_.map(msg => div(cls := "form-error", msg))),
       child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
       )
     )
@@ -314,23 +316,49 @@ object PortfolioFormView:
       case Validation.Failure(_, errs) =>
         routePortfolioErrors(form, errs.toList, submitError)
 
-  /** Show every refusal under the input it belongs to, whichever check produced
-    * it — this form's own field refinement or the tree-wide topology rules. */
+  /** Show every refusal under each target its location names, whichever check
+    * produced it — this form's own field refinement or the tree-wide topology
+    * rules. */
   private def routePortfolioErrors(
     form: PortfolioFormState,
     errors: List[ValidationError],
     submitError: Var[Option[String]]
   ): Unit =
-    FormSubmitUtil.routeErrors(form, errors, submitError, inputFor)
+    FormSubmitUtil.routeErrors(form, errors, submitError, inputsFor)
 
-  /** The input a refusal belongs under. This form has two, so a location naming
-    * anything else goes to the banner.
+  /** No display target of this form. A refusal at such a location is shown on
+    * the form's submit line by `routeErrors`. */
+  private val noTarget: Set[PortfolioField] = Set.empty
+
+  /** The targets a refusal belongs under. This form has two inputs and its own
+    * line; every location is assigned by name, so a location added later fails
+    * the build until it is given one. The builder's topology check of this
+    * form's submit belongs on the form's own line. The subject does not change
+    * the routing.
     *
     * Visible to the package so the mapping is testable without rendering the
     * form.
     */
-  private[views] def inputFor(location: ErrorLocation): Option[PortfolioField] =
+  private[views] def inputsFor(location: ErrorLocation): Set[PortfolioField] =
     location match
-      case ErrorLocation.Field(_, FieldName.Name)       => Some(PortfolioField.Name)
-      case ErrorLocation.Field(_, FieldName.ParentName) => Some(PortfolioField.Parent)
-      case _                                            => None
+      case ErrorLocation.Field(_, field) =>
+        field match
+          case FieldName.Name       => Set(PortfolioField.Name)
+          case FieldName.ParentName => Set(PortfolioField.Parent)
+          case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
+               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
+               FieldName.Probability | FieldName.SeedVarId | FieldName.SeedEntityId |
+               FieldName.DistributionType | FieldName.Terms | FieldName.MinLoss | FieldName.MaxLoss |
+               FieldName.Spec | FieldName.Percentiles | FieldName.Quantiles |
+               FieldName.PercentileAt(_) | FieldName.QuantileAt(_) | FieldName.ChildAt(_) |
+               FieldName.LossRange | FieldName.PercentileQuantilePairing |
+               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
+               FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
+               FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
+               FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
+               FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
+               FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
+               FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
+            noTarget
+      case ErrorLocation.Whole     => Set(PortfolioField.FormLevel)
+      case ErrorLocation.Header(_) => noTarget

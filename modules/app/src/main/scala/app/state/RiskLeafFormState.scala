@@ -11,6 +11,10 @@ import zio.prelude.Validation
 enum RiskLeafField:
   case Name, Parent, Probability, Percentiles, Quantiles, MinLoss, MaxLoss, Terms
 
+  /** The form's own line, for a refusal about a combination of its inputs
+    * rather than about one of them. */
+  case FormLevel
+
 /**
  * Reactive form state for creating a RiskLeaf.
  *
@@ -327,9 +331,13 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
 
   /** Parent has no continuous reactive validation of its own (unlike name) —
     * only submit-time errors (`ParentSelection.toParentRef` refusing the
-    * selection in `toDraft`, or a topology error from the server) ever
+    * selection in `toDraft`, or the builder's topology check) ever
     * populate this, via `setSubmitFieldError`. */
   val parentError: Signal[Option[String]] = withSubmitErrors(Parent, Val(None))
+
+  /** The form's own line: a submit refusal about a combination of this form's
+    * inputs rather than about one of them. */
+  val formLevelError: Signal[Option[String]] = withSubmitErrors(FormLevel, Val(None))
   val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, messageOf(probabilityErrorRaw))
 
   // Cross-field errors use a content-presence gate, NOT the per-field touch gate.

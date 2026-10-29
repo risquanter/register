@@ -353,6 +353,7 @@ object RiskLeafFormView:
           onClickCallback = () => onEditSaveClick()
         )
       ),
+      child.maybe <-- state.formLevelError.map(_.map(msg => div(cls := "form-error", msg))),
       child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
       )
     )
@@ -479,37 +480,58 @@ object RiskLeafFormView:
       case Validation.Failure(_, errs) =>
         routeLeafErrors(state, errs.toList, submitError)
 
-  /** Show every refusal under the input it belongs to, whichever check produced
-    * it — this form's own field refinement or the tree-wide topology rules. */
+  /** Show every refusal under each target its location names, whichever check
+    * produced it — this form's own field refinement or the tree-wide topology
+    * rules. */
   private def routeLeafErrors(
     state: RiskLeafFormState,
     errors: List[ValidationError],
     submitError: Var[Option[String]]
   ): Unit =
-    FormSubmitUtil.routeErrors(state, errors, submitError, inputFor)
+    FormSubmitUtil.routeErrors(state, errors, submitError, inputsFor)
 
-  /** The input a refusal belongs under. One mapping for every input this form
-    * owns, so the name, the parent, the probability and the five distribution
-    * inputs are routed by the same match.
+  /** No display target of this form. A refusal at such a location is shown on
+    * the form's submit line by `routeErrors`. */
+  private val noTarget: Set[RiskLeafField] = Set.empty
+
+  /** The targets a refusal belongs under. One mapping for every location, so
+    * every case is assigned by name and a location added later fails the
+    * build until it is given one.
     *
     * An element failure and a collection failure share one input, because the
-    * form edits the whole list as one comma-separated value.
+    * form edits the whole list as one comma-separated value. A rule over a pair
+    * of inputs belongs under both. A rule over the mode's inputs together, and
+    * the builder's topology check of this form's submit, belong on the form's
+    * own line. The subject does not change the routing.
     *
     * Visible to the package so the mapping is testable without rendering the
     * form.
     */
-  private[views] def inputFor(location: ErrorLocation): Option[RiskLeafField] =
+  private[views] def inputsFor(location: ErrorLocation): Set[RiskLeafField] =
     location match
-      case ErrorLocation.Field(_, FieldName.Name)             => Some(RiskLeafField.Name)
-      case ErrorLocation.Field(_, FieldName.ParentName)       => Some(RiskLeafField.Parent)
-      case ErrorLocation.Field(_, FieldName.Probability)      => Some(RiskLeafField.Probability)
-      case ErrorLocation.Field(_, FieldName.Percentiles)      => Some(RiskLeafField.Percentiles)
-      case ErrorLocation.Field(_, FieldName.PercentileAt(_))  => Some(RiskLeafField.Percentiles)
-      case ErrorLocation.Field(_, FieldName.Quantiles)        => Some(RiskLeafField.Quantiles)
-      case ErrorLocation.Field(_, FieldName.QuantileAt(_))    => Some(RiskLeafField.Quantiles)
-      case ErrorLocation.Field(_, FieldName.MinLoss)          => Some(RiskLeafField.MinLoss)
-      case ErrorLocation.Field(_, FieldName.MaxLoss)          => Some(RiskLeafField.MaxLoss)
-      case ErrorLocation.Field(_, FieldName.Terms)            => Some(RiskLeafField.Terms)
-      // A mode-level mismatch names the distribution rather than one of its
-      // fields, so it belongs in the banner.
-      case _                                                  => None
+      case ErrorLocation.Field(_, field) =>
+        field match
+          case FieldName.Name                                  => Set(RiskLeafField.Name)
+          case FieldName.ParentName                            => Set(RiskLeafField.Parent)
+          case FieldName.Probability                           => Set(RiskLeafField.Probability)
+          case FieldName.Percentiles | FieldName.PercentileAt(_) => Set(RiskLeafField.Percentiles)
+          case FieldName.Quantiles | FieldName.QuantileAt(_)   => Set(RiskLeafField.Quantiles)
+          case FieldName.MinLoss                               => Set(RiskLeafField.MinLoss)
+          case FieldName.MaxLoss                               => Set(RiskLeafField.MaxLoss)
+          case FieldName.Terms                                 => Set(RiskLeafField.Terms)
+          case FieldName.LossRange                             => Set(RiskLeafField.MinLoss, RiskLeafField.MaxLoss)
+          case FieldName.PercentileQuantilePairing             => Set(RiskLeafField.Percentiles, RiskLeafField.Quantiles)
+          case FieldName.DistributionType                      => Set(RiskLeafField.FormLevel)
+          case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
+               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
+               FieldName.SeedVarId | FieldName.SeedEntityId | FieldName.Spec | FieldName.ChildAt(_) |
+               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
+               FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
+               FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
+               FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
+               FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
+               FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
+               FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
+            noTarget
+      case ErrorLocation.Whole     => Set(RiskLeafField.FormLevel)
+      case ErrorLocation.Header(_) => noTarget
