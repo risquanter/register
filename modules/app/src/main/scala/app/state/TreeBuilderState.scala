@@ -384,20 +384,28 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * loaded tree would look "dirty" even with zero edits.
     */
   def isDirty: Boolean =
-    val current = (treeNameVar.now(), portfoliosVar.now(), leavesVar.now())
-    loadedSnapshotVar.now() match
-      case Some(baseline) => current != baseline
-      case None           => current._1.trim.nonEmpty || current._2.nonEmpty || current._3.nonEmpty
+    differsFromLoaded(treeNameVar.now(), portfoliosVar.now(), leavesVar.now(), loadedSnapshotVar.now())
+
+  /** The rule `isDirty` and `isDirtySignal` both apply, as a function of the
+    * values it compares. */
+  private def differsFromLoaded(
+    name:       String,
+    portfolios: List[PortfolioDraft],
+    leaves:     List[LeafDraft],
+    loaded:     Option[(String, List[PortfolioDraft], List[LeafDraft])]
+  ): Boolean =
+    loaded match
+      case Some(baseline) => (name, portfolios, leaves) != baseline
+      case None           => name.trim.nonEmpty || portfolios.nonEmpty || leaves.nonEmpty
 
   /** Reactive mirror of `isDirty`, for live debugging (`TreeBuilderView`'s
-    * debug bar) — recomputes on any change to the tracked fields *or*
-    * `loadedSnapshotVar` itself (e.g. after `markJustSaved`), which the
-    * plain `isDirty` def above can't reflect on its own since it's
-    * pull-based (read via `.now()` on demand) rather than push-based.
+    * debug bar). It recomputes on any change to the tracked fields or to
+    * `loadedSnapshotVar` itself (e.g. after `markJustSaved`), from the values
+    * those signals carry.
     */
   val isDirtySignal: Signal[Boolean] =
     treeNameVar.signal.combineWith(portfoliosVar.signal, leavesVar.signal, loadedSnapshotVar.signal)
-      .map { _ => isDirty }
+      .map((name, portfolios, leaves, loaded) => differsFromLoaded(name, portfolios, leaves, loaded))
 
   /** Mark the current draft as matching what the server just confirmed
     * saving — call this right after a create/update submission succeeds.

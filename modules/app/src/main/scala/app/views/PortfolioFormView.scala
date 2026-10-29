@@ -67,9 +67,9 @@ object PortfolioFormView:
       form.nameVar.signal.combineWith(form.parentVar.signal).map { (name, parent) =>
         FieldSnapshot.PortfolioFields(name, parent)
       }
-    val isDirty: Signal[Boolean] = portfolioMode.combineWith(currentSnapshot).map { (mode, snapshot) =>
-      FormMode.isFormDirty(mode, snapshot, builderState.leavesVar.now(), builderState.portfoliosVar.now())
-    }
+    val isDirty: Signal[Boolean] =
+      portfolioMode.combineWith(currentSnapshot, builderState.leavesVar.signal, builderState.portfoliosVar.signal)
+        .map((mode, snapshot, leaves, portfolios) => FormMode.isFormDirty(mode, snapshot, leaves, portfolios))
 
     // Mode-dependent, per the state machine: Blank and Templating are both
     // "unlocked, click submits what's typed" states, so they share one

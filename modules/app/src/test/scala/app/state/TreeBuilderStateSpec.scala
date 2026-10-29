@@ -2,6 +2,8 @@ package app.state
 
 import zio.test.*
 import zio.prelude.Validation
+import com.raquo.laminar.api.L.*
+import com.raquo.airstream.ownership.ManualOwner
 
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, DistributionShape}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId}
@@ -14,6 +16,14 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
   private def n(value: String): SafeName.SafeName =
     SafeName.fromString(value).getOrElse(throw new AssertionError(s"not a SafeName: $value"))
+
+  /** Observe a signal's current value under a throwaway owner. */
+  private def currentOf[A](signal: Signal[A]): A =
+    given owner: ManualOwner = new ManualOwner
+    var seen: Option[A] = None
+    signal.foreach(a => seen = Some(a))
+    owner.killSubscriptions()
+    seen.get
 
   /** The parent a node sitting under the named portfolio carries. */
   private def under(parent: String): ParentRef = ParentRef.Under(n(parent))
@@ -210,6 +220,16 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.treeNameVar.set("Draft")
         assertTrue(state.isDirty)
+      },
+
+      test("isDirtySignal gives the answer isDirty gives, before and after an edit post-load") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val beforeEdit = (currentOf(state.isDirtySignal), state.isDirty)
+        state.treeNameVar.set("Renamed Tree")
+        val afterEdit = (currentOf(state.isDirtySignal), state.isDirty)
+        assertTrue(beforeEdit == (false, false), afterEdit == (true, true))
       },
 
       test("false again after startNewTree resets the snapshot") {
@@ -638,6 +658,29 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         formState.subjectVar.set(ErrorSubject.ExistingNode(rootId))
         state.populatePortfolioForm(formState, PortfolioDraft(n("Operations"), ParentRef.Root, None))
         assertTrue(formState.subjectVar.now() == ErrorSubject.DraftNode)
+      },
+
+      test("a template populated from inside an observer ends on the draft node") {
+        // The leaf view's Templating arm populates from the source and then
+        // resets the subject, both from inside an observer of the form mode.
+        // The writes apply in the order they were issued, so the form holds the
+        // source's fields and names the draft node.
+        val tree      = mkTree(treeUlid, "TemplateLeaf", Seq(rootPortfolioWithChild, childPortfolio, leafUnderChild), rootId)
+        val state     = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val formState = new RiskLeafFormState
+        val trigger   = Var(0)
+        given owner: ManualOwner = new ManualOwner
+        trigger.signal.changes.foreach { _ =>
+          state.populateLeafForm(formState, state.leavesVar.now().head)
+          formState.subjectVar.set(ErrorSubject.DraftNode)
+        }
+        trigger.set(1)
+        owner.killSubscriptions()
+        assertTrue(
+          formState.nameVar.now() == "Hardware Failure",
+          formState.subjectVar.now() == ErrorSubject.DraftNode
+        )
       }
 
     ),

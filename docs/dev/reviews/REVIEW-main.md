@@ -604,3 +604,77 @@ escalated:
     REQUIRED_FIELD->TYPE_MISMATCH) and edit-path subject DraftNode->ExistingNode
     (changed error-path semantics) → complex
 ```
+
+```
+COVERAGE  tier=complex  scope=the routine tier's two escalated items for commits 141300d1
+          and 4acbfc9f, plus commit 1f5943c0 (the fixes to the routine findings), named by
+          the user (File scope source 1); plan documents read as the oracle only
+read-in-full:
+  modules/app/src/main/scala/app/state/FormState.scala
+  modules/app/src/main/scala/app/state/Located.scala
+  modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+  modules/app/src/main/scala/app/state/PortfolioFormState.scala
+  modules/app/src/main/scala/app/state/TreeBuilderState.scala
+  modules/app/src/main/scala/app/state/ParentSelection.scala
+  modules/app/src/main/scala/app/state/FormMode.scala
+  modules/app/src/main/scala/app/state/DistributionChartState.scala
+  modules/app/src/main/scala/app/views/RiskLeafFormView.scala
+  modules/app/src/main/scala/app/views/PortfolioFormView.scala
+  modules/app/src/main/scala/app/views/FormSubmitUtil.scala
+  modules/app/src/main/scala/app/components/FormInputs.scala
+  modules/app/src/test/scala/app/state/RiskLeafFormStateSpec.scala
+  modules/app/src/test/scala/app/views/FormErrorRoutingSpec.scala
+  (in part) modules/app/src/main/scala/app/views/DistributionChartView.scala:25-124,
+    modules/common/.../domain/data/DistributionShape.scala:56-360,
+    modules/common/.../domain/data/iron/ValidationUtil.scala:318-338,
+    modules/common/.../domain/errors/ErrorLocation.scala:1-80,127-141,219,
+    modules/app/src/test/scala/app/state/TreeBuilderStateSpec.scala:1-130,600-660,
+    PLAN-ERROR-WIRE-BOUNDARY.md §15.4, §15.5a-15.8, §13:5785-5848, EWB-D-25, EWB-D-38
+discharged:
+  1 adversarial line scan — 2 findings (terms-overflow TYPE_MISMATCH and the flatMap
+    suppression, RiskLeafFormState.scala:274-279,484-491; live terms check counts
+    percentiles where the gate counts pairs, RiskLeafFormState.scala:297 vs
+    DistributionShape.scala:273-281)
+  2 removed-behaviour audit — PASS — minMetalogTerms replaced by refineMetalogTermCount
+    (RiskLeafFormState.scala:285); if/else→match on ParentRef exhaustive over its two cases
+    (RiskTreeRequests.scala:29-32); currentSnapshot's combined values equal the .now()
+    reads it replaced (RiskLeafFormView.scala:54-59); treeNameErrorRaw's message mapping
+    kept (TreeBuilderState.scala:128-135)
+  3 cross-module tracing — PASS — browser refusals never leave the browser; the only
+    readers of a refusal are FormSubmitUtil.routeErrors (location + message,
+    FormSubmitUtil.scala:28-35) and the two inputFor mappings, which match FieldName and
+    discard the subject (RiskLeafFormView.scala:491-505, PortfolioFormView.scala:332-336);
+    no consumer in modules/app/src/main reads ValidationError.code. Controls reached on every
+    submit path: the refinement boundary toDraft (RiskLeafFormState.scala:523-529) from
+    handleSubmit (RiskLeafFormView.scala:436) and handleUpdate (:460); the shape gate
+    shapeFrom → DistributionShape.Metalog/Lognormal.fromPrimitives
+    (RiskLeafFormState.scala:484-500) from toDraft and from draftSignal (:540-546);
+    PortfolioFormState.toDraft (PortfolioFormState.scala:70-75) from
+    PortfolioFormView.handleSubmit (:285) and handleUpdate (:305)
+  4 state and interleaving model — PASS, 1 pre-existing note — the subject enters
+    draftSignal four times and combineWith emits once per transaction; the emitted
+    Option[DistributionShape] is independent of the subject (pinned,
+    RiskLeafFormStateSpec "the subject does not change the shape it carries"); writes
+    issued inside the Templating observer apply in issue order so DraftNode is the final
+    subject (pinned, TreeBuilderStateSpec "a template populated from inside an observer
+    ends on the draft node"); every emission during a populate lands in currentDraftVar and
+    is collapsed by the 400 ms debounce (DistributionChartView.scala:74-83), so one fetch
+    of the final fields; no stale fetch, no double fetch. Pre-existing: equal values
+    re-emitted into currentDraftVar re-embed the chart and refetch after a submit
+  5 invariant reconstruction — PASS — live and submit refuse the same input with the same
+    sentence for probability, bounds and terms (pinned; the terms case now covers below
+    range, above anchor count, unreadable); every refusal reaches its field's slot or the
+    banner by location alone; pair locations reach the banner until plan step 4
+    (§15.8 step 2 states this)
+  6 design altitude — 2 notes (positional FieldSnapshot.LeafFields construction,
+    RiskLeafFormView.scala:57-58; FormInputs.fromValue if-chain on named constants,
+    FormInputs.scala:263-266, pre-existing)
+  7 terminology freshness (meaning level) — PASS — §1.4 "90% confidence interval" and
+    "stating none means one term per anchor" agree with RiskLeafFormView.scala:402 and
+    RiskLeafFormState.scala:274-275; no denotation changed
+  8 inline verification — app/test pass after the three pinning tests and one
+    strengthened test; the Airstream re-emission premise behind the pre-existing note is
+    unverified and named in the finding
+escalated:
+  (none)
+```

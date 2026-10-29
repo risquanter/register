@@ -55,11 +55,21 @@ object RiskLeafFormView:
       state.nameVar.signal.combineWith(state.parentVar.signal, state.probabilityVar.signal, state.distributionModeVar.signal)
         .combineWith(state.percentilesVar.signal, state.quantilesVar.signal, state.termsVar.signal, state.minLossVar.signal, state.maxLossVar.signal)
         .map { (name, parent, probability, mode, percentiles, quantiles, terms, minLoss, maxLoss) =>
-          FieldSnapshot.LeafFields(name, parent, probability, mode, percentiles, quantiles, terms, minLoss, maxLoss)
+          FieldSnapshot.LeafFields(
+            name        = name,
+            parent      = parent,
+            probability = probability,
+            mode        = mode,
+            percentiles = percentiles,
+            quantiles   = quantiles,
+            terms       = terms,
+            minLoss     = minLoss,
+            maxLoss     = maxLoss
+          )
         }
-    val isDirty: Signal[Boolean] = leafMode.combineWith(currentSnapshot).map { (mode, snapshot) =>
-      FormMode.isFormDirty(mode, snapshot, builderState.leavesVar.now(), builderState.portfoliosVar.now())
-    }
+    val isDirty: Signal[Boolean] =
+      leafMode.combineWith(currentSnapshot, builderState.leavesVar.signal, builderState.portfoliosVar.signal)
+        .map((mode, snapshot, leaves, portfolios) => FormMode.isFormDirty(mode, snapshot, leaves, portfolios))
 
     // Mode-dependent, per the state machine — see the matching comment in
     // PortfolioFormView: Blank and Templating both submit on click and share

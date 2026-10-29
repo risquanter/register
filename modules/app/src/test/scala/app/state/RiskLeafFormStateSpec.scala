@@ -114,6 +114,12 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         assertTrue(refusalLocations(st) == Set(at(FieldName.Percentiles)))
       },
 
+      test("quantiles that do not increase") {
+        val st = validMetalogForm()
+        st.quantilesVar.set("25000, 5000, 1000")
+        assertTrue(refusalLocations(st) == Set(at(FieldName.Quantiles)))
+      },
+
       test("unequal percentile and quantile counts name the pairing") {
         val st = validMetalogForm()
         st.quantilesVar.set("1000, 5000")
@@ -168,14 +174,28 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         )
       },
 
-      test("a term count below the fit's range, and one that is not a number, give one sentence on both paths") {
-        val cases = List("1", "abc").map { entered =>
+      test("a term count below the fit's range, one above the anchor count, and one that is not a number give one sentence on both paths") {
+        val cases = List("1", "5", "abc").map { entered =>
           val st = validMetalogForm()
           st.termsVar.set(entered)
           st.markTouched(RiskLeafField.Terms)
           (current(st.termsError).toList, submittedAt(st, FieldName.Terms))
         }
         assertTrue(cases.forall((live, submitted) => live.nonEmpty && live == submitted))
+      },
+
+      test("while the percentile and loss counts differ, the term count is not compared with either") {
+        // No anchors form, so the submit reports the pairing and says nothing about terms.
+        val st = validMetalogForm()
+        st.percentilesVar.set("10, 50")
+        st.quantilesVar.set("1000, 5000, 25000")
+        st.termsVar.set("3")
+        st.markTouched(RiskLeafField.Terms)
+        assertTrue(
+          current(st.termsError).isEmpty,
+          submittedAt(st, FieldName.Terms).isEmpty,
+          refusalLocations(st).contains(at(FieldName.PercentileQuantilePairing))
+        )
       },
 
       test("the term count is judged against the anchors that parse") {
@@ -195,6 +215,20 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
 
     suite("draftSignal")(
 
+      test("does not re-emit a shape equal to the one it last emitted") {
+        // Rewriting a field with its own value, and moving the subject, both
+        // leave the shape unchanged, as a populate after a submit does.
+        val st = validMetalogForm()
+        given owner: ManualOwner = new ManualOwner
+        var emissions = 0
+        st.draftSignal.foreach(_ => emissions += 1)
+        st.percentilesVar.set(st.percentilesVar.now())
+        st.quantilesVar.set(st.quantilesVar.now())
+        st.subjectVar.set(ErrorSubject.DraftNode)
+        owner.killSubscriptions()
+        assertTrue(emissions == 1)
+      },
+
       test("builds the shape the submit builds") {
         val st = validMetalogForm()
         assertTrue(current(st.draftSignal) == st.currentShapeValidation().toOption)
@@ -204,6 +238,15 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         val st = validLognormalForm()
         st.maxLossVar.set("")
         assertTrue(current(st.draftSignal).isEmpty)
+      },
+
+      test("the subject does not change the shape it carries") {
+        // The subject names where a refusal is located; an accepted shape holds
+        // no subject, so the same fields give the same draft under either.
+        val st = validMetalogForm()
+        val asExisting = current(st.draftSignal)
+        st.subjectVar.set(ErrorSubject.DraftNode)
+        assertTrue(asExisting.isDefined, current(st.draftSignal) == asExisting)
       }
 
     ),

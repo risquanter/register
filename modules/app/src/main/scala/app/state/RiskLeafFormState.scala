@@ -280,24 +280,29 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
 
   /** A stated term count checked as the shape's own gate checks it: first the
     * fit's range, by the shared refinement, then against the anchor count, with
-    * the same codes and sentences. */
-  private def termsWithinFit(input: Located[String], terms: Int, anchors: Int): Validation[ValidationError, Unit] =
+    * the same codes and sentences. `anchors` is empty while the percentile and
+    * loss counts differ, because no anchors form then and the gate reports the
+    * pairing instead. */
+  private def termsWithinFit(input: Located[String], terms: Int, anchors: Option[Int]): Validation[ValidationError, Unit] =
     ValidationUtil.toValidation(input.as(terms).refine(ValidationUtil.refineMetalogTermCount)).flatMap { count =>
-      if count > anchors then
+      if anchors.exists(count > _) then
         Validation.fail(input.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
       else Validation.unit
     }
 
   /** Metalog mode: terms validation. The anchors are counted as the shape
-    * counts them, so an entry that is not a number is not counted here either. */
+    * counts them: an entry that is not a number is not counted, and there are
+    * anchors only when the percentile and loss counts are equal. */
   private val termsErrorRaw: Signal[Option[ValidationError]] =
-    distributionModeVar.signal.combineWith(located(termsVar, termsField), percentilesVar.signal).map {
-      case (DistributionMode.Metalog, input, pStr) =>
-        firstRefusal(
-          readTerms(input).flatMap(_.fold(Validation.unit)(t => termsWithinFit(input, t, parseDoubleList(pStr).length)))
-        )
-      case _ => None
-    }
+    distributionModeVar.signal
+      .combineWith(located(termsVar, termsField), percentilesVar.signal, quantilesVar.signal)
+      .map {
+        case (DistributionMode.Metalog, input, pStr, qStr) =>
+          val percentiles = parseDoubleList(pStr).length
+          val anchors     = Option.when(percentiles == parseDoubleList(qStr).length)(percentiles)
+          firstRefusal(readTerms(input).flatMap(_.fold(Validation.unit)(t => termsWithinFit(input, t, anchors))))
+        case _ => None
+      }
 
   /** Lognormal mode: cross-field validation (minLoss < maxLoss). Located at
     * the pair, as the shared shape factory reports the same rule. */
@@ -533,7 +538,9 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * Emits `Some(shape)` when the mode's own fields gate into a
     * [[DistributionShape]], `None` when incomplete or invalid. Does not include
     * probability — that is a leaf-level field separate from the shape. Built
-    * from the values the signals carry, so it reads no snapshot.
+    * from the values the signals carry, so it reads no snapshot. An emission
+    * equal to the last one is dropped, so rewriting a field with its own value
+    * or moving the subject does not refetch the preview.
     *
     * Used by [[app.state.DistributionChartState]] to trigger debounced preview fetches.
     */
@@ -544,6 +551,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       .map { (mode, percentiles, quantiles, terms, minLoss, maxLoss, s) =>
         shapeFrom(mode, percentiles, quantiles, terms, minLoss, maxLoss, s).toOption
       }
+      .distinct
 
   /** Signal emitting an advisory warning when the implied P90/P10 loss ratio is
     * unusually high (above `impliedRatioLimit`), suggesting the expert

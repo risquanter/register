@@ -1,6 +1,6 @@
 package app.components
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import app.state.ParentSelection
 
 /**
@@ -46,7 +46,7 @@ object FormInputs:
       input(
         typ := "text",
         inputMode := inputModeAttr,
-        cls <-- errorSignal.map(err => if err.isDefined then "form-input error" else "form-input"),
+        cls <-- errorSignal.map(_.fold("form-input")(_ => "form-input error")),
         placeholder := placeholderText,
         disabled <-- disabledSignal,
         controlled(
@@ -82,7 +82,7 @@ object FormInputs:
       label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, labelText),
       textArea(
         inputMode := inputModeAttr,
-        cls <-- errorSignal.map(err => if err.isDefined then "form-input form-textarea error" else "form-input form-textarea"),
+        cls <-- errorSignal.map(_.fold("form-input form-textarea")(_ => "form-input form-textarea error")),
         placeholder := placeholderText,
         rows := rowCount,
         disabled <-- disabledSignal,
@@ -160,11 +160,10 @@ object FormInputs:
    *
    * Recreating the currently-selected `<option>` resets the browser's
    * native `<select>` selection independently of whatever Var/Signal the
-   * app uses to track the choice — confirmed in `AnalyzeView`'s
-   * compare-branch picker and shared by the same mechanism in
-   * `parentSelect` below (TODO.md item 26). Extracted here so every
-   * dynamic-option `<select>` in the app gets this by construction instead
-   * of copy-pasting the fix (or missing it) per call site.
+   * app uses to track the choice, which is why `AnalyzeView`'s
+   * compare-branch picker and `parentSelect` below both use this. Every
+   * dynamic-option `<select>` in the app gets keyed options by construction
+   * rather than per call site.
    *
    * @param options Signal of (value, label) pairs, in display order.
    * @param disabledValues Option values to render as `disabled` (present but
@@ -260,10 +259,10 @@ object FormInputs:
       case ParentSelection.Under(n) => n
       case ParentSelection.Unset    => unsetValue
 
-    def fromValue(raw: String): ParentSelection =
-      if raw == unsetValue then ParentSelection.Unset
-      else if raw == rootLabel then ParentSelection.Root
-      else ParentSelection.Under(raw)
+    def fromValue(raw: String): ParentSelection = raw match
+      case `unsetValue` => ParentSelection.Unset
+      case `rootLabel`  => ParentSelection.Root
+      case name         => ParentSelection.Under(name)
 
     def correctedDisplay(sel: ParentSelection, opts: List[String]): String =
       val display = toValue(sel)
