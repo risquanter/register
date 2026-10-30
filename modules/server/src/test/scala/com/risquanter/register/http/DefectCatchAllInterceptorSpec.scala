@@ -15,13 +15,15 @@ import sttp.tapir.AttributeKey
 import sttp.tapir.model.{ConnectionInfo, ServerRequest}
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.{CustomiseInterceptors, EndpointInterceptor, Interceptor, RequestHandler, RequestResult, Responder, ResponseSource}
-import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
+import sttp.tapir.server.interceptor.cors.CORSInterceptor
 import sttp.tapir.server.model.{ServerResponse, ValuedEndpointOutput}
 import sttp.tapir.server.stub.TapirStubInterpreter
 import sttp.tapir.server.ziohttp.ZioHttpServerOptions
 import sttp.tapir.ztapir.RIOMonadError
 
+import com.risquanter.register.Application
 import com.risquanter.register.configs.TestConfigs
+import com.risquanter.register.domain.errors.RequestHeaderName
 import com.risquanter.register.domain.data.iron.TelemetryPlaceholders
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
@@ -176,9 +178,9 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
     *
     * It reproduces the decode-failure handler, the exception handler, the server
     * log's redacted request line, the security headers prepended first and
-    * therefore outermost, the span interceptor second, and CORS after both. Only
-    * the CORS configuration differs from `Application.startServer`, which reads
-    * its allowed origins from configuration.
+    * therefore outermost, the span interceptor second, and CORS after both. CORS
+    * runs the server's own `Application.corsPolicy`; only the allowed origin is
+    * the test's, where `Application.startServer` reads it from configuration.
     */
   private def chainWith(place: Placement, tracing: Tracing): Customise =
     place(
@@ -194,9 +196,7 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
         .prependInterceptor(SecurityHeadersInterceptor.interceptor)
         .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
         .corsInterceptor(
-          CORSInterceptor.customOrThrow[Task](
-            TapirCORSConfig.default.allowMatchingOrigins(_ == TestOrigin)
-          )
+          CORSInterceptor.customOrThrow[Task](Application.corsPolicy(List(TestOrigin)))
         ),
       DefectCatchAllInterceptor.interceptor(tracing)
     )
@@ -232,6 +232,23 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
       basicRequest
         .get(uri"http://localhost/w/$CapabilityKey/probe")
         .header("Origin", TestOrigin)
+        .send(backend)
+    }
+
+  /** Sends the preflight a browser sends before a cross-origin `GET` that
+    * carries `header`. */
+  private def preflight(header: String): ZIO[Tracing, Throwable, Response[Either[String, String]]] =
+    ZIO.serviceWithZIO[Tracing] { tracing =>
+      val backend = TapirStubInterpreter(
+        chainWith(appended, tracing),
+        SttpBackendStub[Task, Any](summon[SttpMonadError[Task]])
+      ).whenServerEndpointRunLogic(dying).backend()
+
+      basicRequest
+        .options(uri"http://localhost/probe")
+        .header("Origin", TestOrigin)
+        .header("Access-Control-Request-Method", "GET")
+        .header("Access-Control-Request-Headers", header)
         .send(backend)
     }
 
@@ -328,6 +345,20 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
           response.code.code == 500,
           fault(response).isDefined,
           allowOrigin(response).isEmpty
+        )
+      }
+    ),
+
+    suite("the CORS policy the chain runs")(
+      // Every tree endpoint requires the branch header, so a browser on another
+      // origin sends no tree request at all unless the preflight allows it.
+      test("a preflight asking for the branch header is answered with it allowed") {
+        for response <- preflight(RequestHeaderName.Branch.wireName)
+        yield assertTrue(
+          allowOrigin(response).contains(TestOrigin),
+          response.header("Access-Control-Allow-Headers").exists(
+            _.split(",").map(_.trim.toLowerCase).contains(RequestHeaderName.Branch.wireName.toLowerCase)
+          )
         )
       }
     )

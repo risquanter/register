@@ -5,7 +5,9 @@ import zio.http.Server
 import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
-import io.getquill.SnakeCase
+import java.util.concurrent.TimeUnit
+import scala.concurrent.duration.FiniteDuration
+import com.risquanter.register.domain.errors.RequestHeaderName
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
@@ -313,6 +315,20 @@ object Application extends ZIOAppDefault {
       ZLayer.fromZIO(DistributionPreviewController.makeZIO)
     )
 
+  /** How long a browser may cache a preflight answer. One hour, chosen here. */
+  private val PreflightMaxAge: FiniteDuration = FiniteDuration(1, TimeUnit.HOURS)
+
+  /** The CORS policy: the configured origins, every request header the SPA
+    * sends, and preflight caching. The headers are an explicit list rather than
+    * a reflection of whatever the browser asks for.
+    */
+  def corsPolicy(origins: List[String]): TapirCORSConfig =
+    TapirCORSConfig.default
+      .allowMatchingOrigins(origins.contains)
+      .allowHeaders("Content-Type", "Accept", "Authorization", RequestHeaderName.Branch.wireName)
+      .exposeHeaders("Content-Type")
+      .maxAge(PreflightMaxAge)
+
   def startServer = for {
     cfg        <- ZIO.service[ServerConfig]
     corsConfig <- ZIO.service[CorsConfig]
@@ -329,13 +345,7 @@ object Application extends ZIOAppDefault {
 
     // CORS at the tapir interceptor layer — handles OPTIONS preflight before
     // route matching, avoiding the 405 that zio-http Middleware.cors produces.
-    // A18: explicit header whitelist (no reflectHeaders)
-    // A20: preflight caching (maxAge 1 hour)
-    tapirCorsConfig = TapirCORSConfig.default
-      .allowMatchingOrigins(origin => corsConfig.normalised.contains(origin))
-      .allowHeaders("Content-Type", "Accept", "Authorization")
-      .exposeHeaders("Content-Type")
-      .maxAge(scala.concurrent.duration.Duration(3600, "s"))
+    tapirCorsConfig = corsPolicy(corsConfig.normalised)
     // Tapir enters the first interceptor in the stack first and leaves it last,
     // so order decides what decorates whose response. Each prepend appends to
     // the prepended list, which makes the security-headers interceptor —

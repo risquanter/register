@@ -5,6 +5,7 @@ import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.domain.errors.RequestHeaderName
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -111,7 +112,7 @@ trait BaseEndpoint {
     *
     * @see ADR-012: Claim Header Injection
     */
-  val authedBaseEndpoint = baseEndpoint.in(header[Option[UserId.Authenticated]]("x-user-id"))
+  val authedBaseEndpoint = baseEndpoint.in(header[Option[UserId.Authenticated]](RequestHeaderName.UserId.wireName))
 
   /** Shared `X-Branch` input. The target branch is an explicit, required
     * wire value — `"main"` or a scenario name — decoded once at the Tapir
@@ -119,6 +120,6 @@ trait BaseEndpoint {
     * decoding → 400: there is no absent-means-main state anywhere.
     */
   val branchHeader: EndpointInput[BranchChoice] =
-    header[BranchChoice]("X-Branch")
+    header[BranchChoice](RequestHeaderName.Branch.wireName)
       .description("Target branch: \"main\" or a scenario name. Required.")
 }
