@@ -335,7 +335,7 @@ object RiskLeafFormView:
       ),
       // The form's own line: the builder's topology check of this submit, then
       // any refusal no input of this form claims.
-      children <-- state.formLevelError.map(_.map(msg => div(cls := "form-error", msg)))
+      crossFieldError(state.formLevelError)
       )
     )
 

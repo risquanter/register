@@ -187,14 +187,12 @@ object FormInputs:
     }
 
   /**
-   * Cross-field error display (for errors not tied to a specific field).
+   * A form's own line: the refusals not tied to one input, one per line.
    */
-  def crossFieldError(errorSignal: Signal[Option[String]]): HtmlElement =
+  def crossFieldError(errorSignal: Signal[List[String]]): HtmlElement =
     div(
       cls := "cross-field-error",
-      child.maybe <-- errorSignal.map(_.map(msg =>
-        div(cls := "form-error", msg)
-      ))
+      children <-- errorSignal.map(_.map(msg => div(cls := "form-error", msg)))
     )
 
   /**

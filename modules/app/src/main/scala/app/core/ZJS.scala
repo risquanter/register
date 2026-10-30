@@ -6,6 +6,7 @@ import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import sttp.tapir.Endpoint
 
+import app.state.GlobalError
 import app.state.LoadState
 import app.state.SubmitState
 import com.risquanter.register.http.errors.WireError
@@ -29,8 +30,8 @@ object ZJS:
   /** Observer for cross-cutting error/success reporting (e.g. global error banner).
     *
     * Registered once at app startup via `registerErrorObserver`. Every ZIO effect
-    * forked through `forkProvided` automatically notifies this observer, giving
-    * universal banner coverage with zero per-call-site wiring.
+    * forked through `forkProvided` notifies this observer unless its caller opts
+    * out: `runJsQuiet` skips it, and `submitInto` notifies it itself.
     */
   trait ErrorObserver:
     /** Called when any forked effect fails. Consumes the failure to update the
@@ -207,7 +208,6 @@ object ZJS:
     * *observing* the old request's stream, it does not cancel the underlying
     * ZIO fiber (`forkProvided` discards the fiber handle) — the abandoned
     * network call still completes server-side, its result just goes nowhere.
-    * Tracked in TODO.md.
     *
     * @param settle Maps one emission of the request's stream (typically the
     *   `Either` from `toOutcomeEventStream`) to the outcome value.
@@ -274,17 +274,28 @@ object ZJS:
     /** Fork the ZIO and drive a `Var[SubmitState]` through its lifecycle.
       *
       * Sets Submitting → Success (via onSuccess callback) on success,
-      * Submitting → Failed(msg) on error. Mirrors `loadInto` but for
+      * Submitting → Failed(failure) on error. Mirrors `loadInto` but for
       * the submit lifecycle where success requires caller-defined side-effects
       * (e.g. updating editing state, refreshing tree list).
+      *
+      * A refusal of the request's fields is shown by the submitting view on
+      * its own line, so it is withheld from the global observer and the banner
+      * does not repeat it. Every other failure, and every success, reaches the
+      * observer.
       */
     def submitInto(target: Var[SubmitState])(onSuccess: A => Unit): Unit =
       target.set(SubmitState.Submitting)
-      forkProvided {
+      forkProvided(
         zio
-          .tap(a => ZIO.succeed(onSuccess(a)))
-          .tapError(f => ZIO.succeed(target.set(SubmitState.Failed(f))))
-      }
+          .tap(a => ZIO.succeed { onSuccess(a); errorObserver.foreach(_.onSuccess()) })
+          .tapError(f => ZIO.succeed {
+            target.set(SubmitState.Failed(f))
+            GlobalError.from(f) match
+              case GlobalError.ValidationFailed(_) => ()
+              case _                               => errorObserver.foreach(_.onError(f))
+          }),
+        notifyObserver = false
+      )
 
   // ---------------------------------------------------------------------------
   // Extension on unsecured Tapir endpoints

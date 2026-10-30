@@ -3,8 +3,7 @@
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
 **Status.** All forty-three decisions, `EWB-D-1` to `EWB-D-43`, are ruled and
-recorded in §10. One mechanism under `EWB-D-43` is held for a ruling: how the
-tree submit stops sending its refusals to the banner, stated in step 5 of §15.8. Approval is in place: the token names this document and
+recorded in §10. Approval is in place: the token names this document and
 the file inventory exists beside it. Phases 1, 1a, 1b, 2, 2b, 2c and 3 have landed, and `EWB-D-27`'s
 projection change landed with them. What remains is Phase 3a, then Phase 3b, then
 Phases 4 to 7.
@@ -5502,10 +5501,13 @@ rarely carry a refusal. What settles it is that the browser runs the same
 refinements as the server, pinned by step 4's agreement test, so the refusals
 the server adds are tree-wide ones that map to no input of a node form.
 
-**Held.** The ruling named the banner mechanism as `submitInto` passing
-`notifyObserver = false`. That flag also stops the banner showing an expired
-workspace and stops a successful submit clearing a stale banner, so the
-mechanism is held for a ruling. Step 5 states the proposed replacement.
+**Mechanism — RULED 2026-10-30.** The ruling first named the banner mechanism
+as `submitInto` passing `notifyObserver = false`. That flag also stops the
+banner showing an expired workspace and stops a successful submit clearing a
+stale banner. The ruled mechanism is that `submitInto` withholds from the
+global observer a failure that `GlobalError.from` classifies as
+`ValidationFailed`. Every other failure, and every success, reaches the
+observer as before.
 
 ---
 
@@ -6418,12 +6420,20 @@ pushed into:
 ```
 
 `RiskLeafFormView.scala:287`. So each node-form state holds the refusals of its
-own last submit, and each reader selects its own. The members below are written
-for `RiskLeafFormState`. `PortfolioFormState` has the same members over
-`PortfolioField`. They sit in the two node-form states and not in `FormState`,
-because `TreeBuilderState` also extends `FormState` and has no refusal mapping.
+own last submit, and each reader selects its own. The members are the same for
+both node forms, so they are stated once, in a trait both node-form states
+extend in place of `FormState`. `TreeBuilderState` stays a plain `FormState`:
+it keeps no store, because both of its checks are derived from its current
+state (below). Each form supplies its mapping and names its own line:
 
 ```scala
+trait SubmitRefusals[Field] extends FormState[Field]:
+  /** The targets a refusal at `location` belongs under; empty for none. */
+  protected def inputsFor(location: ErrorLocation): Set[Field]
+
+  /** The form's own line, for a refusal about its inputs together. */
+  protected def formLine: Field
+
   /** Refusals of this form's last submit that its own live checks do not
     * produce: those of `toDraft` and of the builder's topology check. The live
     * checks are not held here: they are derived from the input `Var`s, and
@@ -6438,17 +6448,41 @@ because `TreeBuilderState` also extends `FormState` and has no refusal mapping.
     * A pair refusal drops from both its inputs, since editing either one can
     * satisfy the rule. The refusals on the form's own line drop on any edit,
     * because they are about the inputs together. */
-  def clearFor(field: RiskLeafField): Unit
+  def clearFor(field: Field): Unit
 
   /** Every refusal for one input, shown once the input is touched or the form
     * submitted: this form's own check while it refuses, otherwise the stored
     * refusals naming this input. A refusal whose location names several
     * inputs is selected by each of them, which is how a constraint over a
     * pair of inputs appears under both. */
-  def errorsFor(field: RiskLeafField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]]
+  def errorsFor(field: Field, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]]
 
   /** The stored refusals no target of this form claims. */
   def unclaimed: Signal[List[ValidationError]]
+
+  /** The sentences of the refusals a target shows, for the input components. */
+  protected def messagesOf(errors: Signal[List[ValidationError]]): Signal[List[String]]
+
+  /** The form's own line: a submit refusal about the form's inputs together,
+    * then any refusal no target of this form claims. */
+  lazy val formLevelError: Signal[List[String]]
+```
+
+The rules the trait applies, `selected` and `staleAfterEdit`, are pure
+functions in `object SubmitRefusals`. Each node-form state implements the two
+abstract members by delegating to its companion's `inputsFor` and naming its
+`FormLevel` case.
+
+The builder's line is derived, not stored. `TreeBuilderState.topologyError`
+runs the submit's topology check over the current nodes, gated by the flag
+`triggerValidation` sets, so it shows nothing before the first Create click and
+drops each problem the moment the tree no longer has it. A failed request's
+lines follow it on the same line, and `TreeBuilderState.draftEdits`, which fires
+on every edit of the tree's name or nodes, clears that failure:
+
+```scala
+  val topologyError: Signal[List[String]]
+  val draftEdits: EventStream[Unit]
 ```
 
 The mapping moves with them. Step 4 placed `inputsFor` in the views as
@@ -6606,20 +6640,25 @@ outside `modules/app`.
    (`EWB-D-42`). `FormState`'s type parameter is renamed from `F` to `Field` in
    the same pass.
 5. **The push inverted to a pull.** `submitErrors`, `setSubmitErrors`,
-   `clearFor`, `errorsFor` and `unclaimed` in both node-form states, and each
-   `inputsFor` moved into its form state's companion; `FormSubmitUtil.scala`
+   `clearFor`, `errorsFor`, `unclaimed`, `messagesOf` and `formLevelError` in
+   the trait `SubmitRefusals`, which both node-form states extend, and each
+   `inputsFor` moved into its form state's companion; the builder's line derived
+   from `TreeBuilderState.topologyError` and a failed request's lines, a local
+   tree refusal no longer stored, and a failed request cleared on any edit of the
+   tree's draft; `FormSubmitUtil.scala`
    deleted; `submitFieldErrors`, `setSubmitFieldError`, `clearSubmitFieldError`
    and `withSubmitErrors` deleted from `FormState.scala`; the nine
    `clearSubmitFieldError` call sites in the two node-form views become `clearFor`
    calls; the input components take `Signal[List[String]]`. No server refusal is
    delivered into a node form (`EWB-D-43`). The builder's line renders the tree
    submit's refusals one per line, and `ErrorBanner` renders
-   `GlobalError.ValidationFailed` one per line. **Held for a ruling:** how the
-   banner stops repeating the tree submit's refusals. The proposed mechanism is
-   that `submitInto` withholds from the global observer a failure that
+   `GlobalError.ValidationFailed` one per line. Each node form's own line is
+   rendered by `FormInputs.crossFieldError`, which takes
+   `Signal[List[String]]`. The banner stops repeating the tree submit's
+   refusals: `submitInto` withholds from the global observer a failure that
    `GlobalError.from` classifies as `ValidationFailed`, and passes every other
-   failure and every success to it as today. An expired workspace then still
-   reaches the banner, and a successful submit still clears a stale one.
+   failure and every success to it. An expired workspace then still reaches the
+   banner, and a successful submit still clears a stale one.
 
 Steps 1 and 2 each add something nothing reads yet, so each is reviewable alone.
 Steps 3 to 5 are sequential because each depends on the one before: the accessors
