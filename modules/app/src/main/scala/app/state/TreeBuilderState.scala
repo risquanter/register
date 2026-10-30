@@ -31,9 +31,10 @@ enum TreeBuilderField:
  * Builder state for constructing a risk tree on the client.
  * Performs client-side validation aligned with backend rules (no ID generation).
  *
- * Extends FormState for the tree-name field's error display timing
- * (same touched / triggerValidation / withDisplayControl infrastructure
- * used by RiskLeafFormState and PortfolioFormState).
+ * Extends FormState for the display timing of the tree-name field and of the
+ * topology line (the touched / triggerValidation infrastructure the node forms
+ * also use). It keeps no store of submit refusals: both of its checks are
+ * derived from its current state.
  */
 final class TreeBuilderState extends FormState[TreeBuilderField]:
   import TreeBuilderField.*
@@ -133,6 +134,27 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
   /** Raw errors for hasErrors check — tree-name is the only builder-level field. */
   override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw.map(_.map(_.message)))
+
+  /** The tree's topology problems, shown once Create has been clicked and
+    * recomputed on every change to the tree's nodes. Empty when the tree is
+    * valid. Derived rather than stored, so it cannot outlive the problem it
+    * reports. */
+  val topologyError: Signal[List[String]] =
+    showErrorsSignal.combineWith(portfoliosVar.signal, leavesVar.signal).map {
+      case (false, _, _)                 => Nil
+      case (true, portfolios, leaves) =>
+        topologyOf(portfolios, leaves) match
+          case Validation.Failure(_, errors) => errors.toList.map(_.message)
+          case Validation.Success(_, _)      => Nil
+    }
+
+  /** Fires on every edit of the tree's draft: its name or its nodes. */
+  val draftEdits: EventStream[Unit] =
+    EventStream.merge(
+      treeNameVar.signal.changes.mapToUnit,
+      portfoliosVar.signal.changes.mapToUnit,
+      leavesVar.signal.changes.mapToUnit
+    )
 
   /** Parent dropdown options: root sentinel (if unclaimed) + current portfolio
     * names, excluding `excludeSelf` — a node can never be its own parent, and
@@ -318,10 +340,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val treeNameV = refinedTreeName
     val portfoliosV = Validation.succeed(portfolios.map(toPortfolioRequest))
     val leavesV = Validation.succeed(leaves.map(toLeafRequest))
-    val topologyV = TreeBuilderLogic.fullValidateTopology(
-      portfolios.map(p => p.name -> p.parent),
-      leaves.map(l => l.name -> l.parent)
-    )
+    val topologyV = topologyOf(portfolios, leaves)
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
       RiskTreeDefinitionRequest(treeName.value, ports, leafs)
@@ -347,10 +366,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val treeNameV = refinedTreeName
     // Topology is validated over the full node set (existing + new), exactly as in the
     // create flow — correctness-by-construction is whole-graph, independent of bucketing.
-    val topologyV = TreeBuilderLogic.fullValidateTopology(
-      portfolios.map(p => p.name -> p.parent),
-      leaves.map(l => l.name -> l.parent)
-    )
+    val topologyV = topologyOf(portfolios, leaves)
     val headerV = Validation.validateWith(treeNameV, topologyV)((name, _) => name)
 
     val existingPortfoliosV = Validation.succeed(existingPortfolios.map(toPortfolioUpdateRequest))
@@ -484,6 +500,14 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   // ------------------------------------------------------------
   // Helpers
   // ------------------------------------------------------------
+
+  /** The submit-time topology check over the whole node set: what a tree
+    * submit refuses, and what `topologyError` shows. */
+  private def topologyOf(portfolios: List[PortfolioDraft], leaves: List[LeafDraft]): Validation[ValidationError, Unit] =
+    TreeBuilderLogic.fullValidateTopology(
+      portfolios.map(p => p.name -> p.parent),
+      leaves.map(l => l.name -> l.parent)
+    )
 
   /** The tree name, refined from its current value. */
   private def refinedTreeName: Validation[ValidationError, SafeName.SafeName] =

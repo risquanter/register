@@ -20,7 +20,7 @@ enum PortfolioField:
  * Reactive form state for creating a portfolio.
  * Validates name eagerly (Iron SafeName) and exposes parent selection as a ParentSelection.
  */
-final class PortfolioFormState extends FormState[PortfolioField]:
+final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
   import PortfolioField.*
 
   // Fields
@@ -54,38 +54,10 @@ final class PortfolioFormState extends FormState[PortfolioField]:
   private val nameErrorRaw: Signal[Option[ValidationError]] =
     nameLocated.map(_.refine(ValidationUtil.refineName).left.toOption.flatMap(_.headOption))
 
-  /** Refusals of this form's last submit that its own live check does not
-    * produce: those of `toDraft` and of the builder's topology check. The live
-    * check is not held here: it is derived from the input `Var`s, and writing
-    * a derived value back into a `Var` is the self-correcting reactive `Var`
-    * defect ADR-019 names. */
-  private val submitErrors: Var[List[ValidationError]] = Var(Nil)
+  override protected def inputsFor(location: ErrorLocation): Set[PortfolioField] =
+    PortfolioFormState.inputsFor(location)
 
-  /** Store a submit's refusals, replacing the previous submit's. */
-  def setSubmitErrors(errors: List[ValidationError]): Unit =
-    submitErrors.set(errors)
-
-  /** Drop the stored refusals naming this input, because the user edited it.
-    * The refusals on the form's own line drop on any edit, because they are
-    * about the inputs together. */
-  def clearFor(field: PortfolioField): Unit =
-    submitErrors.update(_.filterNot(FormState.staleAfterEdit(PortfolioFormState.inputsFor, FormLevel, field)))
-
-  /** Every refusal for one input, shown once the input is touched or the form
-    * submitted: this form's own check while it refuses, otherwise the stored
-    * refusals naming this input. */
-  def errorsFor(field: PortfolioField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]] =
-    shouldShowError(field).combineWith(live, submitErrors.signal).map { (show, own, stored) =>
-      FormState.selected(PortfolioFormState.inputsFor, field, show, own, stored)
-    }
-
-  /** The stored refusals no target of this form claims. */
-  def unclaimed: Signal[List[ValidationError]] =
-    submitErrors.signal.map(_.filter(e => PortfolioFormState.inputsFor(e.location).isEmpty))
-
-  /** The sentences of the refusals a target shows, for the input components. */
-  private def messagesOf(errors: Signal[List[ValidationError]]): Signal[List[String]] =
-    errors.map(_.map(_.message))
+  override protected def formLine: PortfolioField = FormLevel
 
   // Display-controlled errors: the live check, else the stored submit refusals
   val nameError: Signal[List[String]] = messagesOf(errorsFor(Name, nameErrorRaw))
@@ -94,12 +66,6 @@ final class PortfolioFormState extends FormState[PortfolioField]:
     * only submit-time refusals (`Validation.Failure` from `toDraft`, or the
     * builder's topology check) ever show here, from the stored refusals. */
   val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
-
-  /** The form's own line: a submit refusal about a combination of this form's
-    * inputs rather than about one of them, then any refusal no target of this
-    * form claims. */
-  val formLevelError: Signal[List[String]] =
-    messagesOf(errorsFor(FormLevel, Val(None)).combineWith(unclaimed).map(_ ++ _))
 
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] = List(nameErrorRaw.map(_.map(_.message)))
@@ -123,7 +89,7 @@ final class PortfolioFormState extends FormState[PortfolioField]:
    *  second place doing the same thing. */
   def reset(): Unit =
     nameVar.set("")
-    submitErrors.set(Nil)
+    setSubmitErrors(Nil)
     resetTouched()
 
 object PortfolioFormState:

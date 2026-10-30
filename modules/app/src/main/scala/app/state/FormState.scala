@@ -123,11 +123,64 @@ trait FormState[Field]:
         Validation.fail(input.reject(ValidationErrorCode.TYPE_MISMATCH, unreadable))
       )(value => Validation.succeed(input.as(value)))
 
-/** The rules a node form applies to the refusals of its last submit, over the
-  * form's own mapping from a location to its targets. Both node forms apply the
-  * same rules, so they are stated once here.
+/** A form that keeps the refusals of its last submit and lets each of its
+  * targets — its inputs and its own line — select the ones that name it.
+  *
+  * Each form supplies its mapping from a location to its targets and names its
+  * own line; the store, the selection and the clearing are the same for every
+  * such form, so they are stated once here.
   */
-object FormState:
+trait SubmitRefusals[Field] extends FormState[Field]:
+
+  /** The targets a refusal at `location` belongs under; empty for none. */
+  protected def inputsFor(location: ErrorLocation): Set[Field]
+
+  /** The form's own line, for a refusal about its inputs together. */
+  protected def formLine: Field
+
+  /** Refusals of this form's last submit that its own live checks do not
+    * produce: those of the submit read and of the builder's topology check.
+    * The live checks are not held here: they are derived from the input
+    * `Var`s, and writing a derived value back into a `Var` is the
+    * self-correcting reactive `Var` defect ADR-019 names. */
+  private val submitErrors: Var[List[ValidationError]] = Var(Nil)
+
+  /** Store a submit's refusals, replacing the previous submit's. */
+  def setSubmitErrors(errors: List[ValidationError]): Unit =
+    submitErrors.set(errors)
+
+  /** Drop the stored refusals naming this input, because the user edited it.
+    * A refusal naming several inputs drops from all of them, since editing any
+    * one can satisfy the rule. The refusals on the form's own line drop on any
+    * edit, because they are about the inputs together. */
+  def clearFor(field: Field): Unit =
+    submitErrors.update(_.filterNot(SubmitRefusals.staleAfterEdit(inputsFor, formLine, field)))
+
+  /** Every refusal for one target, shown once it is touched or the form
+    * submitted: this form's own check while it refuses, otherwise the stored
+    * refusals naming this target. A refusal whose location names several
+    * inputs is selected by each of them. */
+  def errorsFor(field: Field, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]] =
+    shouldShowError(field).combineWith(live, submitErrors.signal).map { (show, own, stored) =>
+      SubmitRefusals.selected(inputsFor, field, show, own, stored)
+    }
+
+  /** The stored refusals no target of this form claims. */
+  def unclaimed: Signal[List[ValidationError]] =
+    submitErrors.signal.map(_.filter(e => inputsFor(e.location).isEmpty))
+
+  /** The sentences of the refusals a target shows, for the input components. */
+  protected def messagesOf(errors: Signal[List[ValidationError]]): Signal[List[String]] =
+    errors.map(_.map(_.message))
+
+  /** The form's own line: a submit refusal about the form's inputs together,
+    * then any refusal no target of this form claims. */
+  lazy val formLevelError: Signal[List[String]] =
+    messagesOf(errorsFor(formLine, Val(None)).combineWith(unclaimed).map(_ ++ _))
+
+/** The rules a form with a refusal store applies to the refusals of its last
+  * submit, over the form's own mapping from a location to its targets. */
+object SubmitRefusals:
 
   /** The refusals one target shows. Nothing until the target is touched or the
     * form submitted; then the form's own check while it refuses, otherwise the

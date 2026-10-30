@@ -33,7 +33,7 @@ enum RiskLeafField:
  * field its value came from and the subject `subjectVar` holds. The two
  * cross-field checks locate their refusal at the pair they constrain.
  */
-final class RiskLeafFormState extends FormState[RiskLeafField]:
+final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   import RiskLeafField.*
 
   // ============================================================
@@ -83,7 +83,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     minLossVar.set("")
     maxLossVar.set("")
     termsVar.set("")
-    submitErrors.set(Nil)
+    setSubmitErrors(Nil)
     resetTouched()
 
   // ============================================================
@@ -164,45 +164,14 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   private def messageOf(check: Signal[Option[ValidationError]]): Signal[Option[String]] =
     check.map(_.map(_.message))
 
-  /** The sentences of the refusals a target shows, for the input components. */
-  private def messagesOf(errors: Signal[List[ValidationError]]): Signal[List[String]] =
-    errors.map(_.map(_.message))
-
   // ============================================================
   // Submit Refusals
   // ============================================================
 
-  /** Refusals of this form's last submit that its own live checks do not
-    * produce: those of `toDraft` and of the builder's topology check. The live
-    * checks are not held here: they are derived from the input `Var`s, and
-    * writing a derived value back into a `Var` is the self-correcting
-    * reactive `Var` defect ADR-019 names. */
-  private val submitErrors: Var[List[ValidationError]] = Var(Nil)
+  override protected def inputsFor(location: ErrorLocation): Set[RiskLeafField] =
+    RiskLeafFormState.inputsFor(location)
 
-  /** Store a submit's refusals, replacing the previous submit's. */
-  def setSubmitErrors(errors: List[ValidationError]): Unit =
-    submitErrors.set(errors)
-
-  /** Drop the stored refusals naming this input, because the user edited it.
-    * A pair refusal drops from both its inputs, since editing either one can
-    * satisfy the rule. The refusals on the form's own line drop on any edit,
-    * because they are about the inputs together. */
-  def clearFor(field: RiskLeafField): Unit =
-    submitErrors.update(_.filterNot(FormState.staleAfterEdit(RiskLeafFormState.inputsFor, FormLevel, field)))
-
-  /** Every refusal for one input, shown once the input is touched or the form
-    * submitted: this form's own check while it refuses, otherwise the stored
-    * refusals naming this input. A refusal whose location names several
-    * inputs is selected by each of them, which is how a constraint over a
-    * pair of inputs appears under both. */
-  def errorsFor(field: RiskLeafField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]] =
-    shouldShowError(field).combineWith(live, submitErrors.signal).map { (show, own, stored) =>
-      FormState.selected(RiskLeafFormState.inputsFor, field, show, own, stored)
-    }
-
-  /** The stored refusals no target of this form claims. */
-  def unclaimed: Signal[List[ValidationError]] =
-    submitErrors.signal.map(_.filter(e => RiskLeafFormState.inputsFor(e.location).isEmpty))
+  override protected def formLine: RiskLeafField = FormLevel
 
   // ============================================================
   // Raw Validation Signals (using ValidationUtil from common)
@@ -376,11 +345,6 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * here, from the stored refusals. */
   val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
 
-  /** The form's own line: a submit refusal about a combination of this form's
-    * inputs rather than about one of them, then any refusal no target of this
-    * form claims. */
-  val formLevelError: Signal[List[String]] =
-    messagesOf(errorsFor(FormLevel, Val(None)).combineWith(unclaimed).map(_ ++ _))
   val probabilityError: Signal[List[String]] = messagesOf(errorsFor(Probability, probabilityErrorRaw))
 
   // Cross-field errors use a content-presence gate, NOT the per-field touch gate.

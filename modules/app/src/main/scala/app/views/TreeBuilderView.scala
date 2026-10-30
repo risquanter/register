@@ -58,8 +58,19 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
         treeViewState.loadTreeList()
         treeViewState.selectTree(response.id)
 
-    def validationFailed(errors: zio.NonEmptyChunk[com.risquanter.register.domain.errors.ValidationError]): Unit =
-      submitState.set(SubmitState.Failed(LocalProblem.FormInvalid(errors.toList)))
+    // A local refusal is not stored: `triggerValidation` has already run, so
+    // the tree-name input and the topology line show what the submit refused,
+    // each derived from the builder's current state.
+    def validationFailed(): Unit =
+      submitState.set(SubmitState.Idle)
+
+    // The builder's line: the tree's current topology problems, then a failed
+    // request's lines. Rendered only while there is at least one.
+    val lineErrors: Signal[List[String]] =
+      state.topologyError.combineWith(submitState.signal).map {
+        case (topology, SubmitState.Failed(failure)) => topology ++ ErrorMessages.viewFailedLines(failure)
+        case (topology, _)                           => topology
+      }
 
     // `toRequest`/`toUpdateRequest` only ever read `portfoliosVar`/`leavesVar` —
     // a leaf or portfolio currently open mid-add/mid-edit (isEditDirtyVar) was
@@ -84,7 +95,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
                 state.toUpdateRequest() match
                   case Validation.Success(_, request) =>
                     updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess(wasCreate = false))
-                  case Validation.Failure(_, errors) => validationFailed(errors)
+                  case Validation.Failure(_, _) => validationFailed()
 
           // ── Create mode ──
           case None =>
@@ -96,7 +107,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
                   case None =>
                     submitState.set(SubmitState.Submitting)
                     wsState.bootstrap(request, onSuccess(wasCreate = true), failure => submitState.set(SubmitState.Failed(failure)))
-              case Validation.Failure(_, errors) => validationFailed(errors)
+              case Validation.Failure(_, _) => validationFailed()
       }
 
     div(
@@ -123,18 +134,14 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
         ))
       },
 
-      // Clear stale submit feedback when the user edits the tree name.
-      // Does NOT clear a Success notification — Success transitions to Idle only via
-      // the next explicit submit action. This prevents the programmatic-write trampoline
-      // where selectTree() writes treeNameVar immediately after onSuccess sets Success,
-      // causing the notification to disappear within milliseconds.
-      state.treeNameVar.signal.changes
-        .withCurrentValueOf(submitState.signal)
-        --> { case (_, current) =>
-          current match
-            case SubmitState.Success(_) => ()
-            case _                      => submitState.set(SubmitState.Idle)
-        },
+      // A failed request goes stale when the user edits the tree's draft: its
+      // name or its nodes. Only a failure is cleared. A Success stays until the
+      // next submit, because selectTree() writes the draft right after onSuccess
+      // sets it, and an in-flight submit keeps its spinner.
+      state.draftEdits.sample(submitState.signal) --> {
+        case SubmitState.Failed(_) => submitState.set(SubmitState.Idle)
+        case _                     => ()
+      },
 
       FormInputs.textInput(
         labelText = "Tree Name",
@@ -162,8 +169,11 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
           Some(div(cls := "submit-feedback submit-success",
             s"""Tree "${r.name}" saved with ID: ${r.id.value}"""
           ))
-        case (SubmitState.Failed(failure), _) =>
-          Some(div(cls := "submit-feedback submit-error", ErrorMessages.viewFailedLines(failure).map(div(_))))
+        case (SubmitState.Failed(_), _)   => None
+      },
+      child.maybe <-- lineErrors.map {
+        case Nil   => None
+        case lines => Some(div(cls := "submit-feedback submit-error", lines.map(div(_))))
       }
     )
 

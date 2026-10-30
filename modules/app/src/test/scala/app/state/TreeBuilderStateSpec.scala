@@ -6,7 +6,7 @@ import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, DistributionShape}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId, ValidationMessages}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
@@ -693,6 +693,48 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           case Validation.Failure(_, es) => es.toList.map(_.location).toSet
           case Validation.Success(_, _)  => Set.empty[ErrorLocation]
         assertTrue(locations.contains(ErrorLocation.requestField(FieldName.Name)))
+      }
+
+    ),
+
+    suite("topology line")(
+
+      test("shows nothing before Create has been clicked") {
+        val state = new TreeBuilderState()
+        assertTrue(currentOf(state.topologyError).isEmpty)
+      },
+
+      test("after Create on an empty tree, says a root is required") {
+        val state = new TreeBuilderState()
+        state.triggerValidation()
+        assertTrue(currentOf(state.topologyError) == List(ValidationMessages.exactlyOneRootRequired))
+      },
+
+      test("follows the tree: a root portfolio replaces the root refusal with the child refusal") {
+        val state = new TreeBuilderState()
+        state.triggerValidation()
+        state.addPortfolio(n("Ops"), ParentRef.Root)
+        val shown = currentOf(state.topologyError)
+        assertTrue(
+          !shown.contains(ValidationMessages.exactlyOneRootRequired),
+          shown == List(ValidationMessages.portfoliosWithoutChildren(List("Ops")))
+        )
+      },
+
+      test("empties once the tree is valid") {
+        val state = new TreeBuilderState()
+        val probability: OccurrenceProbability = 0.3
+        state.triggerValidation()
+        state.addPortfolio(n("Ops"), ParentRef.Root)
+        state.addLeaf(n("Outage"), under("Ops"), metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)), probability)
+        assertTrue(currentOf(state.topologyError).isEmpty)
+      },
+
+      test("a new tree hides it again until the next Create") {
+        val state = new TreeBuilderState()
+        state.triggerValidation()
+        state.startNewTree()
+        assertTrue(currentOf(state.topologyError).isEmpty)
       }
 
     )
