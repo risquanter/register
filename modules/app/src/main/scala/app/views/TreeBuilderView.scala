@@ -139,7 +139,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
       FormInputs.textInput(
         labelText = "Tree Name",
         valueVar = state.treeNameVar,
-        errorSignal = state.treeNameError,
+        errorSignal = state.treeNameError.map(_.toList),
         onBlurCallback = () => state.markTouched(TreeBuilderField.TreeName),
         placeholderText = "e.g., Enterprise Risk Tree"
       ),
@@ -163,7 +163,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
             s"""Tree "${r.name}" saved with ID: ${r.id.value}"""
           ))
         case (SubmitState.Failed(failure), _) =>
-          Some(div(cls := "submit-feedback submit-error", ErrorMessages.viewFailed(failure)))
+          Some(div(cls := "submit-feedback submit-error", ErrorMessages.viewFailedLines(failure).map(div(_))))
       }
     )
 

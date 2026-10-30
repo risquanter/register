@@ -2,7 +2,7 @@ package app.state
 
 import com.raquo.laminar.api.L.*
 
-import com.risquanter.register.domain.errors.{ErrorSubject, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
 
 /**
@@ -37,18 +37,8 @@ trait FormState[Field]:
   /** Per-field "touched" state for showing errors on blur */
   private val touchedFields: Var[Set[Field]] = Var(Set.empty)
 
-  /** Per-field submit-time errors routed from the topology checks and the server */
-  private val submitFieldErrors: Var[Map[Field, String]] = Var(Map.empty)
-
   def markTouched(field: Field): Unit =
     touchedFields.update(_ + field)
-
-  def setSubmitFieldError(field: Field, message: String): Unit =
-    submitFieldErrors.update(_ + (field -> message))
-
-  /** Clear a single field's submit error (e.g. when the user edits that field). */
-  def clearSubmitFieldError(field: Field): Unit =
-    submitFieldErrors.update(_ - field)
 
   def isTouched(field: Field): Signal[Boolean] =
     touchedFields.signal.map(_.contains(field))
@@ -67,17 +57,8 @@ trait FormState[Field]:
       case (false, _)    => None
     }
 
-  /** Compose submit-time server errors with reactive validation for a field.
-   *  Reactive errors take priority; submit error is shown when no reactive error exists. */
-  def withSubmitErrors(field: Field, rawError: Signal[Option[String]]): Signal[Option[String]] =
-    val submitErr = submitFieldErrors.signal.map(_.get(field))
-    withDisplayControl(field, rawError.combineWith(submitErr).map {
-      case (reactive, submitted) => reactive.orElse(submitted)
-    })
-
   /** Call before submit to show all errors */
   def triggerValidation(): Unit =
-    submitFieldErrors.set(Map.empty)
     showErrorsVar.set(true)
 
   /** Expose the show-all-errors flag for subclasses that need to build
@@ -89,7 +70,6 @@ trait FormState[Field]:
   def resetTouched(): Unit =
     showErrorsVar.set(false)
     touchedFields.set(Set.empty)
-    submitFieldErrors.set(Map.empty)
 
   // ============================================================
   // Error Aggregation
@@ -142,4 +122,43 @@ trait FormState[Field]:
       parse(input.value).fold[Validation[ValidationError, Located[A]]](
         Validation.fail(input.reject(ValidationErrorCode.TYPE_MISMATCH, unreadable))
       )(value => Validation.succeed(input.as(value)))
+
+/** The rules a node form applies to the refusals of its last submit, over the
+  * form's own mapping from a location to its targets. Both node forms apply the
+  * same rules, so they are stated once here.
+  */
+object FormState:
+
+  /** The refusals one target shows. Nothing until the target is touched or the
+    * form submitted; then the form's own check while it refuses, otherwise the
+    * stored refusals whose location names this target.
+    *
+    * {{{
+    * selected(inputsFor, Name, show = true, own = None, stored)        // the stored refusals naming Name
+    * selected(inputsFor, Name, show = true, own = Some(blank), stored) // List(blank)
+    * }}}
+    */
+  def selected[Field](
+    inputsFor: ErrorLocation => Set[Field],
+    field:     Field,
+    show:      Boolean,
+    own:       Option[ValidationError],
+    stored:    List[ValidationError]
+  ): List[ValidationError] =
+    (show, own) match
+      case (false, _)        => Nil
+      case (true, Some(err)) => List(err)
+      case (true, None)      => stored.filter(e => inputsFor(e.location).contains(field))
+
+  /** Whether an edit of `field` makes a stored refusal stale: the refusal names
+    * that input, or it shows on the form's own line. A line refusal is about the
+    * inputs together or about none of them, so editing any input can answer it.
+    */
+  def staleAfterEdit[Field](
+    inputsFor: ErrorLocation => Set[Field],
+    formLine:  Field,
+    field:     Field
+  )(error: ValidationError): Boolean =
+    val targets = inputsFor(error.location)
+    targets.isEmpty || targets.contains(field) || targets.contains(formLine)
 

@@ -7,7 +7,7 @@ import app.components.FormInputs.*
 import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
@@ -18,7 +18,6 @@ object RiskLeafFormView:
 
   def apply(builderState: TreeBuilderState, chartState: DistributionChartState): HtmlElement =
     val state = new RiskLeafFormState
-    val submitError: Var[Option[String]] = Var(None)
 
     // This form's view of `activeForm`, via `forLeaf`: a Portfolio target
     // collapses to `Inactive` (fields shown empty and disabled, no lock
@@ -131,7 +130,7 @@ object RiskLeafFormView:
         // Portfolio target folds to Inactive, never Blank — so there is no
         // other-form draft to protect on this branch; submit directly.
         case FormMode.Blank =>
-          handleSubmit(state, builderState, submitError)
+          handleSubmit(state, builderState)
         // A portfolio is currently selected instead — this click means "start
         // a fresh leaf draft," which first has to reclaim `activeForm` from
         // the portfolio (there is only one shared target at a time). If the
@@ -147,13 +146,13 @@ object RiskLeafFormView:
         case FormMode.Inactive =>
           activateForm()
         case FormMode.Locked(t: FormTarget.Leaf) => builderState.activeForm.set(FormMode.Templating(t))
-        case FormMode.Templating(_: FormTarget.Leaf) => handleSubmit(state, builderState, submitError)
+        case FormMode.Templating(_: FormTarget.Leaf) => handleSubmit(state, builderState)
         case _ => ()
 
     def onEditSaveClick(): Unit =
       builderState.activeForm.now().forLeaf match
         case FormMode.Locked(t: FormTarget.Leaf)      => builderState.activeForm.set(FormMode.Editing(t))
-        case FormMode.Editing(FormTarget.Leaf(name))  => handleUpdate(state, name, builderState, submitError)
+        case FormMode.Editing(FormTarget.Leaf(name))  => handleUpdate(state, name, builderState)
         case _ => ()
 
     // Reverting to a saved node's own values is exactly what populating from it
@@ -173,7 +172,7 @@ object RiskLeafFormView:
         case FormMode.Editing(t: FormTarget.Leaf)     => builderState.activeForm.set(FormMode.Locked(t))
         case FormMode.Templating(t: FormTarget.Leaf)  => builderState.activeForm.set(FormMode.Locked(t))
         case _ => ()
-      submitError.set(None)
+      state.setSubmitErrors(Nil)
 
     FormCard(
       header = div(cls := "form-card-title", child.text <-- headerText),
@@ -227,36 +226,17 @@ object RiskLeafFormView:
         state.subjectVar.set(ErrorSubject.DraftNode)
       },
 
-      // Clear stale submit + per-field errors whenever the user edits a field
-      state.nameVar.signal.changes --> { _ =>
-        submitError.set(None)
-        state.clearSubmitFieldError(RiskLeafField.Name)
-      },
-      state.probabilityVar.signal.changes --> { _ =>
-        submitError.set(None)
-        state.clearSubmitFieldError(RiskLeafField.Probability)
-      },
-      state.percentilesVar.signal.changes --> { _ =>
-        submitError.set(None)
-        state.clearSubmitFieldError(RiskLeafField.Percentiles)
-      },
-      state.quantilesVar.signal.changes --> { _ =>
-        submitError.set(None)
-        state.clearSubmitFieldError(RiskLeafField.Quantiles)
-      },
-      state.minLossVar.signal.changes --> { _ =>
-        submitError.set(None)
-        state.clearSubmitFieldError(RiskLeafField.MinLoss)
-      },
-      state.maxLossVar.signal.changes --> { _ =>
-        submitError.set(None)
-        state.clearSubmitFieldError(RiskLeafField.MaxLoss)
-      },
-      state.distributionModeVar.signal.changes --> { _ => submitError.set(None) },
-      state.parentVar.signal.changes --> { _ =>
-        submitError.set(None)
-        state.clearSubmitFieldError(RiskLeafField.Parent)
-      },
+      // Drop the stored submit refusals an edit makes stale: those naming the
+      // edited input, and those on the form's own line. Changing the mode
+      // edits no single input, so it drops only the line's.
+      state.nameVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Name)),
+      state.probabilityVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Probability)),
+      state.percentilesVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Percentiles)),
+      state.quantilesVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Quantiles)),
+      state.minLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.MinLoss)),
+      state.maxLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.MaxLoss)),
+      state.distributionModeVar.signal.changes --> (_ => state.clearFor(RiskLeafField.FormLevel)),
+      state.parentVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Parent)),
 
       // Push the reactive draft up to TreeBuilderState for DistributionChartState
       // to observe. draftSignal is None while the distribution fields do not form
@@ -353,8 +333,9 @@ object RiskLeafFormView:
           onClickCallback = () => onEditSaveClick()
         )
       ),
-      child.maybe <-- state.formLevelError.map(_.map(msg => div(cls := "form-error", msg))),
-      child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
+      // The form's own line: the builder's topology check of this submit, then
+      // any refusal no input of this form claims.
+      children <-- state.formLevelError.map(_.map(msg => div(cls := "form-error", msg)))
       )
     )
 
@@ -437,11 +418,12 @@ object RiskLeafFormView:
       )
     )
   
-  /** Handle add-leaf submission. */
+  /** Handle add-leaf submission. Every refusal is stored at once, whichever
+    * check produced it — this form's own field refinement or the tree-wide
+    * topology rules — and each input selects its own. */
   private def handleSubmit(
     state: RiskLeafFormState,
-    builderState: TreeBuilderState,
-    submitError: Var[Option[String]]
+    builderState: TreeBuilderState
   ): Unit =
     state.triggerValidation()
     state.toDraft match
@@ -453,19 +435,17 @@ object RiskLeafFormView:
             // just-submitted values for viewing. A fast successive add is the
             // Templating flow now (click Add again to unlock a copy), not a
             // touched-state reset here.
-            submitError.set(None)
+            state.setSubmitErrors(Nil)
           case Validation.Failure(_, errs) =>
-            routeLeafErrors(state, errs.toList, submitError)
+            state.setSubmitErrors(errs.toList)
       case Validation.Failure(_, errs) =>
-        // Every field's refusal at once, each routed to its own inline slot.
-        routeLeafErrors(state, errs.toList, submitError)
+        state.setSubmitErrors(errs.toList)
 
   /** Handle update-leaf submission (edit mode). */
   private def handleUpdate(
     state: RiskLeafFormState,
     originalName: SafeName.SafeName,
-    builderState: TreeBuilderState,
-    submitError: Var[Option[String]]
+    builderState: TreeBuilderState
   ): Unit =
     state.triggerValidation()
     state.toDraft match
@@ -474,64 +454,8 @@ object RiskLeafFormView:
           case Validation.Success(_, _) =>
             // TreeBuilderState.updateLeaf already moved `activeForm` back to
             // `Locked(t)`, locking these same, just-saved values for viewing.
-            submitError.set(None)
+            state.setSubmitErrors(Nil)
           case Validation.Failure(_, errs) =>
-            routeLeafErrors(state, errs.toList, submitError)
+            state.setSubmitErrors(errs.toList)
       case Validation.Failure(_, errs) =>
-        routeLeafErrors(state, errs.toList, submitError)
-
-  /** Show every refusal under each target its location names, whichever check
-    * produced it — this form's own field refinement or the tree-wide topology
-    * rules. */
-  private def routeLeafErrors(
-    state: RiskLeafFormState,
-    errors: List[ValidationError],
-    submitError: Var[Option[String]]
-  ): Unit =
-    FormSubmitUtil.routeErrors(state, errors, submitError, inputsFor)
-
-  /** No display target of this form. A refusal at such a location is shown on
-    * the form's submit line by `routeErrors`. */
-  private val noTarget: Set[RiskLeafField] = Set.empty
-
-  /** The targets a refusal belongs under. One mapping for every location, so
-    * every case is assigned by name and a location added later fails the
-    * build until it is given one.
-    *
-    * An element failure and a collection failure share one input, because the
-    * form edits the whole list as one comma-separated value. A rule over a pair
-    * of inputs belongs under both. A rule over the mode's inputs together, and
-    * the builder's topology check of this form's submit, belong on the form's
-    * own line. The subject does not change the routing.
-    *
-    * Visible to the package so the mapping is testable without rendering the
-    * form.
-    */
-  private[views] def inputsFor(location: ErrorLocation): Set[RiskLeafField] =
-    location match
-      case ErrorLocation.Field(_, field) =>
-        field match
-          case FieldName.Name                                  => Set(RiskLeafField.Name)
-          case FieldName.ParentName                            => Set(RiskLeafField.Parent)
-          case FieldName.Probability                           => Set(RiskLeafField.Probability)
-          case FieldName.Percentiles | FieldName.PercentileAt(_) => Set(RiskLeafField.Percentiles)
-          case FieldName.Quantiles | FieldName.QuantileAt(_)   => Set(RiskLeafField.Quantiles)
-          case FieldName.MinLoss                               => Set(RiskLeafField.MinLoss)
-          case FieldName.MaxLoss                               => Set(RiskLeafField.MaxLoss)
-          case FieldName.Terms                                 => Set(RiskLeafField.Terms)
-          case FieldName.LossRange                             => Set(RiskLeafField.MinLoss, RiskLeafField.MaxLoss)
-          case FieldName.PercentileQuantilePairing             => Set(RiskLeafField.Percentiles, RiskLeafField.Quantiles)
-          case FieldName.DistributionType                      => Set(RiskLeafField.FormLevel)
-          case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
-               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
-               FieldName.SeedVarId | FieldName.SeedEntityId | FieldName.Spec | FieldName.ChildAt(_) |
-               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
-               FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
-               FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
-               FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
-               FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
-               FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
-               FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
-            noTarget
-      case ErrorLocation.Whole     => Set(RiskLeafField.FormLevel)
-      case ErrorLocation.Header(_) => noTarget
+        state.setSubmitErrors(errs.toList)

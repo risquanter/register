@@ -7,7 +7,7 @@ import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
@@ -24,7 +24,6 @@ object PortfolioFormView:
 
   def apply(builderState: TreeBuilderState): HtmlElement =
     val form = new PortfolioFormState
-    val submitError: Var[Option[String]] = Var(None)
 
     // `.distinct` — a leaf occupying `activeForm` always collapses to the
     // same `Inactive` value regardless of which of its own states it's in,
@@ -132,7 +131,7 @@ object PortfolioFormView:
         // target folds to Inactive, never Blank — so there is no other-form
         // draft to protect on this branch; submit directly.
         case FormMode.Blank =>
-          handleSubmit(form, builderState, submitError)
+          handleSubmit(form, builderState)
         // A leaf is currently selected instead — this click means "start a
         // fresh portfolio draft," which first has to reclaim `activeForm`
         // from the leaf (there is only one shared target at a time). If the
@@ -148,13 +147,13 @@ object PortfolioFormView:
         case FormMode.Inactive =>
           activateForm()
         case FormMode.Locked(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Templating(t))
-        case FormMode.Templating(_: FormTarget.Portfolio) => handleSubmit(form, builderState, submitError)
+        case FormMode.Templating(_: FormTarget.Portfolio) => handleSubmit(form, builderState)
         case _ => ()
 
     def onEditSaveClick(): Unit =
       builderState.activeForm.now().forPortfolio match
         case FormMode.Locked(t: FormTarget.Portfolio)      => builderState.activeForm.set(FormMode.Editing(t))
-        case FormMode.Editing(FormTarget.Portfolio(name))  => handleUpdate(form, name, builderState, submitError)
+        case FormMode.Editing(FormTarget.Portfolio(name))  => handleUpdate(form, name, builderState)
         case _ => ()
 
     // Reverting to a saved portfolio's own values is exactly what populating
@@ -174,7 +173,7 @@ object PortfolioFormView:
         case FormMode.Editing(t: FormTarget.Portfolio)    => builderState.activeForm.set(FormMode.Locked(t))
         case FormMode.Templating(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Locked(t))
         case _ => ()
-      submitError.set(None)
+      form.setSubmitErrors(Nil)
 
     FormCard(
       header = div(cls := "form-card-title", child.text <-- headerText),
@@ -220,15 +219,10 @@ object PortfolioFormView:
         form.subjectVar.set(ErrorSubject.DraftNode)
       },
 
-      // Clear stale submit error whenever the user edits a field
-      form.nameVar.signal.changes --> { _ =>
-        submitError.set(None)
-        form.clearSubmitFieldError(PortfolioField.Name)
-      },
-      form.parentVar.signal.changes --> { _ =>
-        submitError.set(None)
-        form.clearSubmitFieldError(PortfolioField.Parent)
-      },
+      // Drop the stored submit refusals an edit makes stale: those naming the
+      // edited input, and those on the form's own line.
+      form.nameVar.signal.changes --> (_ => form.clearFor(PortfolioField.Name)),
+      form.parentVar.signal.changes --> (_ => form.clearFor(PortfolioField.Parent)),
 
       // Written to this form's own dirty flag, not the shared isEditDirtyVar
       // directly — a shared write would let this form's "not dirty" (when
@@ -273,15 +267,16 @@ object PortfolioFormView:
       ),
       // The form's own line: the builder's topology check of this submit, then
       // any refusal no input of this form claims.
-      child.maybe <-- form.formLevelError.map(_.map(msg => div(cls := "form-error", msg))),
-      child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
+      children <-- form.formLevelError.map(_.map(msg => div(cls := "form-error", msg)))
       )
     )
 
+  /** Handle add-portfolio submission. Every refusal is stored at once,
+    * whichever check produced it — this form's own field refinement or the
+    * tree-wide topology rules — and each input selects its own. */
   private def handleSubmit(
     form: PortfolioFormState,
-    builderState: TreeBuilderState,
-    submitError: Var[Option[String]]
+    builderState: TreeBuilderState
   ): Unit =
     form.triggerValidation()
     form.toDraft match
@@ -291,17 +286,17 @@ object PortfolioFormView:
             // Fields are left as-is — TreeBuilderState.addPortfolio already moved
             // `activeForm` to `Locked(newTarget)`, locking these same, just-submitted
             // values for viewing.
-            submitError.set(None)
+            form.setSubmitErrors(Nil)
           case Validation.Failure(_, errs) =>
-            routePortfolioErrors(form, errs.toList, submitError)
+            form.setSubmitErrors(errs.toList)
       case Validation.Failure(_, errs) =>
-        routePortfolioErrors(form, errs.toList, submitError)
+        form.setSubmitErrors(errs.toList)
 
+  /** Handle update-portfolio submission (edit mode). */
   private def handleUpdate(
     form: PortfolioFormState,
     originalName: SafeName.SafeName,
-    builderState: TreeBuilderState,
-    submitError: Var[Option[String]]
+    builderState: TreeBuilderState
   ): Unit =
     form.triggerValidation()
     form.toDraft match
@@ -310,55 +305,8 @@ object PortfolioFormView:
           case Validation.Success(_, _) =>
             // TreeBuilderState.updatePortfolio already moved `activeForm` back to
             // `Locked(t)`, locking these same, just-saved values for viewing.
-            submitError.set(None)
+            form.setSubmitErrors(Nil)
           case Validation.Failure(_, errs) =>
-            routePortfolioErrors(form, errs.toList, submitError)
+            form.setSubmitErrors(errs.toList)
       case Validation.Failure(_, errs) =>
-        routePortfolioErrors(form, errs.toList, submitError)
-
-  /** Show every refusal under each target its location names, whichever check
-    * produced it — this form's own field refinement or the tree-wide topology
-    * rules. */
-  private def routePortfolioErrors(
-    form: PortfolioFormState,
-    errors: List[ValidationError],
-    submitError: Var[Option[String]]
-  ): Unit =
-    FormSubmitUtil.routeErrors(form, errors, submitError, inputsFor)
-
-  /** No display target of this form. A refusal at such a location is shown on
-    * the form's submit line by `routeErrors`. */
-  private val noTarget: Set[PortfolioField] = Set.empty
-
-  /** The targets a refusal belongs under. This form has two inputs and its own
-    * line; every location is assigned by name, so a location added later fails
-    * the build until it is given one. The builder's topology check of this
-    * form's submit belongs on the form's own line. The subject does not change
-    * the routing.
-    *
-    * Visible to the package so the mapping is testable without rendering the
-    * form.
-    */
-  private[views] def inputsFor(location: ErrorLocation): Set[PortfolioField] =
-    location match
-      case ErrorLocation.Field(_, field) =>
-        field match
-          case FieldName.Name       => Set(PortfolioField.Name)
-          case FieldName.ParentName => Set(PortfolioField.Parent)
-          case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
-               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
-               FieldName.Probability | FieldName.SeedVarId | FieldName.SeedEntityId |
-               FieldName.DistributionType | FieldName.Terms | FieldName.MinLoss | FieldName.MaxLoss |
-               FieldName.Spec | FieldName.Percentiles | FieldName.Quantiles |
-               FieldName.PercentileAt(_) | FieldName.QuantileAt(_) | FieldName.ChildAt(_) |
-               FieldName.LossRange | FieldName.PercentileQuantilePairing |
-               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
-               FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
-               FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
-               FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
-               FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
-               FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
-               FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
-            noTarget
-      case ErrorLocation.Whole     => Set(PortfolioField.FormLevel)
-      case ErrorLocation.Header(_) => noTarget
+        form.setSubmitErrors(errs.toList)

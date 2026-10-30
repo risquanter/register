@@ -206,7 +206,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         st.termsVar.set("3")
         st.markTouched(RiskLeafField.Terms)
         assertTrue(
-          current(st.termsError).isDefined,
+          current(st.termsError).nonEmpty,
           refusalLocations(st).contains(at(FieldName.Terms))
         )
       }
@@ -258,7 +258,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         st.distributionModeVar.set(DistributionMode.Lognormal)
         st.minLossVar.set("0")
         st.markTouched(RiskLeafField.MinLoss)
-        assertTrue(current(st.minLossError).contains("Value must be greater than zero"))
+        assertTrue(current(st.minLossError) == List("Value must be greater than zero"))
       },
 
       test("a maxLoss of 0 shows the positivity error") {
@@ -266,7 +266,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         st.distributionModeVar.set(DistributionMode.Lognormal)
         st.maxLossVar.set("0")
         st.markTouched(RiskLeafField.MaxLoss)
-        assertTrue(current(st.maxLossError).contains("Value must be greater than zero"))
+        assertTrue(current(st.maxLossError) == List("Value must be greater than zero"))
       },
 
       test("a minLoss of 1 is accepted") {

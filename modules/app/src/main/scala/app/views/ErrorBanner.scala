@@ -22,15 +22,16 @@ object ErrorBanner:
       child.maybe <-- globalError.map(_.map(renderBanner(_, onDismiss)))
     )
 
-  /** How one failure is presented: its icon, its sentence, the trace to offer
-    * for copying, and which styling it takes.
+  /** How one failure is presented: its icon, its sentences, the trace to offer
+    * for copying, and which styling it takes. A refusal of several fields has
+    * one sentence per refusal, so no refusal is joined into another's.
     *
     * The four values are derived from the same case, so they are produced
     * together in one match rather than by several matches on the same value.
     */
   private case class Presentation(
     icon: String,
-    message: String,
+    messages: List[String],
     trace: Option[TraceId],
     styling: String
   )
@@ -40,28 +41,28 @@ object ErrorBanner:
 
   private def present(error: GlobalError): Presentation = error match
     case GlobalError.ValidationFailed(errors) =>
-      Presentation("⚠", errors.map(_.message).mkString("; "), None, ErrorStyling)
+      Presentation("⚠", errors.map(_.message), None, ErrorStyling)
 
     case GlobalError.NetworkError(message) =>
-      Presentation("⚡", message, None, ErrorStyling)
+      Presentation("⚡", List(message), None, ErrorStyling)
 
     case GlobalError.InputRejected(message) =>
-      Presentation("⚠", message, None, ErrorStyling)
+      Presentation("⚠", List(message), None, ErrorStyling)
 
     case GlobalError.Conflict(message) =>
-      Presentation("🔄", message, None, ErrorStyling)
+      Presentation("🔄", List(message), None, ErrorStyling)
 
     case GlobalError.NotFound =>
-      Presentation("⚠", ErrorMessages.NotFound, None, ErrorStyling)
+      Presentation("⚠", List(ErrorMessages.NotFound), None, ErrorStyling)
 
     case GlobalError.WorkspaceExpired(message) =>
-      Presentation("ℹ", message, None, InfoStyling)
+      Presentation("ℹ", List(message), None, InfoStyling)
 
     case GlobalError.ServerError(message, trace) =>
-      Presentation("🔥", message, trace, ErrorStyling)
+      Presentation("🔥", List(message), trace, ErrorStyling)
 
     case GlobalError.DependencyError(message, trace) =>
-      Presentation("⚡", message, trace, ErrorStyling)
+      Presentation("⚡", List(message), trace, ErrorStyling)
 
   /** The trace is rendered as a muted line under the message and is selectable,
     * so someone reporting a fault can copy the identifier the server logged the
@@ -74,7 +75,7 @@ object ErrorBanner:
       span(cls := "error-banner-icon", presentation.icon),
       div(
         cls := "error-banner-body",
-        span(cls := "error-banner-message", presentation.message),
+        presentation.messages.map(message => div(span(cls := "error-banner-message", message))),
         presentation.trace.map(t => div(cls := "error-banner-trace", t.value))
       ),
       button(

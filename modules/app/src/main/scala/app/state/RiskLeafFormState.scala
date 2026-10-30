@@ -83,6 +83,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     minLossVar.set("")
     maxLossVar.set("")
     termsVar.set("")
+    submitErrors.set(Nil)
     resetTouched()
 
   // ============================================================
@@ -158,10 +159,50 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   private val parseNonEmptyList: String => Option[List[Double]] =
     s => Some(parseDoubleList(s)).filter(_.nonEmpty)
 
-  /** A located check's sentence, for the display signals and `errorSignals`,
-    * which still carry text. */
+  /** A located check's sentence, for the cross-field gates and `errorSignals`,
+    * which carry text. */
   private def messageOf(check: Signal[Option[ValidationError]]): Signal[Option[String]] =
     check.map(_.map(_.message))
+
+  /** The sentences of the refusals a target shows, for the input components. */
+  private def messagesOf(errors: Signal[List[ValidationError]]): Signal[List[String]] =
+    errors.map(_.map(_.message))
+
+  // ============================================================
+  // Submit Refusals
+  // ============================================================
+
+  /** Refusals of this form's last submit that its own live checks do not
+    * produce: those of `toDraft` and of the builder's topology check. The live
+    * checks are not held here: they are derived from the input `Var`s, and
+    * writing a derived value back into a `Var` is the self-correcting
+    * reactive `Var` defect ADR-019 names. */
+  private val submitErrors: Var[List[ValidationError]] = Var(Nil)
+
+  /** Store a submit's refusals, replacing the previous submit's. */
+  def setSubmitErrors(errors: List[ValidationError]): Unit =
+    submitErrors.set(errors)
+
+  /** Drop the stored refusals naming this input, because the user edited it.
+    * A pair refusal drops from both its inputs, since editing either one can
+    * satisfy the rule. The refusals on the form's own line drop on any edit,
+    * because they are about the inputs together. */
+  def clearFor(field: RiskLeafField): Unit =
+    submitErrors.update(_.filterNot(FormState.staleAfterEdit(RiskLeafFormState.inputsFor, FormLevel, field)))
+
+  /** Every refusal for one input, shown once the input is touched or the form
+    * submitted: this form's own check while it refuses, otherwise the stored
+    * refusals naming this input. A refusal whose location names several
+    * inputs is selected by each of them, which is how a constraint over a
+    * pair of inputs appears under both. */
+  def errorsFor(field: RiskLeafField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]] =
+    shouldShowError(field).combineWith(live, submitErrors.signal).map { (show, own, stored) =>
+      FormState.selected(RiskLeafFormState.inputsFor, field, show, own, stored)
+    }
+
+  /** The stored refusals no target of this form claims. */
+  def unclaimed: Signal[List[ValidationError]] =
+    submitErrors.signal.map(_.filter(e => RiskLeafFormState.inputsFor(e.location).isEmpty))
 
   // ============================================================
   // Raw Validation Signals (using ValidationUtil from common)
@@ -327,23 +368,25 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // Display-controlled Error Signals (for UI binding)
   // ============================================================
 
-  val nameError: Signal[Option[String]] = withSubmitErrors(Name, messageOf(nameErrorRaw))
+  val nameError: Signal[List[String]] = messagesOf(errorsFor(Name, nameErrorRaw))
 
   /** Parent has no continuous reactive validation of its own (unlike name) —
-    * only submit-time errors (`ParentSelection.toParentRef` refusing the
-    * selection in `toDraft`, or the builder's topology check) ever
-    * populate this, via `setSubmitFieldError`. */
-  val parentError: Signal[Option[String]] = withSubmitErrors(Parent, Val(None))
+    * only submit-time refusals (`ParentSelection.toParentRef` refusing the
+    * selection in `toDraft`, or the builder's topology check) ever show
+    * here, from the stored refusals. */
+  val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
 
   /** The form's own line: a submit refusal about a combination of this form's
-    * inputs rather than about one of them. */
-  val formLevelError: Signal[Option[String]] = withSubmitErrors(FormLevel, Val(None))
-  val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, messageOf(probabilityErrorRaw))
+    * inputs rather than about one of them, then any refusal no target of this
+    * form claims. */
+  val formLevelError: Signal[List[String]] =
+    messagesOf(errorsFor(FormLevel, Val(None)).combineWith(unclaimed).map(_ ++ _))
+  val probabilityError: Signal[List[String]] = messagesOf(errorsFor(Probability, probabilityErrorRaw))
 
   // Cross-field errors use a content-presence gate, NOT the per-field touch gate.
   //
-  // Problem with merging the cross-field raw error into each field's withSubmitErrors:
-  //   withSubmitErrors(Percentiles, ownRaw.orElse(crossRaw))
+  // Problem with merging the cross-field raw error into each field's errorsFor:
+  //   errorsFor(Percentiles, ownRaw.orElse(crossRaw))
   // gates the WHOLE combined signal behind "Percentiles was touched". So when the user
   // enters 3 percentiles (blurs, touched) then starts typing 1 quantile (not yet blurred),
   // the cross-field "lengths must match" error only appears under Percentiles — the stable,
@@ -353,7 +396,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // non-empty content. Its visibility gate must be:
   //   showAll (submit triggered) || (pField.nonEmpty && qField.nonEmpty)
   //
-  // Own-field errors continue to use the per-field touch gate via withSubmitErrors.
+  // Own-field errors continue to use the per-field touch gate via errorsFor.
   // The final per-field signal is: own-error (touch-gated) orElse cross-error (content-gated).
 
   // Track which field in each cross-field pair was most recently edited.
@@ -414,30 +457,30 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   private val lognormalCrossFieldGated_Max: Signal[Option[String]] =
     crossFieldGated(MaxLoss, minLossVar, maxLossVar, messageOf(lognormalCrossFieldErrorRaw), lastLognormalEdited.map(!_))
 
+  /** An input's own and stored refusals, or the pair rule's refusal when the
+    * input shows none of its own. */
+  private def withCrossField(own: Signal[List[String]], cross: Signal[Option[String]]): Signal[List[String]] =
+    own.combineWith(cross).map {
+      case (Nil, pair) => pair.toList
+      case (shown, _)  => shown
+    }
+
   /** Percentiles: own error (touch-gated) ∪ metalog cross-field (last-edited-gated) */
-  val percentilesError: Signal[Option[String]] =
-    withSubmitErrors(Percentiles, messageOf(percentilesErrorRaw))
-      .combineWith(metalogCrossFieldGated_Pct)
-      .map { (own, cross) => own.orElse(cross) }
+  val percentilesError: Signal[List[String]] =
+    withCrossField(messagesOf(errorsFor(Percentiles, percentilesErrorRaw)), metalogCrossFieldGated_Pct)
 
   /** Quantiles: own error (touch-gated) ∪ metalog cross-field (last-edited-gated) */
-  val quantilesError: Signal[Option[String]] =
-    withSubmitErrors(Quantiles, messageOf(quantilesErrorRaw))
-      .combineWith(metalogCrossFieldGated_Qt)
-      .map { (own, cross) => own.orElse(cross) }
+  val quantilesError: Signal[List[String]] =
+    withCrossField(messagesOf(errorsFor(Quantiles, quantilesErrorRaw)), metalogCrossFieldGated_Qt)
 
   /** Min loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
-  val minLossError: Signal[Option[String]] =
-    withSubmitErrors(MinLoss, messageOf(minLossErrorRaw))
-      .combineWith(lognormalCrossFieldGated_Min)
-      .map { (own, cross) => own.orElse(cross) }
+  val minLossError: Signal[List[String]] =
+    withCrossField(messagesOf(errorsFor(MinLoss, minLossErrorRaw)), lognormalCrossFieldGated_Min)
 
   /** Max loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
-  val maxLossError: Signal[Option[String]] =
-    withSubmitErrors(MaxLoss, messageOf(maxLossErrorRaw))
-      .combineWith(lognormalCrossFieldGated_Max)
-      .map { (own, cross) => own.orElse(cross) }
-  val termsError: Signal[Option[String]] = withSubmitErrors(Terms, messageOf(termsErrorRaw))
+  val maxLossError: Signal[List[String]] =
+    withCrossField(messagesOf(errorsFor(MaxLoss, maxLossErrorRaw)), lognormalCrossFieldGated_Max)
+  val termsError: Signal[List[String]] = messagesOf(errorsFor(Terms, termsErrorRaw))
 
   // ============================================================
   // FormState Implementation
@@ -530,8 +573,9 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     *
     * This is the form's one refinement boundary: the `Var`s above hold what the
     * user is typing, and everything past this point is a refined type. Each
-    * failure names the field it came from, so the view routes it to that
-    * field's inline slot and the banner stays empty.
+    * failure names the field it came from, so once the view stores it with
+    * `setSubmitErrors`, the input it names selects it and the banner stays
+    * empty.
     */
   def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, DistributionShape)] =
     val nameV = ValidationUtil.toValidation(locatedNow(nameVar, nameField).refine(ValidationUtil.refineName))
@@ -621,3 +665,49 @@ object RiskLeafFormState:
     */
   def impliedRatioTooHigh(ratio: Double): String =
     f"P90/P10 ratio is $ratio%.0f× — very high. Review whether this reflects expert judgment."
+
+  /** No display target of this form. A refusal at such a location is shown on
+    * the form's own line, through `unclaimed`. */
+  private val noTarget: Set[RiskLeafField] = Set.empty
+
+  /** The targets a refusal belongs under. One mapping for every location, so
+    * every case is assigned by name and a location added later fails the
+    * build until it is given one.
+    *
+    * An element failure and a collection failure share one input, because the
+    * form edits the whole list as one comma-separated value. A rule over a pair
+    * of inputs belongs under both. A rule over the mode's inputs together, and
+    * the builder's topology check of this form's submit, belong on the form's
+    * own line. The subject does not change the routing.
+    *
+    * Visible to the application so the mapping is testable without rendering
+    * the form.
+    */
+  private[app] def inputsFor(location: ErrorLocation): Set[RiskLeafField] =
+    location match
+      case ErrorLocation.Field(_, field) =>
+        field match
+          case FieldName.Name                                  => Set(RiskLeafField.Name)
+          case FieldName.ParentName                            => Set(RiskLeafField.Parent)
+          case FieldName.Probability                           => Set(RiskLeafField.Probability)
+          case FieldName.Percentiles | FieldName.PercentileAt(_) => Set(RiskLeafField.Percentiles)
+          case FieldName.Quantiles | FieldName.QuantileAt(_)   => Set(RiskLeafField.Quantiles)
+          case FieldName.MinLoss                               => Set(RiskLeafField.MinLoss)
+          case FieldName.MaxLoss                               => Set(RiskLeafField.MaxLoss)
+          case FieldName.Terms                                 => Set(RiskLeafField.Terms)
+          case FieldName.LossRange                             => Set(RiskLeafField.MinLoss, RiskLeafField.MaxLoss)
+          case FieldName.PercentileQuantilePairing             => Set(RiskLeafField.Percentiles, RiskLeafField.Quantiles)
+          case FieldName.DistributionType                      => Set(RiskLeafField.FormLevel)
+          case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
+               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
+               FieldName.SeedVarId | FieldName.SeedEntityId | FieldName.Spec | FieldName.ChildAt(_) |
+               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
+               FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
+               FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
+               FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
+               FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
+               FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
+               FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
+            noTarget
+      case ErrorLocation.Whole     => Set(RiskLeafField.FormLevel)
+      case ErrorLocation.Header(_) => noTarget

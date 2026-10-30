@@ -54,18 +54,52 @@ final class PortfolioFormState extends FormState[PortfolioField]:
   private val nameErrorRaw: Signal[Option[ValidationError]] =
     nameLocated.map(_.refine(ValidationUtil.refineName).left.toOption.flatMap(_.headOption))
 
-  // Display-controlled errors (with submit-time server error composition)
-  val nameError: Signal[Option[String]] = withSubmitErrors(Name, nameErrorRaw.map(_.map(_.message)))
+  /** Refusals of this form's last submit that its own live check does not
+    * produce: those of `toDraft` and of the builder's topology check. The live
+    * check is not held here: it is derived from the input `Var`s, and writing
+    * a derived value back into a `Var` is the self-correcting reactive `Var`
+    * defect ADR-019 names. */
+  private val submitErrors: Var[List[ValidationError]] = Var(Nil)
+
+  /** Store a submit's refusals, replacing the previous submit's. */
+  def setSubmitErrors(errors: List[ValidationError]): Unit =
+    submitErrors.set(errors)
+
+  /** Drop the stored refusals naming this input, because the user edited it.
+    * The refusals on the form's own line drop on any edit, because they are
+    * about the inputs together. */
+  def clearFor(field: PortfolioField): Unit =
+    submitErrors.update(_.filterNot(FormState.staleAfterEdit(PortfolioFormState.inputsFor, FormLevel, field)))
+
+  /** Every refusal for one input, shown once the input is touched or the form
+    * submitted: this form's own check while it refuses, otherwise the stored
+    * refusals naming this input. */
+  def errorsFor(field: PortfolioField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]] =
+    shouldShowError(field).combineWith(live, submitErrors.signal).map { (show, own, stored) =>
+      FormState.selected(PortfolioFormState.inputsFor, field, show, own, stored)
+    }
+
+  /** The stored refusals no target of this form claims. */
+  def unclaimed: Signal[List[ValidationError]] =
+    submitErrors.signal.map(_.filter(e => PortfolioFormState.inputsFor(e.location).isEmpty))
+
+  /** The sentences of the refusals a target shows, for the input components. */
+  private def messagesOf(errors: Signal[List[ValidationError]]): Signal[List[String]] =
+    errors.map(_.map(_.message))
+
+  // Display-controlled errors: the live check, else the stored submit refusals
+  val nameError: Signal[List[String]] = messagesOf(errorsFor(Name, nameErrorRaw))
 
   /** Parent has no continuous reactive validation of its own (unlike name) —
-    * only submit-time errors (`Validation.Failure` from `toDraft`, or the
-    * builder's topology check) ever populate this, via
-    * `setSubmitFieldError`. */
-  val parentError: Signal[Option[String]] = withSubmitErrors(Parent, Val(None))
+    * only submit-time refusals (`Validation.Failure` from `toDraft`, or the
+    * builder's topology check) ever show here, from the stored refusals. */
+  val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
 
   /** The form's own line: a submit refusal about a combination of this form's
-    * inputs rather than about one of them. */
-  val formLevelError: Signal[Option[String]] = withSubmitErrors(FormLevel, Val(None))
+    * inputs rather than about one of them, then any refusal no target of this
+    * form claims. */
+  val formLevelError: Signal[List[String]] =
+    messagesOf(errorsFor(FormLevel, Val(None)).combineWith(unclaimed).map(_ ++ _))
 
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] = List(nameErrorRaw.map(_.map(_.message)))
@@ -89,4 +123,44 @@ final class PortfolioFormState extends FormState[PortfolioField]:
    *  second place doing the same thing. */
   def reset(): Unit =
     nameVar.set("")
+    submitErrors.set(Nil)
     resetTouched()
+
+object PortfolioFormState:
+
+  /** No display target of this form. A refusal at such a location is shown on
+    * the form's own line, through `unclaimed`. */
+  private val noTarget: Set[PortfolioField] = Set.empty
+
+  /** The targets a refusal belongs under. This form has two inputs and its own
+    * line; every location is assigned by name, so a location added later fails
+    * the build until it is given one. The builder's topology check of this
+    * form's submit belongs on the form's own line. The subject does not change
+    * the routing.
+    *
+    * Visible to the application so the mapping is testable without rendering
+    * the form.
+    */
+  private[app] def inputsFor(location: ErrorLocation): Set[PortfolioField] =
+    location match
+      case ErrorLocation.Field(_, field) =>
+        field match
+          case FieldName.Name       => Set(PortfolioField.Name)
+          case FieldName.ParentName => Set(PortfolioField.Parent)
+          case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
+               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
+               FieldName.Probability | FieldName.SeedVarId | FieldName.SeedEntityId |
+               FieldName.DistributionType | FieldName.Terms | FieldName.MinLoss | FieldName.MaxLoss |
+               FieldName.Spec | FieldName.Percentiles | FieldName.Quantiles |
+               FieldName.PercentileAt(_) | FieldName.QuantileAt(_) | FieldName.ChildAt(_) |
+               FieldName.LossRange | FieldName.PercentileQuantilePairing |
+               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
+               FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
+               FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
+               FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
+               FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
+               FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
+               FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
+            noTarget
+      case ErrorLocation.Whole     => Set(PortfolioField.FormLevel)
+      case ErrorLocation.Header(_) => noTarget

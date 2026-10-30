@@ -16,7 +16,7 @@ object FormInputs:
    * 
    * @param labelText Label shown above the input
    * @param valueVar Var to bind the input value
-   * @param errorSignal Signal containing error message (None = valid)
+   * @param errorSignal Every message the input shows, one line each (empty = valid)
    * @param filter Function to filter allowed input characters
    * @param onBlurCallback Callback when field loses focus (for marking touched)
    * @param placeholderText Placeholder text
@@ -27,7 +27,7 @@ object FormInputs:
   def textInput(
     labelText: String,
     valueVar: Var[String],
-    errorSignal: Signal[Option[String]],
+    errorSignal: Signal[List[String]],
     filter: String => Boolean = _ => true,
     onBlurCallback: () => Unit = () => (),
     placeholderText: String = "",
@@ -46,7 +46,10 @@ object FormInputs:
       input(
         typ := "text",
         inputMode := inputModeAttr,
-        cls <-- errorSignal.map(_.fold("form-input")(_ => "form-input error")),
+        cls <-- errorSignal.map {
+          case Nil => "form-input"
+          case _   => "form-input error"
+        },
         placeholder := placeholderText,
         disabled <-- disabledSignal,
         controlled(
@@ -58,10 +61,12 @@ object FormInputs:
         // field and clicking out — the field stays untouched until meaningful input.
         onBlur --> (_ => if valueVar.now().nonEmpty then onBlurCallback())
       ),
-      child.maybe <-- errorSignal.map(_.map(msg => 
-        span(cls := "form-error", msg)
-      ))
+      errorLines(errorSignal)
     )
+
+  /** One line per message under an input, in the order given. */
+  private def errorLines(errorSignal: Signal[List[String]]): Modifier[HtmlElement] =
+    children <-- errorSignal.map(_.map(msg => span(cls := "form-error", msg)))
 
   /**
    * Textarea for multi-line input (percentiles, quantiles).
@@ -69,7 +74,7 @@ object FormInputs:
   def textAreaInput(
     labelText: String,
     valueVar: Var[String],
-    errorSignal: Signal[Option[String]],
+    errorSignal: Signal[List[String]],
     filter: String => Boolean = _ => true,
     onBlurCallback: () => Unit = () => (),
     placeholderText: String = "",
@@ -82,7 +87,10 @@ object FormInputs:
       label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, labelText),
       textArea(
         inputMode := inputModeAttr,
-        cls <-- errorSignal.map(_.fold("form-input form-textarea")(_ => "form-input form-textarea error")),
+        cls <-- errorSignal.map {
+          case Nil => "form-input form-textarea"
+          case _   => "form-input form-textarea error"
+        },
         placeholder := placeholderText,
         rows := rowCount,
         disabled <-- disabledSignal,
@@ -92,9 +100,7 @@ object FormInputs:
         ),
         onBlur --> (_ => if valueVar.now().nonEmpty then onBlurCallback())
       ),
-      child.maybe <-- errorSignal.map(_.map(msg =>
-        span(cls := "form-error", msg)
-      ))
+      errorLines(errorSignal)
     )
 
   /**
@@ -237,7 +243,7 @@ object FormInputs:
    * @param parentVar Var holding the current selection.
    * @param options Signal of available parent names (may include rootLabel)
    * @param rootLabel Sentinel string representing the root (e.g., "(root)")
-   * @param errorSignal Submit-time "Parent is required" / topology error, if any.
+   * @param errorSignal Submit-time "Parent is required" / topology refusals, one line each.
    * @param existingNames Every portfolio name currently in the tree,
    *   unfiltered by self-exclusion — see `TreeBuilderState.allPortfolioNames`.
    * @param lockedSignal See `textInput`'s matching parameter doc. Defaults to
@@ -249,7 +255,7 @@ object FormInputs:
     rootLabel: String,
     existingNames: Signal[Set[String]],
     disabledSignal: Signal[Boolean] = Val(false),
-    errorSignal: Signal[Option[String]] = Val(None),
+    errorSignal: Signal[List[String]] = Val(Nil),
     lockedSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     val unsetValue = ""
@@ -273,7 +279,7 @@ object FormInputs:
       label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, "Parent Portfolio"),
       select(
         cls := "form-input",
-        cls("error") <-- errorSignal.map(_.isDefined),
+        cls("error") <-- errorSignal.map(_.nonEmpty),
         disabled <-- disabledSignal,
         option(value := unsetValue, disabled := true, "— none selected —"),
         splitOptions(options.map(_.map(opt => opt -> opt))),
@@ -293,5 +299,5 @@ object FormInputs:
             case _ => ()
         }
       ),
-      child.maybe <-- errorSignal.map(_.map(msg => span(cls := "form-error", msg)))
+      errorLines(errorSignal)
     )

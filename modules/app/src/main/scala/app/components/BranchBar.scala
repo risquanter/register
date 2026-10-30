@@ -1,7 +1,6 @@
 package app.components
 
 import com.raquo.laminar.api.L.{*, given}
-import org.scalajs.dom
 
 import app.components.FormInputs
 import app.core.LocalProblem
@@ -270,8 +269,8 @@ object BranchBar:
         labelText = "",
         valueVar = nameInput,
         errorSignal = createState.signal.map {
-          case ScenarioSubmitState.Failed(failure) => Some(ErrorMessages.viewFailed(failure))
-          case _                                   => None
+          case ScenarioSubmitState.Failed(failure) => ErrorMessages.viewFailedLines(failure)
+          case _                                   => Nil
         },
         filter = s => s.matches("^[a-zA-Z0-9 _-]*$"),
         placeholderText = "scenario-name"

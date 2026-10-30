@@ -101,6 +101,26 @@ object ErrorMessages:
     case LocalProblem.FormInvalid(errors)      => errors.map(_.message).mkString("; ")
     case LocalProblem.NoActiveWorkspace        => NoActiveWorkspace
 
+  /** The lines a view shows for a failure, one per refusal when the failure is
+    * a refusal of fields, and otherwise the one sentence `viewFailed` gives.
+    * A view that lists refusals reads this, so no refusal is joined into
+    * another's sentence.
+    *
+    * {{{
+    * viewFailedLines(LocalProblem.FormInvalid(List(blankName, rootTaken)))
+    * // List(blankName.message, rootTaken.message)
+    * }}}
+    */
+  def viewFailedLines(failure: ViewFailure): List[String] = failure match
+    case LocalProblem.FormInvalid(errors) =>
+      errors.map(_.message).toList
+    case RequestFailure.Wire(WireError.RequestRejected(errors, _)) =>
+      errors.map(_.message).toList
+    case RequestFailure.Wire(WireError.ValidationRejected(_, RejectionDetail.Fields(errors), _)) =>
+      errors.map(_.message).toList
+    case other =>
+      List(viewFailed(other))
+
   /** The sentence for each case the server can answer with.
     *
     * The match is on the wire cases rather than on a status, so a new case is a
