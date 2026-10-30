@@ -2,8 +2,9 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All forty-one decisions, `EWB-D-1` to `EWB-D-41`, are ruled and
-recorded in §10. Nothing is open. Approval is in place: the token names this document and
+**Status.** All forty-three decisions, `EWB-D-1` to `EWB-D-43`, are ruled and
+recorded in §10. One mechanism under `EWB-D-43` is held for a ruling: how the
+tree submit stops sending its refusals to the banner, stated in step 5 of §15.8. Approval is in place: the token names this document and
 the file inventory exists beside it. Phases 1, 1a, 1b, 2, 2b, 2c and 3 have landed, and `EWB-D-27`'s
 projection change landed with them. What remains is Phase 3a, then Phase 3b, then
 Phases 4 to 7.
@@ -5421,6 +5422,91 @@ kind reporting by a different rule from every other, which is the state
 A second caller now exists, so §5.4 moves the three to `WireRefusal` and adds
 `refusedWith`. The shape of what they produce is unchanged.
 
+### EWB-D-42 — where a node form shows a refusal at `ErrorLocation.Whole` — RULED 2026-10-29
+
+**Ruled 2026-10-29: Option A. In both node forms, `ErrorLocation.Whole` maps to
+`Set(FormLevel)`.** Step 4 of §15.8 writes the arm. Step 5 carries the
+consequence stated under Option A's cost.
+
+**Goal.** Step 4 replaces every `case _ => None` arm with a named arm, so
+`Whole` needs a target in `inputsFor`. Every `Whole` a node form receives today
+comes from its own submit's topology check in `TreeBuilderLogic`. That check
+refuses with three sentences: "exactly one root required", "a leaf needs a
+portfolio parent" and "multiple roots found". Each is caused by the parent
+chosen in that form, and each shows on the form's own line today.
+
+**Option A — `Whole` maps to `FormLevel`** (ruled).
+
+*Pros:* after step 5 the topology refusals stay on the form's line, next to the
+parent field that caused them, which is where they appear today.
+*Cons:* in step 5 a server refusal at `Whole`, delivered into the open form's
+`serverErrors`, would also land on the form's line. Such a refusal is about the
+whole tree request and not about this node, so step 5 needs its own rule for a
+server refusal at `Whole`.
+
+**Option B — `Whole` maps to the empty set.**
+
+*Pros:* `Whole` means one thing in every form, no target of this form, and in
+step 5 it reaches the banner by the same rule as every other unclaimed refusal.
+*Cost:* from step 5 the topology refusals move from the form to the banner
+above the layout, away from the parent field the user has to change.
+
+*Concretely:* a user adds a second portfolio and chooses Root as its parent.
+Under A, "multiple roots found" appears in the portfolio form before and after
+step 5. Under B it appears in the form until step 5 and in the banner from
+step 5 on.
+
+**Trade-off.** One meaning for `Whole` across every form, against keeping a
+refusal beside the input that caused it. What settles it is that each of the
+three sentences is answered by changing this form's parent field.
+
+### EWB-D-43 — whether a tree submit's server refusal reaches a node form — RULED 2026-10-30
+
+**Ruled 2026-10-30: Option B. No server refusal is delivered into a node form.**
+Step 5 of §15.8 carries it, and §15.5a states the mechanism.
+
+**Goal.** Step 5 as first written delivered `GlobalError.ValidationFailed` into
+the open form. Two facts make that delivery wrong as written. The server names a
+node by its position in the request, `ErrorSubject.nodeAtIndex(collection, idx)`
+at `RiskTreeRequests.scala:155` and `:167`. The open form's subject is
+`DraftNode`, or the node's identifier in edit mode. `inputsFor` ignores the
+subject, so leaf 3's probability refusal would appear under leaf 1's
+probability input.
+
+**Option A — deliver by node.** `TreeBuilderState.toRequest` builds the request
+from `leavesVar` and `portfoliosVar` in list order, so a position can be turned
+back into a node. Only refusals about the open form's node go into that form,
+and a server refusal at `Whole` stays on the builder's line.
+*Pros:* a server refusal about a node's input appears under that input.
+*Cons:* it adds a translation from position to node, and it shows anything only
+when the refused node's form is the one open.
+
+**Option B — deliver nothing into the node forms** (ruled). A form's stored
+refusals are its own submit's: those of `toDraft` and those of the builder's
+topology check. The tree submit's server refusals stay on the builder's line,
+one line per refusal in place of the `"; "` join, and the banner stops
+repeating them. The banner renders `ValidationFailed` as a list for the
+refusals no view owns, such as the curve limit in `LECChartState.scala`.
+*Pros:* it is smaller, and it keeps each refusal with the view that made the
+request.
+*Cons:* the plan's aim of showing a server refusal under the input is dropped.
+
+*Concretely:* a user loads a tree, opens leaf "Outage" and submits the tree. The
+server refuses leaf 2's probability. Under A the sentence appears under the
+Probability input if leaf 2 is "Outage", and on the builder's line otherwise.
+Under B it appears once, as a line under the builder's submit button, and the
+banner stays empty.
+
+**Trade-off.** Placement under the input, against a translation that would
+rarely carry a refusal. What settles it is that the browser runs the same
+refinements as the server, pinned by step 4's agreement test, so the refusals
+the server adds are tree-wide ones that map to no input of a node form.
+
+**Held.** The ruling named the banner mechanism as `submitInto` passing
+`notifyObserver = false`. That flag also stops the banner showing an expired
+workspace and stops a successful submit clearing a stale banner, so the
+mechanism is held for a ruling. Step 5 states the proposed replacement.
+
 ---
 
 ## 11. ADR alignment
@@ -5432,7 +5518,7 @@ A second caller now exists, so §5.4 moves the three to `WireRefusal` and adds
 | ADR-036 (confidential internal identifiers) | `TreeNotInWorkspace`, `WorkspaceExpired`, the log line | Compliant. No wire case declares a `WorkspaceId`, so the output half holds structurally rather than by discipline. The input half is untouched. §6.2's log annotation is explicitly permitted: a confidential identifier may appear in a server log. |
 | ADR-022 (secret handling) | the three workspace errors | Compliant and unchanged. None carries a credential, so R1's `final class` rule has nothing to be violated at the container. |
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention, and in Phase 3a the browser's refinement entry points | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. Phase 3a strengthens ADR-001's "smart constructors are the only valid construction path" on the browser side: a form's live checks and its submission both read a located accessor, so the value a refinement sees was built where the field is declared rather than assembled at the call site. The refinements keep their `(value, location)` parameters and stay public, because the server supplies a location it derives by iterating a submitted collection, so on that side the entry point is enforced by convention exactly as it is today. No amendment is needed — the record already states the rule this makes true. |
-| ADR-019 (frontend component architecture) | `GlobalError`, `ErrorBanner`, and in Phase 3a the form states and the per-form mapping | Compliant, and Phase 3a closes a smell — **with one staleness in the record to rule on.** Decision 7's two tiers are unchanged, and Phase 3a's reading of them is what decides §15.5: a control and the form's own line are both the inline tier the owning view renders, so both are cases of the form's display enum, and the banner is the unowned tier, so it is not. Routing before rendering is what makes decision 7's "an error belongs to exactly one tier" true, because today a refusal about a field the open form owns is rendered in the banner by `ErrorBanner.scala:42-43` regardless — the mirror of the record's own "Duplicating a Per-View Error into the Global Banner" smell. The classifier's input type changes and a `NotFound` display case is added. **The staleness:** the record's "Validation via `.now()` on Submit" smell gives a GOOD example that calls `ValidationUtil.refineName(v)` with one argument. Phase 3 already made that two arguments, so the example has been wrong since Phase 3 landed; Phase 3a leaves that signature alone and so does not move it again. The record is an accepted ADR, so this plan does not edit it: the amendment is presented and waits. Separately, that smell's heading reads as banning a snapshot read on submit while its example is an imperative check; the located submit accessor of §15.4 reads a snapshot to compose a submission and performs no check, which is what `toDraft` already does at `RiskLeafFormState.scala:428-431`. Two further points of the record bear on §15.5a and both are satisfied: "Signals Down, Callbacks Up" forbids mutating a `Var` you do not own, which is what `routeErrors` does to the view's `submitError` and what the inversion removes; and the "Self-Correcting Reactive Var" smell is why the form's own derived checks are not written into `serverErrors` but combined with it at the point of reading. |
+| ADR-019 (frontend component architecture) | `GlobalError`, `ErrorBanner`, and in Phase 3a the form states and the per-form mapping | Compliant, and Phase 3a closes a smell — **with one staleness in the record to rule on.** Decision 7's two tiers are unchanged, and Phase 3a's reading of them is what decides §15.5: a control and the form's own line are both the inline tier the owning view renders, so both are cases of the form's display enum, and the banner is the unowned tier, so it is not. Routing before rendering is what makes decision 7's "an error belongs to exactly one tier" true, because today a refusal about a field the open form owns is rendered in the banner by `ErrorBanner.scala:42-43` regardless — the mirror of the record's own "Duplicating a Per-View Error into the Global Banner" smell. The classifier's input type changes and a `NotFound` display case is added. **The staleness:** the record's "Validation via `.now()` on Submit" smell gives a GOOD example that calls `ValidationUtil.refineName(v)` with one argument. Phase 3 already made that two arguments, so the example has been wrong since Phase 3 landed; Phase 3a leaves that signature alone and so does not move it again. The record is an accepted ADR, so this plan does not edit it: the amendment is presented and waits. Separately, that smell's heading reads as banning a snapshot read on submit while its example is an imperative check; the located submit accessor of §15.4 reads a snapshot to compose a submission and performs no check, which is what `toDraft` already does at `RiskLeafFormState.scala:428-431`. Two further points of the record bear on §15.5a and both are satisfied: "Signals Down, Callbacks Up" forbids mutating a `Var` you do not own, which is what `routeErrors` does to the view's `submitError` and what the inversion removes; and the "Self-Correcting Reactive Var" smell is why the form's own derived checks are not written into `submitErrors` but combined with it at the point of reading. |
 | ADR-028 (vague quantifier query pane) | `QueryProblem` | Compliant. The engine's rendered messages still reach the pane. `FolModelValidationFailure` and `FolEvaluationFailure` stop reaching it, which matches the ADR's own description of them as wiring faults rather than query errors. |
 | ADR-039 (trust-boundary ingress validation) | the Irmin and Postgres borders, the ingress rejection type | **Currently violated, fixed in Phase 7.** The record states that a value entering process memory from outside is refined at the border and that an ingress rejection is a typed failure distinct from a transport fault. Today `handleIrmin` collapses seven typed Irmin cases into `RepositoryFailure(String)`, the repository's four stored-value decoders interpolate an accumulated `ValidationError` list into a sentence, and `WorkspaceStorePostgres` recovers a branch from that sentence with `reason.contains`. Phase 7 closes all three and records the one exemption the record requires, on the branch listing. No amendment to the record is needed: it was written against these findings. |
 | ADR-002 (observability) | the correlation identifier, the failure log line | **Currently violated, fixed here, and the record is amended.** A correlation identifier that never reaches a client cannot correlate anything; `EWB-D-8` decides the fix. The resolve-failure line annotated a redacted constant and so identified no workspace; `EWB-D-26` replaces it with one line per failed request, written where the trace is in scope, so every line carries the identifier the response carries. **The amendment:** the record's code-smell section demands differentiated log levels, which `EWB-D-26` satisfies by origin, but its one example put a validation failure at `logWarning`. That example now shows a caller-caused failure at `logInfo`. The section's decision is unchanged and binds more concretely than before. |
@@ -5830,12 +5916,12 @@ selection. Those are the assertions that fail against today's
 `unrouted.headOption` at `FormSubmitUtil.scala:35` and today's
 `Map[F, String]` at `FormState.scala:31`, both of which this phase deletes.
 
-**A server refusal reaches the control, not the banner.** The test posts a leaf
-whose probability the browser's check would have caught, takes the server's
-`ValidationRejected` through `GlobalError` and the form's mapping, and asserts
-the probability control holds the message and the banner is empty. This is the
-consumer §15.1 shows was never built, so it is the regression test for the whole
-phase.
+**A stale stored refusal goes when its input is edited.** The test stores a
+refusal at `DraftNode.Name` and one at `LossRange`, then calls `clearFor(Name)`
+and asserts the name refusal is gone and the pair refusal stays under both bound
+inputs. A `clearFor(MinLoss)` then removes the pair refusal from both. The
+display gate is asserted as well: a stored refusal is not selected for an input
+until the input is touched or the form submitted.
 
 **Every phase.** All four tiers green: `commonJVM/test`, `server/test`,
 `app/test`, `serverIt/test`. Leaked Docker containers, networks and volumes
@@ -5929,7 +6015,7 @@ helper, `RiskLeafFormState.scala:135` and `RiskLeafFormState.scala:441`. The
 sixth, `IronTapirCodecs.scala:275`, passes `codecLocation` instead, which is
 correct for a codec and is the reason a single rule cannot hard-code one
 location. Nothing relates the function to the field name, so any of those six
-could name any of `FieldName`'s forty-eight cases and compile.
+could name any of `FieldName`'s fifty cases and compile.
 
 **What this phase does about it, and what it leaves.** The two browser sites
 collapse into one declaration in the form state's located accessor, so the
@@ -6280,6 +6366,12 @@ target of this form.** The banner is where that goes, which is what decision 7
 already says it is for. Every `case _ => None` arm in both mappings becomes an
 explicit arm returning a named set, and what remains empty is empty by decision.
 
+`ErrorLocation.Whole` is one of those arms, and `EWB-D-42` rules it to
+`Set(FormLevel)` in both node forms. Every `Whole` a node form receives comes
+from its own submit's topology check, and each of that check's three refusals is
+answered by changing this form's parent field. So the refusal belongs on the
+form's own line.
+
 What the empty set does **not** mean is "the banner". It means no target of
 *this* form, and which surface then renders the refusal depends on which view
 issued the request. `TreeBuilderView` owns the tree submit and renders its
@@ -6325,63 +6417,101 @@ pushed into:
         errorSignal = state.probabilityError,
 ```
 
-`RiskLeafFormView.scala:287`. So the form holds the refusals that arrived and
-each reader selects its own:
+`RiskLeafFormView.scala:287`. So each node-form state holds the refusals of its
+own last submit, and each reader selects its own. The members below are written
+for `RiskLeafFormState`. `PortfolioFormState` has the same members over
+`PortfolioField`. They sit in the two node-form states and not in `FormState`,
+because `TreeBuilderState` also extends `FormState` and has no refusal mapping.
 
 ```scala
-  /** Refusals that arrived from the server. The form's own checks are not held
-    * here: they are derived from the input `Var`s, and writing a derived value
-    * back into a `Var` is the self-correcting-reactive-`Var` defect ADR-019
-    * names. */
-  private val serverErrors: Var[List[ValidationError]] = Var(Nil)
+  /** Refusals of this form's last submit that its own live checks do not
+    * produce: those of `toDraft` and of the builder's topology check. The live
+    * checks are not held here: they are derived from the input `Var`s, and
+    * writing a derived value back into a `Var` is the self-correcting
+    * reactive `Var` defect ADR-019 names. */
+  private val submitErrors: Var[List[ValidationError]] = Var(Nil)
 
-  /** Every refusal for one input: this form's own check first, then the
-    * server's for the same input. A refusal whose location names several
-    * controls is selected by each of them, which is how a constraint over a
+  /** Store a submit's refusals, replacing the previous submit's. */
+  def setSubmitErrors(errors: List[ValidationError]): Unit
+
+  /** Drop the stored refusals naming this input, because the user edited it.
+    * A pair refusal drops from both its inputs, since editing either one can
+    * satisfy the rule. The refusals on the form's own line drop on any edit,
+    * because they are about the inputs together. */
+  def clearFor(field: RiskLeafField): Unit
+
+  /** Every refusal for one input, shown once the input is touched or the form
+    * submitted: this form's own check while it refuses, otherwise the stored
+    * refusals naming this input. A refusal whose location names several
+    * inputs is selected by each of them, which is how a constraint over a
     * pair of inputs appears under both. */
-  def errorsFor(field: RiskLeafField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]] =
-    live.combineWith(serverErrors.signal).map { (own, fromServer) =>
-      own.toList ++ fromServer.filter(e => inputsFor(e.location).contains(field))
-    }
+  def errorsFor(field: RiskLeafField, live: Signal[Option[ValidationError]]): Signal[List[ValidationError]]
 
-  /** The server's refusals no input of this form claimed. */
-  def unclaimed: Signal[List[ValidationError]] =
-    serverErrors.signal.map(_.filter(e => inputsFor(e.location).isEmpty))
+  /** The stored refusals no target of this form claims. */
+  def unclaimed: Signal[List[ValidationError]]
 ```
 
-`inputsFor` is consulted in those two methods and nowhere else, which is what
-makes the mapping central: a control passes its own display key, and the
-translation from the shared vocabulary happens inside `errorsFor`. `unclaimed`
-is only expressible this way — asking whether any input claimed a location needs
-the whole mapping in one place.
+The mapping moves with them. Step 4 placed `inputsFor` in the views as
+`private[views]`, and a form state in `app.state` cannot call it. So each
+mapping moves, with its `noTarget`, into the companion of its form state,
+unchanged in body:
 
-The two call shapes are unchanged by the set-valued result: `contains` tests
+```scala
+object RiskLeafFormState:
+  private[app] def inputsFor(location: ErrorLocation): Set[RiskLeafField]
+
+object PortfolioFormState:
+  private[app] def inputsFor(location: ErrorLocation): Set[PortfolioField]
+```
+
+`inputsFor` is consulted in `errorsFor`, `unclaimed` and `clearFor` and nowhere
+else, which is what makes the mapping central. A control passes its own display
+key, and the translation from the shared vocabulary happens inside the state.
+`unclaimed` is only expressible this way, because asking whether any input
+claimed a location needs the whole mapping in one place.
+
+The call shapes are unchanged by the set-valued result. `contains` tests
 membership of a set as readily as of an `Option`, and `isEmpty` is true of the
 empty set as it was of `None`. What changes is that `contains` can now be true
 for two different `field` arguments on the same refusal, which is the behaviour
 `EWB-D-39` preserves.
 
+**The display signals carry a list.** `errorsFor` returns every selected
+refusal, so the input components take every message.
+`FormInputs.textInput`, `textAreaInput` and `parentSelect` take
+`errorSignal: Signal[List[String]]` and render one line per message. The two
+callers outside the node forms, in `BranchBar.scala` and `TreeBuilderView.scala`,
+hold at most one message and pass it as a list. Each form's own line renders
+`errorsFor(FormLevel, Val(None))` followed by `unclaimed`, which keeps today's
+rule that a refusal naming no input shows on the form's line.
+
 **What this deletes.** `FormSubmitUtil.scala` holds one object with one method,
 so the file goes with `routeErrors`. `submitFieldErrors`, `setSubmitFieldError`,
 `clearSubmitFieldError` and `withSubmitErrors` go from `FormState.scala`. The
-seven `clearSubmitFieldError` calls in `RiskLeafFormView.scala` go: a stale
-server refusal is cleared by `serverErrors.set(Nil)` on the next submit, and a
-refusal about a field the user has since edited is filtered by the field's own
-live check taking priority in `errorsFor`.
+view's `submitError` `Var` goes from both node-form views. The seven
+`clearSubmitFieldError` calls in `RiskLeafFormView.scala` become `clearFor` calls,
+and so do the two in `PortfolioFormView.scala`. They stay because an edit that
+makes a field valid produces no live refusal, so without them a stale stored
+refusal would stay under a valid input until the next submit. A user who adds a
+leaf named "Fraud" beside an existing "Fraud" sees the duplicate-name refusal
+under Name. Renaming the leaf to "Fraud-2" calls `clearFor(Name)`, and the
+refusal goes.
 
 All three discards go with the push. Nothing is stored per key, so nothing
-overwrites; nothing is filtered away, so no `headOption`; the banner selects
-rather than receives, so no `mkString` at `ErrorBanner.scala:42-43`. And the
-ownership violation goes, because the form writes only its own `Var` — no bus is
-needed, since the thing a bus would have fixed was the `Var` being passed out.
+overwrites. Nothing is filtered away, so no `headOption`. And the ownership
+violation goes, because the form writes only its own `Var`. No bus is needed,
+since the thing a bus would have fixed was the `Var` being passed out.
 
-`shouldShowError(field)` still gates `errorsFor`, so the blur-and-submit display
-timing is unchanged, and the priority rule — the form's own check shown before
-the server's — carries over from `withSubmitErrors` at `FormState.scala:62-67`.
+`shouldShowError(field)` gates `errorsFor`, so the blur-and-submit display
+timing is unchanged. The priority rule, the form's own check shown before the
+stored refusals, carries over from `withSubmitErrors` at `FormState.scala:62-67`.
 
-`GlobalError.ValidationFailed` is delivered into the open form's `serverErrors`
-rather than flattened in `ErrorBanner`, and the banner renders `unclaimed` as a
-list.
+**No server refusal is delivered into a node form** (`EWB-D-43`). The node
+forms' refusals all come from the browser. The tree submit's server refusals
+stay on the builder's line under the submit button, one line per refusal in
+place of the `"; "` join of `ErrorMessages.viewFailed`. `ErrorBanner` renders
+`GlobalError.ValidationFailed` as one line per refusal, for the refusals no view
+owns.
 
 ### 15.6 The per-form display enum stays
 
@@ -6400,7 +6530,7 @@ names a constraint over the pair, and the form renders it under the minimum and
 the maximum both. So the mapping is many-to-many, and neither vocabulary can be
 derived from the other.
 
-And `FieldName` has forty-eight cases while the leaf form renders eight.
+And `FieldName` has fifty cases while the leaf form has nine display targets.
 `FormState[F]` keyed on the form's own enum is what stops `markTouched` being
 handed a field the form has no control for.
 
@@ -6472,14 +6602,24 @@ outside `modules/app`.
    `Set` result; `LossRange` maps to `Set(MinLoss, MaxLoss)` and
    `PercentileQuantilePairing` to `Set(Percentiles, Quantiles)`; every
    `case _ => None` arm is replaced by a named arm returning a named set.
-   `FormState`'s type parameter is renamed from `F` to `Field` in the same pass.
-5. **The push inverted to a pull.** `serverErrors`, `errorsFor` and `unclaimed`
-   in both form states; `FormSubmitUtil.scala` deleted; `submitFieldErrors`,
-   `setSubmitFieldError`, `clearSubmitFieldError` and `withSubmitErrors` deleted
-   from `FormState.scala`; the seven `clearSubmitFieldError` call sites in
-   `RiskLeafFormView.scala` removed. `GlobalError.ValidationFailed` is delivered
-   into the open form's `serverErrors`, and `ErrorBanner` renders `unclaimed` as
-   a list.
+   `ErrorLocation.Whole` maps to `Set(FormLevel)` in both node forms
+   (`EWB-D-42`). `FormState`'s type parameter is renamed from `F` to `Field` in
+   the same pass.
+5. **The push inverted to a pull.** `submitErrors`, `setSubmitErrors`,
+   `clearFor`, `errorsFor` and `unclaimed` in both node-form states, and each
+   `inputsFor` moved into its form state's companion; `FormSubmitUtil.scala`
+   deleted; `submitFieldErrors`, `setSubmitFieldError`, `clearSubmitFieldError`
+   and `withSubmitErrors` deleted from `FormState.scala`; the nine
+   `clearSubmitFieldError` call sites in the two node-form views become `clearFor`
+   calls; the input components take `Signal[List[String]]`. No server refusal is
+   delivered into a node form (`EWB-D-43`). The builder's line renders the tree
+   submit's refusals one per line, and `ErrorBanner` renders
+   `GlobalError.ValidationFailed` one per line. **Held for a ruling:** how the
+   banner stops repeating the tree submit's refusals. The proposed mechanism is
+   that `submitInto` withholds from the global observer a failure that
+   `GlobalError.from` classifies as `ValidationFailed`, and passes every other
+   failure and every success to it as today. An expired workspace then still
+   reaches the banner, and a successful submit still clears a stale one.
 
 Steps 1 and 2 each add something nothing reads yet, so each is reviewable alone.
 Steps 3 to 5 are sequential because each depends on the one before: the accessors
