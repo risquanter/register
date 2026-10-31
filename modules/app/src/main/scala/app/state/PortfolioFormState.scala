@@ -16,6 +16,16 @@ enum PortfolioField:
     * rather than about one of them. */
   case FormLevel
 
+object PortfolioField:
+  /** The label an input carries, and the name a summary entry gives it. */
+  def label(field: PortfolioField): String = field match
+    case Name      => "Portfolio Name"
+    case Parent    => ParentSelection.Label
+    case FormLevel => "This portfolio"
+
+  /** The element id of the input, unique on the page. */
+  def inputId(field: PortfolioField): String = s"portfolio-${field.toString.toLowerCase}"
+
 /**
  * Reactive form state for creating a portfolio.
  * Validates name eagerly (Iron SafeName) and exposes parent selection as a ParentSelection.
@@ -80,6 +90,10 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] =
     List(nameErrorRaw, parentErrorRaw).map(_.map(_.map(_.message)))
+
+  /** The inputs in the order `PortfolioFormView` renders them. */
+  override protected def displayed: List[(PortfolioField, Signal[List[String]])] =
+    List(Name -> nameError, Parent -> parentError)
 
   /** Build validated inputs for submission. `Unset` fails validation exactly
     * like an empty name would — there is no silent default to fall back to.

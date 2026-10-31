@@ -234,7 +234,8 @@ object PortfolioFormView:
       isDirty --> builderState.portfolioFormDirtyVar.writer,
 
       FormInputs.textInput(
-        labelText = "Portfolio Name",
+        labelText = PortfolioField.label(PortfolioField.Name),
+        inputId = PortfolioField.inputId(PortfolioField.Name),
         valueVar = form.nameVar,
         errorSignal = form.nameError,
         onBlurCallback = () => form.markTouched(PortfolioField.Name),
@@ -243,7 +244,7 @@ object PortfolioFormView:
         disabledSignal = isDisabled,
         lockedSignal = showLockIcon
       ),
-      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isDisabled, form.parentError, showLockIcon),
+      FormInputs.parentSelect(PortfolioField.inputId(PortfolioField.Parent), form.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isDisabled, form.parentError, showLockIcon),
 
       // Add/Submit, Clear Form, Edit/Save — right-aligned as a group, Clear Form
       // immediately right of Add/Submit.
@@ -269,9 +270,10 @@ object PortfolioFormView:
           onClickCallback = () => onEditSaveClick()
         )
       ),
-      // The form's own line: the builder's topology check of this submit, then
-      // any refusal no input of this form claims.
-      FormInputs.crossFieldError(form.formLevelError)
+      // Every refusal the form shows, input by input, then the form's own line:
+      // the builder's topology check of this submit and any refusal no input
+      // of this form claims.
+      FormInputs.summaryList(form.summary, PortfolioField.label, PortfolioField.inputId)
       )
     )
 

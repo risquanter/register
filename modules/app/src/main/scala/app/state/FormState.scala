@@ -179,6 +179,15 @@ trait SubmitRefusals[Field] extends FormState[Field]:
   lazy val formLevelError: Signal[List[String]] =
     messagesOf(errorsFor(formLine, Val(None)).combineWith(unclaimed).map(_ ++ _))
 
+  /** Each input this form renders, in display order, with what it shows. */
+  protected def displayed: List[(Field, Signal[List[String]])]
+
+  /** Every refusal the form shows now, input by input, then its own line. */
+  lazy val summary: Signal[List[SummaryEntry[Field]]] =
+    Signal.combineSeq(displayed.map((field, messages) => messages.map(field -> _)))
+      .combineWith(formLevelError)
+      .map((perInput, line) => SubmitRefusals.summaryOf(perInput.toList, line))
+
 /** The rules a form with a refusal store applies to the refusals of its last
   * submit, over the form's own mapping from a location to its targets. */
 object SubmitRefusals:
@@ -215,4 +224,24 @@ object SubmitRefusals:
   )(error: ValidationError): Boolean =
     val targets = inputsFor(error.location)
     targets.isEmpty || targets.contains(field) || targets.contains(formLine)
+
+  /** The summary of what a form shows, a sentence shown under two inputs listed
+    * once under the first.
+    * {{{
+    * summaryOf(List(MinLoss -> List("min under max"), MaxLoss -> List("min under max")), Nil)
+    * // List(SummaryEntry(Some(MinLoss), "min under max"))
+    * }}} */
+  def summaryOf[Field](
+    perInput: List[(Field, List[String])],
+    line:     List[String]
+  ): List[SummaryEntry[Field]] =
+    perInput
+      .flatMap((field, messages) => messages.map(field -> _))
+      .distinctBy((_, message) => message)
+      .map((field, message) => SummaryEntry(Some(field), message)) ++
+      line.map(SummaryEntry(None, _))
+
+/** One refusal in a form's summary list: the sentence and the input it is
+  * shown under, or none for the form's own line. */
+final case class SummaryEntry[Field](field: Option[Field], message: String)
 

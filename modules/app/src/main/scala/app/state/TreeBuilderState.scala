@@ -27,6 +27,15 @@ final case class LeafDraft(
 enum TreeBuilderField:
   case TreeName
 
+object TreeBuilderField:
+  /** The label an input carries, and the name a summary entry gives it. */
+  def label(field: TreeBuilderField): String = field match
+    case TreeName => "Tree Name"
+
+  /** The element id of the input, unique on the page. */
+  def inputId(field: TreeBuilderField): String = field match
+    case TreeName => "tree-name"
+
 /**
  * Builder state for constructing a risk tree on the client.
  * Performs client-side validation aligned with backend rules (no ID generation).
@@ -146,6 +155,15 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
         topologyOf(portfolios, leaves) match
           case Validation.Failure(_, errors) => errors.toList.map(_.message)
           case Validation.Success(_, _)      => Nil
+    }
+
+  /** The builder's summary: the tree name's refusal, then the tree's topology
+    * problems. A failed request's lines are added by the view, which owns the
+    * submit state. */
+  val summary: Signal[List[SummaryEntry[TreeBuilderField]]] =
+    treeNameError.combineWith(topologyError).map { (name, topology) =>
+      name.map(SummaryEntry(Some(TreeBuilderField.TreeName), _)).toList ++
+        topology.map(SummaryEntry(None, _))
     }
 
   /** Fires on every edit of the tree's draft: its name or its nodes. */

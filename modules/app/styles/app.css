@@ -1788,8 +1788,48 @@ select.form-input:has(option[value=""]:checked) {
   margin-bottom: var(--sp-1);
 }
 
-.cross-field-error {
-  margin-bottom: var(--sp-4);
+/* A form's summary list (FormInputs.summaryList), under its submit button:
+   every refusal the form shows. The heading with the count stays outside the
+   scrolled body, so it stays visible. */
+.summary-list {
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  color: var(--error);
+  background-color: var(--error-surface);
+  border: 1px solid var(--error);
+}
+
+.summary-list-heading {
+  font-weight: 600;
+  margin-bottom: var(--sp-2);
+}
+
+.summary-list-body {
+  max-height: calc(12 * 1.5em);   /* twelve lines, chosen by this project */
+  overflow-y: auto;
+  line-height: 1.5em;
+}
+
+.summary-list-entry {
+  display: block;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+}
+
+button.summary-list-entry {
+  cursor: pointer;
+}
+
+button.summary-list-entry:hover {
+  text-decoration: underline;
 }
 
 /* =============================================
@@ -2027,9 +2067,12 @@ select.form-input:has(option[value=""]:checked) {
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   font-family: var(--font-sans);
-  color: var(--foreground-variant);
-  background-color: var(--surface-raised);
-  border: 1px solid var(--border-focus);
+  /* Information colours: the box lists what is still required, one sentence
+     per line, and is not an error. The tint is laid over the raised surface,
+     because the tint alone is translucent and the box sits over the form. */
+  color: var(--info);
+  background: linear-gradient(var(--info-surface), var(--info-surface)), var(--surface-raised);
+  border: 1px solid var(--info);
   pointer-events: none;
 }
 

@@ -1,7 +1,8 @@
 package app.components
 
 import com.raquo.laminar.api.L.*
-import app.state.ParentSelection
+import org.scalajs.dom
+import app.state.{ParentSelection, SummaryEntry}
 
 /**
  * Reusable form input components with:
@@ -15,6 +16,8 @@ object FormInputs:
    * Text input with filtering and error display.
    * 
    * @param labelText Label shown above the input
+   * @param inputId Element id of the input, which its label names and a
+   *                summary entry focuses
    * @param valueVar Var to bind the input value
    * @param errorSignal Every message the input shows, one line each (empty = valid)
    * @param filter Function to filter allowed input characters
@@ -26,6 +29,7 @@ object FormInputs:
    */
   def textInput(
     labelText: String,
+    inputId: String,
     valueVar: Var[String],
     errorSignal: Signal[List[String]],
     filter: String => Boolean = _ => true,
@@ -42,8 +46,9 @@ object FormInputs:
   ): HtmlElement =
     div(
       cls := "form-field",
-      label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, labelText),
+      label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, forId := inputId, labelText),
       input(
+        idAttr := inputId,
         typ := "text",
         inputMode := inputModeAttr,
         cls <-- errorSignal.map {
@@ -207,14 +212,53 @@ object FormInputs:
       option(value := key, disabled <-- disabledValues.map(_.contains(key)), initial._2)
     }
 
-  /**
-   * A form's own line: the refusals not tied to one input, one per line.
-   */
-  def crossFieldError(errorSignal: Signal[List[String]]): HtmlElement =
+  /** A form's summary list, rendered under its submit button. Empty renders
+    * nothing. An entry naming an input is a button that focuses it; an entry on
+    * the form's own line is plain text. */
+  def summaryList[Field](
+    entries: Signal[List[SummaryEntry[Field]]],
+    label: Field => String,
+    inputId: Field => String
+  ): HtmlElement =
     div(
-      cls := "cross-field-error",
-      children <-- errorSignal.map(_.map(msg => div(cls := "form-error", msg)))
+      child.maybe <-- entries.map {
+        case Nil  => None
+        case list =>
+          Some(div(
+            cls := "summary-list",
+            role := "alert",
+            div(cls := "summary-list-heading", summaryHeading(list.size)),
+            div(cls := "summary-list-body", list.map(summaryEntry(_, label, inputId)))
+          ))
+      }
     )
+
+  def summaryHeading(count: Int): String = count match
+    case 1 => "1 problem to fix"
+    case n => s"$n problems to fix"
+
+  /** One entry: `"<label>: <sentence>"` as a button that focuses the input when
+    * that input is on the page, or the sentence alone on the form's own line. */
+  private def summaryEntry[Field](
+    entry: SummaryEntry[Field],
+    label: Field => String,
+    inputId: Field => String
+  ): HtmlElement =
+    entry.field match
+      case Some(field) =>
+        button(
+          typ := "button",
+          cls := "summary-list-entry",
+          s"${label(field)}: ${entry.message}",
+          onClick --> (_ =>
+            Option(dom.document.getElementById(inputId(field))).foreach {
+              case element: dom.HTMLElement => element.focus()
+              case _                        => ()
+            }
+          )
+        )
+      case None =>
+        div(cls := "summary-list-entry", entry.message)
 
   /**
    * Dropdown for selecting a parent node.
@@ -251,6 +295,8 @@ object FormInputs:
    * `Unset`. `existingNames` changes only on a real add, rename or remove,
    * never on a target switch.
    *
+   * @param inputId Element id of the dropdown, which its label names and a
+   *   summary entry focuses.
    * @param parentVar Var holding the current selection.
    * @param options Signal of available parent names (may include rootLabel)
    * @param rootLabel Sentinel string representing the root (e.g., "(root)")
@@ -261,6 +307,7 @@ object FormInputs:
    *   mirroring `disabledSignal`.
    */
   def parentSelect(
+    inputId: String,
     parentVar: Var[ParentSelection],
     options: Signal[List[String]],
     rootLabel: String,
@@ -287,8 +334,9 @@ object FormInputs:
 
     div(
       cls := "form-field",
-      label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, "Parent Portfolio"),
+      label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, forId := inputId, ParentSelection.Label),
       select(
+        idAttr := inputId,
         cls := "form-input",
         cls("error") <-- errorSignal.map(_.nonEmpty),
         disabled <-- disabledSignal,

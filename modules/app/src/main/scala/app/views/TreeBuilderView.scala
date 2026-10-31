@@ -1,9 +1,9 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
-import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState, DistributionChartState, ScenarioState}
-import app.components.{FailureNotice, FormInputs}
+import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, SummaryEntry, WorkspaceState, DistributionChartState, ScenarioState}
+import app.components.FormInputs
 import app.components.ConfirmGuard.proceedOrConfirm
 import app.core.LocalProblem
 import app.core.ZJS.*
@@ -58,17 +58,18 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
         treeViewState.selectTree(response.id)
 
     // A local refusal is not stored: `triggerValidation` has already run, so
-    // the tree-name input and the topology line show what the submit refused,
+    // the tree-name input and the summary list show what the submit refused,
     // each derived from the builder's current state.
     def validationFailed(): Unit =
       submitState.set(SubmitState.Idle)
 
-    // The builder's line: the tree's current topology problems, then a failed
-    // request's lines. Rendered only while there is at least one.
-    val lineErrors: Signal[List[String]] =
-      state.topologyError.combineWith(submitState.signal).map {
-        case (topology, SubmitState.Failed(failure)) => topology ++ ErrorMessages.viewFailedLines(failure)
-        case (topology, _)                           => topology
+    // The builder's summary: the tree name's refusal and the tree's topology
+    // problems, then a failed request's lines.
+    val summary: Signal[List[SummaryEntry[TreeBuilderField]]] =
+      state.summary.combineWith(submitState.signal).map {
+        case (entries, SubmitState.Failed(failure)) =>
+          entries ++ ErrorMessages.viewFailedLines(failure).map(SummaryEntry(None, _))
+        case (entries, _) => entries
       }
 
     // `toRequest`/`toUpdateRequest` only ever read `portfoliosVar`/`leavesVar` —
@@ -141,7 +142,8 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
       },
 
       FormInputs.textInput(
-        labelText = "Tree Name",
+        labelText = TreeBuilderField.label(TreeBuilderField.TreeName),
+        inputId = TreeBuilderField.inputId(TreeBuilderField.TreeName),
         valueVar = state.treeNameVar,
         errorSignal = state.treeNameError.map(_.toList),
         onBlurCallback = () => state.markTouched(TreeBuilderField.TreeName),
@@ -171,9 +173,6 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
           ))
         case (SubmitState.Failed(_), _)   => None
       },
-      child.maybe <-- lineErrors.map {
-        case Nil   => None
-        case lines => Some(FailureNotice.lines(lines, None))
-      }
+      FormInputs.summaryList(summary, TreeBuilderField.label, TreeBuilderField.inputId)
     )
 

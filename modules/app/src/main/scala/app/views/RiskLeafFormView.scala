@@ -258,7 +258,8 @@ object RiskLeafFormView:
 
       // Common Fields
       textInput(
-        labelText = "Name",
+        labelText = RiskLeafField.label(RiskLeafField.Name),
+        inputId = RiskLeafField.inputId(RiskLeafField.Name),
         valueVar = state.nameVar,
         errorSignal = state.nameError,
         filter = state.nameFilter,
@@ -269,7 +270,8 @@ object RiskLeafFormView:
       ),
 
       textInput(
-        labelText = "Probability",
+        labelText = RiskLeafField.label(RiskLeafField.Probability),
+        inputId = RiskLeafField.inputId(RiskLeafField.Probability),
         valueVar = state.probabilityVar,
         errorSignal = state.probabilityError,
         filter = state.probabilityFilter,
@@ -293,7 +295,7 @@ object RiskLeafFormView:
       ),
 
       // Parent selection
-      parentSelect(state.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isDisabled, state.parentError, showLockIcon),
+      parentSelect(RiskLeafField.inputId(RiskLeafField.Parent), state.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isDisabled, state.parentError, showLockIcon),
 
       // Conditional Fields based on mode. Only `distributionModeVar` triggers a
       // subtree rebuild here — `isDisabled`/`showLockIcon` are threaded through
@@ -338,9 +340,10 @@ object RiskLeafFormView:
           onClickCallback = () => onEditSaveClick()
         )
       ),
-      // The form's own line: the builder's topology check of this submit, then
-      // any refusal no input of this form claims.
-      crossFieldError(state.formLevelError)
+      // Every refusal the form shows, input by input, then the form's own line:
+      // the builder's topology check of this submit and any refusal no input
+      // of this form claims.
+      summaryList(state.summary, RiskLeafField.label, RiskLeafField.inputId)
       )
     )
 
@@ -351,7 +354,8 @@ object RiskLeafFormView:
       div(cls := "mode-fields-title", "Metalog Parameters"),
 
       textInput(
-        labelText = "Percentiles",
+        labelText = RiskLeafField.label(RiskLeafField.Percentiles),
+        inputId = RiskLeafField.inputId(RiskLeafField.Percentiles),
         valueVar = state.percentilesVar,
         errorSignal = state.percentilesError,
         filter = state.percentilesFilter,
@@ -363,7 +367,8 @@ object RiskLeafFormView:
       ),
 
       textInput(
-        labelText = "Quantiles (loss in $M)",
+        labelText = RiskLeafField.label(RiskLeafField.Quantiles),
+        inputId = RiskLeafField.inputId(RiskLeafField.Quantiles),
         valueVar = state.quantilesVar,
         errorSignal = state.quantilesError,
         filter = state.quantilesFilter,
@@ -380,7 +385,8 @@ object RiskLeafFormView:
       }),
 
       textInput(
-        labelText = "Terms (optional)",
+        labelText = RiskLeafField.label(RiskLeafField.Terms),
+        inputId = RiskLeafField.inputId(RiskLeafField.Terms),
         valueVar = state.termsVar,
         errorSignal = state.termsError,
         filter = state.lossFilter,
@@ -399,7 +405,8 @@ object RiskLeafFormView:
       div(cls := "mode-fields-title", "Lognormal Parameters (90% CI)"),
 
       textInput(
-        labelText = "Minimum Loss",
+        labelText = RiskLeafField.label(RiskLeafField.MinLoss),
+        inputId = RiskLeafField.inputId(RiskLeafField.MinLoss),
         valueVar = state.minLossVar,
         errorSignal = state.minLossError,
         filter = state.lossFilter,
@@ -411,7 +418,8 @@ object RiskLeafFormView:
       ),
 
       textInput(
-        labelText = "Maximum Loss",
+        labelText = RiskLeafField.label(RiskLeafField.MaxLoss),
+        inputId = RiskLeafField.inputId(RiskLeafField.MaxLoss),
         valueVar = state.maxLossVar,
         errorSignal = state.maxLossError,
         filter = state.lossFilter,

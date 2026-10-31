@@ -6,7 +6,7 @@ import zio.prelude.Validation
 import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
-import app.state.{DistributionMode, ParentSelection, PortfolioField, PortfolioFormState, RiskLeafField, RiskLeafFormState}
+import app.state.{DistributionMode, ParentSelection, PortfolioField, PortfolioFormState, RiskLeafField, RiskLeafFormState, SubmitRefusals, SummaryEntry}
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, RequestHeaderName, SubmittedCollection, ValidationError, ValidationErrorCode
@@ -348,6 +348,58 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
           server == List(ErrorLocation.Field(
             ErrorSubject.nodeAtIndex(SubmittedCollection.Leaves, 0), FieldName.Probability
           ))
+        )
+      }
+    ),
+
+    suite("the summary list")(
+      test("lists a pair refusal once, under the first of its inputs") {
+        val summary = SubmitRefusals.summaryOf(
+          List(RiskLeafField.MinLoss -> List("min under max"), RiskLeafField.MaxLoss -> List("min under max")),
+          Nil
+        )
+        assertTrue(summary == List(SummaryEntry(Some(RiskLeafField.MinLoss), "min under max")))
+      },
+      test("keeps the inputs' order and puts the form's own line last") {
+        val summary = SubmitRefusals.summaryOf(
+          List(RiskLeafField.Name -> List("name taken"), RiskLeafField.Probability -> List("too high", "not a number")),
+          List("two roots")
+        )
+        assertTrue(summary == List(
+          SummaryEntry(Some(RiskLeafField.Name), "name taken"),
+          SummaryEntry(Some(RiskLeafField.Probability), "too high"),
+          SummaryEntry(Some(RiskLeafField.Probability), "not a number"),
+          SummaryEntry(None, "two roots")
+        ))
+      },
+      test("a leaf form's summary is empty before a submit") {
+        val state = new RiskLeafFormState
+        assertTrue(current(state.summary).isEmpty)
+      },
+      test("a leaf form's summary matches what its inputs show after a submit") {
+        val state = new RiskLeafFormState
+        state.distributionModeVar.set(DistributionMode.Lognormal)
+        state.minLossVar.set("1000")
+        state.maxLossVar.set("50000")
+        state.triggerValidation()
+        state.setSubmitErrors(List(
+          refusal(draft(FieldName.LossRange), "range refused"),
+          refusal(ErrorLocation.Whole, "two roots")
+        ))
+        val expected =
+          current(state.nameError).map(SummaryEntry(Some(RiskLeafField.Name), _)) ++
+          current(state.probabilityError).map(SummaryEntry(Some(RiskLeafField.Probability), _)) ++
+          List(
+            SummaryEntry(Some(RiskLeafField.MinLoss), "range refused"),
+            SummaryEntry(None, "two roots")
+          )
+        assertTrue(current(state.summary) == expected, current(state.nameError).nonEmpty)
+      },
+      test("a blocked submit lists its reasons in the order the inputs appear") {
+        val state = new RiskLeafFormState
+        assertTrue(
+          current(state.blockingReasons).take(3) ==
+            List(ValidationMessages.nameRequired, ValidationMessages.probabilityRequired, ValidationMessages.parentRequired)
         )
       }
     ),

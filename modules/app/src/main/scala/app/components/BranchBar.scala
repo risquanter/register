@@ -57,6 +57,9 @@ object BranchBar:
     */
   val mainSentinel = "__main__"
 
+  /** The element id of the new scenario's name input, unique on the page. */
+  val CreateNameInputId: String = "scenario-create-name"
+
   def branchOptionValue(choice: BranchChoice): String = choice match
     case BranchChoice.Main           => mainSentinel
     case BranchChoice.Scenario(name) => name.value.toString
@@ -280,6 +283,7 @@ object BranchBar:
       onClick.stopPropagation --> { _ => () },
       FormInputs.textInput(
         labelText = "",
+        inputId = BranchBar.CreateNameInputId,
         valueVar = nameInput,
         errorSignal = createState.signal.map {
           case ScenarioSubmitState.Failed(failure) => ErrorMessages.viewFailedLines(failure)

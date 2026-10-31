@@ -6956,8 +6956,9 @@ the type the dropdown selects. It holds the `"Parent Portfolio"` that
 there, so the label lives in the state module and the components depend on it
 rather than the reverse.
 
-**The inputs take an id.** `textInput`, `parentSelect` and `radioGroup` gain one
-parameter each, set on the input element and on its label's `for`:
+**The inputs take an id.** `textInput` and `parentSelect` gain one parameter
+each, set on the input element and on its label's `for`. The distribution-type
+`radioGroup` has no summary entry, so it takes none:
 
 ```scala
 // modules/app/src/main/scala/app/components/FormInputs.scala
@@ -7022,7 +7023,7 @@ layout. Its body is capped:
 /* modules/app/styles/app.css */
 .summary-list { margin-top: var(--sp-4); }
 .summary-list-body {
-  max-height: calc(12 * 1.5em);   /* twelve lines, chosen here (EWB-D-46) */
+  max-height: calc(12 * 1.5em);   /* twelve lines, chosen by this project */
   overflow-y: auto;
 }
 ```

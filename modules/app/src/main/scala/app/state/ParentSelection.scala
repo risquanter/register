@@ -26,6 +26,9 @@ enum ParentSelection:
   case Unset
 
 object ParentSelection:
+  /** The label of the parent dropdown, and the name a summary entry gives it. */
+  val Label: String = "Parent Portfolio"
+
   /** A saved node's own parent is always a definite, already-made choice —
     * never `Unset`. Used when populating a form from a saved leaf or
     * portfolio, and as the baseline `isFormDirty` compares the live form

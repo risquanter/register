@@ -15,6 +15,22 @@ enum RiskLeafField:
     * rather than about one of them. */
   case FormLevel
 
+object RiskLeafField:
+  /** The label an input carries, and the name a summary entry gives it. */
+  def label(field: RiskLeafField): String = field match
+    case Name        => "Name"
+    case Parent      => ParentSelection.Label
+    case Probability => "Probability"
+    case Percentiles => "Percentiles"
+    case Quantiles   => "Quantiles (loss in $M)"
+    case MinLoss     => "Minimum Loss"
+    case MaxLoss     => "Maximum Loss"
+    case Terms       => "Terms (optional)"
+    case FormLevel   => "This leaf"
+
+  /** The element id of the input, unique on the page. */
+  def inputId(field: RiskLeafField): String = s"leaf-${field.toString.toLowerCase}"
+
 /**
  * Reactive form state for creating a RiskLeaf.
  *
@@ -446,13 +462,15 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   // FormState Implementation
   // ============================================================
 
-  /** The raw checks behind `blockingReasons`, ignoring display timing. The
-   *  standalone cross-field checks are listed too, so a pair refusal blocks the
-   *  submit even when neither of its fields has an error of its own. */
+  /** The raw checks behind `blockingReasons`, ignoring display timing, in the
+   *  order the inputs appear, so a blocked submit's hover box and the summary
+   *  list run in the same order. The standalone cross-field checks are listed
+   *  too, so a pair refusal blocks the submit even when neither of its fields
+   *  has an error of its own. */
   override def errorSignals: List[Signal[Option[String]]] = List(
     nameErrorRaw,
-    parentErrorRaw,
     probabilityErrorRaw,
+    parentErrorRaw,
     percentilesErrorRaw,
     quantilesErrorRaw,
     metalogCrossFieldErrorRaw,
@@ -461,6 +479,19 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     maxLossErrorRaw,
     lognormalCrossFieldErrorRaw
   ).map(messageOf)
+
+  /** The inputs in the order `RiskLeafFormView` renders them. The fields of
+    * the mode not shown show nothing, because their checks pass outside it. */
+  override protected def displayed: List[(RiskLeafField, Signal[List[String]])] = List(
+    Name        -> nameError,
+    Probability -> probabilityError,
+    Parent      -> parentError,
+    Percentiles -> percentilesError,
+    Quantiles   -> quantilesError,
+    Terms       -> termsError,
+    MinLoss     -> minLossError,
+    MaxLoss     -> maxLossError
+  )
 
   // ============================================================
   // Form Submission
@@ -531,8 +562,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     * This is the form's one refinement boundary: the `Var`s above hold what the
     * user is typing, and everything past this point is a refined type. Each
     * failure names the field it came from, so once the view stores it with
-    * `setSubmitErrors`, the input it names selects it and the banner stays
-    * empty.
+    * `setSubmitErrors`, the input it names selects it.
     */
   def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, DistributionShape)] =
     val nameV = ValidationUtil.toValidation(locatedNow(nameVar, nameField).refine(ValidationUtil.refineName))

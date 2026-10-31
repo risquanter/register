@@ -3,6 +3,7 @@ package app.views
 import zio.test.*
 import sttp.model.StatusCode
 
+import app.components.FormInputs
 import app.core.{LocalProblem, RequestFailure}
 import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
@@ -23,7 +24,17 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
-    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite)
+    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite, summaryHeadingSuite)
+
+  private val summaryHeadingSuite =
+    suite("FormInputs.summaryHeading")(
+      test("one problem is counted in the singular") {
+        assertTrue(FormInputs.summaryHeading(1) == "1 problem to fix")
+      },
+      test("several problems are counted in the plural") {
+        assertTrue(FormInputs.summaryHeading(3) == "3 problems to fix")
+      }
+    )
 
   private val traceOfSuite =
     suite("ErrorMessages.traceOf")(
