@@ -151,9 +151,6 @@ object BranchBar:
       cls := "scenario-toolbar",
       display <-- scenariosEnabled.map(if _ then "flex" else "none"),
       onMountCallback(_ => scenarioState.refresh()),
-      // A delete closes the menu, so a failed one reopens it to show the
-      // failure under the scenario's row.
-      scenarioState.deleteFailure.signal.changes.collect { case Some(_) => true } --> menuOpen,
       span(cls := "scenario-toolbar-label", "Scenarios:"),
       div(
         cls := "scenario-dropdown",
@@ -227,9 +224,11 @@ object BranchBar:
     )
 
   /** Named-scenario row: clicking the label switches to the scenario and
-    * clicking the ✕ deletes it, whichever branch is active. `stopPropagation`
-    * on the ✕ keeps a delete click from also firing the row's own switch-to
-    * action. A failed delete of this scenario is shown under its row.
+    * closes the menu, and clicking the ✕ deletes it, whichever branch is
+    * active. `stopPropagation` on the ✕ keeps a delete click from also firing
+    * the row's own switch-to action. A delete leaves the menu open, so the
+    * result shows where it was asked for: the row disappears once the list
+    * refreshes, or a failed delete is shown under the row.
     */
   private def scenarioRow(
     scenarioState: ScenarioState,
@@ -254,7 +253,6 @@ object BranchBar:
             ConfirmGuard.proceedOrConfirm(true, s"Delete scenario '${name.value}'? This cannot be undone.") { () =>
               scenarioState.delete(name)
             }
-            closeAll()
           }
         )
       ),

@@ -29,8 +29,9 @@ State flows via function parameters, not inheritance:
 object FormInputs:
   def textInput(
     labelText: String,
+    inputId: String,
     valueVar: Var[String],
-    errorSignal: Signal[Option[String]],
+    errorSignal: Signal[List[String]],
     filter: String => Boolean = _ => true,
     onBlurCallback: () => Unit = () => ()
   ): HtmlElement = div(...)
@@ -59,7 +60,7 @@ object RiskLeafFormView:
       FormInputs.textInput(
         valueVar = leafState.nameVar,
         errorSignal = leafState.nameError,
-        onBlurCallback = () => leafState.markTouched("name")  // callback up
+        onBlurCallback = () => leafState.markTouched(RiskLeafField.Name)  // callback up
       ),
       button(onClick --> (_ => builderState.addLeaf(leafState)))  // callback up
     )
@@ -100,8 +101,9 @@ They never create their own `Var`s or perform validation logic:
 ```scala
 // FormInputs.textInput — pure view function
 // FormInputs.radioGroup[T] — generic, type-parameterized
-// FormInputs.submitButton — disabled state via Signal[Boolean]
-// FormInputs.crossFieldError — conditional error display
+// FormInputs.blockable / submitButton — disabled while blockedBy: Signal[List[String]]
+//   holds a reason, which hovering over the button shows
+// FormInputs.summaryList[Field] — a form's summary list under its submit button
 ```
 
 ### 6. State Machines for Named Phases, Derived Signals for Projections
