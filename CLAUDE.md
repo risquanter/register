@@ -111,6 +111,16 @@ plan or fix-note whose inventory lists the touched files. The instant the fix
 would change a signature, spread beyond the reviewed files, or trip a decision
 trigger, it stops qualifying.
 
+**A second carve-out, for a defect found while working an approved plan.** A
+defect the plan's own work uncovers — in testing, in a review, in a visual
+check — is fixed inside that plan, never in a new one. When every file the fix
+touches is on the plan's inventory, and the fix changes no endpoint, DTO or
+serialization shape, no plan text is written: present the exact before/after
+inline, which **is** the signature echo; halt; implement on approval. The halt
+and green-is-the-only-done still apply. A fix that needs a file outside the
+inventory is a forced extension, presented as such. G3 alone is never a reason
+to write a plan document.
+
 ## The Signature Echo (G1)
 
 Before writing or changing a signature, type or file, in its own turn:
