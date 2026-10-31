@@ -446,10 +446,9 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   // FormState Implementation
   // ============================================================
 
-  /** Raw errors for hasErrors check (ignores display timing).
-   *  Cross-field errors are already folded into the per-field composed signals,
-   *  but we still include the standalone cross-field raws here so that
-   *  `hasErrors` / `isValid` catches them even when neither field has an own error. */
+  /** The raw checks behind `blockingReasons`, ignoring display timing. The
+   *  standalone cross-field checks are listed too, so a pair refusal blocks the
+   *  submit even when neither of its fields has an error of its own. */
   override def errorSignals: List[Signal[Option[String]]] = List(
     nameErrorRaw,
     parentErrorRaw,
@@ -466,9 +465,6 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   // ============================================================
   // Form Submission
   // ============================================================
-
-  /** Check if form is valid (for submit button) */
-  val isValid: Signal[Boolean] = hasErrors.map(!_)
 
   /** The form's text fields parsed, zipped and gated into one shape. A pure
     * function of its arguments, so the live preview and the submit build the

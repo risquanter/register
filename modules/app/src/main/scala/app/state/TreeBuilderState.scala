@@ -132,7 +132,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   /** Display-controlled tree-name error (only shows after blur or submit trigger). */
   val treeNameError: Signal[Option[String]] = withDisplayControl(TreeName, treeNameErrorRaw.map(_.map(_.message)))
 
-  /** Raw errors for hasErrors check — tree-name is the only builder-level field. */
+  /** The raw checks behind `blockingReasons`: tree-name is the only builder-level field. */
   override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw.map(_.map(_.message)))
 
   /** The tree's topology problems, shown once Create has been clicked and

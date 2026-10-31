@@ -15,7 +15,7 @@ import zio.prelude.Validation
  * Provides:
  * - The subject every refusal of the form names: `subjectVar`
  * - Error display timing: `markTouched`, `shouldShowError`, `triggerValidation`
- * - Error aggregation: `errorSignals`, `hasErrors`
+ * - Error aggregation: `errorSignals`, `blockingReasons`
  * - Parse helpers: `parseDouble`, `parseLong`, `parseDoubleList`, `parseRequired`
  *
  * Subclasses define `subjectVar` and `errorSignals`, and use `shouldShowError`
@@ -82,10 +82,6 @@ trait FormState[Field]:
     * what blocks the form's submit buttons. */
   lazy val blockingReasons: Signal[List[String]] =
     Signal.combineSeq(errorSignals).map(_.toList.flatten)
-
-  /** Signal indicating whether any field has an error */
-  lazy val hasErrors: Signal[Boolean] =
-    blockingReasons.map(_.nonEmpty)
 
   // ============================================================
   // Parse Helpers

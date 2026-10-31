@@ -71,7 +71,7 @@ Separate **field-level validation** (per-form) from **assembly-level coordinatio
 
 | Layer | Responsibility | Example |
 |-------|---------------|---------|
-| **FormState** (trait) | Error signal aggregation, `hasErrors` | `FormState.errorSignals` |
+| **FormState** (trait) | Error signal aggregation, `blockingReasons` | `FormState.errorSignals` |
 | **LeafFormState** | Single leaf field `Var`s + validation signals | `nameVar`, `probabilityVar`, `nameError` |
 | **BuilderState** | Collection of validated items, `toRequest()` | `Var[List[LeafEntry]]`, parent options |
 
@@ -303,7 +303,7 @@ submitState.set(SubmitState.Failed(e))
 | `FormInputs.textInput` | Stateless function, Var + Signal params (Pattern 5) |
 | `FormInputs.radioGroup[T]` | Generic type-parameterized component (Pattern 5) |
 | `RiskLeafFormState` | Field-level Vars + reactive validation (Pattern 3) |
-| `FormState.hasErrors` | Derived Signal from `errorSignals` (Pattern 4) |
+| `FormState.blockingReasons` | Derived Signal from `errorSignals` (Pattern 4) |
 | `TreeBuilderView` | Receives shared state, owns submit lifecycle (Pattern 2 consumer) |
 | `TreePreview` | Pure derived view: Signal → HtmlElement (Pattern 4) |
 | `SplitPane` | Stateless layout — inline flex-weight bridge, no state (Pattern 5) |

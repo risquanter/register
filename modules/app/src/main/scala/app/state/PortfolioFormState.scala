@@ -81,8 +81,6 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
   override def errorSignals: List[Signal[Option[String]]] =
     List(nameErrorRaw, parentErrorRaw).map(_.map(_.map(_.message)))
 
-  val isValid: Signal[Boolean] = hasErrors.map(! _)
-
   /** Build validated inputs for submission. `Unset` fails validation exactly
     * like an empty name would — there is no silent default to fall back to.
     */
