@@ -63,6 +63,15 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
     def validationFailed(): Unit =
       submitState.set(SubmitState.Idle)
 
+    // True while a submit is in flight. Its success replaces the builder's
+    // contents, with a blank builder after a Create and the server's copy after
+    // an Update, so the inputs are locked until it lands rather than taking
+    // edits it would discard.
+    val saving: Signal[Boolean] = submitState.signal.map {
+      case SubmitState.Submitting => true
+      case _                      => false
+    }
+
     // The builder's summary: the tree name's refusal and the tree's topology
     // problems, then a failed request's lines.
     val summary: Signal[List[SummaryEntry[TreeBuilderField]]] =
@@ -141,18 +150,26 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
         case _                     => ()
       },
 
-      FormInputs.textInput(
-        labelText = TreeBuilderField.label(TreeBuilderField.TreeName),
-        inputId = TreeBuilderField.inputId(TreeBuilderField.TreeName),
-        valueVar = state.treeNameVar,
-        errorSignal = state.treeNameError.map(_.toList),
-        onBlurCallback = () => state.markTouched(TreeBuilderField.TreeName),
-        placeholderText = "e.g., Enterprise Risk Tree"
-      ),
-      div(
-        cls := "forms-stack",
-        PortfolioFormView(state),
-        RiskLeafFormView(state, chartState)
+      // Everything the save would overwrite is locked while it runs, and
+      // hovering over it says why.
+      FormInputs.lockable(
+        div(
+          FormInputs.textInput(
+            labelText = TreeBuilderField.label(TreeBuilderField.TreeName),
+            inputId = TreeBuilderField.inputId(TreeBuilderField.TreeName),
+            valueVar = state.treeNameVar,
+            errorSignal = state.treeNameError.map(_.toList),
+            onBlurCallback = () => state.markTouched(TreeBuilderField.TreeName),
+            placeholderText = "e.g., Enterprise Risk Tree",
+            disabledSignal = saving
+          ),
+          div(
+            cls := "forms-stack",
+            PortfolioFormView(state, saving),
+            RiskLeafFormView(state, chartState, saving)
+          )
+        ),
+        saving.map(Option.when(_)(BlockedMessages.TreeSaving).toList)
       ),
       FormInputs.submitButton(
         state.isUpdateMode.map(if _ then "Update Risk Tree" else "Create Risk Tree"),

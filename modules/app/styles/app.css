@@ -2080,6 +2080,26 @@ button.summary-list-entry:hover {
   display: block;
 }
 
+/* A region locked as a whole (FormInputs.lockable). Its disabled controls
+   take no pointer, so hovering over them reaches the region, which shows the
+   reason. */
+.lockable {
+  position: relative;
+}
+
+.lockable :disabled {
+  pointer-events: none;
+}
+
+.lockable:hover > .blockable-reason {
+  display: block;
+}
+
+/* A blocked button inside shows its own box, so the region's stays hidden. */
+.lockable:has(.blockable:hover) > .blockable-reason {
+  display: none;
+}
+
 .submit-spinner {
   color: var(--foreground-muted);
   font-style: italic;

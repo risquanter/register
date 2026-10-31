@@ -16,7 +16,10 @@ import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
  */
 object RiskLeafFormView:
 
-  def apply(builderState: TreeBuilderState, chartState: DistributionChartState): HtmlElement =
+  /** @param saving True while the tree is being saved: the form is locked, and
+    *               its buttons are blocked with the reason, so an edit made
+    *               during the save cannot be overwritten when it lands. */
+  def apply(builderState: TreeBuilderState, chartState: DistributionChartState, saving: Signal[Boolean]): HtmlElement =
     val state = new RiskLeafFormState
 
     // This form's view of `activeForm`, via `forLeaf`: a Portfolio target
@@ -34,8 +37,12 @@ object RiskLeafFormView:
     // *portfolio* is being freshly drafted (`Drafting(Portfolio)` — passed
     // through unchanged by `forLeaf` rather than folded away, see its doc
     // comment) — but the lock glyph next to each label means something more
-    // specific ("this is a saved value"), so it's kept to Locked only.
-    val isDisabled: Signal[Boolean] = leafMode.map { case FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_) => true; case _ => false }
+    // specific ("this is a saved value"), so it's kept to Locked only. They
+    // are disabled too while the tree is being saved.
+    val isDisabled: Signal[Boolean] = leafMode.combineWith(saving).map {
+      case (FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_), _) => true
+      case (_, treeSaving)                                                     => treeSaving
+    }
     val showLockIcon: Signal[Boolean] = leafMode.map { case FormMode.Locked(_) => true; case _ => false }
 
     /** The leaf whose own occupancy of root must not count against itself in
@@ -78,30 +85,33 @@ object RiskLeafFormView:
       case FormMode.Blank | FormMode.Templating(_) => "Submit Leaf"
       case _                                        => "Draft New Leaf"
     }
-    val addSubmitBlockedBy: Signal[List[String]] = leafMode.combineWith(state.blockingReasons).map {
-      case (FormMode.Editing(_), _)      => List(BlockedMessages.editInProgress(FormKind.Leaf))
-      case (FormMode.Locked(_), _)       => Nil // just unlocks a template copy, nothing to validate yet
-      case (FormMode.Inactive, _)        => Nil // just wakes the form into Blank, nothing to validate yet
-      case (FormMode.Drafting(other), _) => List(BlockedMessages.otherDraftInProgress(other)) // don't invite discarding it
-      case (_, reasons)                  => reasons
+    val addSubmitBlockedBy: Signal[List[String]] = leafMode.combineWith(state.blockingReasons, saving).map {
+      case (_, _, true)                     => List(BlockedMessages.TreeSaving)
+      case (FormMode.Editing(_), _, _)      => List(BlockedMessages.editInProgress(FormKind.Leaf))
+      case (FormMode.Locked(_), _, _)       => Nil // just unlocks a template copy, nothing to validate yet
+      case (FormMode.Inactive, _, _)        => Nil // just wakes the form into Blank, nothing to validate yet
+      case (FormMode.Drafting(other), _, _) => List(BlockedMessages.otherDraftInProgress(other)) // don't invite discarding it
+      case (_, reasons, _)                  => reasons
     }
     val editSaveLabel: Signal[String] = leafMode.map {
       case FormMode.Editing(_) => "Save"
       case _                   => "Edit"
     }
-    val editSaveBlockedBy: Signal[List[String]] = leafMode.combineWith(state.blockingReasons).map {
-      case (FormMode.Blank, _)           => List(BlockedMessages.nothingSelected(FormKind.Leaf))
-      case (FormMode.Templating(_), _)   => List(BlockedMessages.copyNotEditable(FormKind.Leaf))
-      case (FormMode.Inactive, _)        => List(BlockedMessages.nothingSelected(FormKind.Leaf))
-      case (FormMode.Drafting(other), _) => List(BlockedMessages.otherDraftInProgress(other))
-      case (FormMode.Locked(_), _)       => Nil // just unlocks in place, nothing to validate yet
-      case (_, reasons)                  => reasons
+    val editSaveBlockedBy: Signal[List[String]] = leafMode.combineWith(state.blockingReasons, saving).map {
+      case (_, _, true)                     => List(BlockedMessages.TreeSaving)
+      case (FormMode.Blank, _, _)           => List(BlockedMessages.nothingSelected(FormKind.Leaf))
+      case (FormMode.Templating(_), _, _)   => List(BlockedMessages.copyNotEditable(FormKind.Leaf))
+      case (FormMode.Inactive, _, _)        => List(BlockedMessages.nothingSelected(FormKind.Leaf))
+      case (FormMode.Drafting(other), _, _) => List(BlockedMessages.otherDraftInProgress(other))
+      case (FormMode.Locked(_), _, _)       => Nil // just unlocks in place, nothing to validate yet
+      case (_, reasons, _)                  => reasons
     }
-    val clearFormBlockedBy: Signal[List[String]] = leafMode.map {
-      case FormMode.Locked(_)       => List(BlockedMessages.savedNothingToClear(FormKind.Leaf))
-      case FormMode.Inactive        => List(BlockedMessages.NothingToClear)
-      case FormMode.Drafting(other) => List(BlockedMessages.otherDraftInProgress(other))
-      case _                        => Nil
+    val clearFormBlockedBy: Signal[List[String]] = leafMode.combineWith(saving).map {
+      case (_, true)                     => List(BlockedMessages.TreeSaving)
+      case (FormMode.Locked(_), _)       => List(BlockedMessages.savedNothingToClear(FormKind.Leaf))
+      case (FormMode.Inactive, _)        => List(BlockedMessages.NothingToClear)
+      case (FormMode.Drafting(other), _) => List(BlockedMessages.otherDraftInProgress(other))
+      case _                             => Nil
     }
 
     // Card focus: expanded when this form is the active one; collapsed when a

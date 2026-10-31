@@ -136,7 +136,8 @@ final class ScenarioState(
                       case _                             => ()
                     listState.refresh()
                   })
-              case None => ZIO.unit
+              // Already gone, deleted elsewhere: refresh so the stale row goes too.
+              case None => ZIO.succeed(listState.refresh())
           }
           .tapError(f => ZIO.succeed(deleteFailure.set(Some((name, f)))))
           .runJs

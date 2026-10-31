@@ -158,6 +158,18 @@ object FormInputs:
       }
     )
 
+  /** `content` under one hover box: while `lockedBy` holds a reason, hovering
+    * anywhere over it shows the reasons. Locking the inputs is the caller's. */
+  def lockable(content: HtmlElement, lockedBy: Signal[List[String]]): HtmlElement =
+    div(
+      cls := "lockable",
+      content,
+      children <-- lockedBy.map {
+        case Nil     => Nil
+        case reasons => List(div(cls := "blockable-reason", reasons.map(div(_))))
+      }
+    )
+
   /**
    * Submit button, disabled while `blockedBy` holds a reason, which hovering
    * over it then shows.
