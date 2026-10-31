@@ -2725,27 +2725,7 @@ repository without stating why, so there is no ruling to overturn — the single
 store is an unexamined default rather than a decision. The deployment half
 belongs to `register-infra`.
 
-## 64. The Design view's debug bar shows the grey colour until the first edit
-
-**What the user sees.** With the debug UI on, the bar above the tree builder is
-grey on first load. After clicking around it turns amber and stays amber. The
-amber colour is the wanted look, so the bar should be amber from the start.
-
-**What the code does.** `TreeBuilderView` gives the bar the class
-`dirty-debug-bar` always, and adds `dirty-debug-bar--active` while
-`state.isDirtySignal` or `state.isEditDirtyVar` is true. In
-`modules/app/styles/app.css`, `.dirty-debug-bar` is the grey colour and
-`.dirty-debug-bar--active` is the amber one. So the colour reports the dirty
-state. A fresh builder is not dirty and shows grey, and the first edit makes it
-dirty and shows amber.
-
-**Consequence for the change.** Making the bar amber on first load means making
-it amber in the clean state. The colour then no longer tells clean from dirty,
-and only the text of the bar does.
-
-**Status.** Researched, no code changed.
-
-## 65. The tree list says "Waiting to load…" when no workspace exists
+## 64. The tree list says "Waiting to load…" when no workspace exists
 
 **What the user sees.** On a first visit there is no workspace, and the Saved
 Trees box reads "Waiting to load…". Nothing is going to load, so the text
