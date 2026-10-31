@@ -2,8 +2,9 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** All forty-three decisions, `EWB-D-1` to `EWB-D-43`, are ruled and
-recorded in §10. Approval is in place: the token names this document and
+**Status.** Forty-six decisions, `EWB-D-1` to `EWB-D-46`, are ruled.
+`EWB-D-1` to `EWB-D-43` are recorded in §10, and `EWB-D-44` to `EWB-D-46` in
+§16.2. `EWB-D-47` is open, in §16.7. Approval is in place: the token names this document and
 the file inventory exists beside it. Phases 1, 1a, 1b, 2, 2b, 2c and 3 have landed, and `EWB-D-27`'s
 projection change landed with them. What remains is Phase 3a, then Phase 3b, then
 Phases 4 to 7.
@@ -2504,10 +2505,11 @@ edit path; a `FormLevel` case added to `RiskLeafField` and `PortfolioField` and
 every `case _ => None` arm of both mappings made explicit; the push inverted to a
 pull, which deletes `FormSubmitUtil.scala` together with `submitFieldErrors` and
 its three methods in `FormState.scala` and renames that trait's type parameter
-from `F` to `Field`; and `GlobalError.ValidationFailed` rendered one line per
-refusal, on the builder's line for a tree submit and in `ErrorBanner` for a
-refusal no view owns, with no server refusal delivered into a node form
-(`EWB-D-43`). Eleven refinement call
+from `F` to `Field`; a tree submit's refusals rendered one line per refusal on
+the builder's line, with no server refusal delivered into a node form
+(`EWB-D-43`); and, as its continuation in §16, every action's result shown where
+the action was taken and in the form's summary list, with the banner narrowed
+to session conditions (`EWB-D-44` to `EWB-D-47`). Eleven refinement call
 sites in four files, all under `modules/app`, listed in §15.7. `ValidationUtil`'s
 twenty-six refinements keep their `(value, location)` parameters, and the call
 sites outside `modules/app` are unchanged.
@@ -5506,10 +5508,15 @@ the server adds are tree-wide ones that map to no input of a node form.
 **Mechanism — RULED 2026-10-30.** The ruling first named the banner mechanism
 as `submitInto` passing `notifyObserver = false`. That flag also stops the
 banner showing an expired workspace and stops a successful submit clearing a
-stale banner. The ruled mechanism is that `submitInto` withholds from the
+stale banner. The ruled mechanism was that `submitInto` withholds from the
 global observer a failure that `GlobalError.from` classifies as
-`ValidationFailed`. Every other failure, and every success, reaches the
-observer as before.
+`ValidationFailed`.
+
+**Mechanism superseded 2026-10-31 by `EWB-D-45` (§16.3).** The banner shows only
+session conditions, and the observer ignores every other failure, so
+`submitInto` withholds nothing and notifies the observer like every other fork.
+The remark in Option B that the banner renders `ValidationFailed` for the curve
+limit is superseded by §16.5, which moves the curve limit inline.
 
 ---
 
@@ -6653,14 +6660,11 @@ outside `modules/app`.
    `clearSubmitFieldError` call sites in the two node-form views become `clearFor`
    calls; the input components take `Signal[List[String]]`. No server refusal is
    delivered into a node form (`EWB-D-43`). The builder's line renders the tree
-   submit's refusals one per line, and `ErrorBanner` renders
-   `GlobalError.ValidationFailed` one per line. Each node form's own line is
-   rendered by `FormInputs.crossFieldError`, which takes
-   `Signal[List[String]]`. The banner stops repeating the tree submit's
-   refusals: `submitInto` withholds from the global observer a failure that
-   `GlobalError.from` classifies as `ValidationFailed`, and passes every other
-   failure and every success to it. An expired workspace then still reaches the
-   banner, and a successful submit still clears a stale one. Every failure a
+   submit's refusals one per line. Each node form's own line is rendered by
+   `FormInputs.crossFieldError`, which takes `Signal[List[String]]`. The banner
+   does not repeat the tree submit's refusals. §16.3 makes that hold for every
+   failure, by narrowing the banner to session conditions.
+   Every failure a
    view shows inline renders through `FailureNotice`, one box with the full
    `var(--error)` border an input in error takes; the per-view error classes
    and their prefixes go. Every disabled button takes its reasons through
@@ -6682,3 +6686,509 @@ server refusal as well. Their raw signals become
 `Signal[Option[ValidationError]]` in step 3 like every other check, stamped at
 `LossRange` and `PercentileQuantilePairing` so that the browser's own refusal and
 the server's carry the same location.
+
+---
+
+## 16. Where a result is shown — Phase 3a, continued
+
+This section continues Phase 3a and ships with it, before Phase 3b. It settles where the
+browser shows the result of an action, and what the global banner is for. It
+changes no endpoint, no wire case and no serialized shape. Every file it edits
+is in the browser module.
+
+### 16.1 What is wrong today
+
+Three facts, each read from the code as it stands after Phase 3a.
+
+**The banner shows a failure the view also shows.** `forkProvided` at
+`ZJS.scala:61` notifies the global observer of every failure, and the observer
+at `Main.scala:101-106` writes every one of them into the banner. The views also
+render most of them inline. So a stale Update shows "This was edited elsewhere
+since you loaded it…" twice: under the submit button and in the banner. ADR-019
+§7 named that as a smell. Phase 3a closed it only for a field refusal on a tree
+submit, by the special case at `ZJS.scala:293-295`.
+
+**Some results have no inline place at all.** Six failures reach the user only
+through the banner:
+
+- a scenario delete (`ScenarioState.delete`, `ScenarioState.scala:139`);
+- a query that failed for a reason other than its text
+  (`AnalyzeQueryState.scala:185`, settled to `Outcome.Idle`);
+- the history of a tree (`TreeHistoryState.history`, never rendered as `Failed`);
+- the changed-nodes diff (`ChangedNodesState.diffResult`, never rendered as
+  `Failed`);
+- the scenario list in the branch menu (`BranchBar.scala:180`, which renders a
+  failed list as an empty one);
+- the curve-selection limit, which is not a request at all
+  (`LECChartState.scala:202` writes `GlobalError.ValidationFailed` directly).
+
+**A form's refusals can be out of sight.** A refusal sits under its input. On a
+long form the input can be above the visible part of the panel, so a click on
+Submit that is refused can look like nothing happened. A disabled button gives
+its reasons only on hover (`FormInputs.blockable`, `FormInputs.scala:146`), and a
+touch screen has no hover.
+
+### 16.2 The rules — `EWB-D-44` to `EWB-D-46`, ruled 2026-10-31
+
+1. **An action's result is shown where the action was taken** (`EWB-D-44`).
+   Success or failure, whatever the cause, it renders inline next to the control
+   that issued it. A refusal the form shows also appears in that form's summary
+   list (§16.4).
+2. **The banner shows only conditions of the whole session** (`EWB-D-45`): the
+   server cannot be reached, a service the server depends on is down, or the
+   workspace has expired. It never shows a specific action's refusal.
+3. **A failure caused by one of those conditions is shown in both places**
+   (`EWB-D-45`). Under the button the user reads that the action failed and
+   nothing was changed. In the banner the user reads that the server is
+   unreachable, which says the next action will fail too.
+4. **Every form gets a summary list under its submit button** (`EWB-D-46`). The
+   per-input messages stay. The list grows to at most twelve lines and then
+   scrolls inside itself, with a heading that gives the count.
+
+A worked example. A user edits leaf "Outage", and the server cannot be reached.
+
+- They click Submit Leaf. That is local, so nothing is sent and nothing changes.
+- They click Update Risk Tree. Under the button they read: "The request did not
+  reach the server. Nothing was changed. Check your connection and try again."
+  The banner reads: "Connection to the server lost. Requests will fail until it
+  is back."
+- The connection returns and they click Update again. The update succeeds, its
+  success line replaces the failure under the button, and the success clears the
+  banner.
+
+### 16.3 The banner holds a session condition
+
+`GlobalError` keeps its name, because ADR-019 and the banner already use it. Its
+cases become the three conditions, and the classifier returns `None` for every
+failure that is not one of them.
+
+```scala
+// modules/app/src/main/scala/app/state/GlobalError.scala
+enum GlobalError:
+  /** The request never reached the server. */
+  case ServerUnreachable
+  /** A service the server depends on did not answer. Carries the trace,
+    * because the user can act on nothing else. */
+  case DependencyDown(trace: Option[TraceId])
+  /** The workspace is past one of its two deadlines. */
+  case WorkspaceExpired(message: String)
+
+object GlobalError:
+  /** The session condition a failure reveals, if it reveals one. The match is
+    * on every wire case, so a new case is a compile error here until it is
+    * placed. */
+  def from(failure: RequestFailure): Option[GlobalError] = failure match
+    case RequestFailure.Transport(_)        => Some(ServerUnreachable)
+    case RequestFailure.Undecodable(_)      => None
+    case RequestFailure.Wire(error)         => fromWireError(error)
+
+  def fromWireError(e: WireError): Option[GlobalError] = e match
+    case WireError.DependencyUnavailable(t)           => Some(DependencyDown(Some(t)))
+    case WireError.WorkspaceExpired(c, life, idle, _) => Some(WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle)))
+    case WireError.RequestRejected(_, _)              => None
+    case WireError.ValidationRejected(_, _, _)        => None
+    case WireError.NotFound(_)                        => None
+    case WireError.AccessDenied(_)                    => None
+    case WireError.Conflict(_, _)                     => None
+    case WireError.NotSupported(_, _)                 => None
+    case WireError.InternalFault(_)                   => None
+```
+
+The cases `ValidationFailed`, `NetworkError`, `InputRejected`, `Conflict`,
+`NotFound` and `ServerError` are deleted. Each was a per-view failure, and each
+is now rendered inline through `ErrorMessages.viewFailedLines`, which already
+covers every wire case.
+
+The observer writes a condition and ignores everything else. A success clears
+the banner, because an answer proves the server reachable again.
+
+```scala
+// modules/app/src/main/scala/app/Main.scala
+ZJS.registerErrorObserver(new ZJS.ErrorObserver:
+  def onError(error: RequestFailure): Unit =
+    GlobalError.from(error).foreach(condition => globalError.set(Some(condition)))
+  def onSuccess(): Unit =
+    globalError.set(None)
+)
+```
+
+The banner's `present` has three arms. The `ServerUnreachable` sentence is new.
+
+```scala
+// modules/app/src/main/scala/app/views/ErrorMessages.scala
+val ConnectionLost: String =
+  "Connection to the server lost. Requests will fail until it is back."
+
+// modules/app/src/main/scala/app/views/ErrorBanner.scala
+private def present(error: GlobalError): Presentation = error match
+  case GlobalError.ServerUnreachable       => Presentation("⚡", List(ErrorMessages.ConnectionLost), None, ErrorStyling)
+  case GlobalError.DependencyDown(trace)   => Presentation("⚡", List(ErrorMessages.DependencyDown), trace, ErrorStyling)
+  case GlobalError.WorkspaceExpired(msg)   => Presentation("ℹ", List(msg), None, InfoStyling)
+```
+
+**The special case in `submitInto` goes.** The observer now decides what reaches
+the banner, so `submitInto` notifies it like every other fork:
+
+```scala
+// modules/app/src/main/scala/app/core/ZJS.scala
+def submitInto(target: Var[SubmitState])(onSuccess: A => Unit): Unit =
+  target.set(SubmitState.Submitting)
+  forkProvided(
+    zio
+      .tap(a => ZIO.succeed(onSuccess(a)))
+      .tapError(f => ZIO.succeed(target.set(SubmitState.Failed(f))))
+  )
+```
+
+**`settleLoad` is deleted.** It reset a load to `Idle` on an expired workspace
+and on a `404`, so that the banner alone showed them. Under rule 1 a load's
+failure is shown where the load is displayed, so every failure becomes
+`LoadState.Failed`. `loadInto`, `loadStatePipeline` and
+`loadOptionStatePipeline` settle `Left(f)` to `LoadState.Failed(f)`. An expired
+workspace is then shown in both places, by rule 3. A `404` is shown only inline,
+because the browser cannot tell an absent workspace from an absent tree: the two
+answer identically (ADR-035 §3), so it is not known to be a session condition.
+
+`WorkspaceState.preValidate` keeps `runJsQuiet` and its `onExpired` callback. It
+runs at startup, before any view has issued a request, so the banner is the only
+place its result can go. `Main.scala:117` sets
+`GlobalError.WorkspaceExpired(ErrorMessages.WorkspaceUnavailableOnStartup)`
+unchanged. `HealthState.refresh` keeps `runJsQuiet`, because its result is the
+health dot in the top bar.
+
+### 16.4 The summary list
+
+**What one entry is.** A sentence with the input it is about, or with no input
+when it is on the form's own line.
+
+```scala
+// modules/app/src/main/scala/app/state/FormState.scala
+/** One refusal in a form's summary list: the sentence and the input it is
+  * shown under, or none for the form's own line. */
+final case class SummaryEntry[Field](field: Option[Field], message: String)
+```
+
+**Which entries a form lists.** Exactly what its inputs and its own line show
+now, in the order the inputs appear, with a sentence shown under two inputs
+listed once under the first. The list is derived from the display signals that
+already exist, so it cannot disagree with them.
+
+```scala
+// modules/app/src/main/scala/app/state/FormState.scala, in trait SubmitRefusals
+/** Each input this form renders, in display order, with what it shows. */
+protected def displayed: List[(Field, Signal[List[String]])]
+
+/** Every refusal the form shows now, input by input, then its own line. */
+lazy val summary: Signal[List[SummaryEntry[Field]]] =
+  Signal.combineSeq(displayed.map((field, messages) => messages.map(field -> _)))
+    .combineWith(formLevelError)
+    .map((perInput, line) => SubmitRefusals.summaryOf(perInput.toList, line))
+
+// in object SubmitRefusals
+/** The summary of what a form shows, a sentence shown under two inputs listed
+  * once under the first.
+  * {{{
+  * summaryOf(List(MinLoss -> List("min under max"), MaxLoss -> List("min under max")), Nil)
+  * // List(SummaryEntry(Some(MinLoss), "min under max"))
+  * }}} */
+def summaryOf[Field](
+  perInput: List[(Field, List[String])],
+  line:     List[String]
+): List[SummaryEntry[Field]]
+```
+
+`RiskLeafFormState.displayed` lists `Name`, `Probability`, `Parent`,
+`Percentiles`, `Quantiles`, `Terms`, `MinLoss` and `MaxLoss` with `nameError`,
+`probabilityError`, `parentError`, `percentilesError`, `quantilesError`,
+`termsError`, `minLossError` and `maxLossError`. That is the order
+`RiskLeafFormView` renders them in. `PortfolioFormState.displayed` lists `Name`
+and `Parent`.
+
+The tree builder is not a `SubmitRefusals` form. Its list is the tree-name entry
+followed by the builder's line, which already holds the topology problems and a
+failed request's lines:
+
+```scala
+// modules/app/src/main/scala/app/state/TreeBuilderState.scala
+/** The builder's summary: the tree name's refusal, then the tree's topology
+  * problems. A failed request's lines are added by the view, which owns the
+  * submit state. */
+val summary: Signal[List[SummaryEntry[TreeBuilderField]]] =
+  treeNameError.combineWith(topologyError).map { (name, topology) =>
+    name.map(SummaryEntry(Some(TreeBuilderField.TreeName), _)).toList ++
+      topology.map(SummaryEntry(None, _))
+  }
+```
+
+**Labels and ids.** Each field names its label and its element id, so a summary
+entry can say which input it is about and can focus it. The labels are the
+strings the views pass today, moved to one place.
+
+```scala
+// modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+enum RiskLeafField:
+  case Name, Parent, Probability, Percentiles, Quantiles, MinLoss, MaxLoss, Terms
+  case FormLevel
+
+object RiskLeafField:
+  /** The label an input carries, and the name a summary entry gives it. */
+  def label(field: RiskLeafField): String = field match
+    case Name        => "Name"
+    case Parent      => ParentSelection.Label
+    case Probability => "Probability"
+    case Percentiles => "Percentiles"
+    case Quantiles   => "Quantiles (loss in $M)"
+    case MinLoss     => "Minimum Loss"
+    case MaxLoss     => "Maximum Loss"
+    case Terms       => "Terms (optional)"
+    case FormLevel   => "This leaf"
+
+  /** The element id of the input, unique on the page. */
+  def inputId(field: RiskLeafField): String = s"leaf-${field.toString.toLowerCase}"
+```
+
+`PortfolioField` gains the same two functions, with the labels
+`"Portfolio Name"`, `ParentSelection.Label` and `"This portfolio"`, and ids
+prefixed `portfolio-`. `TreeBuilderField` gains them with `"Tree Name"` and the
+id `tree-name`. `ParentSelection.Label` is a new constant in the companion of
+the type the dropdown selects. It holds the `"Parent Portfolio"` that
+`FormInputs.scala:290` writes in place today, and `parentSelect` reads it from
+there, so the label lives in the state module and the components depend on it
+rather than the reverse.
+
+**The inputs take an id.** `textInput`, `parentSelect` and `radioGroup` gain one
+parameter each, set on the input element and on its label's `for`:
+
+```scala
+// modules/app/src/main/scala/app/components/FormInputs.scala
+def textInput(
+  labelText: String,
+  inputId: String,
+  valueVar: Var[String],
+  errorSignal: Signal[List[String]],
+  filter: String => Boolean = _ => true,
+  onBlurCallback: () => Unit = () => (),
+  placeholderText: String = "",
+  inputModeAttr: String = "text",
+  disabledSignal: Signal[Boolean] = Val(false),
+  lockedSignal: Signal[Boolean] = Val(false)
+): HtmlElement
+
+def parentSelect(
+  inputId: String,
+  parentVar: Var[ParentSelection],
+  options: Signal[List[String]],
+  rootLabel: String,
+  existingNames: Signal[Set[String]],
+  disabledSignal: Signal[Boolean] = Val(false),
+  errorSignal: Signal[List[String]] = Val(Nil),
+  lockedSignal: Signal[Boolean] = Val(false)
+): HtmlElement
+```
+
+**The list component.** It renders nothing while the list is empty. Each entry
+whose field has an input is a button that focuses it.
+
+```scala
+// modules/app/src/main/scala/app/components/FormInputs.scala
+/** A form's summary list, rendered under its submit button. Empty renders
+  * nothing. An entry naming an input is a button that focuses it; an entry on
+  * the form's own line is plain text. */
+def summaryList[Field](
+  entries: Signal[List[SummaryEntry[Field]]],
+  label: Field => String,
+  inputId: Field => String
+): HtmlElement
+```
+
+Its heading reads `FormInputs.summaryHeading(count)`:
+
+```scala
+def summaryHeading(count: Int): String = count match
+  case 1 => "1 problem to fix"
+  case n => s"$n problems to fix"
+```
+
+An entry reads `"<label>: <sentence>"`. A click calls
+`dom.document.getElementById(inputId(field))` and focuses the element if it is
+there. The list carries `role := "alert"`, so a screen reader announces it when
+it appears.
+
+**Sizing.** The list sits in the left `.split-panel`, which already scrolls
+(`app.css:1410-1414`), so a long list makes the form taller and never breaks the
+layout. Its body is capped:
+
+```css
+/* modules/app/styles/app.css */
+.summary-list { margin-top: var(--sp-4); }
+.summary-list-body {
+  max-height: calc(12 * 1.5em);   /* twelve lines, chosen here (EWB-D-46) */
+  overflow-y: auto;
+}
+```
+
+The figure of twelve is chosen by this plan. The heading stays outside the
+scrolled body, so the count stays visible.
+
+**Where it renders.** Under `addSubmitBlockedBy` and `editSaveBlockedBy`'s
+buttons in `RiskLeafFormView` and `PortfolioFormView`, in place of
+`FormInputs.crossFieldError(form.formLevelError)`. The form's own line becomes
+the list's last entries, so it is no longer rendered twice. In `TreeBuilderView`
+it replaces the `lineErrors` notice at `TreeBuilderView.scala:175-178`, with the
+failed request's lines appended as `SummaryEntry(None, line)`.
+
+### 16.5 The inline places that are missing
+
+Each of the six gaps in §16.1 gets an inline rendering through `FailureNotice`:
+
+- **Scenario delete.** `ScenarioState` holds the last delete's failure, and
+  `BranchBar.scenarioRow` renders it under that scenario's row:
+  ```scala
+  // modules/app/src/main/scala/app/state/ScenarioState.scala
+  /** The scenario whose delete failed last, and why; cleared when a delete starts. */
+  val deleteFailure: Var[Option[(ScenarioName.ScenarioName, ViewFailure)]] = Var(None)
+  ```
+- **A query that failed for a reason other than its text.**
+  `AnalyzeQueryState.Outcome` gains `case Failed(failure: ViewFailure)`, set by
+  `case Left(f)`. The outcome writer sets `queryResult` to `LoadState.Failed(f)`,
+  and `QueryResultCard` renders `FailureNotice(f, None)` in its `Failed` arm in
+  place of `emptyNode`.
+- **History.** `AnalyzeView` renders `FailureNotice(f, Some(() => reload))`
+  beside each `HistorySlider` while that slot's `history` is `LoadState.Failed`.
+  The retry is the call already made at `AnalyzeView.scala:336`.
+- **The changed-nodes diff.** `AnalyzeView` renders `FailureNotice(f, None)` in
+  the compare slot's card while its `diffResult` is `LoadState.Failed`.
+- **The scenario list.** `BranchBar`'s menu renders
+  `FailureNotice(f, Some(() => listState.refresh()))` while the list is
+  `LoadState.Failed`, in place of an empty list.
+- **The curve-selection limit.** `LECChartState` stops taking `globalError`. It
+  emits on a refused selection, and `TreeDetailView` shows a transient notice
+  beside the tree, the way it shows the selection-locked notice at
+  `TreeDetailView.scala:103` and `:132-133`:
+  ```scala
+  // modules/app/src/main/scala/app/state/LECChartState.scala
+  /** The most curves a user may select, chosen by this project. */
+  val MaxUserSelections: Int = 13
+  /** Emits when a selection is refused because `MaxUserSelections` are already selected. */
+  val selectionCapReached: EventStream[Unit]
+  ```
+  The sentence is `BlockedMessages.selectionCapReached(MaxUserSelections)`.
+  `TreeViewState` stops taking `globalError`, because it took it only to pass on.
+
+**A server fault keeps its trace.** The banner showed the trace of an internal
+fault, a denial and a dependency outage. Those failures are now inline, so
+`FailureNotice` shows the trace as a muted, selectable line under the sentences:
+
+```scala
+// modules/app/src/main/scala/app/views/ErrorMessages.scala
+/** The trace a failure offers for reporting: present where the user cannot
+  * resolve the failure themselves. */
+def traceOf(failure: ViewFailure): Option[TraceId] = failure match
+  case RequestFailure.Wire(WireError.InternalFault(t))         => Some(t)
+  case RequestFailure.Wire(WireError.AccessDenied(t))          => Some(t)
+  case RequestFailure.Wire(WireError.DependencyUnavailable(t)) => Some(t)
+  case _                                                       => None
+```
+
+`FailureNotice.apply` renders `traceOf(failure)` as
+`div(cls := "failure-notice-trace", t.value)`.
+
+### 16.6 What `EWB-D-43` loses
+
+`EWB-D-43`'s ruling stands: no server refusal is delivered into a node form. Its
+mechanism is superseded by `EWB-D-45`. The withholding in `submitInto` is no
+longer needed, because the observer passes a field refusal to nowhere. Its
+remark that "the banner renders `ValidationFailed` as a list for the refusals no
+view owns, such as the curve limit" is superseded by §16.5, which moves the
+curve limit inline.
+
+### 16.7 Decisions
+
+`EWB-D-44`, `EWB-D-45` and `EWB-D-46` are ruled, as §16.2 records. One question
+is open.
+
+**`EWB-D-47` — what the summary shows while the submit is blocked before any
+input is touched.** The list shows what the inputs show, and an input shows its
+refusal only after it is touched or the form submitted. A blocked button cannot
+be clicked, so on an empty form nothing is shown, and on a touch screen the
+hover reasons cannot be seen either.
+
+*Option A — the list waits, as the inputs do.* Nothing appears until an input is
+touched. *Pro:* an empty form is quiet. *Con:* a touch-screen user sees a
+disabled button and no reason.
+
+*Option B — while the button is blocked, the list also lists the blocking
+reasons no input shows yet,* in muted text under a heading such as "To submit:".
+The hover box goes, because the same reasons are now on screen. *Pro:* every
+user sees why the button is disabled, without hovering. *Con:* an empty form
+shows "Name is required" and its neighbours before the user has typed.
+
+*Concretely:* a user opens the leaf form on a tablet. Under A they see a grey
+Submit Leaf button and nothing else. Under B they see the button and, below it,
+"To submit: Name is required · Probability is required · Parent: select a
+parent".
+
+My recommendation is B, because the problem §16.1 names is a disabled button
+that says nothing.
+
+### 16.8 ADR alignment
+
+- **ADR-019 §7** is amended to the rules of §16.2, with the user's approval of
+  2026-10-31: "A per-view failure never goes to the banner", and a failure caused
+  by a session condition "is shown in both places". The record's
+  "Duplicating a Per-View Error into the Global Banner" smell now holds without
+  exception. The Implementation table's `GlobalError` row still reads "Sealed
+  enum of failures no view owns". It is changed in the same pass to "Sealed enum
+  of the session conditions the banner shows".
+- **ADR-019 decision 3 and Patterns 4 and 5.** `summary` is a derived signal and
+  `summaryList` is a stateless component, so both comply.
+- **ADR-035 §3.** A `404` stays inline and is not classified as a lost workspace,
+  so absent and not-yours still answer identically on screen.
+- **ADR-033.** No catch is added.
+- **ADR-037.** Every new sentence is a named value or a function of its
+  parameter: `ConnectionLost`, `summaryHeading`, `selectionCapReached`,
+  `ParentSelection.Label`, and the labels on the field enums.
+
+### 16.9 Terminology impact
+
+None. No heading in `docs/user/TERMINOLOGY.md` names a banner, a summary list or
+a session condition, and no figure or its meaning changes.
+
+### 16.10 Steps
+
+1. `GlobalError` narrowed, the observer, `ErrorBanner`, `ConnectionLost`;
+   `submitInto` simplified; `settleLoad` deleted and the three load settlers
+   changed. `GlobalErrorSpec` rewritten to the three cases.
+2. The six inline places of §16.5, and `traceOf` in `FailureNotice`.
+3. `SummaryEntry`, `summaryOf`, `displayed`, `summary`, the field labels and ids,
+   the `inputId` parameters, `summaryList`, and its placement in the three
+   views, with the CSS of §16.4. `EWB-D-47` is applied once ruled.
+
+### 16.11 Verification
+
+Tests added:
+
+- `GlobalErrorSpec`: `from` gives `ServerUnreachable` for a transport failure,
+  `DependencyDown` with its trace for `DependencyUnavailable`, `WorkspaceExpired`
+  for an expired workspace, and `None` for every other wire case and for an
+  undecodable answer.
+- `FormErrorRoutingSpec`: `summaryOf` lists a pair refusal once under its first
+  input, keeps display order, and puts the form's own line last; a leaf form's
+  `summary` matches what its inputs show after a submit, and is empty before.
+- `ErrorMessagesSpec`: `traceOf` gives the trace for the three cases and `None`
+  otherwise; `summaryHeading(1)` and `summaryHeading(3)`.
+- `LECChartStateSpec`: a fourteenth selection emits on `selectionCapReached` and
+  leaves the selection unchanged.
+
+Commands, each green:
+
+```bash
+sbt app/test
+sbt 'commonJVM/test; server/test'
+docker ps -a --filter name=register_it_ -q | xargs -r docker rm -f; docker network ls --filter name=register_it_ -q | xargs -r docker network rm; docker volume ls --filter name=register_it_ -q | xargs -r docker volume rm
+sbt serverIt/test
+```
+
+Every source file this phase edits is already a bullet in
+`PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`, so it needs no inventory amendment. The
+test files are in the same module as the code they test.

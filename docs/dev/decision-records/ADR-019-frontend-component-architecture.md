@@ -133,14 +133,16 @@ least one transition is triggered by something other than "this value's own
 inputs changed" — a submit, a load, a user action; (c) different phases
 enable or disable different behavior, rather than just displaying differently.
 
-### 7. Error Presentation: Inline by Default, One Global Banner as the Catch-All
+### 7. Error Presentation: Inline by Default, One Global Banner for Session Conditions
 
-A view that issued a request owns its failure and renders it inline
-(`LoadState.Failed`, `SubmitState.Failed`). Failures no view owns — a
-fire-and-forget call, the startup health probe, an expired workspace — go to a
-single `GlobalError` signal that `ErrorBanner` renders above the layout. An
-error belongs to exactly one tier; sending a per-view failure to the banner as
-well shows it to the user twice.
+A view that issued a request owns its result and renders it inline
+(`LoadState.Failed`, `SubmitState.Failed`), next to the control that issued it
+and in that form's summary list. The banner renders only conditions of the
+session as a whole: the server cannot be reached, a service it depends on is
+down, the workspace has expired. A per-view failure never goes to the banner. A
+failure caused by one of those conditions is shown in both places, because the
+two say different things: that this action failed, and that the next one will
+fail too.
 
 `GlobalError` is the app module's own sealed enum, named apart from the server's
 `AppError` because the two describe different things — what went wrong, versus
@@ -289,7 +291,7 @@ globalError.set(Some(GlobalError.from(e)))
 ```
 
 ```scala
-// GOOD: the owning view renders it; the banner takes only unowned failures
+// GOOD: the owning view renders it; the banner takes only session conditions
 submitState.set(SubmitState.Failed(e))
 ```
 
