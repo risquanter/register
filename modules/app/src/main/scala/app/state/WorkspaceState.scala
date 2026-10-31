@@ -6,10 +6,10 @@ import org.scalajs.dom
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
+import com.risquanter.register.http.responses.SimulationResponse
 
 import app.core.ZJS.*
-import app.core.{RequestFailure, ViewFailure}
+import app.core.{BackendClient, RequestFailure}
 import com.risquanter.register.http.errors.WireError
 
 /** Central workspace lifecycle state — deferred bootstrap pattern.
@@ -111,30 +111,20 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
 
   // ── Bootstrap (Scenario 1 — first tree create) ────────────────
 
-  /** Bootstrap a new workspace with the first tree.
+  /** The request that creates a new workspace with its first tree.
     *
-    * Called by TreeBuilderView when the user submits their first tree
-    * and no workspace exists yet. After success, all subsequent creates
-    * use `createWorkspaceTreeEndpoint` directly.
-    *
-    * @param request    The tree definition from the builder form
-    * @param onSuccess  Callback with the created tree (drives TreeViewState)
-    * @param onError    Callback with why the request failed (drives
-    *                   `SubmitState.Failed`), so the caller's view composes
-    *                   the sentence where it renders it
+    * TreeBuilderView runs it when the user submits their first tree and no
+    * workspace exists yet, through `submitInto`, like the other tree submits.
+    * On success the workspace key is stored and pushed to the URL before the
+    * created tree is returned. Every later create uses
+    * `createWorkspaceTreeEndpoint` directly.
     */
-  def bootstrap(
-    request: RiskTreeDefinitionRequest,
-    onSuccess: SimulationResponse => Unit,
-    onError: ViewFailure => Unit
-  ): Unit =
+  def bootstrap(request: RiskTreeDefinitionRequest): zio.ZIO[BackendClient, RequestFailure, SimulationResponse] =
     bootstrapWorkspaceEndpoint((currentUserId, None, request))
       .tap { response =>
         zio.ZIO.succeed {
           workspaceKey.set(Some(response.workspaceKey))
           pushKeyToURL(response.workspaceKey)
-          onSuccess(response.tree)
         }
       }
-      .tapError(f => zio.ZIO.succeed(onError(f)))
-      .runJs
+      .map(_.tree)

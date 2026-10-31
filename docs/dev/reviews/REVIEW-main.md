@@ -730,3 +730,82 @@ escalated:
     modules/app/src/main/scala/app/components/FormInputs.scala:230 — new Laminar render sites
     carrying server sentences and reasons (SPA output path) → security
 ```
+
+```
+COVERAGE  tier=complex  scope=the routine tier's escalation list for the frontend commits
+          after 4acbfc9f (1f5943c0, 00645acb, eb412b6a, a758940e, c0be2ece, 75227515,
+          10b5365a, and the follow-up 3ca530f2 on disk) — File scope source 1, named by
+          the user
+read-in-full:
+  modules/app/src/main/scala/app/views/TreeBuilderView.scala
+  modules/app/src/main/scala/app/core/ZJS.scala
+  modules/app/src/main/scala/app/state/TreeBuilderState.scala
+  modules/app/src/main/scala/app/state/TreeViewState.scala
+  modules/app/src/main/scala/app/state/TreeLoadPolicy.scala
+  modules/app/src/main/scala/app/state/SubmitState.scala
+  modules/app/src/main/scala/app/state/GlobalError.scala
+  modules/app/src/main/scala/app/state/FormState.scala
+  modules/app/src/main/scala/app/state/WorkspaceState.scala
+  modules/app/src/main/scala/app/views/DesignView.scala
+  modules/app/src/main/scala/app/views/ErrorBanner.scala
+  modules/app/src/main/scala/app/views/ErrorMessages.scala
+  modules/app/src/main/scala/app/views/PortfolioFormView.scala
+  modules/app/src/main/scala/app/views/RiskLeafFormView.scala
+  modules/app/src/main/scala/app/views/BlockedMessages.scala
+  modules/app/src/main/scala/app/components/FormInputs.scala
+  modules/app/src/main/scala/app/components/FailureNotice.scala
+  modules/app/src/main/scala/app/core/ViewFailure.scala
+  modules/app/src/main/scala/app/Main.scala
+  modules/app/src/main/scala/app/components/AppShell.scala (lines 24-77, the view switch)
+  modules/app/src/test/scala/app/state/TreeBuilderStateSpec.scala (tail; two tests added)
+  library, from the airstream 17.2.0 sources jar (no sibling checkout exists):
+    core/Transaction.scala, state/Var.scala:26-36, state/SourceVar.scala,
+    misc/StreamFromSignal.scala, combine/SampleCombineStreamN.scala,
+    combine/MergeStream.scala, core/Signal.scala:86
+  plan: PLAN-ERROR-WIRE-BOUNDARY.md §7.4, §9 Phase 3a, EWB-D-42, EWB-D-43, §15.5a, §15.8
+  records: ADR-010, ADR-019, ADR-033, ADR-035
+discharged:
+  1 adversarial line scan — PASS on the two escalated items; 1 finding on the bootstrap
+    path (TreeBuilderView.scala:107 with WorkspaceState.scala:131-140, `.runJs` notifies
+    the observer, so a server field refusal on the first Create shows in the banner and
+    on the builder's line)
+  2 removed-behaviour audit — PASS — Failed(FormInvalid) replaced by treeNameError +
+    topologyError, both gated by triggerValidation (TreeBuilderState.scala:133,142-149);
+    the name-edit clear replaced by draftEdits (TreeBuilderState.scala:152-157) and no
+    longer clears Submitting; forkProvided's automatic onError/onSuccess re-established
+    by hand at ZJS.scala:290-295 for every failure GlobalError.from does not classify
+    as ValidationFailed, and for every success; recordToConsole still runs for every
+    failure (ZJS.scala:63)
+  3 cross-module tracing — PASS — submitInto has two callers, both in
+    TreeBuilderView.scala:95,104; the withholding reaches no other view. Error path
+    reached on every submit: ZJS.scala:291-296 (Failed set, then the observer decision)
+    from :95 and :104; TreeBuilderView.scala:107 (bootstrap failure → Failed) and :91
+    (no workspace → Failed). Render site for every Failed: TreeBuilderView.scala:69-72 →
+    :175-178 (FailureNotice.lines) via ErrorMessages.viewFailedLines (:117-125). Banner
+    writer: Main.scala:101-106
+  4 state and interleaving model — PASS on item 1 — Var.set opens its own transaction
+    and a set issued inside an observer runs after the current transaction, depth-first
+    (Transaction.scala pendingTransactions.add/putNextTransactionOnStack); a set issued
+    from a ZIO callback runs to completion before the next statement; sample reads the
+    sampled signal's tryNow() at the sampling emission (SampleCombineStreamN); changes
+    emits nothing on first start (StreamFromSignal onStart, isFirstPull && changesOnly)
+    and the view is never remounted (AppShell.scala:77 toggles display). Hence Success
+    set at TreeBuilderView.scala:49 is what every draft write of startNewTree (:51) and
+    of loadFromTree (via DesignView.scala:132 → :52) samples. Pinned in
+    TreeBuilderStateSpec "draft edits". 1 pre-existing finding: draft writes accepted
+    while a submit is in flight are overwritten by onSuccess (TreeBuilderView.scala:51,
+    :55-58 with TreeLoadPolicy.scala:41-42)
+  5 invariant reconstruction — PASS — submitState has one owner (TreeBuilderView) plus
+    submitInto; every Failed renders; a failure the view renders is also sent to the
+    banner except a field refusal (see finding 2, pre-existing and codebase-wide:
+    loadInto ZJS.scala:187-193 does the same)
+  6 design altitude — 1 note (submitInto re-implements forkProvided's notification
+    instead of forkProvided taking a predicate, ZJS.scala:61,286-298); if/else pass —
+    TreeLoadPolicy.scala:41-46 three-way if/else-if producing an enum (pre-existing)
+  7 terminology freshness (meaning level) — PASS — no glossary heading denotes a
+    submit, a refusal's display, or the banner; §8 trace handling unchanged
+  8 inline verification — app/test pass with the two pinning tests added
+escalated:
+  (none beyond the routine tier's security item, which stands: FailureNotice.scala:23,
+  FormInputs.scala:230)
+```

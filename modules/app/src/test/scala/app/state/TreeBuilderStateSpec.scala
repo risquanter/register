@@ -5,6 +5,7 @@ import zio.prelude.Validation
 import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
+import app.core.LocalProblem
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, DistributionShape}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId, ValidationMessages}
 import io.github.iltotore.iron.*
@@ -735,6 +736,49 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.triggerValidation()
         state.startNewTree()
         assertTrue(currentOf(state.topologyError).isEmpty)
+      }
+
+    ),
+
+    suite("draft edits")(
+
+      test("fires once per write of the name or a node list, and not on display or mode state") {
+        val state = new TreeBuilderState()
+        given owner: ManualOwner = new ManualOwner
+        var fired = 0
+        state.draftEdits.foreach(_ => fired += 1)
+        state.triggerValidation()
+        state.markTouched(TreeBuilderField.TreeName)
+        state.editingTreeId.set(Some(TreeId.fromString(treeUlid).toOption.get))
+        val afterNonDraft = fired
+        state.treeNameVar.set("Enterprise")
+        val afterName = fired
+        state.addPortfolio(n("Ops"), ParentRef.Root)
+        val afterAdd = fired
+        // removeNode writes both node lists, so it is two edits.
+        state.removeNode(n("Ops"))
+        val afterRemove = fired
+        owner.killSubscriptions()
+        assertTrue(afterNonDraft == 0, afterName == 1, afterAdd == 2, afterRemove == 4)
+      },
+
+      test("a draft write samples the submit state set before it, so a reset after a success is seen as the success") {
+        val state = new TreeBuilderState()
+        val submitState: Var[SubmitState] = Var(SubmitState.Idle)
+        given owner: ManualOwner = new ManualOwner
+        var sampled: List[SubmitState] = Nil
+        state.draftEdits.sample(submitState.signal).foreach(s => sampled = sampled :+ s)
+        submitState.set(SubmitState.Failed(LocalProblem.NoActiveWorkspace))
+        state.treeNameVar.set("Enterprise")
+        // The view sets the next state and then resets the draft in one callback;
+        // the three writes of startNewTree each see the state set before them.
+        submitState.set(SubmitState.Submitting)
+        state.startNewTree()
+        owner.killSubscriptions()
+        assertTrue(sampled == List(
+          SubmitState.Failed(LocalProblem.NoActiveWorkspace),
+          SubmitState.Submitting, SubmitState.Submitting, SubmitState.Submitting
+        ))
       }
 
     )

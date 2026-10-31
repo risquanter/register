@@ -103,8 +103,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
                   case Some(key) =>
                     createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess(wasCreate = true))
                   case None =>
-                    submitState.set(SubmitState.Submitting)
-                    wsState.bootstrap(request, onSuccess(wasCreate = true), failure => submitState.set(SubmitState.Failed(failure)))
+                    wsState.bootstrap(request).submitInto(submitState)(onSuccess(wasCreate = true))
               case Validation.Failure(_, _) => validationFailed()
       }
 
