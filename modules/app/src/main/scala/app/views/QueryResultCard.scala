@@ -1,7 +1,8 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
+import app.components.FailureNotice
 import app.state.LoadState
 import com.risquanter.register.domain.data.RiskNode
 import com.risquanter.register.domain.data.iron.NodeId
@@ -10,7 +11,8 @@ import com.risquanter.register.http.responses.QueryResponse
 /** Result card for vague quantifier query evaluation (ADR-028).
   *
   * Shows satisfied badge, proportion bar, count, matching nodes, query echo.
-  * States: Idle, Loading, Loaded (Failed renders as emptyNode safety-net).
+  * States: Idle, Loading, Loaded, and Failed, which renders the failure in the
+  * card where the query was run.
   *
   * Accepts a node-lookup signal for resolving node names in the
   * matching-nodes list.
@@ -32,7 +34,9 @@ object QueryResultCard:
         // with no result either way.
         case (LoadState.Idle, _) | (LoadState.Absent, _) => renderIdle
         case (LoadState.Loading, _)     => renderLoading
-        case (LoadState.Failed(_), _)   => emptyNode // safety-net: domain errors route to AnalyzeView inline slot
+        // A refusal of the query text is shown under the input instead and
+        // leaves the result idle, so this is every other failure of the run.
+        case (LoadState.Failed(f), _)   => FailureNotice(f, None)
         case (LoadState.Loaded(r), lookup) => renderResult(r, lookup)
       }
     )
@@ -52,8 +56,9 @@ object QueryResultCard:
     )
 
   private def renderResult(r: QueryResponse, nodeLookup: Map[NodeId, RiskNode]): HtmlElement =
-    val satisfiedCls = if r.satisfied then "badge-satisfied" else "badge-not-satisfied"
-    val satisfiedText = if r.satisfied then "SATISFIED" else "NOT SATISFIED"
+    val (satisfiedCls, satisfiedText) = r.satisfied match
+      case true  => ("badge-satisfied", "SATISFIED")
+      case false => ("badge-not-satisfied", "NOT SATISFIED")
     val pct = (r.proportion * 100).round.toInt
 
     div(

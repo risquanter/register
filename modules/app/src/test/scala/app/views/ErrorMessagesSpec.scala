@@ -15,16 +15,39 @@ import com.risquanter.register.http.errors.{RejectionDetail, WireError}
   * sentence each case got, and that is what these pin: one case per arm, so a
   * rearranged match that still compiles cannot silently swap two sentences.
   *
-  * The companion to this is `GlobalErrorSpec`, which pins the same failures as
-  * the banner shows them. Both read these functions, which is why the two tiers
-  * cannot drift apart (ADR-019 Pattern 7).
+  * The companion to this is `GlobalErrorSpec`, which pins which failures the
+  * banner also shows as a condition of the session (ADR-019 Pattern 7).
   */
 object ErrorMessagesSpec extends ZIOSpecDefault:
 
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
-    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite)
+    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite)
+
+  private val traceOfSuite =
+    suite("ErrorMessages.traceOf")(
+      test("a fault, a denial and an outage offer their trace, because the user cannot resolve them") {
+        assertTrue(
+          ErrorMessages.traceOf(RequestFailure.Wire(WireError.InternalFault(trace))) == Some(trace),
+          ErrorMessages.traceOf(RequestFailure.Wire(WireError.AccessDenied(trace))) == Some(trace),
+          ErrorMessages.traceOf(RequestFailure.Wire(WireError.DependencyUnavailable(trace))) == Some(trace)
+        )
+      },
+      test("a refusal the user can correct offers none") {
+        assertTrue(
+          ErrorMessages.traceOf(RequestFailure.Wire(WireError.RequestRejected(List(blankName), trace))).isEmpty,
+          ErrorMessages.traceOf(RequestFailure.Wire(WireError.NotFound(trace))).isEmpty
+        )
+      },
+      test("a failure with no server answer offers none") {
+        assertTrue(
+          ErrorMessages.traceOf(RequestFailure.Transport(new RuntimeException("Failed to fetch"))).isEmpty,
+          ErrorMessages.traceOf(RequestFailure.Undecodable(StatusCode.BadGateway)).isEmpty,
+          ErrorMessages.traceOf(LocalProblem.NoActiveWorkspace).isEmpty
+        )
+      }
+    )
 
   private val blankName: E.ValidationError =
     E.ValidationError(E.ErrorLocation.requestField(E.FieldName.Name), E.ValidationErrorCode.REQUIRED_FIELD, "must not be empty")
@@ -60,7 +83,7 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
 
   private val viewFailedSuite =
     suite("ErrorMessages.viewFailed")(
-      test("a failure the server answered with reads the same sentence the banner reads") {
+      test("a failure the server answered with reads the sentence for its wire case") {
         val error = WireError.InternalFault(trace)
         assertTrue(
           ErrorMessages.viewFailed(RequestFailure.Wire(error)) == ErrorMessages.wire(error),

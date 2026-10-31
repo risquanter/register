@@ -4,7 +4,7 @@ import java.time.Duration
 import sttp.model.StatusCode
 import app.core.{LocalProblem, RequestFailure, ViewFailure}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.ScenarioName
+import com.risquanter.register.domain.data.iron.{ScenarioName, TraceId}
 import com.risquanter.register.domain.errors.MergeRefusal
 import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProblem, RejectionDetail, WireError}
 
@@ -127,6 +127,14 @@ object ErrorMessages:
       errors.map(_.message).toList
     case other =>
       List(viewFailed(other))
+
+  /** The trace a failure offers for reporting: present where the user cannot
+    * resolve the failure themselves. */
+  def traceOf(failure: ViewFailure): Option[TraceId] = failure match
+    case RequestFailure.Wire(WireError.InternalFault(t))         => Some(t)
+    case RequestFailure.Wire(WireError.AccessDenied(t))          => Some(t)
+    case RequestFailure.Wire(WireError.DependencyUnavailable(t)) => Some(t)
+    case _                                                       => None
 
   /** The sentence for each case the server can answer with.
     *

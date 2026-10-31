@@ -1,6 +1,6 @@
 package app.components
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import app.core.LocalProblem
 import app.state.{ScenarioState, ScenarioSubmitState, LoadState}
@@ -17,6 +17,9 @@ import com.risquanter.register.http.responses.ScenarioSummaryResponse
   *
   * All are entirely absent from the DOM when scenarios are unavailable —
   * removed outright, not grayed out.
+  *
+  * The menu shows a failed list load with a retry, and a failed delete under
+  * the row of the scenario it was for.
   */
 object BranchBar:
 
@@ -145,6 +148,9 @@ object BranchBar:
       cls := "scenario-toolbar",
       display <-- scenariosEnabled.map(if _ then "flex" else "none"),
       onMountCallback(_ => scenarioState.refresh()),
+      // A delete closes the menu, so a failed one reopens it to show the
+      // failure under the scenario's row.
+      scenarioState.deleteFailure.signal.changes.collect { case Some(_) => true } --> menuOpen,
       span(cls := "scenario-toolbar-label", "Scenarios:"),
       div(
         cls := "scenario-dropdown",
@@ -183,6 +189,9 @@ object BranchBar:
 
     div(
       menuItem("⎇ main", current == BranchChoice.Main, () => { scenarioState.switchTo(BranchChoice.Main); closeAll() }),
+      listState match
+        case LoadState.Failed(f) => FailureNotice(f, Some(() => scenarioState.refresh()))
+        case _                   => emptyNode,
       names.map(name => scenarioRow(scenarioState, name, current == BranchChoice.Scenario(name), closeAll)),
       div(cls := "scenario-menu-divider"),
       child.maybe <-- createTrigger.signal.map {
@@ -217,7 +226,7 @@ object BranchBar:
   /** Named-scenario row: clicking the label switches to the scenario and
     * clicking the ✕ deletes it, whichever branch is active. `stopPropagation`
     * on the ✕ keeps a delete click from also firing the row's own switch-to
-    * action.
+    * action. A failed delete of this scenario is shown under its row.
     */
   private def scenarioRow(
     scenarioState: ScenarioState,
@@ -226,24 +235,29 @@ object BranchBar:
     closeAll: () => Unit
   ): HtmlElement =
     div(
-      cls := "scenario-menu-item-row",
-      span(
-        cls := "scenario-menu-item-label",
-        cls("scenario-menu-item--active") := active,
-        s"⎇ ${name.value}",
-        onClick --> { _ => scenarioState.switchTo(BranchChoice.Scenario(name)); closeAll() }
-      ),
-      span(
-        cls := "scenario-menu-item-delete",
-        title := s"Delete scenario '${name.value}'",
-        "✕",
-        onClick.stopPropagation --> { _ =>
-          ConfirmGuard.proceedOrConfirm(true, s"Delete scenario '${name.value}'? This cannot be undone.") { () =>
-            scenarioState.delete(name)
+      div(
+        cls := "scenario-menu-item-row",
+        span(
+          cls := "scenario-menu-item-label",
+          cls("scenario-menu-item--active") := active,
+          s"⎇ ${name.value}",
+          onClick --> { _ => scenarioState.switchTo(BranchChoice.Scenario(name)); closeAll() }
+        ),
+        span(
+          cls := "scenario-menu-item-delete",
+          title := s"Delete scenario '${name.value}'",
+          "✕",
+          onClick.stopPropagation --> { _ =>
+            ConfirmGuard.proceedOrConfirm(true, s"Delete scenario '${name.value}'? This cannot be undone.") { () =>
+              scenarioState.delete(name)
+            }
+            closeAll()
           }
-          closeAll()
-        }
-      )
+        )
+      ),
+      child.maybe <-- scenarioState.deleteFailure.signal.map(_.collect {
+        case (`name`, failure) => FailureNotice(failure, None)
+      })
     )
 
   private def actionItem(label: String, onSelect: () => Unit): HtmlElement =

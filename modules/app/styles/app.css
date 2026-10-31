@@ -1959,6 +1959,16 @@ select.form-input:has(option[value=""]:checked) {
   border: 1px solid var(--error);
 }
 
+/* The trace a server fault offers for reporting: muted, and selectable so it
+   can be copied. */
+.failure-notice-trace {
+  margin-top: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+  user-select: all;
+}
+
 .failure-notice-retry {
   margin-top: var(--sp-2);
   background: var(--surface-overlay);

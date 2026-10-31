@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.*
 
 import app.core.ZJS.*
-import app.core.RequestFailure
+import app.core.{RequestFailure, ViewFailure}
 import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
@@ -39,7 +39,7 @@ final class AnalyzeQueryState(
   // private val defaultQuery = "" //
   val queryInput: Var[String] = Var(defaultQuery)
 
-  // ── Client-side parse validation (T3.1b) ──────────────────────
+  // ── Client-side parse validation ──────────────────────────────
   //
   // VagueQueryParser.parse() runs in-browser (fol-engine cross-compiled
   // to JS via common). Validation is triggered by:
@@ -90,17 +90,12 @@ final class AnalyzeQueryState(
   // its subscription to whatever the *previous* trigger's request stream was
   // still doing — a response for a superseded query can therefore never
   // land after a newer one has already started, regardless of which
-  // request's server round trip happens to finish first. This replaces an
-  // earlier hand-rolled "is this response still relevant" guard: Airstream
-  // already has a combinator for exactly this ("supersede stale in-flight
-  // work when a new trigger fires"), so there's no bespoke bookkeeping left
-  // to keep correct by hand.
+  // request's server round trip happens to finish first.
   //
-  // One known, deliberate gap: `flatMapSwitch` stops *observing* the
-  // superseded request's stream, it does not cancel the underlying ZIO
-  // fiber (`forkProvided`, see `ZJS.scala`, discards the fiber handle) — the
-  // abandoned network call still runs to completion server-side, its result
-  // just goes nowhere. Tracked separately (TODO.md).
+  // `flatMapSwitch` stops *observing* the superseded request's stream; it
+  // does not cancel the underlying ZIO fiber (`forkProvided`, see
+  // `ZJS.scala`, discards the fiber handle). The abandoned network call
+  // still runs to completion server-side, and its result goes nowhere.
   val queryResult: Var[LoadState[QueryResponse]] = Var(LoadState.Idle)
 
   /** Server-side domain error (400 query failures) for inline display.
@@ -109,9 +104,8 @@ final class AnalyzeQueryState(
     * (parse, unknown-symbol, bind, domain-not-quantifiable). Rendered as
     * `span.form-error` in the query panel, parallel to `parseError`.
     *
-    * Cleared on every new query execution. Infra-level errors (500, network)
-    * bypass this channel and route to `GlobalError` / `ErrorBanner` instead.
-    *
+    * Cleared on every new query execution. Every other failure lands in
+    * `queryResult` as `LoadState.Failed`, which the result card renders.
     */
   val queryServerError: Var[Option[String]] = Var(None)
 
@@ -135,9 +129,8 @@ final class AnalyzeQueryState(
     * trigger like any other — modelling "clear the result" as a value this
     * pipeline emits, not as a side-channel `Var.set` outside it, is what
     * lets `flatMapSwitch` also supersede an in-flight query the moment the
-    * tree changes (today's separate `resetResult()` caller in `AnalyzeView`
-    * still exists, it just enqueues a trigger now instead of writing state
-    * directly).
+    * tree changes: `resetResult()` enqueues a trigger rather than writing
+    * state directly.
     */
   private enum Trigger:
     case Reset
@@ -153,6 +146,7 @@ final class AnalyzeQueryState(
     case Loading
     case Loaded(resp: QueryResponse)
     case DomainError(message: String)
+    case Failed(failure: ViewFailure)
 
   private val triggerBus: EventBus[Trigger] = new EventBus[Trigger]
 
@@ -160,8 +154,8 @@ final class AnalyzeQueryState(
   // "one request, or reset, supersedes whatever the previous one was still
   // doing" skeleton `ChangedNodesState` and `ScenarioListState` use via
   // `loadStatePipeline`. Only the settle mapping is local: it needs the
-  // `DomainError` case (inline 400-level query failures), which the plain
-  // `LoadState` specialization can't carry.
+  // `DomainError` case (a refusal of the query text, shown under the input),
+  // which the plain `LoadState` specialization can't carry.
   private val outcome: EventStream[Outcome] =
     requestPipeline[Either[RequestFailure, QueryResponse], Outcome](
       triggerBus.events.map {
@@ -181,9 +175,8 @@ final class AnalyzeQueryState(
           WireError.ValidationRejected(_, RejectionDetail.Query(problem), _)
         )) =>
           Outcome.DomainError(ErrorMessages.query(problem))
-        // Any other failure: the global observer has already reported it, so
-        // this stream only needs to resolve back out of Loading.
-        case Left(_) => Outcome.Idle
+        // Any other failure is shown by the result card, where the query was run.
+        case Left(f) => Outcome.Failed(f)
       }
     )
 
@@ -202,6 +195,9 @@ final class AnalyzeQueryState(
     case Outcome.DomainError(message) =>
       queryResult.set(LoadState.Idle)
       queryServerError.set(Some(message))
+    case Outcome.Failed(failure) =>
+      queryResult.set(LoadState.Failed(failure))
+      queryServerError.set(None)
   }(using unsafeWindowOwner)
 
   // ── Actions ───────────────────────────────────────────────────
@@ -227,8 +223,8 @@ final class AnalyzeQueryState(
     * No-op if no workspace or tree is selected.
     *
     * Error routing (ADR-010):
-    *   - 400 domain errors (parse/symbol/bind) → `queryServerError` (inline)
-    *   - 5xx / network / other → `GlobalError` → `ErrorBanner`
+    *   - a refusal of the query text → `queryServerError`, under the input
+    *   - any other failure → `queryResult` as `LoadState.Failed`, in the result card
     */
   def executeQuery(): Unit =
     val queryText = queryInput.now()

@@ -1,9 +1,9 @@
 package app.state
 
 import zio.ZIO
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
-import app.core.LocalProblem
+import app.core.{LocalProblem, ViewFailure}
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
@@ -89,8 +89,7 @@ final class ScenarioState(
       case Some(key) =>
         submitState.set(ScenarioSubmitState.Submitting)
         // forkOf None = fork from main's head; Some(n) = fork from scenario n's
-        // head. Fork-from-commit (ScenarioSourceDto.Commit) lands with the
-        // history slider's fork button (Slice E-B).
+        // head. Forking from a commit (ScenarioSourceDto.Commit) is not offered here.
         val source = forkOf.fold[ScenarioSourceDto](ScenarioSourceDto.Branch(BranchChoice.Main))(n =>
           ScenarioSourceDto.Branch(BranchChoice.Scenario(n)))
         createScenarioEndpoint((userIdAccessor(), key, CreateScenarioRequest(name, source)))
@@ -118,22 +117,29 @@ final class ScenarioState(
     * branch-fallback subscription (above) notice the deletion — that path is
     * necessarily async (another instance only learns about it by observing
     * the shared list), but this instance's own knowledge shouldn't depend on
-    * that refresh succeeding. Errors surface via the global error banner
-    * (`forkProvided`'s default observer), matching other destructive actions.
+    * that refresh succeeding. A failure is held in `deleteFailure`, which the
+    * scenario's row in the menu renders.
     */
   def delete(name: ScenarioName.ScenarioName): Unit =
     keySignal.now() match
       case None => ()
       case Some(key) =>
+        deleteFailure.set(None)
         listScenariosEndpoint((userIdAccessor(), key))
           .flatMap { fresh =>
             fresh.find(_.name == name) match
               case Some(s) =>
                 deleteScenarioEndpoint((userIdAccessor(), key, name, s.head))
                   .tap(_ => ZIO.succeed {
-                    if activeBranch.now() == BranchChoice.Scenario(name) then activeBranch.set(BranchChoice.Main)
+                    activeBranch.now() match
+                      case BranchChoice.Scenario(`name`) => activeBranch.set(BranchChoice.Main)
+                      case _                             => ()
                     listState.refresh()
                   })
               case None => ZIO.unit
           }
+          .tapError(f => ZIO.succeed(deleteFailure.set(Some((name, f)))))
           .runJs
+
+  /** The scenario whose delete failed last, and why; cleared when a delete starts. */
+  val deleteFailure: Var[Option[(ScenarioName.ScenarioName, ViewFailure)]] = Var(None)

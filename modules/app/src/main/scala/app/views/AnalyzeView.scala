@@ -1,10 +1,10 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import scala.scalajs.js
 
-import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalettePicker, Icons, HistorySlider, LecChartControls}
+import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalettePicker, Icons, HistorySlider, LecChartControls, FailureNotice}
 import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
 import app.state.{TreeViewState, TreeHistoryState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareLayout, CompareState, CompareSlot, CompareSlotState, CompareTarget, SlotCoordinate, toCoordinate}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
@@ -331,11 +331,10 @@ object AnalyzeView:
       compareSlots.map { slot =>
         treeViewState.selectedTreeId.signal
           .combineWith(slot.state.target.signal)
-          .changes.debounce(100) --> {
-            case (Some(activeTid), CompareTarget.Target(coord)) =>
-              slot.historyState.loadHistory(coord.treeOverride.getOrElse(activeTid), coord.branch)
-            case _ =>
-              slot.historyState.reset()
+          .changes.debounce(100) --> { (activeTid, target) =>
+            comparandHistory(activeTid, target) match
+              case Some((treeId, branch)) => slot.historyState.loadHistory(treeId, branch)
+              case None                   => slot.historyState.reset()
           }
       },
       // Baseline slider stops: the active tree's history on the active branch.
@@ -731,6 +730,24 @@ object AnalyzeView:
     case LoadState.Loaded(m) => m
     case _                   => Map.empty
 
+  /** The (tree, branch) whose history a comparand's slider shows: the slot's
+    * own tree override, else the tab's tree, on the slot's branch. None while
+    * the tab holds no tree or the slot no target. */
+  private def comparandHistory(activeTid: Option[TreeId], target: CompareTarget): Option[(TreeId, BranchChoice)] =
+    (activeTid, target) match
+      case (Some(tid), CompareTarget.Target(coord)) => Some((coord.treeOverride.getOrElse(tid), coord.branch))
+      case _                                        => None
+
+  /** A slot's failed load, shown in the slot's card where its result would
+    * be, with a retry when one is offered. */
+  private def slotFailure[A](result: Signal[LoadState[A]], retry: Signal[Option[() => Unit]]): HtmlElement =
+    div(
+      child.maybe <-- result.combineWith(retry).map {
+        case (LoadState.Failed(f), r) => Some(FailureNotice(f, r))
+        case _                        => None
+      }
+    )
+
 
   /** One side-by-side panel's spec lifecycle — mirrors `LECChartState
     * .specSignal`'s shape (empty selection → Idle; otherwise the cache's
@@ -795,7 +812,13 @@ object AnalyzeView:
       // History slider under the picker: rewind the baseline to an earlier stop.
       div(
         cls := "slot-card-slider",
-        HistorySlider(baselineHistoryState.commits, compareState.baselineAt.signal, compareState.baselineAt.set(_))
+        HistorySlider(baselineHistoryState.commits, compareState.baselineAt.signal, compareState.baselineAt.set(_)),
+        slotFailure(
+          baselineHistoryState.history.signal,
+          treeViewState.selectedTreeId.signal.combineWith(scenarioState.activeBranch.signal).map { (tid, branch) =>
+            tid.map(t => () => baselineHistoryState.loadHistory(t, branch))
+          }
+        )
       ),
       // Actions row — the eye alone, right-aligned, stacking under the refresh
       // and lining up with the comparand rows' rightmost button.
@@ -832,7 +855,15 @@ object AnalyzeView:
       // stop (past-vs-current against the baseline at head).
       div(
         cls := "slot-card-slider",
-        HistorySlider(slot.historyState.commits, slot.state.atSignal, slot.state.setAt(_))
+        HistorySlider(slot.historyState.commits, slot.state.atSignal, slot.state.setAt(_)),
+        slotFailure(
+          slot.historyState.history.signal,
+          activeTreeId.combineWith(slot.state.target.signal).map { (tid, target) =>
+            comparandHistory(tid, target).map((treeId, branch) => () => slot.historyState.loadHistory(treeId, branch))
+          }
+        ),
+        // The changed-node markers of this slot's tree come from the diff.
+        slotFailure(slot.diffState.diffResult.signal, Val(None))
       ),
       div(
         cls := "slot-card-actions",
@@ -1005,17 +1036,19 @@ object AnalyzeView:
     compareState: CompareState,
     compareTree: RiskTree
   ): Unit =
-    val chosen = slot.state.target.now() != CompareTarget.NotChosen
-    if chosen && !slot.state.mirror.now() && slot.treeViewState.chartState.userSelectedNodeIds.now().isEmpty then
-      val active = treeViewState.chartState
-      val baseline = active.satisfyingNodeIds.now() ++ active.userSelectedNodeIds.now()
-      val activeRoot = treeViewState.selectedTree.now() match
-        case LoadState.Loaded(activeTree) => Some(activeTree.rootId)
-        case _                            => None
-      val (rootToSelect, seeds) =
-        computeSeed(baseline, activeRoot, compareTree.nodes.map(_.id).toSet, Some(compareTree.rootId))
-      rootToSelect.foreach(active.userSelectionToggle.onNext)
-      seeds.foreach(slot.treeViewState.chartState.userSelectionToggle.onNext)
+    slot.state.target.now() match
+      case CompareTarget.Target(_)
+          if !slot.state.mirror.now() && slot.treeViewState.chartState.userSelectedNodeIds.now().isEmpty =>
+        val active = treeViewState.chartState
+        val baseline = active.satisfyingNodeIds.now() ++ active.userSelectedNodeIds.now()
+        val activeRoot = treeViewState.selectedTree.now() match
+          case LoadState.Loaded(activeTree) => Some(activeTree.rootId)
+          case _                            => None
+        val (rootToSelect, seeds) =
+          computeSeed(baseline, activeRoot, compareTree.nodes.map(_.id).toSet, Some(compareTree.rootId))
+        rootToSelect.foreach(active.userSelectionToggle.onNext)
+        seeds.foreach(slot.treeViewState.chartState.userSelectionToggle.onNext)
+      case _ => ()
 
   /** Branch picker for one Compare slot — options are `scenarioState
     * .scenarios` plus `main`. The tab's own active branch is offered too: a
