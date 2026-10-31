@@ -2,9 +2,9 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Forty-six decisions, `EWB-D-1` to `EWB-D-46`, are ruled.
-`EWB-D-1` to `EWB-D-43` are recorded in §10, and `EWB-D-44` to `EWB-D-46` in
-§16.2. `EWB-D-47` is open, in §16.7. Approval is in place: the token names this document and
+**Status.** All forty-seven decisions, `EWB-D-1` to `EWB-D-47`, are ruled.
+`EWB-D-1` to `EWB-D-43` are recorded in §10, and `EWB-D-44` to `EWB-D-47` in
+§16.2 and §16.7. Approval is in place: the token names this document and
 the file inventory exists beside it. Phases 1, 1a, 1b, 2, 2b, 2c and 3 have landed, and `EWB-D-27`'s
 projection change landed with them. What remains is Phase 3a, then Phase 3b, then
 Phases 4 to 7.
@@ -7104,32 +7104,25 @@ curve limit inline.
 
 ### 16.7 Decisions
 
-`EWB-D-44`, `EWB-D-45` and `EWB-D-46` are ruled, as §16.2 records. One question
-is open.
+`EWB-D-44` to `EWB-D-47` are ruled. §16.2 records the first three.
 
-**`EWB-D-47` — what the summary shows while the submit is blocked before any
-input is touched.** The list shows what the inputs show, and an input shows its
-refusal only after it is touched or the form submitted. A blocked button cannot
-be clicked, so on an empty form nothing is shown, and on a touch screen the
-hover reasons cannot be seen either.
+**`EWB-D-47` — what a blocked submit shows — RULED 2026-10-31.** The question
+was what a form shows while its submit is blocked and no input is touched yet:
+an input shows its refusal only after it is touched or the form submitted, and a
+blocked button cannot be clicked.
 
-*Option A — the list waits, as the inputs do.* Nothing appears until an input is
-touched. *Pro:* an empty form is quiet. *Con:* a touch-screen user sees a
-disabled button and no reason.
+**Ruled:** the submit stays blocked as now, and its hover box stays where it is.
+The box shows the blocking sentences one per line, in the order the inputs
+appear, in the information styling (`--info`, `--info-surface`), so it reads as
+the list of what is still required rather than as an error. The sentences are
+the existing ones. Each already names its field, as in "Probability is
+required", so no label is put in front of it.
 
-*Option B — while the button is blocked, the list also lists the blocking
-reasons no input shows yet,* in muted text under a heading such as "To submit:".
-The hover box goes, because the same reasons are now on screen. *Pro:* every
-user sees why the button is disabled, without hovering. *Con:* an empty form
-shows "Name is required" and its neighbours before the user has typed.
-
-*Concretely:* a user opens the leaf form on a tablet. Under A they see a grey
-Submit Leaf button and nothing else. Under B they see the button and, below it,
-"To submit: Name is required · Probability is required · Parent: select a
-parent".
-
-My recommendation is B, because the problem §16.1 names is a disabled button
-that says nothing.
+Two changes carry it. `.blockable-reason` in `app.css` takes the information
+colours and one sentence per line. `RiskLeafFormState.errorSignals` lists its
+checks in display order (`name`, `probability`, `parent`, then the distribution
+checks), so the hover box and the summary list run in the same order. No
+signature changes.
 
 ### 16.8 ADR alignment
 
@@ -7162,7 +7155,7 @@ a session condition, and no figure or its meaning changes.
 2. The six inline places of §16.5, and `traceOf` in `FailureNotice`.
 3. `SummaryEntry`, `summaryOf`, `displayed`, `summary`, the field labels and ids,
    the `inputId` parameters, `summaryList`, and its placement in the three
-   views, with the CSS of §16.4. `EWB-D-47` is applied once ruled.
+   views, with the CSS of §16.4, and `EWB-D-47`'s hover styling and order.
 
 ### 16.11 Verification
 

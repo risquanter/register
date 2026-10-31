@@ -11,7 +11,7 @@ import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProbl
 /** Every sentence the browser shows for a failure.
   *
   * The server sends a case and the values that belong to it; the sentence is
-  * written here, because only this side knows it is drawing a banner rather than
+  * written here, because only this side knows it is drawing a notice rather than
   * a log line, and a sentence that arrives already written cannot be translated.
   *
   * A sentence that takes a value is a function of that value rather than a
@@ -63,6 +63,12 @@ object ErrorMessages:
     "The request did not reach the server. Nothing was changed. " +
     "Check your connection and try again."
 
+  /** The banner's sentence while the server cannot be reached. It states the
+    * condition of the session, beside the inline `TransportFailed` that states
+    * the result of the action. */
+  val ConnectionLost: String =
+    "Connection to the server lost. Requests will fail until it is back."
+
   /** Shown when the server answered and the reply could not be read.
     *
     * It deliberately does not say that nothing was changed. The request reached
@@ -89,9 +95,7 @@ object ErrorMessages:
 
   /** The sentence for anything that leaves a view with nothing to show.
     *
-    * This is what an inline view error displays. For a failure the server
-    * answered with, it is the same text the banner shows, because both read
-    * the functions below.
+    * This is what an inline view error displays, where the action was taken.
     *
     * The match is on the kinds of answer rather than on a status or a message,
     * so a view renders a failure it never had to compose, and a new case is a

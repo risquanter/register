@@ -6,7 +6,6 @@ import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import sttp.tapir.Endpoint
 
-import app.state.GlobalError
 import app.state.LoadState
 import app.state.SubmitState
 import com.risquanter.register.http.errors.WireError
@@ -22,20 +21,21 @@ import com.risquanter.register.http.errors.WireError
   * All effects are forked on `Runtime.default` with `BackendClientLive.configuredLayer`
   * so callers never need to manually provide the ZIO environment.
   *
-  * An optional `ErrorObserver` can be registered once at app startup to surface
-  * network/server errors in the global error banner and auto-dismiss on success.
+  * An optional `ErrorObserver` can be registered once at app startup to show a
+  * condition of the session in the global banner and to clear it on success.
   */
 object ZJS:
 
-  /** Observer for cross-cutting error/success reporting (e.g. global error banner).
+  /** Observer for cross-cutting error/success reporting (the global banner).
     *
     * Registered once at app startup via `registerErrorObserver`. Every ZIO effect
     * forked through `forkProvided` notifies this observer unless its caller opts
-    * out: `runJsQuiet` skips it, and `submitInto` notifies it itself.
+    * out with `runJsQuiet`.
     */
   trait ErrorObserver:
-    /** Called when any forked effect fails. Consumes the failure to update the
-      * banner, and returns nothing because setting that state is its whole job.
+    /** Called when any forked effect fails. The observer decides whether the
+      * failure reveals a condition the banner shows, and returns nothing
+      * because setting that state is its whole job.
       */
     def onError(error: RequestFailure): Unit
     /** Called when any forked effect succeeds — used to auto-dismiss stale banners. */
@@ -55,7 +55,7 @@ object ZJS:
     *
     * If an `ErrorObserver` is registered and `notifyObserver = true`,
     * every fork automatically:
-    *  - reports errors via `onError` (surfaces in global banner)
+    *  - reports errors via `onError` (the banner shows a session condition)
     *  - clears stale errors via `onSuccess` (auto-dismiss on recovery)
     */
   private def forkProvided[A](zio: ZIO[BackendClient, RequestFailure, A], notifyObserver: Boolean = true): Unit =
@@ -96,24 +96,6 @@ object ZJS:
     case RequestFailure.Undecodable(status) =>
       dom.console.warn(s"request failed: Undecodable status=${status.code}")
 
-  /** What a view shows when its request fails.
-    *
-    * An expired workspace answers `410` and a workspace whose key no longer
-    * resolves answers `404`. Both leave the inline view with nothing to say:
-    * the global banner owns that message, so the view resets to idle rather
-    * than showing a second error line beside it (ADR-019 Pattern 7). Anything
-    * else becomes the view's own error line.
-    *
-    * A `404` is not narrowed to the workspace, because absent and not-yours
-    * answer identically so that neither is an existence oracle (ADR-035 §3).
-    *
-    * Pure and total, so it is testable without running the effect that calls
-    * it.
-    */
-  def settleLoad[A](failure: RequestFailure): LoadState[A] = failure match
-    case RequestFailure.Wire(WireError.WorkspaceExpired(_, _, _, _)) => LoadState.Idle
-    case RequestFailure.Wire(WireError.NotFound(_))                  => LoadState.Idle
-    case other                                                       => LoadState.Failed(other)
 
   // ---------------------------------------------------------------------------
   // Extensions on ZIO[BackendClient, E, A]
@@ -180,16 +162,16 @@ object ZJS:
 
     /** Fork the effect and push its lifecycle into a `Var[LoadState[A]]`.
       *
-      * Sets Loading → Loaded on success and Loading → Failed on a failure. A
-      * failure meaning the workspace is gone resets to Idle instead, because
-      * the global banner is what reports that one.
+      * Sets Loading → Loaded on success and Loading → Failed on a failure,
+      * whatever the failure, because a load's result is shown where it is
+      * displayed (ADR-019 decision 7).
       */
     def loadInto(target: Var[LoadState[A]]): Unit =
       target.set(LoadState.Loading)
       forkProvided {
         zio
           .tap(a => ZIO.succeed(target.set(LoadState.Loaded(a))))
-          .tapError(f => ZIO.succeed(target.set(settleLoad(f))))
+          .tapError(f => ZIO.succeed(target.set(LoadState.Failed(f))))
       }
 
   // ---------------------------------------------------------------------------
@@ -223,13 +205,11 @@ object ZJS:
         EventStream.fromValue(loading, emitOnce = true).mergeWith(request().map(settle))
     }
 
-  /** `requestPipeline` specialized to the `LoadState` lifecycle with the
-    * standard error routing (mirrors `loadInto`, through `settleLoad`): a
-    * failure meaning the workspace is gone resolves to `Idle` (the global
-    * banner's own domain), any other failure to `Failed(failure)`. The
-    * request streams are expected to come
-    * from `toOutcomeEventStream`, which already notified the global
-    * `ErrorObserver` — this pipeline only decides what the target displays.
+  /** `requestPipeline` specialized to the `LoadState` lifecycle: every failure
+    * resolves to `Failed(failure)`, as in `loadInto`. The request streams are
+    * expected to come from `toOutcomeEventStream`, which already notified the
+    * global `ErrorObserver` — this pipeline only decides what the target
+    * displays.
     */
   def loadStatePipeline[A](
     triggers: EventStream[Option[() => EventStream[Either[RequestFailure, A]]]]
@@ -240,7 +220,7 @@ object ZJS:
       loading = LoadState.Loading,
       settle  = {
         case Right(a) => LoadState.Loaded(a)
-        case Left(f)  => settleLoad(f)
+        case Left(f)  => LoadState.Failed(f)
       }
     )
 
@@ -261,7 +241,7 @@ object ZJS:
       settle  = {
         case Right(Some(a)) => LoadState.Loaded(a)
         case Right(None)    => LoadState.Absent
-        case Left(f)        => settleLoad(f)
+        case Left(f)        => LoadState.Failed(f)
       }
     )
 
@@ -278,23 +258,16 @@ object ZJS:
       * the submit lifecycle where success requires caller-defined side-effects
       * (e.g. updating editing state, refreshing tree list).
       *
-      * A refusal of the request's fields is shown by the submitting view on
-      * its own line, so it is withheld from the global observer and the banner
-      * does not repeat it. Every other failure, and every success, reaches the
-      * observer.
+      * The submitting view shows every failure. The global observer is
+      * notified as for every fork, and the banner takes only a failure that
+      * reveals a condition of the session (`GlobalError.from`).
       */
     def submitInto(target: Var[SubmitState])(onSuccess: A => Unit): Unit =
       target.set(SubmitState.Submitting)
       forkProvided(
         zio
-          .tap(a => ZIO.succeed { onSuccess(a); errorObserver.foreach(_.onSuccess()) })
-          .tapError(f => ZIO.succeed {
-            target.set(SubmitState.Failed(f))
-            GlobalError.from(f) match
-              case GlobalError.ValidationFailed(_) => ()
-              case _                               => errorObserver.foreach(_.onError(f))
-          }),
-        notifyObserver = false
+          .tap(a => ZIO.succeed(onSuccess(a)))
+          .tapError(f => ZIO.succeed(target.set(SubmitState.Failed(f))))
       )
 
   // ---------------------------------------------------------------------------

@@ -10,13 +10,13 @@ import app.core.RequestFailure
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
-import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
 
 /** Chart selection and LEC curve data state, separated from tree navigation.
   *
   * Owns the user's manual node selection for charting (Ctrl+click picks),
-  * the fetched curve data cache, and the bus-based toggle with a 13-cap guard.
+  * the fetched curve data cache, and the bus-based toggle with a guard at
+  * `LECChartState.MaxUserSelections`.
   *
   * Fetches structured `Map[NodeId, LECNodeCurve]` via `lec-multi`.
   * The Vega-Lite spec is built client-side from this data.
@@ -32,7 +32,6 @@ import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
   * @param keySignal      Read-only signal providing the active workspace key.
   * @param selectedTreeId Signal for the currently selected tree ID.
   * @param selectedTree   Signal for the currently loaded tree structure.
-  * @param globalError    App-wide error Var for the 13-cap validation error.
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   * @param branchAccessor Returns this tab's active branch (BranchChoice) — BranchBar.
   * @param userPalette    Palette family for user-selected (Ctrl+click) nodes.
@@ -47,7 +46,6 @@ final class LECChartState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
   selectedTree: StrictSignal[LoadState[RiskTree]],
-  globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   branchAccessor: () => BranchChoice = () => BranchChoice.Main,
   atAccessor: () => Option[CommitHash] = () => None,
@@ -184,25 +182,27 @@ final class LECChartState(
   /** WriteBus exposed to views for Ctrl+click toggle events.
     *
     * Views emit node IDs into this bus; the internal observer handles
-    * set toggle + 13-cap guard. This keeps mutation logic encapsulated
+    * set toggle + selection-cap guard. This keeps mutation logic encapsulated
     * inside the state owner (ADR-019 P2: events up, not imperative calls).
     */
   private val userSelectionBus: EventBus[NodeId] = new EventBus[NodeId]
   val userSelectionToggle: WriteBus[NodeId] = userSelectionBus.writer
 
-  // Internal observer — handles the toggle + cap logic.
+  private val capReachedBus: EventBus[Unit] = new EventBus[Unit]
+
+  /** Emits when a selection is refused because `MaxUserSelections` are already
+    * selected. The view that took the click shows the notice beside the tree. */
+  val selectionCapReached: EventStream[Unit] = capReachedBus.events
+
+  // Internal observer — handles the toggle + cap logic. A refused selection
+  // leaves the set unchanged and emits on `selectionCapReached`.
   // Uses unsafeWindowOwner: LECChartState lives for the app lifetime.
   userSelectionBus.events.foreach { nodeId =>
     val current = userSelectedNodeIds.now()
     if current.contains(nodeId) then
       userSelectedNodeIds.update(_ - nodeId)
-    else if current.size >= 13 then
-      // A limit on the selection as a whole, raised and shown in the browser;
-      // no field of any request carries it.
-      globalError.set(Some(GlobalError.ValidationFailed(List(
-        ValidationError(ErrorLocation.Whole, ValidationErrorCode.CONSTRAINT_VIOLATION,
-          "Maximum 13 user-selected curves. Remove a selection before adding more.")
-      ))))
+    else if current.size >= LECChartState.MaxUserSelections then
+      capReachedBus.emit(())
     else
       userSelectedNodeIds.update(_ + nodeId)
   }(using unsafeWindowOwner)
@@ -281,6 +281,9 @@ final class LECChartState(
       case _ => () // No workspace or tree selected — nothing to do
 
 object LECChartState:
+  /** The most curves a user may select by Ctrl+click, chosen by this project. */
+  val MaxUserSelections: Int = 13
+
   /** Pure derivation extracted from `droppedSelections` so it's testable
     * without a Laminar harness: selected nodes not present in the loaded curve
     * map. Non-loaded cache → empty (nothing charted yet, nothing dropped). */

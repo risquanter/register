@@ -7,22 +7,40 @@ import com.raquo.airstream.ownership.ManualOwner
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKeySecret}
 
-/** Pure tests for `LECChartState.setUserSelection` — the wholesale-replace
-  * write used by the mirror-baseline sync. */
+/** Tests for `LECChartState`'s user selection: the wholesale-replace write used
+  * by the mirror-baseline sync, and the toggle's selection cap. */
 object LECChartStateSpec extends ZIOSpecDefault:
 
-  private val n1 = NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get
-  private val n2 = NodeId.fromString("01HX9ABCDE0000000000000002").toOption.get
+  private def node(i: Int): NodeId = NodeId.fromString(f"01HX9ABCDE00000000000000$i%02d").toOption.get
+
+  private val n1 = node(1)
+  private val n2 = node(2)
 
   private def newState: LECChartState =
     new LECChartState(
       keySignal      = Val(Option.empty[WorkspaceKeySecret]),
       selectedTreeId = Val(Option.empty[TreeId]),
-      selectedTree   = Val[LoadState[RiskTree]](LoadState.Idle),
-      globalError    = Var(Option.empty[GlobalError])
+      selectedTree   = Val[LoadState[RiskTree]](LoadState.Idle)
     )
 
-  def spec = suite("LECChartState.setUserSelection")(
+  def spec = suite("LECChartState")(
+
+    test("a selection past the cap is refused, leaves the set unchanged and emits the notice") {
+      val owner = new ManualOwner
+      val state = newState
+      var refusals = 0
+      state.selectionCapReached.foreach(_ => refusals += 1)(owner)
+      (1 to LECChartState.MaxUserSelections).foreach(i => state.userSelectionToggle.onNext(node(i)))
+      val full = state.userSelectedNodeIds.now()
+      state.userSelectionToggle.onNext(node(LECChartState.MaxUserSelections + 1))
+      val afterRefusal = state.userSelectedNodeIds.now()
+      owner.killSubscriptions()
+      assertTrue(
+        full.size == LECChartState.MaxUserSelections,
+        afterRefusal == full,
+        refusals == 1
+      )
+    },
 
     test("replaces the whole selection and skips a no-op write") {
       val owner = new ManualOwner

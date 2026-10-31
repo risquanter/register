@@ -144,32 +144,29 @@ failure caused by one of those conditions is shown in both places, because the
 two say different things: that this action failed, and that the next one will
 fail too.
 
-`GlobalError` is the app module's own sealed enum, named apart from the server's
-`AppError` because the two describe different things — what went wrong, versus
-what the user is told:
+`GlobalError` is the app module's own sealed enum of the session conditions the
+banner shows, named apart from the server's `AppError` because the two describe
+different things — what went wrong, versus what the user is told:
 
 ```scala
 enum GlobalError:
-  case ValidationFailed(errors: List[ValidationError])
-  case NetworkError(message: String)
-  case Conflict(message: String)
-  case ServerError(message: String)
-  case DependencyError(message: String)
+  case ServerUnreachable
+  case DependencyDown(trace: Option[TraceId])
   case WorkspaceExpired(message: String)
 ```
 
 Three properties keep it usable:
 
 - **Variants are pure values.** No variant carries a callback or an effect. Which
-  action the user is offered — a refresh on `Conflict`, informational rather than
-  error styling on `WorkspaceExpired` — is chosen at the rendering site, so one
-  value can render differently in different contexts (ADR-010: errors are values).
+  action the user is offered — a dismiss, informational rather than error
+  styling on `WorkspaceExpired` — is chosen at the rendering site, so one value
+  can render differently in different contexts (ADR-010: errors are values).
 - **Classification is compiler-enforced.** `GlobalError.from` matches the three
   cases of `RequestFailure` — the server answered, the call never happened, or
   the reply could not be read — and routes the first through `fromWireError`,
-  whose match over the nine `WireError` cases is exhaustive. A new wire case is
-  therefore a compile error until it has a treatment, rather than quietly
-  degrading into `NetworkError`.
+  whose match over the nine `WireError` cases is exhaustive and returns `None`
+  for each per-view case. A new wire case is therefore a compile error until it
+  is placed as a session condition or as a per-view result.
 - **The SPA does not retry.** Request-path resilience is the mesh's
   (ADR-012 §4, ADR-031); a failure that reaches the browser is final for that
   request and is displayed rather than re-attempted.
@@ -312,7 +309,7 @@ submitState.set(SubmitState.Failed(e))
 | `AppShell` | Pure structural shell — receives all state as signals, owns no effects (Pattern 1/2) |
 | `FormMode` | Sealed enum + pure transition/dirty-check functions (Pattern 6) |
 | `TreeLoadPolicy.decide` | Pure decision function producing a named outcome type (Pattern 6) |
-| `GlobalError` | Sealed enum of failures no view owns; pure values, exhaustive classification (Pattern 7) |
+| `GlobalError` | Sealed enum of the session conditions the banner shows; pure values, exhaustive classification (Pattern 7) |
 | `ErrorBanner` | Renders the global signal; picks per-variant styling and action (Pattern 7) |
 | `HealthState` + `Main` | Health probe state extracted from view; `Main` orchestrates one-shot startup probe |
 | `DistributionChartPlaceholder` | Stateless placeholder in Design view for future modelling chart (Pattern 5) |

@@ -2,7 +2,7 @@ package app.views
 
 import com.raquo.laminar.api.L.*
 
-import app.state.{TreeViewState, LoadState, ChartHoverBridge}
+import app.state.{TreeViewState, LoadState, ChartHoverBridge, LECChartState}
 import app.components.{Icons, ColorSwatchPicker, FailureNotice, TreeNodeRow}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
@@ -32,6 +32,10 @@ import com.risquanter.register.http.responses.TreeHistoryEntry
   *                          a persistent header hint marks the mirrored state.
   */
 object TreeDetailView:
+
+  /** How long a transient notice beside the tree stays up, in milliseconds.
+    * Chosen by this project: long enough to read one sentence. */
+  private val TransientNoticeMillis: Int = 2200
 
   // ── Node display helpers (mirrors TreePreview.TreeNode pattern) ──
 
@@ -101,6 +105,9 @@ object TreeDetailView:
     // Pulsed true when a Ctrl-gesture is blocked because the row mirrors the
     // baseline selection; auto-hides shortly after so the notice is transient.
     val lockedNoticeVisible: Var[Boolean] = Var(false)
+    // Pulsed true when a Ctrl+click is refused because the curve selection is
+    // full; auto-hides like the locked notice.
+    val capNoticeVisible: Var[Boolean] = Var(false)
     // Strict mirror of the (possibly derived — mirror OR rewound) incoming lock,
     // so the click handler can read it synchronously via `.now()`.
     val lockedNow: Var[Boolean] = Var(false)
@@ -130,7 +137,15 @@ object TreeDetailView:
       // Auto-hide the transient selection-locked notice; each fresh block
       // restarts the timer (flatMapSwitch drops the previous delay).
       lockedNoticeVisible.signal.changes.filter(identity)
-        .flatMapSwitch(_ => EventStream.fromValue(false).delay(2200)) --> lockedNoticeVisible.writer,
+        .flatMapSwitch(_ => EventStream.fromValue(false).delay(TransientNoticeMillis)) --> lockedNoticeVisible.writer,
+      // A refused selection shows its notice here, beside the tree the click
+      // was on, and restarts the same auto-hide.
+      state.chartState.selectionCapReached --> { _ => capNoticeVisible.set(true) },
+      capNoticeVisible.signal.changes.filter(identity)
+        .flatMapSwitch(_ => EventStream.fromValue(false).delay(TransientNoticeMillis)) --> capNoticeVisible.writer,
+      child.maybe <-- capNoticeVisible.signal.map { visible =>
+        Option.when(visible)(div(cls := "selection-cap-notice", BlockedMessages.selectionCapReached(LECChartState.MaxUserSelections)))
+      },
       // Turning Mirror off clears any pending notice at once, so it never keeps
       // telling the user to disable an already-disabled toggle.
       lockedNow.signal.changes.filter(!_) --> { _ => if lockedNoticeVisible.now() then lockedNoticeVisible.set(false) },

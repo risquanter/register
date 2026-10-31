@@ -51,14 +51,14 @@ object Main:
 
     val builderState = new TreeBuilderState
     val designTreeViewState = new TreeViewState(
-      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal,
+      wsState.keySignal, treeListState, () => wsState.currentUserId, designScenarioState.activeBranch.signal,
       branchDisplay = Some(BranchBar.branchDisplayName)
     )
     // Compare state is built before the baseline tree view so the baseline
     // slider's pin (`baselineAt`) can feed the baseline's own `atSignal`.
     val analyzeCompareState = new CompareState
     val analyzeTreeViewState = new TreeViewState(
-      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal,
+      wsState.keySignal, treeListState, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal,
       atSignal = analyzeCompareState.baselineAt.signal,
       userPalette = analyzeCompareState.baselinePalette.signal,
       branchDisplay = Some(BranchBar.branchDisplayName)
@@ -75,7 +75,7 @@ object Main:
       new CompareSlot(
         state = slotState,
         treeViewState = new TreeViewState(
-          wsState.keySignal, treeListState, globalError, () => wsState.currentUserId,
+          wsState.keySignal, treeListState, () => wsState.currentUserId,
           // The slot's branch and pin derive from its target; TreeViewState needs
           // StrictSignals (it reads .now()), so observe the derived signals for
           // the app's lifetime instead of keeping hand-synced Vars.
@@ -94,13 +94,14 @@ object Main:
       branchAccessor = () => analyzeScenarioState.activeBranch.now()
     )
 
-    // Register the global error observer at the ZJS chokepoint.
-    // Every API call forked via forkProvided will automatically:
-    //  - surface network/server errors in the error banner
-    //  - auto-dismiss stale banners on the next successful call
+    // Register the global error observer at the ZJS chokepoint. Every API call
+    // forked via forkProvided reports to it: a failure that reveals a condition
+    // of the session sets the banner, every other failure is shown only where
+    // its action was taken, and a success clears the banner, because an answer
+    // proves the server reachable again.
     ZJS.registerErrorObserver(new ZJS.ErrorObserver:
       def onError(error: RequestFailure): Unit =
-        globalError.set(Some(GlobalError.from(error)))
+        GlobalError.from(error).foreach(condition => globalError.set(Some(condition)))
       def onSuccess(): Unit =
         globalError.set(None)
     )

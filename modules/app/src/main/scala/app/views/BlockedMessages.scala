@@ -45,6 +45,9 @@ object BlockedMessages:
   def compareFull(slots: Int): String =
     s"At most $slots trees can be compared."
 
+  def selectionCapReached(cap: Int): String =
+    s"At most $cap curves can be selected. Remove a selection before adding more."
+
   // ── The merge modal ──
 
   val MergeConflicts: String = "Resolve the conflicts shown above first."

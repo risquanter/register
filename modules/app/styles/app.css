@@ -860,8 +860,10 @@ body {
   font-style: italic;
 }
 
-/* Transient bubble pulsed when a Ctrl-gesture is blocked on a mirrored row. */
-.selection-locked-notice {
+/* Transient bubble pulsed when a Ctrl-gesture is blocked: on a mirrored row,
+   or because the curve selection is full. */
+.selection-locked-notice,
+.selection-cap-notice {
   position: absolute;
   top: var(--sp-2);
   right: var(--sp-2);

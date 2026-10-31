@@ -4,12 +4,11 @@ import com.raquo.laminar.api.L.*
 import app.state.GlobalError
 import com.risquanter.register.domain.data.iron.TraceId
 
-/** Dismissible banner for failures no per-view channel caught.
+/** Dismissible banner for a condition of the whole session.
   *
   * Renders between the header and the main content, and is visible only while
-  * the signal holds a failure. A per-view error continues to render inline in
-  * its own view and is not routed here, because the banner supplements that
-  * display rather than replacing it (ADR-019 Pattern 7).
+  * the signal holds a condition. The result of a specific action is rendered
+  * inline where the action was taken and never here (ADR-019 decision 7).
   */
 object ErrorBanner:
 
@@ -22,9 +21,8 @@ object ErrorBanner:
       child.maybe <-- globalError.map(_.map(renderBanner(_, onDismiss)))
     )
 
-  /** How one failure is presented: its icon, its sentences, the trace to offer
-    * for copying, and which styling it takes. A refusal of several fields has
-    * one sentence per refusal, so no refusal is joined into another's.
+  /** How one condition is presented: its icon, its sentences, the trace to
+    * offer for copying, and which styling it takes.
     *
     * The four values are derived from the same case, so they are produced
     * together in one match rather than by several matches on the same value.
@@ -40,29 +38,14 @@ object ErrorBanner:
   private val InfoStyling: String  = "error-banner info-banner"
 
   private def present(error: GlobalError): Presentation = error match
-    case GlobalError.ValidationFailed(errors) =>
-      Presentation("⚠", errors.map(_.message), None, ErrorStyling)
+    case GlobalError.ServerUnreachable =>
+      Presentation("⚡", List(ErrorMessages.ConnectionLost), None, ErrorStyling)
 
-    case GlobalError.NetworkError(message) =>
-      Presentation("⚡", List(message), None, ErrorStyling)
-
-    case GlobalError.InputRejected(message) =>
-      Presentation("⚠", List(message), None, ErrorStyling)
-
-    case GlobalError.Conflict(message) =>
-      Presentation("🔄", List(message), None, ErrorStyling)
-
-    case GlobalError.NotFound =>
-      Presentation("⚠", List(ErrorMessages.NotFound), None, ErrorStyling)
+    case GlobalError.DependencyDown(trace) =>
+      Presentation("⚡", List(ErrorMessages.DependencyDown), trace, ErrorStyling)
 
     case GlobalError.WorkspaceExpired(message) =>
       Presentation("ℹ", List(message), None, InfoStyling)
-
-    case GlobalError.ServerError(message, trace) =>
-      Presentation("🔥", List(message), trace, ErrorStyling)
-
-    case GlobalError.DependencyError(message, trace) =>
-      Presentation("⚡", List(message), trace, ErrorStyling)
 
   /** The trace is rendered as a muted line under the message and is selectable,
     * so someone reporting a fault can copy the identifier the server logged the

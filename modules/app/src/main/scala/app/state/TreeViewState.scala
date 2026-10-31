@@ -7,7 +7,7 @@ import scala.scalajs.js
 import app.chart.PaletteData
 import app.core.ZJS.*
 import app.core.RequestFailure
-import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
@@ -31,8 +31,6 @@ import com.risquanter.register.http.responses.SimulationResponse
   *                           it reads its own branch's slice and forwards
   *                           refresh requests, so a mutation seen through any
   *                           view refreshes the one list every view reads.
-  * @param globalError        App-wide error Var (passed through to LECChartState for
-  *                           the 13-cap validation error).
   * @param userIdAccessor     Returns the current user identity (None in capability-only mode).
   * @param activeBranchSignal This tab's active branch (BranchChoice) — BranchBar.
   *                           A signal, not just a pull accessor: this class owns the
@@ -56,7 +54,6 @@ import com.risquanter.register.http.responses.SimulationResponse
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   treeListState: TreeListState,
-  globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
   atSignal: StrictSignal[Option[CommitHash]] = Val(None),
@@ -151,7 +148,7 @@ final class TreeViewState(
         }
 
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor, atAccessor, userPalette, chartOrigin)
+  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, userIdAccessor, branchAccessor, atAccessor, userPalette, chartOrigin)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
