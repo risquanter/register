@@ -235,9 +235,9 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
         .send(backend)
     }
 
-  /** Sends the preflight a browser sends before a cross-origin `GET` that
-    * carries `header`. */
-  private def preflight(header: String): ZIO[Tracing, Throwable, Response[Either[String, String]]] =
+  /** Sends the preflight a browser sends before a cross-origin request with
+    * `method` that carries `header`. */
+  private def preflight(method: Method, header: String): ZIO[Tracing, Throwable, Response[Either[String, String]]] =
     ZIO.serviceWithZIO[Tracing] { tracing =>
       val backend = TapirStubInterpreter(
         chainWith(appended, tracing),
@@ -247,7 +247,7 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
       basicRequest
         .options(uri"http://localhost/probe")
         .header("Origin", TestOrigin)
-        .header("Access-Control-Request-Method", "GET")
+        .header("Access-Control-Request-Method", method.method)
         .header("Access-Control-Request-Headers", header)
         .send(backend)
     }
@@ -257,6 +257,13 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
 
   private def allowOrigin(response: Response[Either[String, String]]): Option[String] =
     response.header("Access-Control-Allow-Origin")
+
+  /** Whether a preflight answer allows `header`. Header names compare without
+    * case, and the answer lists them comma-separated. */
+  private def allowsHeader(response: Response[Either[String, String]], header: RequestHeaderName): Boolean =
+    response.header("Access-Control-Allow-Headers").exists(
+      _.split(",").map(_.trim.toLowerCase).contains(header.wireName.toLowerCase)
+    )
 
   override def spec = suite("DefectCatchAllInterceptor")(
 
@@ -353,12 +360,20 @@ object DefectCatchAllInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
       // Every tree endpoint requires the branch header, so a browser on another
       // origin sends no tree request at all unless the preflight allows it.
       test("a preflight asking for the branch header is answered with it allowed") {
-        for response <- preflight(RequestHeaderName.Branch.wireName)
+        for response <- preflight(Method.GET, RequestHeaderName.Branch.wireName)
         yield assertTrue(
           allowOrigin(response).contains(TestOrigin),
-          response.header("Access-Control-Allow-Headers").exists(
-            _.split(",").map(_.trim.toLowerCase).contains(RequestHeaderName.Branch.wireName.toLowerCase)
-          )
+          allowsHeader(response, RequestHeaderName.Branch)
+        )
+      },
+      // The scenario delete requires the compare-and-set header. Without it in
+      // the preflight answer the browser never sends the delete, and the page
+      // reports the request as never having reached the server.
+      test("a preflight for a delete asking for the compare-and-set header is answered with it allowed") {
+        for response <- preflight(Method.DELETE, RequestHeaderName.IfMatch.wireName)
+        yield assertTrue(
+          allowOrigin(response).contains(TestOrigin),
+          allowsHeader(response, RequestHeaderName.IfMatch)
         )
       }
     )

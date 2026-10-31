@@ -2724,3 +2724,46 @@ it and none on which hosting shape to use. `ADR-004a-proposal.md` assumes one
 repository without stating why, so there is no ruling to overturn — the single
 store is an unexamined default rather than a decision. The deployment half
 belongs to `register-infra`.
+
+## 64. The Design view's debug bar shows the grey colour until the first edit
+
+**What the user sees.** With the debug UI on, the bar above the tree builder is
+grey on first load. After clicking around it turns amber and stays amber. The
+amber colour is the wanted look, so the bar should be amber from the start.
+
+**What the code does.** `TreeBuilderView` gives the bar the class
+`dirty-debug-bar` always, and adds `dirty-debug-bar--active` while
+`state.isDirtySignal` or `state.isEditDirtyVar` is true. In
+`modules/app/styles/app.css`, `.dirty-debug-bar` is the grey colour and
+`.dirty-debug-bar--active` is the amber one. So the colour reports the dirty
+state. A fresh builder is not dirty and shows grey, and the first edit makes it
+dirty and shows amber.
+
+**Consequence for the change.** Making the bar amber on first load means making
+it amber in the clean state. The colour then no longer tells clean from dirty,
+and only the text of the bar does.
+
+**Status.** Researched, no code changed.
+
+## 65. The tree list says "Waiting to load…" when no workspace exists
+
+**What the user sees.** On a first visit there is no workspace, and the Saved
+Trees box reads "Waiting to load…". Nothing is going to load, so the text
+misleads.
+
+**What the code does.** `TreeListView` renders "Waiting to load…" for
+`LoadState.Idle`. `TreeListState.refresh` does nothing when `keySignal.now()` is
+`None`, so with no workspace the list never leaves `Idle`. With a workspace, the
+key subscription in `TreeListState` refreshes main at once. `Idle` is then only
+the moment before the request starts, and the list moves on to "Loading trees…"
+and then to the list or to "No saved trees yet.".
+
+**The discriminator.** A workspace is created by the first tree submit:
+`TreeBuilderView` calls `wsState.bootstrap` when `wsState.currentKey` is `None`.
+So no key means no workspace and no trees. `Idle` with no key can take its own
+text, for example "No trees yet. Create a tree to start a workspace.", and
+`Idle` with a key keeps today's behaviour. `TreeViewState` already holds a
+`keySignal`. Whether the view can read it without a new parameter on
+`TreeListView.apply` is checked when the change is planned.
+
+**Status.** Researched, no code changed.

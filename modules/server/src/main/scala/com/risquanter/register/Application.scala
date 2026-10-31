@@ -84,11 +84,9 @@ object Application extends ZIOAppDefault {
       } yield repo
     }
 
-  // Independent IrminClient + health check from irminRepoLayer's — a second
-  // connection/health-check at startup when repository.type=irmin, rather than
-  // sharing RiskTreeRepositoryIrmin's client. Simpler and scoped to only what's
-  // new here; refactoring chooseRepo to expose a shared IrminClient would touch
-  // already-working wiring beyond this scenario layer's scope.
+  // Builds its own IrminClient and health check, separate from irminRepoLayer's,
+  // so repository.type=irmin opens a second connection and runs a second health
+  // check at startup.
   private val irminScenarioServiceLayer: ZLayer[Any, Throwable, ScenarioService] =
     ZLayer.make[ScenarioService](
       IrminConfig.layer,
@@ -296,7 +294,7 @@ object Application extends ZIOAppDefault {
       InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + Tracing + Meter
       ChangedNodesServiceLive.layer, // Content-hash changed-nodes — requires RiskTreeService
-      RepositoryConfig.layer >>> chooseTreeHistoryService, // E1 per-tree history — Irmin-backed, empty in-memory
+      RepositoryConfig.layer >>> chooseTreeHistoryService, // Per-tree history — Irmin-backed, empty in-memory
       QueryServiceLive.layer,       // Requires RiskTreeRepository + CachedResultResolver + MitigationScopeResolverRegistry + Tracing
       chooseWorkspaceStore,
       chooseFlywayService,
@@ -325,7 +323,10 @@ object Application extends ZIOAppDefault {
   def corsPolicy(origins: List[String]): TapirCORSConfig =
     TapirCORSConfig.default
       .allowMatchingOrigins(origins.contains)
-      .allowHeaders("Content-Type", "Accept", "Authorization", RequestHeaderName.Branch.wireName)
+      .allowHeaders(
+        "Content-Type", "Accept", "Authorization",
+        RequestHeaderName.Branch.wireName, RequestHeaderName.IfMatch.wireName
+      )
       .exposeHeaders("Content-Type")
       .maxAge(PreflightMaxAge)
 
@@ -383,7 +384,7 @@ object Application extends ZIOAppDefault {
     _          <- ZIO.logInfo(s"Starting health probe server on ${cfg.host}:${cfg.healthPort}...")
     _          <- ZIO.logInfo(s"Starting API server on ${cfg.host}:${cfg.port}...")
     // Run both servers concurrently — shared lifecycle: if either fails or the
-    // application shuts down, both are interrupted. @see FR-5 in spec.
+    // application shuts down, both are interrupted.
     _          <- HealthProbeServer.serve(cfg.host, cfg.healthPort) <&> Server.serve(httpApp)
   } yield ()
 
