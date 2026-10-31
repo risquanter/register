@@ -71,9 +71,10 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
   // Display-controlled errors: the live check, else the stored submit refusals
   val nameError: Signal[List[String]] = messagesOf(errorsFor(Name, nameErrorRaw))
 
-  /** Parent has no continuous reactive validation of its own (unlike name) —
-    * only submit-time refusals (`Validation.Failure` from `toDraft`, or the
-    * builder's topology check) ever show here, from the stored refusals. */
+  /** The dropdown shows only submit-time refusals (`Validation.Failure` from
+    * `toDraft`, or the builder's topology check), from the stored refusals.
+    * Its live check, `parentErrorRaw`, blocks the submit and is not shown
+    * here. */
   val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
 
   // FormState implementation

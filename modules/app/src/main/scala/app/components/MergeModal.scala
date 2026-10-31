@@ -35,7 +35,7 @@ object MergeModal:
             case (MergePreviewStatus.Clean(), MergeSubmitState.Submitting) => List(BlockedMessages.MergeRunning)
             case (MergePreviewStatus.Clean(), _)                          => Nil
             case _                                                        => List(BlockedMessages.MergeConflicts)
-        case (LoadState.Loading, _) => List(MergeMessages.Checking)
+        case (LoadState.Loading, _) => List(BlockedMessages.MergeChecking)
         case _                      => List(BlockedMessages.MergeNotChecked)
       }
     div(

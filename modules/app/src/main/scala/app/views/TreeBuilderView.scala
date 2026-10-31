@@ -77,10 +77,9 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
     // silently drop it. Same discard-confirmation the tree-switch/new-tree
     // guards in DesignView already use, extended to this action too.
     //
-    // triggerValidation() only runs once we know we're proceeding — it used
-    // to run unconditionally up front, so declining the confirm dialog still
-    // left "required field" errors painted on screen for a submission that
-    // never happened.
+    // triggerValidation() runs only once the user has confirmed, so declining
+    // the confirm dialog leaves no "required field" errors on screen for a
+    // submission that never happened.
     def handleSubmit(): Unit =
       proceedOrConfirm(state.isEditDirtyVar.now(), "You have an unsaved leaf or portfolio draft that will not be included. Continue?") { () =>
         state.triggerValidation()

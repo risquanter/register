@@ -237,6 +237,7 @@ object RiskLeafFormView:
       state.quantilesVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Quantiles)),
       state.minLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.MinLoss)),
       state.maxLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.MaxLoss)),
+      state.termsVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Terms)),
       state.distributionModeVar.signal.changes --> (_ => state.clearFor(RiskLeafField.FormLevel)),
       state.parentVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Parent)),
 
@@ -430,18 +431,14 @@ object RiskLeafFormView:
     builderState: TreeBuilderState
   ): Unit =
     state.triggerValidation()
-    state.toDraft match
-      case Validation.Success(_, (name, parent, prob, shape)) =>
-        builderState.addLeaf(name, parent, shape, prob) match
-          case Validation.Success(_, _) =>
-            // Fields are left as-is — TreeBuilderState.addLeaf already moved
-            // `activeForm` to `Locked(newTarget)`, which locks these same,
-            // just-submitted values for viewing. A fast successive add is the
-            // Templating flow now (click Add again to unlock a copy), not a
-            // touched-state reset here.
-            state.setSubmitErrors(Nil)
-          case Validation.Failure(_, errs) =>
-            state.setSubmitErrors(errs.toList)
+    state.toDraft.flatMap((name, parent, prob, shape) => builderState.addLeaf(name, parent, shape, prob)) match
+      case Validation.Success(_, _) =>
+        // Fields are left as-is — TreeBuilderState.addLeaf already moved
+        // `activeForm` to `Locked(newTarget)`, which locks these same,
+        // just-submitted values for viewing. A fast successive add is the
+        // Templating flow (click Add again to unlock a copy), not a
+        // touched-state reset here.
+        state.setSubmitErrors(Nil)
       case Validation.Failure(_, errs) =>
         state.setSubmitErrors(errs.toList)
 
@@ -452,14 +449,10 @@ object RiskLeafFormView:
     builderState: TreeBuilderState
   ): Unit =
     state.triggerValidation()
-    state.toDraft match
-      case Validation.Success(_, (name, parent, prob, shape)) =>
-        builderState.updateLeaf(originalName, name, parent, shape, prob) match
-          case Validation.Success(_, _) =>
-            // TreeBuilderState.updateLeaf already moved `activeForm` back to
-            // `Locked(t)`, locking these same, just-saved values for viewing.
-            state.setSubmitErrors(Nil)
-          case Validation.Failure(_, errs) =>
-            state.setSubmitErrors(errs.toList)
+    state.toDraft.flatMap((name, parent, prob, shape) => builderState.updateLeaf(originalName, name, parent, shape, prob)) match
+      case Validation.Success(_, _) =>
+        // TreeBuilderState.updateLeaf already moved `activeForm` back to
+        // `Locked(t)`, locking these same, just-saved values for viewing.
+        state.setSubmitErrors(Nil)
       case Validation.Failure(_, errs) =>
         state.setSubmitErrors(errs.toList)

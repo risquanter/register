@@ -283,16 +283,12 @@ object PortfolioFormView:
     builderState: TreeBuilderState
   ): Unit =
     form.triggerValidation()
-    form.toDraft match
-      case Validation.Success(_, (name, parent)) =>
-        builderState.addPortfolio(name, parent) match
-          case Validation.Success(_, _) =>
-            // Fields are left as-is — TreeBuilderState.addPortfolio already moved
-            // `activeForm` to `Locked(newTarget)`, locking these same, just-submitted
-            // values for viewing.
-            form.setSubmitErrors(Nil)
-          case Validation.Failure(_, errs) =>
-            form.setSubmitErrors(errs.toList)
+    form.toDraft.flatMap((name, parent) => builderState.addPortfolio(name, parent)) match
+      case Validation.Success(_, _) =>
+        // Fields are left as-is — TreeBuilderState.addPortfolio already moved
+        // `activeForm` to `Locked(newTarget)`, locking these same, just-submitted
+        // values for viewing.
+        form.setSubmitErrors(Nil)
       case Validation.Failure(_, errs) =>
         form.setSubmitErrors(errs.toList)
 
@@ -303,14 +299,10 @@ object PortfolioFormView:
     builderState: TreeBuilderState
   ): Unit =
     form.triggerValidation()
-    form.toDraft match
-      case Validation.Success(_, (newName, newParent)) =>
-        builderState.updatePortfolio(originalName, newName, newParent) match
-          case Validation.Success(_, _) =>
-            // TreeBuilderState.updatePortfolio already moved `activeForm` back to
-            // `Locked(t)`, locking these same, just-saved values for viewing.
-            form.setSubmitErrors(Nil)
-          case Validation.Failure(_, errs) =>
-            form.setSubmitErrors(errs.toList)
+    form.toDraft.flatMap((newName, newParent) => builderState.updatePortfolio(originalName, newName, newParent)) match
+      case Validation.Success(_, _) =>
+        // TreeBuilderState.updatePortfolio already moved `activeForm` back to
+        // `Locked(t)`, locking these same, just-saved values for viewing.
+        form.setSubmitErrors(Nil)
       case Validation.Failure(_, errs) =>
         form.setSubmitErrors(errs.toList)

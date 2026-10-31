@@ -15,7 +15,7 @@ import com.risquanter.register.http.responses.TreeHistoryEntry
   * expand/collapse controls on portfolio nodes and click-to-select
   * on any node.
   *
-  * Highlighting is inline-style-driven from `nodeColorMap` (P3 §4.1):
+  * Highlighting is inline-style-driven from `nodeColorMap`:
   * - Charted nodes: solid 3px left border in the node's curve hex colour.
   * - Query-matched-but-not-charted: dotted 3px left border in neutral.
   * - Neither: no border.
@@ -45,7 +45,7 @@ object TreeDetailView:
     case portfolio: RiskPortfolio =>
       s"${portfolio.name} (id: ${portfolio.id.value})"
 
-  /** Build a structured tooltip showing all node params (D2(a): native title). */
+  /** Build a structured tooltip showing all node params, shown as the native title. */
   private def nodeTooltip(node: RiskNode): String = node match
     case leaf: RiskLeaf =>
       TreeNodeRow.leafTooltip(
@@ -65,7 +65,7 @@ object TreeDetailView:
     case _: RiskPortfolio => true
     case _: RiskLeaf      => false
 
-  /** Inline border style for a tree node based on chart/query state (§4.1).
+  /** Inline border style for a tree node based on chart/query state.
     *
     * Charted nodes get their curve hex colour as a solid border.
     * Query-matched-but-not-charted nodes get a neutral dotted border.
@@ -123,9 +123,9 @@ object TreeDetailView:
       // here rippled through clearPreview into the chart-spec chain and
       // re-embedded the Vega chart (resetting its toggles) on every click.
       onClick --> { _ => if pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
-      // F-GP1: Escape key closes picker
+      // The Escape key closes the picker.
       onKeyDown --> { ev => if ev.key == "Escape" && pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
-      // F-GP2(B): reactively clear preview whenever picker closes
+      // Closing the picker clears its colour preview.
       pickerOpenFor.signal.changes.filter(_.isEmpty) --> { _ => state.clearPreview() },
       // Auto-hide the transient selection-locked notice; each fresh block
       // restarts the timer (flatMapSwitch drops the previous delay).
@@ -135,8 +135,7 @@ object TreeDetailView:
       // telling the user to disable an already-disabled toggle.
       lockedNow.signal.changes.filter(!_) --> { _ => if lockedNoticeVisible.now() then lockedNoticeVisible.set(false) },
       child.maybe <-- lockedNoticeVisible.signal.map { visible =>
-        if visible then Some(div(cls := "selection-locked-notice", "Selection mirrors the baseline — turn Mirror off to select manually."))
-        else None
+        Option.when(visible)(div(cls := "selection-locked-notice", "Selection mirrors the baseline — turn Mirror off to select manually."))
       },
       child <-- state.selectedTree.signal.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
@@ -169,8 +168,7 @@ object TreeDetailView:
         Icons.treeRoot("tree-root-icon"),
         span(cls := "tree-name", tree.name.value.toString),
         child.maybe <-- selectionLocked.map { locked =>
-          if locked then Some(span(cls := "selection-lock-hint", "mirroring baseline"))
-          else None
+          Option.when(locked)(span(cls := "selection-lock-hint", "mirroring baseline"))
         }
       ),
       rootNode match
@@ -293,32 +291,28 @@ object TreeDetailView:
         emptyNode
     )
 
-  // ── Extracted view helpers (F3a: named functions for inline lambdas) ──
+  // ── View helpers ──
 
   /** ✎ marker for a node the active Compare diff reports as changed.
     * Identical and unchanged nodes render nothing. */
   private def renderChangedMarker(changed: Boolean): Option[HtmlElement] =
-    if changed then
-      Some(span(cls := "node-changed-marker", title := "Changed vs. compared branch", "✎"))
-    else None
+    Option.when(changed)(span(cls := "node-changed-marker", title := "Changed vs. compared branch", "✎"))
 
-  /** Render the colour-swatch trigger icon for charted nodes (PD1(b)). */
+  /** Render the colour-swatch trigger icon for charted nodes. A click opens
+    * this node's picker, or closes it when it is already open. */
   private def renderSwatchTrigger(
     nodeId: NodeId,
     pickerOpenFor: Var[Option[NodeId]],
     charted: Boolean,
     colorOpt: Option[HexColor]
   ): Option[HtmlElement] =
-    if charted then
-      Some(div(
-        cls := "node-swatch-trigger",
-        styleAttr := s"background-color: ${colorOpt.map(_.value).getOrElse("transparent")};",
-        onClick.stopPropagation --> { _ =>
-          if pickerOpenFor.now().contains(nodeId) then pickerOpenFor.set(None)
-          else pickerOpenFor.set(Some(nodeId))
-        }
-      ))
-    else None
+    Option.when(charted)(div(
+      cls := "node-swatch-trigger",
+      styleAttr := s"background-color: ${colorOpt.map(_.value).getOrElse("transparent")};",
+      onClick.stopPropagation --> { _ =>
+        pickerOpenFor.update(openFor => Option.unless(openFor.contains(nodeId))(nodeId))
+      }
+    ))
 
   /** Render the colour picker popover when open for this node. */
   private def renderPickerPopover(
@@ -328,20 +322,18 @@ object TreeDetailView:
     open: Boolean,
     colorOpt: Option[HexColor]
   ): Option[HtmlElement] =
-    if open then
-      colorOpt.map { col =>
-        ColorSwatchPicker(
-          currentColor = col,
-          onSelect = hex => {
-            state.setColorOverride(nodeId, hex)
-            pickerOpenFor.set(None)
-          },
-          onReset = () => {
-            state.clearColorOverride(nodeId)
-            pickerOpenFor.set(None)
-          },
-          onPreview = hex => state.setPreview(nodeId, hex),
-          onPreviewClear = () => state.clearPreview()
-        )
-      }
-    else None
+    colorOpt.filter(_ => open).map { col =>
+      ColorSwatchPicker(
+        currentColor = col,
+        onSelect = hex => {
+          state.setColorOverride(nodeId, hex)
+          pickerOpenFor.set(None)
+        },
+        onReset = () => {
+          state.clearColorOverride(nodeId)
+          pickerOpenFor.set(None)
+        },
+        onPreview = hex => state.setPreview(nodeId, hex),
+        onPreviewClear = () => state.clearPreview()
+      )
+    }

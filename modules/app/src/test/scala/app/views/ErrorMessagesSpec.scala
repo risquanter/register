@@ -4,9 +4,9 @@ import zio.test.*
 import sttp.model.StatusCode
 
 import app.core.{LocalProblem, RequestFailure}
-import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId}
+import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
-import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.http.errors.{RejectionDetail, WireError}
 
 /** Which sentence an inline view error display gets for each kind of failure.
   *
@@ -24,6 +24,41 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
+    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite)
+
+  private val blankName: E.ValidationError =
+    E.ValidationError(E.ErrorLocation.requestField(E.FieldName.Name), E.ValidationErrorCode.REQUIRED_FIELD, "must not be empty")
+
+  private val badProbability: E.ValidationError =
+    E.ValidationError(E.ErrorLocation.requestField(E.FieldName.Probability), E.ValidationErrorCode.INVALID_RANGE, "must be between 0 and 1")
+
+  private val treeId: TreeId = TreeId.fromString("01HX9ABCDE0000000000000001").toOption.get
+
+  private val viewFailedLinesSuite =
+    suite("ErrorMessages.viewFailedLines")(
+      test("a refusal the form made here gives one line per refusal") {
+        assertTrue(
+          ErrorMessages.viewFailedLines(LocalProblem.FormInvalid(List(blankName, badProbability))) ==
+            List("must not be empty", "must be between 0 and 1")
+        )
+      },
+      test("a request the server refused gives one line per refusal") {
+        val failure = RequestFailure.Wire(WireError.RequestRejected(List(blankName, badProbability), trace))
+        assertTrue(ErrorMessages.viewFailedLines(failure) == List("must not be empty", "must be between 0 and 1"))
+      },
+      test("a tree's fields the server refused give one line per refusal") {
+        val failure = RequestFailure.Wire(
+          WireError.ValidationRejected(treeId, RejectionDetail.Fields(List(blankName, badProbability)), trace)
+        )
+        assertTrue(ErrorMessages.viewFailedLines(failure) == List("must not be empty", "must be between 0 and 1"))
+      },
+      test("any other failure gives the one sentence viewFailed gives") {
+        val failure = RequestFailure.Wire(WireError.InternalFault(trace))
+        assertTrue(ErrorMessages.viewFailedLines(failure) == List(ErrorMessages.InternalFault))
+      }
+    )
+
+  private val viewFailedSuite =
     suite("ErrorMessages.viewFailed")(
       test("a failure the server answered with reads the same sentence the banner reads") {
         val error = WireError.InternalFault(trace)

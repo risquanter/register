@@ -2,7 +2,6 @@ package app.components
 
 import com.raquo.laminar.api.L.{*, given}
 
-import app.components.FormInputs
 import app.core.LocalProblem
 import app.state.{ScenarioState, ScenarioSubmitState, LoadState}
 import app.views.ErrorMessages
@@ -63,9 +62,9 @@ object BranchBar:
     * distinguish "nothing chosen yet" (e.g. Compare's placeholder option)
     * check for the empty string themselves before calling this.
     */
-  def parseBranchOptionValue(raw: String): BranchChoice =
-    if raw == mainSentinel then BranchChoice.Main
-    else ScenarioName.fromString(raw).toOption.fold(BranchChoice.Main)(BranchChoice.Scenario(_))
+  def parseBranchOptionValue(raw: String): BranchChoice = raw match
+    case `mainSentinel` => BranchChoice.Main
+    case other          => ScenarioName.fromString(other).toOption.fold(BranchChoice.Main)(BranchChoice.Scenario(_))
 
   /** Shared option list for every branch-picking `<select>`: main + every
     * scenario, rendered via `FormInputs.splitOptions` (keyed by each option's
@@ -190,12 +189,13 @@ object BranchBar:
         case None => Some(actionItem("+ Create from main…", () => createTrigger.set(Some(forkTarget(CreateSource.Main, current)))))
         case Some(_) => None
       },
-      if current != BranchChoice.Main then
-        child.maybe <-- createTrigger.signal.map {
-          case None => Some(actionItem("⧉ Create from current…", () => createTrigger.set(Some(forkTarget(CreateSource.Current, current)))))
-          case Some(_) => None
-        }
-      else emptyNode,
+      current match
+        case BranchChoice.Scenario(_) =>
+          child.maybe <-- createTrigger.signal.map {
+            case None => Some(actionItem("⧉ Create from current…", () => createTrigger.set(Some(forkTarget(CreateSource.Current, current)))))
+            case Some(_) => None
+          }
+        case BranchChoice.Main => emptyNode,
       current match
         case BranchChoice.Scenario(name) =>
           actionItem("⇄ Merge into main…", () => { onMergeRequest(name); closeAll() })
@@ -214,11 +214,10 @@ object BranchBar:
       onClick --> { _ => onSelect() }
     )
 
-  /** Named-scenario row: switching (click the label) and deleting (click the
-    * ✕) are both reachable from the same row, instead of delete being buried
-    * as a separate "Delete current" item that only ever applied to whichever
-    * branch you already happened to be on. `stopPropagation` on the ✕ keeps
-    * a delete click from also firing the row's own switch-to action.
+  /** Named-scenario row: clicking the label switches to the scenario and
+    * clicking the ✕ deletes it, whichever branch is active. `stopPropagation`
+    * on the ✕ keeps a delete click from also firing the row's own switch-to
+    * action.
     */
   private def scenarioRow(
     scenarioState: ScenarioState,

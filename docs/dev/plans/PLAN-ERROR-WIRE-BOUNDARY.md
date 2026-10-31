@@ -2504,8 +2504,10 @@ edit path; a `FormLevel` case added to `RiskLeafField` and `PortfolioField` and
 every `case _ => None` arm of both mappings made explicit; the push inverted to a
 pull, which deletes `FormSubmitUtil.scala` together with `submitFieldErrors` and
 its three methods in `FormState.scala` and renames that trait's type parameter
-from `F` to `Field`; and `GlobalError.ValidationFailed` delivered into the open
-form's own state rather than flattened in `ErrorBanner`. Eleven refinement call
+from `F` to `Field`; and `GlobalError.ValidationFailed` rendered one line per
+refusal, on the builder's line for a tree submit and in `ErrorBanner` for a
+refusal no view owns, with no server refusal delivered into a node form
+(`EWB-D-43`). Eleven refinement call
 sites in four files, all under `modules/app`, listed in §15.7. `ValidationUtil`'s
 twenty-six refinements keep their `(value, location)` parameters, and the call
 sites outside `modules/app` are unchanged.

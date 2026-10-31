@@ -160,9 +160,8 @@ object ZJS:
       * `.tapError`/`.tap` here only observe the outcome — they don't alter
       * the success/failure channel — so `forkProvided`'s own error-observer
       * hook (global banner) still sees the exact same success/failure this
-      * ZIO would have produced via plain `toEventStream`. This is additive:
-      * `toEventStream` itself is unchanged, and every existing caller keeps
-      * today's silent-on-failure behavior.
+      * ZIO would have produced via plain `toEventStream`, which stays silent
+      * on failure.
       */
     def toOutcomeEventStream: EventStream[Either[RequestFailure, A]] =
       val eventBus = EventBus[Either[RequestFailure, A]]()
@@ -225,9 +224,10 @@ object ZJS:
     }
 
   /** `requestPipeline` specialized to the `LoadState` lifecycle with the
-    * standard error routing (mirrors `loadInto`): a workspace-sentinel
-    * failure resolves to `Idle` (the global banner's own domain), any other
-    * failure to `Failed(message)`. The request streams are expected to come
+    * standard error routing (mirrors `loadInto`, through `settleLoad`): a
+    * failure meaning the workspace is gone resolves to `Idle` (the global
+    * banner's own domain), any other failure to `Failed(failure)`. The
+    * request streams are expected to come
     * from `toOutcomeEventStream`, which already notified the global
     * `ErrorObserver` — this pipeline only decides what the target displays.
     */

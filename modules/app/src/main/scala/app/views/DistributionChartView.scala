@@ -50,14 +50,18 @@ object DistributionChartView:
     val toggleEl = div(
       cls := "chart-mode-toggle",
       button(
-        cls <-- chartState.viewModeVar.signal.map(m =>
-          if m == DistributionViewMode.PDF then "toggle-btn active" else "toggle-btn"),
+        cls <-- chartState.viewModeVar.signal.map {
+          case DistributionViewMode.PDF => "toggle-btn active"
+          case DistributionViewMode.CDF => "toggle-btn"
+        },
         "PDF",
         onClick --> { _ => chartState.viewModeVar.set(DistributionViewMode.PDF) }
       ),
       button(
-        cls <-- chartState.viewModeVar.signal.map(m =>
-          if m == DistributionViewMode.CDF then "toggle-btn active" else "toggle-btn"),
+        cls <-- chartState.viewModeVar.signal.map {
+          case DistributionViewMode.CDF => "toggle-btn active"
+          case DistributionViewMode.PDF => "toggle-btn"
+        },
         "CDF",
         onClick --> { _ => chartState.viewModeVar.set(DistributionViewMode.CDF) }
       )

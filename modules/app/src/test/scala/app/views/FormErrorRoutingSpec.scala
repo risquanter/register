@@ -282,6 +282,18 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
           current(state.maxLossError).isEmpty
         )
       },
+      test("an edit of the terms input drops the refusal naming it") {
+        val state = new RiskLeafFormState
+        state.distributionModeVar.set(DistributionMode.Metalog)
+        state.percentilesVar.set("10, 50, 90")
+        state.quantilesVar.set("1000, 5000, 25000")
+        state.termsVar.set("3")
+        state.triggerValidation()
+        state.setSubmitErrors(List(refusal(draft(FieldName.Terms), "terms out of range")))
+        val before = current(state.termsError)
+        state.clearFor(RiskLeafField.Terms)
+        assertTrue(before == List("terms out of range"), current(state.termsError).isEmpty)
+      },
       test("an edit of any input drops the form's own line") {
         val state = new RiskLeafFormState
         state.triggerValidation()

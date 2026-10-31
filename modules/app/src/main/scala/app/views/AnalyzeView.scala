@@ -189,8 +189,7 @@ object AnalyzeView:
                 if baselineHidden then LoadState.Idle else singleSpec
               case (CompareLayout.Overlay, false) =>
                 val baselineSide =
-                  if baselineHidden then None
-                  else Some(CompareColorAssigner.OverlaySide(loadedOrEmpty(thisCurves), thisVisible, thisPalette, "active",
+                  Option.unless(baselineHidden)(CompareColorAssigner.OverlaySide(loadedOrEmpty(thisCurves), thisVisible, thisPalette, "active",
                     thisOrigin.getOrElse(BranchBar.branchDisplayName(activeBranch)) + " (active)",
                     thisExplicitColors))
                 val comparandSides = visibleComparands.map(pi => (pi, slotInputs(pi)))
@@ -245,9 +244,7 @@ object AnalyzeView:
               engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }.toSet
             val thisPairs = ColorAssigner.pairWithColors(loadedOrEmpty(thisCurves), thisVisible, thisColors)
             val slotPairs = slotInputs.zipWithIndex.map { case ((curves, visible, colors, _, _), pi) =>
-              if visiblePool.contains(pi)
-              then Some(ColorAssigner.pairWithColors(loadedOrEmpty(curves), visible, colors))
-              else None
+              Option.when(visiblePool.contains(pi))(ColorAssigner.pairWithColors(loadedOrEmpty(curves), visible, colors))
             }
             val baselinePairsForPin = if baselineHidden then Vector.empty else thisPairs
             val pinned = PinnedAxes.fromCurves((baselinePairsForPin ++ slotPairs.flatten.flatten).map(_._1))
@@ -632,11 +629,10 @@ object AnalyzeView:
               case _ =>
                 div(
                   cls := "lec-chart-surface",
-                  // H3: selections absent at a rewound commit are dropped from the
-                  // chart; name them so a vanished curve is explained, not silent.
+                  // Selections absent at a rewound commit are dropped from the
+                  // chart; the notice names them so a vanished curve is explained.
                   child.maybe <-- treeViewState.chartState.droppedSelections.map { dropped =>
-                    if dropped.isEmpty then None
-                    else Some(div(cls := "dropped-selections-notice",
+                    Option.when(dropped.nonEmpty)(div(cls := "dropped-selections-notice",
                       s"${dropped.size} selected node(s) not present at this point in time"))
                   },
                   LECChartView(combinedSpecSignal, hoverBridge, chartParams)

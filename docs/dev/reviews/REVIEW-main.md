@@ -678,3 +678,55 @@ discharged:
 escalated:
   (none)
 ```
+
+```
+COVERAGE  tier=routine  scope=the frontend commits after 4acbfc9f up to HEAD
+          (1f5943c0, 00645acb, eb412b6a, a758940e, c0be2ece, 75227515, 10b5365a),
+          df4b0f4c excluded as a server change — File scope source 1, named by the user
+read-in-full:
+  modules/app/src/main/scala/app/components/BranchBar.scala
+  modules/app/src/main/scala/app/components/FailureNotice.scala
+  modules/app/src/main/scala/app/components/FormInputs.scala
+  modules/app/src/main/scala/app/components/MergeMessages.scala
+  modules/app/src/main/scala/app/components/MergeModal.scala
+  modules/app/src/main/scala/app/core/ZJS.scala
+  modules/app/src/main/scala/app/state/FormState.scala
+  modules/app/src/main/scala/app/state/PortfolioFormState.scala
+  modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+  modules/app/src/main/scala/app/state/TreeBuilderState.scala
+  modules/app/src/main/scala/app/views/BlockedMessages.scala
+  modules/app/src/main/scala/app/views/ErrorBanner.scala
+  modules/app/src/main/scala/app/views/ErrorMessages.scala
+  modules/app/src/main/scala/app/views/FormSubmitUtil.scala (deleted; read at 10b5365a^)
+  modules/app/src/main/scala/app/views/PortfolioFormView.scala
+  modules/app/src/main/scala/app/views/RiskLeafFormView.scala
+  modules/app/src/main/scala/app/views/TreeBuilderView.scala
+  modules/app/styles/app.css (diff hunks and the rules they name)
+  modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala (hunk)
+  scanned by pattern, not line by line: AnalyzeView.scala, DistributionChartView.scala,
+    LECChartView.scala, TreeDetailView.scala, TreeListView.scala, the three in-scope specs
+discharged:
+  1 plan conformance — PASS — SubmitRefusals, inputsFor, topologyError, draftEdits,
+    blockable, FailureNotice match §15.5a and §15.8 step 5; every changed file is a
+    bullet in PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md (tests by the same-module rule);
+    §9 Phase 3a summary swept to EWB-D-43
+  2 mechanical bug scan — 1 finding — RiskLeafFormView.scala:234-241 (no clearFor(Terms))
+  3 convention conformance — 2 findings — RiskLeafFormView.scala:428,449 and
+    PortfolioFormView.scala:281,300 (nested Validation match); FormState.scala:87 with
+    RiskLeafFormState.scala:471 and PortfolioFormState.scala:84 (hasErrors/isValid no caller)
+  4 test presence — 1 gap closed (ErrorMessagesSpec viewFailedLines); app/test pass,
+    commonJVM/test pass
+  5 drive-by changes — 1 note — app.css .error-banner border
+  6 boyscout pass — performed; notes on MergeModal.scala:38,99,107 and Option.when sites
+  7 terminology freshness (name level) — PASS — no glossary heading names a concept in
+    the diff; SubmitRefusals.selected is a homonym of §4.5 Selection, not that concept
+escalated:
+  modules/app/src/main/scala/app/views/TreeBuilderView.scala:139 — draftEdits.sample(submitState)
+    clears a Failed state and relies on onSuccess setting Success before startNewTree /
+    selectTree write the draft (subscription ordering) → complex
+  modules/app/src/main/scala/app/core/ZJS.scala:286 — submitInto notifies the observer by
+    hand and withholds ValidationFailed from the banner (changed error-path semantics) → complex
+  modules/app/src/main/scala/app/components/FailureNotice.scala:23,
+    modules/app/src/main/scala/app/components/FormInputs.scala:230 — new Laminar render sites
+    carrying server sentences and reasons (SPA output path) → security
+```

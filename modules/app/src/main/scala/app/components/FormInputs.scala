@@ -243,21 +243,13 @@ object FormInputs:
    * relative judgement (who's asking), never "root was deleted", so there is
    * nothing here for it to legitimately go stale against.
    *
-   * Confirmed bug this replaced: switching the active target from node A
-   * (parent = B) straight to node B itself made `options` recompute to
-   * exclude B (self-exclusion) before B's own populate step (deferred one
-   * Airstream transaction later, since it fires from within another
-   * signal's observer) had actually written B's real parent into
-   * `parentVar` — this subscription, reading `parentVar.now()` in between,
-   * saw the *stale* "B" (A's old parent) missing from B's own options and
-   * "corrected" it to `Unset`, in an Airstream transaction that ran *after*
-   * populate's own write, clobbering it. The same thing reproduced for the
-   * root case: editing the node that legitimately holds root showed the
-   * dropdown stuck on "— none selected —", unselectable, because the exact
-   * same stale read fired for `Root` too. Keying this check off
-   * `existingNames` instead removes the coupling: that signal only changes
-   * on a real add/rename/remove, never on a target switch, so it can no
-   * longer race populate.
+   * Keying the check off `existingNames` is what keeps it from racing a
+   * target's populate step. Switching from node A (parent = B) to node B
+   * makes `options` drop B at once, while B's populate step writes B's real
+   * parent one Airstream transaction later; a check keyed off `options`
+   * would read A's stale "B" in between and overwrite populate's write with
+   * `Unset`. `existingNames` changes only on a real add, rename or remove,
+   * never on a target switch.
    *
    * @param parentVar Var holding the current selection.
    * @param options Signal of available parent names (may include rootLabel)

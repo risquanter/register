@@ -344,29 +344,20 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
 
   val nameError: Signal[List[String]] = messagesOf(errorsFor(Name, nameErrorRaw))
 
-  /** Parent has no continuous reactive validation of its own (unlike name) —
-    * only submit-time refusals (`ParentSelection.toParentRef` refusing the
-    * selection in `toDraft`, or the builder's topology check) ever show
-    * here, from the stored refusals. */
+  /** The dropdown shows only submit-time refusals (`ParentSelection.toParentRef`
+    * refusing the selection in `toDraft`, or the builder's topology check),
+    * from the stored refusals. Its live check, `parentErrorRaw`, blocks the
+    * submit and is not shown here. */
   val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
 
   val probabilityError: Signal[List[String]] = messagesOf(errorsFor(Probability, probabilityErrorRaw))
 
-  // Cross-field errors use a content-presence gate, NOT the per-field touch gate.
-  //
-  // Problem with merging the cross-field raw error into each field's errorsFor:
-  //   errorsFor(Percentiles, ownRaw.orElse(crossRaw))
-  // gates the WHOLE combined signal behind "Percentiles was touched". So when the user
-  // enters 3 percentiles (blurs, touched) then starts typing 1 quantile (not yet blurred),
-  // the cross-field "lengths must match" error only appears under Percentiles — the stable,
-  // completed field — while the user is still editing Quantiles. Reversal also possible.
-  //
-  // Correct model: the cross-field constraint is evaluable as soon as BOTH fields have
-  // non-empty content. Its visibility gate must be:
-  //   showAll (submit triggered) || (pField.nonEmpty && qField.nonEmpty)
-  //
-  // Own-field errors continue to use the per-field touch gate via errorsFor.
-  // The final per-field signal is: own-error (touch-gated) orElse cross-error (content-gated).
+  // A cross-field error has its own gate, separate from the per-field touch gate:
+  // the constraint is evaluable once both fields of the pair have content, so it
+  // shows after submit, or when both are filled and this field is touched and was
+  // the one last edited (see `crossFieldGated`). Own-field errors use the per-field touch gate
+  // through `errorsFor`. Each pair field shows its own and stored refusals, or
+  // else the pair's refusal (see `withCrossField`).
 
   // Track which field in each cross-field pair was most recently edited.
   // Starts with an arbitrary default (true) which is irrelevant until both fields
@@ -412,7 +403,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
       .combineWith(isTouched(thisField), bothFilled, isThisFieldLast)
       .map { (showAll, touched, filled, isLast) => showAll || (touched && isLast && filled) }
       .combineWith(raw)
-      .map { (show, err) => if show then err else None }
+      .map { (show, err) => err.filter(_ => show) }
 
   private val metalogCrossFieldGated_Pct: Signal[Option[String]] =
     crossFieldGated(Percentiles, percentilesVar, quantilesVar, messageOf(metalogCrossFieldErrorRaw), lastMetalogEdited)

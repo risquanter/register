@@ -51,4 +51,6 @@ object BlockedMessages:
 
   val MergeNotChecked: String = "Re-check the scenario for conflicts first."
 
+  val MergeChecking: String = "Checking for conflicts…"
+
   val MergeRunning: String = "Merging…"
