@@ -40,6 +40,9 @@ object ErrorMessages:
   val StaleVersion: String =
     "This was edited elsewhere since you loaded it. Reload to see the current version."
 
+  /** Shown when a loaded tree names a root node it does not contain. */
+  val RootNodeMissing: String = "Root node not found"
+
   /** Shown when startup pre-validation finds the stored workspace gone. It
     * names no cause, because that path cannot tell an expired workspace from a
     * key that no longer resolves: both answer identically so that neither is an

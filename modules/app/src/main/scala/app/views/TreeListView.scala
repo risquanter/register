@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{TreeViewState, LoadState}
-import app.components.Icons
+import app.components.{FailureNotice, Icons}
 import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.http.responses.SimulationResponse
 
@@ -65,7 +65,7 @@ object TreeListView:
         case (LoadState.Loading, Some(prev)) if prev.nonEmpty =>
           renderSelector(prev, state, onRefreshExtra)
         case (LoadState.Loading, _) => renderPlaceholder("Loading trees…")
-        case (LoadState.Failed(failure), _) => renderError(ErrorMessages.viewFailed(failure), state)
+        case (LoadState.Failed(failure), _) => FailureNotice(failure, Some(() => state.loadTreeList()))
         case (LoadState.Idle, _) => renderPlaceholder("Waiting to load…")
         // The tree list is a collection, so a successful read with nothing in
         // it is an empty list rather than an absent one. `Absent` is therefore
@@ -127,17 +127,6 @@ object TreeListView:
 
   private def renderPlaceholder(message: String): HtmlElement =
     div(cls := "tree-list-placeholder", p(message))
-
-  private def renderError(message: String, state: TreeViewState): HtmlElement =
-    div(
-      cls := "tree-list-error",
-      p(cls := "error-message", s"Failed to load: $message"),
-      button(
-        cls := "retry-btn",
-        "Retry",
-        onClick --> (_ => state.loadTreeList())
-      )
-    )
 
   private def renderSelector(trees: List[SimulationResponse], state: TreeViewState, onRefreshExtra: () => Unit): HtmlElement =
     val selectedValue: Signal[String] = state.selectedTreeId.signal.map {

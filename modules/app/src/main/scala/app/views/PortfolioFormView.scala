@@ -80,28 +80,30 @@ object PortfolioFormView:
       case FormMode.Blank | FormMode.Templating(_) => "Submit Portfolio"
       case _                                        => "Draft New Portfolio"
     }
-    val addSubmitDisabled: Signal[Boolean] = portfolioMode.combineWith(form.hasErrors).map {
-      case (FormMode.Editing(_), _) => true
-      case (FormMode.Locked(_), _)  => false
-      case (FormMode.Inactive, _)   => false // just wakes the form into Blank, nothing to validate yet
-      case (FormMode.Drafting(_), _) => true // a leaf draft is in progress elsewhere; don't invite discarding it
-      case (_, hasErrors)           => hasErrors
+    val addSubmitBlockedBy: Signal[List[String]] = portfolioMode.combineWith(form.blockingReasons).map {
+      case (FormMode.Editing(_), _)      => List(BlockedMessages.editInProgress(FormKind.Portfolio))
+      case (FormMode.Locked(_), _)       => Nil
+      case (FormMode.Inactive, _)        => Nil // just wakes the form into Blank, nothing to validate yet
+      case (FormMode.Drafting(other), _) => List(BlockedMessages.otherDraftInProgress(other)) // don't invite discarding it
+      case (_, reasons)                  => reasons
     }
     val editSaveLabel: Signal[String] = portfolioMode.map {
       case FormMode.Editing(_) => "Save"
       case _                   => "Edit"
     }
-    val editSaveDisabled: Signal[Boolean] = portfolioMode.combineWith(form.hasErrors).map {
-      case (FormMode.Blank, _)         => true
-      case (FormMode.Templating(_), _) => true
-      case (FormMode.Inactive, _)      => true // no portfolio is selected — nothing to edit
-      case (FormMode.Drafting(_), _)   => true // no portfolio is selected — nothing to edit
-      case (FormMode.Locked(_), _)     => false
-      case (_, hasErrors)              => hasErrors
+    val editSaveBlockedBy: Signal[List[String]] = portfolioMode.combineWith(form.blockingReasons).map {
+      case (FormMode.Blank, _)           => List(BlockedMessages.nothingSelected(FormKind.Portfolio))
+      case (FormMode.Templating(_), _)   => List(BlockedMessages.copyNotEditable(FormKind.Portfolio))
+      case (FormMode.Inactive, _)        => List(BlockedMessages.nothingSelected(FormKind.Portfolio))
+      case (FormMode.Drafting(other), _) => List(BlockedMessages.otherDraftInProgress(other))
+      case (FormMode.Locked(_), _)       => Nil
+      case (_, reasons)                  => reasons
     }
-    val clearFormDisabled: Signal[Boolean] = portfolioMode.map {
-      case FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_) => true
-      case _                                                              => false
+    val clearFormBlockedBy: Signal[List[String]] = portfolioMode.map {
+      case FormMode.Locked(_)       => List(BlockedMessages.savedNothingToClear(FormKind.Portfolio))
+      case FormMode.Inactive        => List(BlockedMessages.NothingToClear)
+      case FormMode.Drafting(other) => List(BlockedMessages.otherDraftInProgress(other))
+      case _                        => Nil
     }
 
     // Card focus: expanded when this form is the active one; collapsed when a
@@ -249,19 +251,21 @@ object PortfolioFormView:
         cls := "form-actions",
         FormInputs.submitButton(
           textSignal = addSubmitLabel,
-          isDisabled = addSubmitDisabled,
+          blockedBy = addSubmitBlockedBy,
           onClickCallback = () => onAddSubmitClick()
         ),
-        button(
-          typ := "button",
-          cls := "form-clear",
-          "Clear Form",
-          disabled <-- clearFormDisabled,
-          onClick --> (_ => onClearFormClick())
+        FormInputs.blockable(
+          button(
+            typ := "button",
+            cls := "form-clear",
+            "Clear Form",
+            onClick --> (_ => onClearFormClick())
+          ),
+          clearFormBlockedBy
         ),
         FormInputs.submitButton(
           textSignal = editSaveLabel,
-          isDisabled = editSaveDisabled,
+          blockedBy = editSaveBlockedBy,
           onClickCallback = () => onEditSaveClick()
         )
       ),

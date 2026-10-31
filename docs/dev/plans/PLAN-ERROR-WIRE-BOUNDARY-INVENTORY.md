@@ -224,3 +224,6 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/app/src/main/scala/app/state/FormState.scala
 - modules/app/src/main/scala/app/state/Located.scala
 - modules/common/src/main/scala/com/risquanter/register/domain/data/DistributionShape.scala
+- modules/app/styles/app.css
+- modules/app/src/main/scala/app/components/FailureNotice.scala
+- modules/app/src/main/scala/app/views/BlockedMessages.scala

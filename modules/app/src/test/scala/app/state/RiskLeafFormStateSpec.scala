@@ -5,7 +5,7 @@ import zio.prelude.Validation
 import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
 
 object RiskLeafFormStateSpec extends ZIOSpecDefault:
@@ -344,6 +344,26 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
 
       test("0 dp: boundary 1.0 → \"100\"") {
         assertTrue(RiskLeafFormState.domainToDisplayPct(1.0, 0) == "100")
+      }
+
+    ),
+
+    suite("blockingReasons")(
+
+      test("is empty for a valid form") {
+        assertTrue(current(validLognormalForm().blockingReasons).isEmpty)
+      },
+
+      test("lists the message of every refusing check, untouched inputs included") {
+        val st = validLognormalForm()
+        st.nameVar.set("")
+        st.parentVar.set(ParentSelection.Unset)
+        val reasons = current(st.blockingReasons)
+        assertTrue(
+          reasons.size == 2,
+          reasons.contains(ValidationMessages.parentRequired),
+          current(st.nameError).isEmpty
+        )
       }
 
     )

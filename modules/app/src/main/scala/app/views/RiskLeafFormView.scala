@@ -78,28 +78,30 @@ object RiskLeafFormView:
       case FormMode.Blank | FormMode.Templating(_) => "Submit Leaf"
       case _                                        => "Draft New Leaf"
     }
-    val addSubmitDisabled: Signal[Boolean] = leafMode.combineWith(state.hasErrors).map {
-      case (FormMode.Editing(_), _)  => true  // mid-edit of an existing leaf; finish or Clear Form first
-      case (FormMode.Locked(_), _)   => false // just unlocks a template copy, nothing to validate yet
-      case (FormMode.Inactive, _)    => false // just wakes the form into Blank, nothing to validate yet
-      case (FormMode.Drafting(_), _) => true  // a portfolio draft is in progress elsewhere; don't invite discarding it
-      case (_, hasErrors)            => hasErrors
+    val addSubmitBlockedBy: Signal[List[String]] = leafMode.combineWith(state.blockingReasons).map {
+      case (FormMode.Editing(_), _)      => List(BlockedMessages.editInProgress(FormKind.Leaf))
+      case (FormMode.Locked(_), _)       => Nil // just unlocks a template copy, nothing to validate yet
+      case (FormMode.Inactive, _)        => Nil // just wakes the form into Blank, nothing to validate yet
+      case (FormMode.Drafting(other), _) => List(BlockedMessages.otherDraftInProgress(other)) // don't invite discarding it
+      case (_, reasons)                  => reasons
     }
     val editSaveLabel: Signal[String] = leafMode.map {
       case FormMode.Editing(_) => "Save"
       case _                   => "Edit"
     }
-    val editSaveDisabled: Signal[Boolean] = leafMode.combineWith(state.hasErrors).map {
-      case (FormMode.Blank, _)         => true
-      case (FormMode.Templating(_), _) => true
-      case (FormMode.Inactive, _)      => true // no leaf is selected — nothing to edit
-      case (FormMode.Drafting(_), _)   => true // no leaf is selected — nothing to edit
-      case (FormMode.Locked(_), _)     => false // just unlocks in place, nothing to validate yet
-      case (_, hasErrors)              => hasErrors
+    val editSaveBlockedBy: Signal[List[String]] = leafMode.combineWith(state.blockingReasons).map {
+      case (FormMode.Blank, _)           => List(BlockedMessages.nothingSelected(FormKind.Leaf))
+      case (FormMode.Templating(_), _)   => List(BlockedMessages.copyNotEditable(FormKind.Leaf))
+      case (FormMode.Inactive, _)        => List(BlockedMessages.nothingSelected(FormKind.Leaf))
+      case (FormMode.Drafting(other), _) => List(BlockedMessages.otherDraftInProgress(other))
+      case (FormMode.Locked(_), _)       => Nil // just unlocks in place, nothing to validate yet
+      case (_, reasons)                  => reasons
     }
-    val clearFormDisabled: Signal[Boolean] = leafMode.map {
-      case FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_) => true
-      case _                                                              => false
+    val clearFormBlockedBy: Signal[List[String]] = leafMode.map {
+      case FormMode.Locked(_)       => List(BlockedMessages.savedNothingToClear(FormKind.Leaf))
+      case FormMode.Inactive        => List(BlockedMessages.NothingToClear)
+      case FormMode.Drafting(other) => List(BlockedMessages.otherDraftInProgress(other))
+      case _                        => Nil
     }
 
     // Card focus: expanded when this form is the active one; collapsed when a
@@ -317,19 +319,21 @@ object RiskLeafFormView:
         ),
         submitButton(
           textSignal = addSubmitLabel,
-          isDisabled = addSubmitDisabled,
+          blockedBy = addSubmitBlockedBy,
           onClickCallback = () => onAddSubmitClick()
         ),
-        button(
-          typ := "button",
-          cls := "form-clear",
-          "Clear Form",
-          disabled <-- clearFormDisabled,
-          onClick --> (_ => onClearFormClick())
+        blockable(
+          button(
+            typ := "button",
+            cls := "form-clear",
+            "Clear Form",
+            onClick --> (_ => onClearFormClick())
+          ),
+          clearFormBlockedBy
         ),
         submitButton(
           textSignal = editSaveLabel,
-          isDisabled = editSaveDisabled,
+          blockedBy = editSaveBlockedBy,
           onClickCallback = () => onEditSaveClick()
         )
       ),

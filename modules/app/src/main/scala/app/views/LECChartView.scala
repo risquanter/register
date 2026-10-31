@@ -7,7 +7,7 @@ import org.scalajs.dom
 import scala.scalajs.js
 
 import app.chart.ChartParams
-import app.components.Icons
+import app.components.{FailureNotice, Icons}
 import app.facades.{vegaEmbed, EmbedResult}
 import app.state.{LoadState, ChartHoverBridge, ChartParamStore}
 
@@ -109,7 +109,7 @@ object LECChartView:
         child <-- specSignal.combineWith(renderError$.signal.distinct).map { (state, renderErr) =>
           disposeChart()
           renderErr match
-            case Some(msg) => renderError(msg)
+            case Some(msg) => renderError(FailureNotice.lines(List(msg), None))
             case None =>
               state match
                 // A curve set is computed from the loaded curves, so `Absent`
@@ -117,7 +117,7 @@ object LECChartView:
                 // spinner that would never resolve.
                 case LoadState.Idle | LoadState.Absent => renderIdle
                 case LoadState.Loading        => renderLoading
-                case LoadState.Failed(f)      => renderError(ErrorMessages.viewFailed(f))
+                case LoadState.Failed(f)      => renderError(FailureNotice(f, None))
                 case LoadState.Loaded(spec) =>
                   renderChart(
                     spec,
@@ -150,11 +150,9 @@ object LECChartView:
       p(cls := "lec-chart-loading", "Loading chart…")
     )
 
-  private def renderError(message: String): HtmlElement =
-    div(
-      cls := "lec-chart-message lec-chart-error",
-      p(s"Chart error: $message")
-    )
+  /** A failure, in the app's failure box, inside the chart area's frame. */
+  private def renderError(notice: HtmlElement): HtmlElement =
+    div(cls := "lec-chart-message", notice)
 
   /** Mount a chart into a fresh container element via VegaEmbed. */
   private def renderChart(

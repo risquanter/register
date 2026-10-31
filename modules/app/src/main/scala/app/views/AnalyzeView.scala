@@ -559,16 +559,20 @@ object AnalyzeView:
         // Run button row
         div(
           cls := "query-actions",
-          button(
-            cls := "btn btn-primary query-run-btn",
-            disabled <-- queryState.isExecuting.combineWith(queryState.queryInput.signal).map {
-              case (executing, text) => executing || text.trim.isEmpty
-            },
-            child <-- queryState.isExecuting.map {
-              case true  => span("Evaluating…")
-              case false => span("Run")
-            },
-            onClick --> (_ => runQuery())
+          FormInputs.blockable(
+            button(
+              cls := "btn btn-primary query-run-btn",
+              child <-- queryState.isExecuting.map {
+                case true  => span("Evaluating…")
+                case false => span("Run")
+              },
+              onClick --> (_ => runQuery())
+            ),
+            queryState.isExecuting.combineWith(queryState.queryInput.signal).map {
+              case (true, _)                     => List(BlockedMessages.QueryEvaluating)
+              case (false, text) if text.isBlank => List(BlockedMessages.QueryBlank)
+              case (false, _)                    => Nil
+            }
           )
         )
       ),
@@ -702,12 +706,17 @@ object AnalyzeView:
       ),
       div(
         cls := "load-trees-footer",
-        button(
-          cls := "compare-add-btn",
-          tpe := "button",
-          disabled <-- compareState.rows.signal.map(_.size >= CompareState.ComparedSlotCount),
-          "+ Compare tree",
-          onClick --> (_ => compareState.addRow())
+        FormInputs.blockable(
+          button(
+            cls := "compare-add-btn",
+            tpe := "button",
+            "+ Compare tree",
+            onClick --> (_ => compareState.addRow())
+          ),
+          compareState.rows.signal.map { rows =>
+            if rows.size >= CompareState.ComparedSlotCount then List(BlockedMessages.compareFull(CompareState.ComparedSlotCount))
+            else Nil
+          }
         ),
         renderLayoutToggle(compareState)
       )

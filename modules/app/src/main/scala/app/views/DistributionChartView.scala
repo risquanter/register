@@ -4,6 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
+import app.components.FailureNotice
 import app.facades.{vegaEmbed, EmbedResult}
 import app.state.{DistributionChartState, DistributionViewMode, LoadState}
 import com.risquanter.register.domain.data.DistributionShape
@@ -147,11 +148,11 @@ object DistributionChartView:
     onError:        String => Unit
   ): HtmlElement =
     renderErr match
-      case Some(msg) => renderError(msg)
+      case Some(msg) => renderError(FailureNotice.lines(List(msg), None))
       case None =>
         specState match
           case LoadState.Loading     => renderLoading
-          case LoadState.Failed(f)   => renderError(ErrorMessages.viewFailed(f))
+          case LoadState.Failed(f)   => renderError(FailureNotice(f, None))
           case LoadState.Loaded(sp)  => renderChart(sp, onResult, onError)
           // The preview spec is computed from the form's own parameters rather
           // than fetched, so `Absent` cannot arise. It shares `Idle`'s message,
@@ -179,11 +180,9 @@ object DistributionChartView:
       p(cls := "distribution-chart-loading", "Loading preview…")
     )
 
-  private def renderError(message: String): HtmlElement =
-    div(
-      cls := "distribution-chart-message distribution-chart-error",
-      p(s"Preview error: $message")
-    )
+  /** A failure, in the app's failure box, inside the preview area's frame. */
+  private def renderError(notice: HtmlElement): HtmlElement =
+    div(cls := "distribution-chart-message", notice)
 
   private def renderChart(
     spec:     js.Dynamic,

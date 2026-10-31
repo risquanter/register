@@ -3,7 +3,7 @@ package app.components
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{LoadState, MergeSubmitState, ScenarioMergeState}
-import app.views.ErrorMessages
+import app.views.BlockedMessages
 import com.risquanter.register.domain.data.iron.ScenarioName
 import com.risquanter.register.http.responses.{MergePreviewResponse, MergePreviewStatus}
 
@@ -28,14 +28,15 @@ object MergeModal:
     name: ScenarioName.ScenarioName,
     onMerged: () => Unit
   ): HtmlElement =
-    val mergeEnabled: Signal[Boolean] =
+    val mergeBlockedBy: Signal[List[String]] =
       state.preview.signal.combineWith(state.submit.signal).map {
         case (LoadState.Loaded(preview), submit) =>
           (preview.status, submit) match
-            case (MergePreviewStatus.Clean(), MergeSubmitState.Submitting) => false
-            case (MergePreviewStatus.Clean(), _)                          => true
-            case _                                                        => false
-        case _ => false
+            case (MergePreviewStatus.Clean(), MergeSubmitState.Submitting) => List(BlockedMessages.MergeRunning)
+            case (MergePreviewStatus.Clean(), _)                          => Nil
+            case _                                                        => List(BlockedMessages.MergeConflicts)
+        case (LoadState.Loading, _) => List(MergeMessages.Checking)
+        case _                      => List(BlockedMessages.MergeNotChecked)
       }
     div(
       cls := "merge-modal-overlay",
@@ -47,17 +48,19 @@ object MergeModal:
         div(cls := "merge-modal-body", child <-- state.preview.signal.map(renderPreview(state, _))),
         child.maybe <-- state.submit.signal.map {
           case MergeSubmitState.Failed(failure) =>
-            Some(div(cls := "merge-modal-error", ErrorMessages.viewFailed(failure)))
+            Some(FailureNotice(failure, None))
           case _ => None
         },
         div(
           cls := "merge-modal-actions",
-          button(
-            tpe := "button",
-            cls := "merge-modal-merge-btn",
-            "Merge",
-            disabled <-- mergeEnabled.map(!_),
-            onClick --> { _ => state.merge(onMerged) }
+          FormInputs.blockable(
+            button(
+              tpe := "button",
+              cls := "merge-modal-merge-btn",
+              "Merge",
+              onClick --> { _ => state.merge(onMerged) }
+            ),
+            mergeBlockedBy
           ),
           button(tpe := "button", "Cancel", onClick --> { _ => state.close() })
         )
@@ -70,7 +73,7 @@ object MergeModal:
         div(cls := "merge-modal-status", MergeMessages.Checking)
       case LoadState.Failed(failure) =>
         div(
-          div(cls := "merge-modal-error", MergeMessages.previewFailed(failure)),
+          FailureNotice(failure, None),
           recheckButton(state)
         )
       // Neither state has a request in flight, so both offer the re-check
@@ -89,7 +92,7 @@ object MergeModal:
             div(cls := "merge-modal-status", MergeMessages.Clean)
 
           case MergePreviewStatus.ScenarioMissing() =>
-            div(cls := "merge-modal-error", MergeMessages.ScenarioMissing)
+            FailureNotice.lines(List(MergeMessages.ScenarioMissing), None)
 
           case MergePreviewStatus.DuplicateNames(perTree) =>
             div(

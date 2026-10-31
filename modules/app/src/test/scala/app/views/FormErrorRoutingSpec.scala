@@ -7,7 +7,7 @@ import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
 import app.state.{DistributionMode, ParentSelection, PortfolioField, PortfolioFormState, RiskLeafField, RiskLeafFormState}
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, RequestHeaderName, SubmittedCollection, ValidationError, ValidationErrorCode
 }
@@ -337,6 +337,24 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
             ErrorSubject.nodeAtIndex(SubmittedCollection.Leaves, 0), FieldName.Probability
           ))
         )
+      }
+    ),
+
+    suite("an unselected parent")(
+      test("blocks the submit with the parent's refusal and shows nothing under the dropdown") {
+        val form = new PortfolioFormState
+        form.nameVar.set("Operations")
+        form.parentVar.set(ParentSelection.Unset)
+        assertTrue(
+          current(form.blockingReasons) == List(ValidationMessages.parentRequired),
+          current(form.parentError).isEmpty
+        )
+      },
+      test("stops blocking once a parent is chosen") {
+        val form = new PortfolioFormState
+        form.nameVar.set("Operations")
+        form.parentVar.set(ParentSelection.Root)
+        assertTrue(current(form.blockingReasons).isEmpty)
       }
     )
   )

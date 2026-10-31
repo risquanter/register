@@ -1331,7 +1331,7 @@ body {
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
   background-color: var(--error-surface);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.20);
+  border-bottom: 1px solid var(--error);
   color: var(--error);
   font-size: var(--text-sm);
   font-family: var(--font-sans);
@@ -1553,10 +1553,6 @@ body {
 
 .lec-chart-loading {
   font-style: italic;
-}
-
-.lec-chart-error {
-  color: var(--error);
 }
 
 /* =============================================
@@ -1947,10 +1943,86 @@ select.form-input:has(option[value=""]:checked) {
   border: 1px solid rgba(74, 222, 128, 0.20);
 }
 
-.submit-error {
+/* The app's one failure box (FailureNotice): a load that failed, a submit
+   that was refused, a request that never arrived. The border is the full
+   error colour, the same one an input in error takes. */
+.failure-notice {
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
   color: var(--error);
   background-color: var(--error-surface);
-  border: 1px solid rgba(239, 68, 68, 0.20);
+  border: 1px solid var(--error);
+}
+
+.failure-notice-retry {
+  margin-top: var(--sp-2);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  color: var(--foreground-muted);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-4);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.failure-notice-retry:hover {
+  background: var(--surface-overlay-hover);
+  color: var(--foreground);
+}
+
+/* A button that may be blocked (FormInputs.blockable). The wrapper takes the
+   pointer, because a disabled button receives none; hovering over it shows
+   the reasons the button is disabled, in the failure box's shape with
+   neutral colours, since a reason is not a failure. */
+.blockable {
+  position: relative;
+  display: inline-block;
+}
+
+.blockable:has(> .form-submit) {
+  display: block;
+}
+
+.form-actions > .blockable:has(> .form-submit) {
+  flex: 1;
+}
+
+.form-actions > .blockable:has(> .form-clear) {
+  flex: 0 0 auto;
+}
+
+.blockable > button:disabled {
+  pointer-events: none;
+}
+
+.blockable:has(> button:disabled) {
+  cursor: not-allowed;
+}
+
+.blockable-reason {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + var(--sp-1));
+  left: 0;
+  z-index: 10;
+  width: max-content;
+  max-width: 20rem;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  color: var(--foreground-variant);
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-focus);
+  pointer-events: none;
+}
+
+.blockable:hover > .blockable-reason {
+  display: block;
 }
 
 .submit-spinner {
@@ -2215,31 +2287,10 @@ select.form-input:has(option[value=""]:checked) {
   border-color: var(--border-focus);
 }
 
-.retry-btn {
-  margin-top: var(--sp-2);
-  background: var(--surface-overlay);
-  border: 1px solid var(--border);
-  color: var(--foreground-muted);
-  border-radius: var(--radius-md);
-  padding: var(--sp-2) var(--sp-4);
-  cursor: pointer;
-  font-size: var(--text-sm);
-}
-
-.retry-btn:hover {
-  background: var(--surface-overlay-hover);
-  color: var(--foreground);
-}
-
-.tree-list-placeholder,
-.tree-list-error {
+.tree-list-placeholder {
   color: var(--foreground-muted);
   font-size: var(--text-sm);
   font-style: italic;
-}
-
-.tree-list-error .error-message {
-  color: var(--error);
 }
 
 /* ---- Tree Detail View ---- */
@@ -2256,11 +2307,6 @@ select.form-input:has(option[value=""]:checked) {
   color: var(--foreground-muted);
   font-size: var(--text-sm);
   font-style: italic;
-}
-
-.tree-detail-error .error-message {
-  color: var(--error);
-  font-size: var(--text-sm);
 }
 
 .tree-detail-header {
@@ -2716,11 +2762,6 @@ select.form-input:has(option[value=""]:checked) {
 .distribution-chart-icon {
   font-size: 2rem;
   opacity: 0.5;
-}
-
-.distribution-chart-error {
-  color: var(--danger, #e06a5a);
-  border-color: var(--danger, #e06a5a);
 }
 
 .distribution-chart-caption {

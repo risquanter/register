@@ -78,9 +78,14 @@ trait FormState[Field]:
   /** List of raw error signals for this form */
   def errorSignals: List[Signal[Option[String]]]
 
+  /** The messages of every raw check that refuses now, ignoring display timing:
+    * what blocks the form's submit buttons. */
+  lazy val blockingReasons: Signal[List[String]] =
+    Signal.combineSeq(errorSignals).map(_.toList.flatten)
+
   /** Signal indicating whether any field has an error */
   lazy val hasErrors: Signal[Boolean] =
-    Signal.combineSeq(errorSignals).map(_.exists(_.isDefined))
+    blockingReasons.map(_.nonEmpty)
 
   // ============================================================
   // Parse Helpers

@@ -183,6 +183,11 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
       firstRefusal(ValidationUtil.toValidation(input.refine(ValidationUtil.refineName)))
     )
 
+  /** The parent selection's live refusal, for blocking submit only. The
+    * dropdown's own display shows only a submit's refusals (`parentError`). */
+  private val parentErrorRaw: Signal[Option[ValidationError]] =
+    located(parentVar, parentField).map(input => firstRefusal(ParentSelection.toParentRef(input)))
+
   /** The probability field's check, on the 0–100 scale it is entered on:
     * present, a number, and inside the closed interval 0 ≤ p ≤ 1 once divided
     * by 100. The range refusal is worded on the entered scale. The live check
@@ -456,6 +461,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
    *  `hasErrors` / `isValid` catches them even when neither field has an own error. */
   override def errorSignals: List[Signal[Option[String]]] = List(
     nameErrorRaw,
+    parentErrorRaw,
     probabilityErrorRaw,
     percentilesErrorRaw,
     quantilesErrorRaw,

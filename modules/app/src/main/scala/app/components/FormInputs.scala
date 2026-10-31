@@ -136,26 +136,47 @@ object FormInputs:
     )
 
   /**
-   * Submit button with disabled state based on validation.
+   * `button`, disabled exactly while `blockedBy` holds a reason. While it is
+   * disabled, hovering over it shows the reasons, one per line.
+   *
+   * The hover belongs to the wrapper rather than the button, because a browser
+   * dispatches no pointer events to a disabled button. CSS shows the reasons
+   * on hover, so the component holds no state of its own.
+   */
+  def blockable(button: HtmlElement, blockedBy: Signal[List[String]]): HtmlElement =
+    div(
+      cls := "blockable",
+      button.amend(disabled <-- blockedBy.map(_.nonEmpty)),
+      children <-- blockedBy.map {
+        case Nil     => Nil
+        case reasons => List(div(cls := "blockable-reason", reasons.map(div(_))))
+      }
+    )
+
+  /**
+   * Submit button, disabled while `blockedBy` holds a reason, which hovering
+   * over it then shows.
    */
   def submitButton(
     text: String,
-    isDisabled: Signal[Boolean],
+    blockedBy: Signal[List[String]],
     onClickCallback: () => Unit
   ): HtmlElement =
-    submitButton(Signal.fromValue(text), isDisabled, onClickCallback)
+    submitButton(Signal.fromValue(text), blockedBy, onClickCallback)
 
   def submitButton(
     textSignal: Signal[String],
-    isDisabled: Signal[Boolean],
+    blockedBy: Signal[List[String]],
     onClickCallback: () => Unit
   ): HtmlElement =
-    button(
-      typ := "button",
-      cls := "form-submit",
-      disabled <-- isDisabled,
-      child.text <-- textSignal,
-      onClick --> (_ => onClickCallback())
+    blockable(
+      button(
+        typ := "button",
+        cls := "form-submit",
+        child.text <-- textSignal,
+        onClick --> (_ => onClickCallback())
+      ),
+      blockedBy
     )
 
   /**

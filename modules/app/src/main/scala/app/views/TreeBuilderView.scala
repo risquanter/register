@@ -1,10 +1,9 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import zio.*
 import zio.prelude.Validation
 import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState, DistributionChartState, ScenarioState}
-import app.components.FormInputs
+import app.components.{FailureNotice, FormInputs}
 import app.components.ConfirmGuard.proceedOrConfirm
 import app.core.LocalProblem
 import app.core.ZJS.*
@@ -157,7 +156,10 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
       ),
       FormInputs.submitButton(
         state.isUpdateMode.map(if _ then "Update Risk Tree" else "Create Risk Tree"),
-        isDisabled = submitState.signal.map(_ == SubmitState.Submitting),
+        blockedBy = submitState.signal.map {
+          case SubmitState.Submitting => List(BlockedMessages.TreeSaving)
+          case _                      => Nil
+        },
         onClickCallback = () => handleSubmit()
       ),
       child.maybe <-- submitState.signal.combineWith(state.isUpdateMode).map {
@@ -173,7 +175,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
       },
       child.maybe <-- lineErrors.map {
         case Nil   => None
-        case lines => Some(div(cls := "submit-feedback submit-error", lines.map(div(_))))
+        case lines => Some(FailureNotice.lines(lines, None))
       }
     )
 

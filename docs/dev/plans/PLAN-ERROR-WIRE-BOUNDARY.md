@@ -6658,7 +6658,15 @@ outside `modules/app`.
    refusals: `submitInto` withholds from the global observer a failure that
    `GlobalError.from` classifies as `ValidationFailed`, and passes every other
    failure and every success to it. An expired workspace then still reaches the
-   banner, and a successful submit still clears a stale one.
+   banner, and a successful submit still clears a stale one. Every failure a
+   view shows inline renders through `FailureNotice`, one box with the full
+   `var(--error)` border an input in error takes; the per-view error classes
+   and their prefixes go. Every disabled button takes its reasons through
+   `FormInputs.blockable`, which disables it while the list is non-empty and
+   shows the list on hover; the sentences are in `BlockedMessages`. A node
+   form's raw checks include the parent selection, so an unselected parent
+   blocks the submit; the dropdown's own display still shows only a submit's
+   refusals.
 
 Steps 1 and 2 each add something nothing reads yet, so each is reviewable alone.
 Steps 3 to 5 are sequential because each depends on the one before: the accessors

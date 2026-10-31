@@ -46,6 +46,10 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
   private def nameLocatedNow: Located[String] =
     Located(nameVar.now(), ErrorLocation.Field(subjectVar.now(), nameField))
 
+  /** The parent selection's live value, located. */
+  private def parentLocated: Signal[Located[ParentSelection]] =
+    parentVar.signal.combineWith(subject).map((v, s) => Located(v, ErrorLocation.Field(s, parentField)))
+
   /** The parent selection's current value, located, for the submit read. */
   private def parentLocatedNow: Located[ParentSelection] =
     Located(parentVar.now(), ErrorLocation.Field(subjectVar.now(), parentField))
@@ -53,6 +57,11 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
   // Raw validation
   private val nameErrorRaw: Signal[Option[ValidationError]] =
     nameLocated.map(_.refine(ValidationUtil.refineName).left.toOption.flatMap(_.headOption))
+
+  /** The parent selection's live refusal, for blocking submit only. The
+    * dropdown's own display shows only a submit's refusals (`parentError`). */
+  private val parentErrorRaw: Signal[Option[ValidationError]] =
+    parentLocated.map(input => ParentSelection.toParentRef(input).toEither.left.toOption.map(_.head))
 
   override protected def inputsFor(location: ErrorLocation): Set[PortfolioField] =
     PortfolioFormState.inputsFor(location)
@@ -68,7 +77,8 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
   val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
 
   // FormState implementation
-  override def errorSignals: List[Signal[Option[String]]] = List(nameErrorRaw.map(_.map(_.message)))
+  override def errorSignals: List[Signal[Option[String]]] =
+    List(nameErrorRaw, parentErrorRaw).map(_.map(_.map(_.message)))
 
   val isValid: Signal[Boolean] = hasErrors.map(! _)
 

@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.*
 
 import app.state.{TreeViewState, LoadState, ChartHoverBridge}
-import app.components.{Icons, ColorSwatchPicker, TreeNodeRow}
+import app.components.{Icons, ColorSwatchPicker, FailureNotice, TreeNodeRow}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -146,16 +146,13 @@ object TreeDetailView:
         // nothing valid to show. Same placeholder as "nothing selected yet"
         // rather than an error banner.
         case LoadState.Absent      => renderPlaceholder("Select a tree to view its structure.")
-        case LoadState.Failed(failure) => renderError(ErrorMessages.viewFailed(failure))
+        case LoadState.Failed(failure) => FailureNotice(failure, None)
         case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, lockedNow.signal, lockedNoticeVisible)
       }
     )
 
   private def renderPlaceholder(message: String): HtmlElement =
     div(cls := "tree-detail-placeholder", p(message))
-
-  private def renderError(message: String): HtmlElement =
-    div(cls := "tree-detail-error", p(cls := "error-message", message))
 
   /** Render the full tree from a RiskTree domain object. */
   private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]], changedNodeIds: Signal[Set[NodeId]], selectionLocked: StrictSignal[Boolean], lockedNoticeVisible: Var[Boolean]): HtmlElement =
@@ -183,7 +180,7 @@ object TreeDetailView:
             renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, selectionLocked, lockedNoticeVisible, depth = 0)
           )
         case None =>
-          div(cls := "tree-detail-error", p("Root node not found"))
+          FailureNotice.lines(List(ErrorMessages.RootNodeMissing), None)
     )
 
   /** Recursively render a node and its children. */
