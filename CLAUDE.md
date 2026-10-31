@@ -293,7 +293,7 @@ Report test results as **pass or fail only** — never report or act on test cou
 
 **Decision triggers and failure handling:** see G2 and G5 in the HARD GATES section above for the nine triggers, the Decision Protocol below for how one is raised, and the register-dev skill for what a red build obliges.
 
-**Versioning:** `build.sbt` `ThisBuild / version` is the source of truth, mirrored as `APP_VERSION` into **both** `.env` and `.env.irmin`. PATCH (task/step landed, bug/security fix — shipped code changed) and MINOR (plan closed; external API change while < 1.0.0) bumps are autonomous — apply when landing the qualifying work. MAJOR is user-owned: the user performs or pre-declares it (e.g., a note in a plan document); never bump it autonomously. Scheme + procedure: supply-chain and register-dev skills; per-ecosystem map: `docs/dev/VERSION-UPGRADE-PROTOCOL.md`.
+**Versioning:** `build.sbt` `ThisBuild / version` is the source of truth, mirrored as `APP_VERSION` into **both** `.env` and `.env.irmin`. The user runs every bump; the agent never edits the version. With each landed step's proposed commits, the agent presents the register-dev skill's one-line bump command with the next version filled in — PATCH (task/step landed, bug/security fix — shipped code changed), MINOR (plan closed; external API change while < 1.0.0), or MAJOR only where the user pre-declared it (e.g., a note in a plan document) — in its own block above the commit block. Scheme + procedure: supply-chain and register-dev skills; per-ecosystem map: `docs/dev/VERSION-UPGRADE-PROTOCOL.md`.
 
 ## Correct-by-construction (always active)
 

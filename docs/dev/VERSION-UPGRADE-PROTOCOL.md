@@ -29,16 +29,19 @@ Mirrored to **two** env files (both must be updated on every bump):
 
 ### Ownership
 
-- **PATCH and MINOR: autonomous** — applied as part of landing the
-  qualifying work, no approval needed.
-- **MAJOR: user-owned.** Never bumped autonomously. The user performs it or
-  pre-declares it (for example, a note at the end of a plan document naming
-  the milestone — milestone-2b completion → 1.0.0 is such a declaration).
+- **Every bump is run by the user.** The agent never edits the version. When
+  it reports a landed work step with its proposed commits, it presents the
+  bump command from the register-dev skill ("Versioning") with the next
+  version already filled in, above the commit block, and the user runs it.
+- **MAJOR is the user's to declare.** The agent proposes PATCH or MINOR from
+  the scheme above, and proposes MAJOR only where the user has pre-declared it
+  (for example, a note at the end of a plan document naming the milestone —
+  milestone-2b completion → 1.0.0 is such a declaration).
 
 ### Publishing a new version of our artifacts
 
-1. Edit `build.sbt` version; sync `.env` and `.env.irmin` (commands:
-   register-dev skill, "Versioning").
+1. Set the version in `build.sbt`, `.env` and `.env.irmin` with the one bump
+   command (register-dev skill, "Versioning").
 2. `docker compose up` rebuilds and tags application images
    (`local/register-server:<v>`, `local/frontend:<v>`) via
    `pull_policy: build`.

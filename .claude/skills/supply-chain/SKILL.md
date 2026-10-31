@@ -59,10 +59,11 @@ Per-ecosystem map (what is pinned where, what to rebuild):
 | External API change once ≥ 1.0.0; user-declared case or pre-declared milestone | MAJOR |
 | Docs-only, test-only, skill/tooling-only (no shipped code) | No bump |
 
-**Ownership:** PATCH and MINOR are autonomous — apply them when landing the
-qualifying work. MAJOR is user-owned: never bump it autonomously; the user
-performs or pre-declares it (e.g., a note at the end of a plan document —
-milestone-2b completion is a pre-declared major).
+**Ownership:** the user runs every bump, and the agent never edits the version.
+With each landed step's proposed commits the agent presents the bump command
+(register-dev skill, "Versioning") with the next version filled in. MAJOR is
+proposed only where the user has pre-declared it (e.g., a note at the end of
+a plan document — milestone-2b completion is a pre-declared major).
 
 ## Procedure map
 
