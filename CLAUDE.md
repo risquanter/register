@@ -60,7 +60,11 @@ document, halt, and get an accepted signal on the document itself.
 
 1. **Exact signatures** — every new or changed function, type, endpoint and DTO
    written out verbatim as copy-pasteable Scala or Tapir definitions, not
-   described in prose.
+   described in prose. Every new type, enum, case, object or method in the plan
+   carries the family search from `.claude/rules/scala-algebraic-design.md`: the
+   family, its file, one existing member quoted, and either the existing type or
+   rule it reuses or the statement that no existing one denotes the same
+   concept.
 2. **File inventory** — every file to create or modify, by full repo-relative
    path with no abbreviation or ellipsis, as **bullet lines** in the plan's
    inventory document. `PLAN-<name>.md` is paired with

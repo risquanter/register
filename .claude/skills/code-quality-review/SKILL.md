@@ -175,6 +175,8 @@ all of the following before being accepted as clean:
 - Logic duplicated across files or within a file?
 - Repeated patterns extractable into a shared helper, type class, or combinator?
 - Near-identical blocks differing only in a type parameter or constant?
+- A new enum, case class or rule object that restates an existing one's cases,
+  fields or rule under another name is a semantic duplicate. **MUST-FIX.**
 
 ---
 

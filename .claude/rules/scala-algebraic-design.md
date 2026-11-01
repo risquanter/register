@@ -94,6 +94,12 @@ Where the search finds nothing, say so — "no existing family, this is the
 first". A type with no family is a different situation from a type whose family
 was never looked for, and only the first is a reason to start a new file.
 
+A new closed set whose cases name the same domain fields or values as an
+existing set is that set, not a new family. A new function whose rule is an
+existing function's rule applied to another type generalises the existing
+function. The search compares case names and parameter lists, not only type
+names.
+
 ---
 
 ## Layer A₀ — Domain primitive recognition
