@@ -655,7 +655,11 @@ body {
 }
 
 .merge-modal-error {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
   color: var(--error);
+  background-color: var(--error-surface);
+  border: 1px solid var(--error);
   margin-bottom: var(--sp-2);
 }
 
