@@ -72,6 +72,8 @@ scenario:       └── c3 (rename cyber-risk) ─────────►
 - Domain relation: changed on one side only → no conflict predicted.
 - Storage relation: both branches changed the bytes of `nodes/{id}` since the base → Irmin merge **conflicts**.
 
+A tree's `meta` value (`risk-trees/{treeId}/meta`) is the one path the application merges itself: its fields merge three-way with `updatedAt` excluded, and the merge writes the result on the staging branch. The pre-check applies that same rule to that path and byte equality to every other.
+
 ### 4. Do not unify the relations
 
 - Widening the domain hash to cover `name`/`parentId` would invalidate simulation caches on every rename or move.

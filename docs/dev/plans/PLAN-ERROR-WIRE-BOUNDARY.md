@@ -7591,8 +7591,16 @@ Applied to one merge:
 - the scenario's own saves are ancestors of main after the merge, so they are
   listed in main's history as "Update" entries.
 
-Two decision-record amendments follow from the ruled decisions, and they are
-presented here for approval. They are not written until approved.
+Three decision-record amendments follow from the ruled decisions. All three were
+approved on 2026-11-01.
+
+**ADR-004a §2.** It stated: "Each user action produces exactly **one** commit —
+Irmin's log *is* the user-visible history, saves are atomic". A merge produces
+three commits, so that sentence was replaced, as written into the record on
+2026-11-01, by the paragraph beginning "Each user action is saved atomically.
+A save produces one commit. A merge produces three", followed by its three
+consequences: Irmin does not list the merge commit, the history read drops the
+copy, and main holds all three commits or none.
 
 **ADR-036 §2.** It states: "the four branch primitives on `IrminClient` take
 `StoreBranch`, while everything that reads or writes tree data is declared over
@@ -7621,6 +7629,8 @@ after the code block:
 - **ADR-007 appendix §4.** Brought into line: edits to different nodes merge
   cleanly when each branch saved the tree, and a conflict carries the three
   versions.
+- **ADR-004a §2.** Amended as §17.6 records: a merge produces three commits,
+  and history shows the last.
 - **ADR-032 §3.** Amended as §17.6 proposes. Node and mitigation paths stay
   byte-compared.
 - **ADR-036 §2.** Amended as §17.6 proposes. No new type carries a

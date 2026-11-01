@@ -41,9 +41,28 @@ selector = `main` **[Refined → DD-8]**.
 ### 2. GraphQL for Irmin↔ZIO (Channel A) — Single Writer
 
 `IrminClient` / `IrminQueries`: queries for reads, `set_tree` mutations for
-writes, branch ops (create/delete/CAS) for scenarios. Each user action produces
-exactly **one** commit — Irmin's log *is* the user-visible history, saves are
-atomic **[Refined → DD-7]**.
+writes, branch ops (create/delete/CAS) for scenarios **[Refined → DD-7]**.
+
+Each user action is saved atomically. A save produces one commit. A merge
+produces three, because Irmin's merge cannot take a `meta` value both branches
+changed: the scenario's `meta` copied onto the staging branch, Irmin's merge
+commit, and the merged `meta`. The history a user sees is a filtered view of the
+persisted commits. It leaves out the commits of intermediate states in which no
+business information changed. For a merge it shows only the last commit.
+
+From this it follows that:
+
+- **Irmin does not list the merge commit.** The history read asks Irmin for the
+  commits that changed `meta`. Irmin's merge commit does not change `meta`,
+  because the copy already made it equal to the scenario's, so its `meta` equals
+  both of its parents. Irmin never returns that commit, and the history read has
+  nothing to filter.
+- **The history read drops the copy.** The copy does change `meta`, so Irmin
+  returns it. The history read's filter then removes it.
+- **Main holds all three commits or none.** All three are written on the
+  staging branch, which nothing reads. At the end, main is switched to the last
+  commit in one compare-and-set. If that step fails, main stays where it was, so
+  main never holds the copy without the other two.
 
 ZIO is the **only writer** to Irmin, so change detection happens at the
 mutation path, not via watch subscriptions **[Refined]**:

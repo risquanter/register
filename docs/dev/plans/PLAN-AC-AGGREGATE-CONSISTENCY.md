@@ -64,9 +64,10 @@ concurrency or CQRS.
    serialise the writes of all workspaces.
 7. **Irmin offers three guarded primitives.** The schema in
    `dev/irmin-schema.graphql` lists `test_and_set_branch(set, test, branch)`,
-   which `IrminClientLive.moveBranchTo` already uses for the merge's publish. It
-   also lists `test_and_set(set, test, path, branch)` and
-   `merge_tree(old, value, path, branch)`, which the code does not use. Whether
+   which `IrminClientLive` already uses in three places: `createBranchAt`,
+   `deleteBranch`, and `moveBranchTo` for the merge's publish. It also lists
+   `test_and_set(set, test, path, branch)`, a guarded write of one value, and
+   `merge_tree(old, value, path, branch)`. No Scala file uses either. Whether
    `test_and_set` can guard a whole tree's subtree, or only one value, has not
    been checked against Irmin's source.
 8. **ADR-004a §2 makes ZIO the only writer to Irmin.** Races are therefore

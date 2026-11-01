@@ -84,9 +84,11 @@ branch does this request operate on" (ADR-018).
 rather than by discipline.** `BranchRef` names main or a scenario;
 `MergeStagingRef` names one merge's staging branch. Both extend the sealed
 `StoreBranch`, and the split in what is declared over which is load-bearing: the
-four branch primitives on `IrminClient` take `StoreBranch`, while everything that
-reads or writes tree data is declared over `BranchRef` alone, so a staging branch
-cannot reach a tree read at all. `BranchChoice.fromBranchRef` is the one place a
+four branch primitives on `IrminClient` take `StoreBranch`, and one write, an
+overload of `set`, takes `MergeStagingRef` alone so that a merge can write a
+tree's `meta` value on its staging branch; everything else that reads or writes
+tree data is declared over `BranchRef` alone, so a staging branch cannot reach a
+tree read at all. `BranchChoice.fromBranchRef` is the one place a
 branch becomes its client-facing form, and it takes `BranchRef` and not
 `StoreBranch` — so a staging branch is excluded by the signature rather than by a
 check, and `MergeStagingRef` has no client-facing form to misuse.
