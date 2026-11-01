@@ -7186,3 +7186,657 @@ sbt serverIt/test
 Every source file this phase edits is already a bullet in
 `PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`, so it needs no inventory amendment. The
 test files are in the same module as the code they test.
+
+## 17. A blocked merge names what conflicts, and a save time no longer blocks one
+
+This section continues the plan and ships with it. It came out of the visual
+check of the merge dialog on 2026-11-01. It changes one wire shape, the conflict
+entry that the merge preview and the merge refusal both carry, and it changes how
+the merge treats a tree's `meta` value.
+
+### 17.1 What is wrong today
+
+Four facts, each read from the code.
+
+**Every save rewrites the tree's `meta` value.** A tree's `meta` value is
+the blob at `risk-trees/{treeId}/meta`, decoded as `TreeMetadata`
+(`modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala`).
+It holds `id`, `name`, `rootId`, `seedVarHighWater`, `schemaVersion`,
+`createdAt` and `updatedAt`. `RiskTreeRepositoryIrmin.update` writes it on every
+save with `updatedAt = now`.
+
+**So a tree saved on both branches can never be merged.** The conflict scan
+calls a path a conflict when its bytes changed on both branches since the fork
+and the two versions differ (`MergeConflictRule.isConflict`). Two saves of one
+tree, one on each branch, leave two `meta` values whose `updatedAt` differ.
+That path conflicts whatever else was edited. Editing a node so the branches
+agree is another save, which writes a new `updatedAt`, so the conflict never
+clears. The dialog's hint, "edit the node on either branch to match the other",
+cannot be followed for that path. ADR-007's appendix §4 states the opposite
+outcome for edits to different nodes: "Result: clean merge, no conflicts."
+
+**The tests do not cover the save path.** `ScenarioMergeServiceItSpec`'s "edits
+to different nodes" writes node blobs straight into the store through
+`writeLeaf`, so the `meta` value is never touched and the merge succeeds. The
+application's own save path is not exercised by any merge test.
+
+**A conflict is reported as a storage path.** `MergeConflictEntry` carries `path`
+and the tree and node identifiers as strings. The dialog shows
+`risk-trees/01M6BV1FSFK17FWXPK12WWWPMW/nodes/01M6BV1FSH97ECQEMYEVQEBXQ6`, which
+names neither the tree, the node nor what was changed. ADR-007's appendix §4
+states that a conflict "surfaces … with three-way diff information (base value
+from the LCA, main's value, scenario's value)". LCA (lowest common ancestor) is
+the commit both branches descend from, which is the fork.
+
+`updatedAt` cannot simply stop changing. `TreeHistoryService.history` reads a
+tree's history from the `meta` value's change log, because "every mutation
+(create, update, revert) rewrites meta with a fresh updatedAt".
+
+### 17.2 The rules
+
+1. **`EWB-D-48` — RULED 2026-11-01.** The server sends each conflict in terms the
+   user recognises: the tree by name, the node or mitigation by name, the fields
+   both branches changed to different values, and the record at the fork, on main
+   and on the scenario. The browser composes the sentences.
+2. **`EWB-D-49` — RULED 2026-11-01.** `updatedAt` takes no part in deciding a
+   merge conflict. A merged tree gets its own `updatedAt`, the time of the merge.
+3. **`EWB-D-50` — RULED 2026-11-01.** The merge writes the `meta` value
+   itself, on the staging branch. To do that, `IrminClient` gains one write
+   method that accepts the staging branch type and nothing else.
+4. **`EWB-D-51` — RULED 2026-11-01.** A conflict line names its tree, node or
+   mitigation once when the name is the same on both branches. When the name
+   differs, the line shows each branch's name with that branch's name beside it:
+   "Risk 'Fraud' on draft-a, 'Card fraud' on main". This follows the Analyze
+   tab's Compare legend, which shows every name with the branch it comes from.
+5. **`EWB-D-52` — RULED 2026-11-01.** When one branch deleted a record and the
+   other changed it, the line says which branch deleted it and which fields the
+   other branch changed: "Deleted on main. Changed on draft-a: Probability".
+   Those fields are the ones that differ between the fork and the branch that
+   changed the record.
+6. **`EWB-D-53` — RULED 2026-11-01.** A merged tree's history shows one "Merge"
+   entry. The user's rule: a step that cannot be recorded on a branch without
+   the step after it is part of that step and is not shown separately. The
+   preparation write is such a step (§17.6). `limit` counts the entries shown,
+   after the preparation commits are dropped.
+
+Five further choices are mine, derived from those rules. They are reversible:
+
+- **A node that is a leaf on one branch and a portfolio on the other fails the
+  scan** with `RepositoryFailure`. §18 makes an update refuse a node sent under
+  the other type, and the server mints every new identifier, so reaching it
+  means the store holds what this code did not write.
+- **The `meta` value merges field by field** over `name`, `rootId` and
+  `seedVarHighWater`. A field conflicts when both branches changed it to
+  different values. Otherwise the merged value is the side that changed it.
+  `schemaVersion` is set to `TreeMetadata.CurrentSchemaVersion` and `createdAt`
+  is taken from main's record, as a save does.
+- **The response no longer carries the raw storage path.** The path stays in the
+  server's log line, because it contains the `WorkspaceId` (ADR-036).
+- **A candidate path of an unknown shape fails the scan** with
+  `RepositoryFailure`. `candidatePaths` builds only the three known shapes, so
+  that failure is unreachable, and reaching it means the store holds what this
+  code did not write.
+
+One limit holds after this section, and it is stated so that it is not mistaken
+for a regression. Adding a leaf under the same portfolio on both branches still
+blocks the merge. Both branches change that portfolio's `childIds`, and both
+raise `seedVarHighWater` and hand out the same next seed number. The dialog then
+names the portfolio with the field `ChildIds` and the tree with the field
+`SeedVarHighWater`, where today it names two storage paths.
+
+### 17.3 The wire shape
+
+`modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala`
+replaces `MergeConflictEntry` and adds the types it uses. Every identifier and
+name is its refined type (ADR-038 §3), where the current entry carries strings.
+
+```scala
+/** The fields of a tree's `meta` value that a merge compares. The save time is not among them:
+  * every save rewrites it, so two branches that both saved a tree would always
+  * differ there (EWB-D-49). */
+final case class TreeMetadataFields(
+  name: SafeName.SafeName,
+  rootId: NodeId,
+  seedVarHighWater: SeedVarId.SeedVarId
+)
+
+object TreeMetadataFields:
+  given codec: JsonCodec[TreeMetadataFields] = DeriveJsonCodec.gen[TreeMetadataFields]
+  given schema: Schema[TreeMetadataFields] =
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[TreeMetadataFields]
+
+/** One record at the three points a merge compares: `base` at the fork, then on
+  * each branch. `None` means the record did not exist at that point. The same
+  * triple is what `MergeConflictRule` decides over. */
+final case class Versions[A](base: Option[A], onMain: Option[A], onScenario: Option[A])
+
+object Versions:
+  given codec[A: JsonCodec]: JsonCodec[Versions[A]] = DeriveJsonCodec.gen[Versions[A]]
+  given schema[A: Schema]: Schema[Versions[A]] = Schema.derived[Versions[A]]
+
+/** A tree, named for the user by its name on each branch that holds it
+  * (EWB-D-51). `None` means the tree does not exist on that branch. */
+final case class TreeLabel(id: TreeId, onMain: Option[SafeName.SafeName], onScenario: Option[SafeName.SafeName])
+
+object TreeLabel:
+  given codec: JsonCodec[TreeLabel] = DeriveJsonCodec.gen[TreeLabel]
+  given schema: Schema[TreeLabel] =
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    Schema.derived[TreeLabel]
+
+/** One record that both branches changed since the fork into versions that
+  * differ. The record's name on each branch is read from `versions`
+  * (EWB-D-51). `fields` lists the fields that differ between main and the
+  * scenario. When one branch deleted the record, it lists the fields the other
+  * branch changed since the fork (EWB-D-52). */
+@jsonDiscriminator(MergeConflictEntry.TagField)
+enum MergeConflictEntry:
+  case TreeMetadataConflict(
+    tree: TreeLabel,
+    versions: Versions[TreeMetadataFields],
+    fields: List[FieldName]
+  )
+  case NodeConflict(
+    tree: TreeLabel,
+    nodeId: NodeId,
+    versions: Versions[RiskNode],
+    fields: List[FieldName]
+  )
+  case MitigationConflict(
+    tree: TreeLabel,
+    mitigationId: MitigationId,
+    versions: Versions[Mitigation],
+    fields: List[FieldName]
+  )
+
+object MergeConflictEntry:
+  /** The key naming which case a payload states, read by every coproduct in
+    * this file and published in their schemas. */
+  final val TagField = "kind"
+  given codec: JsonCodec[MergeConflictEntry] = DeriveJsonCodec.gen[MergeConflictEntry]
+  given schema: Schema[MergeConflictEntry] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = Configuration.default.withDiscriminator(TagField)
+    Schema.derived[MergeConflictEntry]
+```
+
+A field is named by the existing `FieldName`
+(`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`),
+which already carries the codec and schema. The names a conflict uses:
+
+- `meta`: `Name`, `RootId`, `SeedVarHighWater`;
+- a node: `Name`, `ParentId`, `ChildIds`, `Probability`, `DistributionType`
+  (the loss distribution), `SeedVarId`;
+- a mitigation: `Name`, `TargetingSource`, `Spec`, and `Precedence`, which
+  `FieldName` gains as a new case beside `Mitigations`.
+
+`FieldName`'s scaladoc says "A case names what a refusal is about". It becomes
+"A case names what a refusal or a merge conflict is about".
+
+Two holders rename their field from `paths` to `entries`, because an entry is no
+longer a path:
+
+```scala
+// ScenarioMergeResponse.scala — MergePreviewStatus
+  case Conflicts(entries: List[MergeConflictEntry])
+
+// modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala
+  case Conflicts(entries: List[MergeConflictEntry])
+```
+
+`MergeRefusal.describe` logs each entry's kind and identifiers, in the form
+`node 01M6… in tree 01M6… (Probability)`. An identifier may appear in a log line
+(ADR-035 §3), and no case carries a `WorkspaceId`.
+
+### 17.4 The server
+
+**The `meta` value's projection and constant.**
+`modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala`:
+
+```scala
+object TreeMetadata:
+  /** The `meta` format this server writes. Moved here from
+    * `RiskTreeRepositoryIrmin`, which keeps writing it, because the merge writes
+    * the record too. */
+  val CurrentSchemaVersion: Int = 2
+
+final case class TreeMetadata(...):
+  /** The fields a merge compares (EWB-D-49). */
+  def toMergeFields: TreeMetadataFields = TreeMetadataFields(name, rootId, seedVarHighWater)
+```
+
+`RiskTreeRepositoryIrmin.scala` deletes its file-private
+`CurrentSchemaVersion` and reads `TreeMetadata.CurrentSchemaVersion`.
+
+**The three-way rule, for any value.** `MergeConflictRule` in
+`ScenarioMergeService.scala` decides today over three `Option[String]`
+parameters. It takes a `Versions[A]` instead, so the same rule decides a stored
+path's bytes and a single field of `meta`:
+
+```scala
+object MergeConflictRule:
+  def isConflict[A](versions: Versions[A]): Boolean =
+    versions.onMain != versions.onScenario && versions.onMain != versions.base && versions.onScenario != versions.base
+
+  /** Defined only where `isConflict` is false. */
+  def merged[A](versions: Versions[A]): Option[A]
+
+  /** `meta` merged field by field over `name`, `rootId` and
+    * `seedVarHighWater`, each through `isConflict` and `merged`. `updatedAt`
+    * takes no part (EWB-D-49). The conflicting fields, or the merged value with
+    * `updatedAt` set to `at`. Defined where both branches hold `meta`. */
+  def mergeMetadata(
+    base: Option[TreeMetadata],
+    onMain: TreeMetadata,
+    onScenario: TreeMetadata,
+    at: Instant
+  ): Either[List[FieldName], TreeMetadata]
+```
+
+`PathComparison` becomes `path` plus a `Versions[String]`, so the scan passes
+its comparison to the rule unchanged.
+
+**The field comparisons.** In `ScenarioMergeService.scala`:
+
+```scala
+/** The fields that differ between two versions of one record. The scan passes
+  * main's and the scenario's versions when both exist, and the fork's and the
+  * surviving branch's versions when one branch deleted the record (EWB-D-52). */
+object ConflictFields:
+  /** Fails with `RepositoryFailure` when one is a leaf and the other a
+    * portfolio: no request can store that, so the store holds what this code
+    * did not write. */
+  def node(one: RiskNode, other: RiskNode): Either[RepositoryFailure, List[FieldName]]
+  def mitigation(one: Mitigation, other: Mitigation): List[FieldName]
+  def metadata(one: TreeMetadataFields, other: TreeMetadataFields): List[FieldName]
+```
+
+`metadata` serves the deleted-tree case. `MergeConflictRule.mergeMetadata`
+serves the case where both branches hold `meta`.
+
+**The scan.** `scan` decides each path by its shape:
+
+- A `meta` path whose record exists on both branches applies
+  `MergeConflictRule.mergeMetadata`. `Left(fields)` is a `TreeMetadataConflict`.
+  `Right(_)` is no conflict, and the tree is added to `MergeScan.metadataToWrite`.
+- A `meta` path whose record is missing on one branch applies
+  `MergeConflictRule.isConflict`, as today.
+- A node or mitigation path applies `MergeConflictRule.isConflict`, as today. A
+  conflict decodes the three values and becomes a `NodeConflict` or a
+  `MitigationConflict`.
+
+Tree names come from each tree's `meta` value, which `candidatePaths` already
+includes. Decoding uses `RiskTreeRepositoryIrmin.decodeStoredNode`, the
+`Mitigation` codec and the `TreeMetadata` codec. A decode failure is a
+`RepositoryFailure`, as `duplicateNodeNames` already does. The scan then holds:
+
+```scala
+private final case class MergeScan(
+  conflicts: List[MergeConflictEntry],
+  duplicateNames: Map[TreeId, List[SafeName.SafeName]],
+  /** Trees whose `meta` value both branches changed without a conflicting
+    * field: the merge writes these itself (EWB-D-50). */
+  metadataToWrite: List[TreeId]
+)
+```
+
+`MergePreviewResult.Conflicts` carries `List[MergeConflictEntry]`. The
+controller passes it through, and `MergeConflictPath.toWire` is deleted.
+`MergeConflictPath` stays inside the service as the parse of a relative path.
+
+**The staging write (EWB-D-50).**
+`modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala`:
+
+`set` gains an overload that takes the staging type:
+
+```scala
+  /** Set a value on a merge's staging branch. The one write that accepts the
+    * staging type: every other write takes `BranchRef`, so tree data cannot be
+    * written to a staging branch through them (ADR-036 §2). */
+  def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef): IO[IrminError, IrminCommit]
+```
+
+The existing `set` keeps its default `branch = BranchRef.Main`, and the new one
+has no default, as Scala permits default arguments on only one overload.
+`IrminClientLive` implements it with `IrminQueries.setValue`, whose `branch`
+parameter widens from `BranchRef` to `StoreBranch`. `branchArg` already takes
+`StoreBranch`. The four test doubles that implement `IrminClient` gain the
+method.
+
+**The merge.** `mergeOnStaging` gains two steps around `irmin.mergeBranch`, for
+each tree in `metadataToWrite`:
+
+1. Before the merge, read the scenario's `meta` value and write the same text
+   to the same path on staging. Irmin's merge then finds equal bytes on the two
+   sides of that path and takes them.
+2. After the merge, write the merged record from `MergeConflictRule.mergeMetadata`, with
+   `updatedAt` set to the merge time.
+
+The second write carries `mergeMessage(wsId, name)`. The first carries
+`workspace:<id>:merge-prepare:<scenario>` (EWB-D-53). The guard then reads the
+staged state, and the publish runs as today.
+
+**The history read (EWB-D-53).** `TreeHistoryService.history` drops every commit
+whose message contains `:merge-prepare:` before building entries, and returns at
+most `limit` entries after that. Irmin's `last_modified` stops once it has
+collected `n` commits, so the request asks for `2 × limit`. That bound is exact:
+every preparation commit Irmin lists comes with the newer merge commit of the
+same merge, which changes `meta` because it sets a new `updatedAt`, so at least
+half of any listed run is shown.
+
+### 17.5 The browser
+
+`MergeMessages`
+(`modules/app/src/main/scala/app/components/MergeMessages.scala`) gains:
+
+```scala
+  /** The record an entry names, with each name once when the branches agree and
+    * per branch when they differ (EWB-D-51): "Risk 'Fraud' in 'merge-test'",
+    * "Risk 'Fraud' on draft-a, 'Card fraud' on main, in 'merge-test'",
+    * "Mitigation 'Backups' in 'merge-test'", "Tree 'merge-test'". */
+  def entryLabel(scenario: ScenarioName.ScenarioName, entry: MergeConflictEntry): String
+
+  /** One line per differing field, naming the field and, for a value a user
+    * reads directly, both branches' values:
+    * "Probability: 30% on draft-a, 60% on main". Empty for a record one branch
+    * deleted, which `presenceLine` describes. */
+  def fieldLines(scenario: ScenarioName.ScenarioName, entry: MergeConflictEntry): List[String]
+
+  /** The line for a record one branch deleted, naming the fields the other
+    * branch changed (EWB-D-52): "Deleted on main. Changed on draft-a:
+    * Probability, Name". */
+  def presenceLine(scenario: ScenarioName.ScenarioName, entry: MergeConflictEntry): Option[String]
+```
+
+The values shown directly are a name, a probability as a percentage and a
+mitigation's precedence. Every other field is named without its values.
+
+`conflictsHeading` takes the entries and counts records:
+
+```scala
+  def conflictsHeading(entries: List[MergeConflictEntry]): String
+  // "1 item was changed differently on both branches since the fork:"
+```
+
+`ConflictsHint` becomes "Change either branch so these fields agree, then
+re-check." `MergeModal` renders each entry as its label with its field lines and
+presence line under it, in place of the path in code font.
+`ErrorMessages.mergeRefused` counts items rather than nodes.
+
+`renderPreview` needs the scenario's name for `entryLabel`, `fieldLines` and
+`presenceLine`, so it takes `name`, which `renderModal` already holds.
+
+### 17.6 Decisions
+
+`EWB-D-48` to `EWB-D-53` are ruled.
+
+**Why `EWB-D-53` follows from the user's rule.** Every merge write happens on the
+staging branch, and main moves to the staging head by one compare-and-set only
+after the merge and the validation succeed. Any failure deletes the staging
+branch and leaves main as it was. History reads only main or a scenario branch.
+So main never holds the preparation commit without the merge commit after it.
+
+**What Irmin lists.** Irmin 3.11's `Store.last_modified` (`irmin/store.ml`) walks
+every parent of every commit, newest commit date first. It lists a commit when
+the value at the path differs from the value in **every** one of its parents.
+Applied to one merge:
+
+- the preparation commit differs from main's previous `meta`, so it is listed
+  and the history read drops it;
+- Irmin's own merge commit has two parents, the preparation commit and the
+  scenario head, and its `meta` equals both, so it is not listed;
+- the final write differs from the merge commit, so it is listed as "Merge";
+- the scenario's own saves are ancestors of main after the merge, so they are
+  listed in main's history as "Update" entries.
+
+Two decision-record amendments follow from the ruled decisions, and they are
+presented here for approval. They are not written until approved.
+
+**ADR-036 §2.** It states: "the four branch primitives on `IrminClient` take
+`StoreBranch`, while everything that reads or writes tree data is declared over
+`BranchRef` alone, so a staging branch cannot reach a tree read at all".
+The new `set` overload writes tree data to a staging branch. Proposed
+replacement of the sentence:
+
+> the four branch primitives on `IrminClient` take `StoreBranch`, and one write,
+> an overload of `set`, takes `MergeStagingRef` alone so that a merge can write a
+> tree's `meta` value on its staging branch; everything else that reads or
+> writes tree data is declared over `BranchRef` alone, so a staging branch
+> cannot reach a tree read at all.
+
+**ADR-032 §3.** It states: "A pre-check that predicts Irmin merge outcomes must
+compare stored bytes". The `meta` value is no longer left to Irmin's byte
+merge, so the pre-check compares it field by field. Proposed sentence, added
+after the code block:
+
+> A tree's `meta` value (`risk-trees/{treeId}/meta`) is the one path the
+> application merges itself: its fields merge three-way with `updatedAt`
+> excluded, and the merge writes the result on the staging branch. The pre-check
+> applies that same rule to that path and byte equality to every other.
+
+### 17.7 ADR alignment
+
+- **ADR-007 appendix §4.** Brought into line: edits to different nodes merge
+  cleanly when each branch saved the tree, and a conflict carries the three
+  versions.
+- **ADR-032 §3.** Amended as §17.6 proposes. Node and mitigation paths stay
+  byte-compared.
+- **ADR-036 §2.** Amended as §17.6 proposes. No new type carries a
+  `WorkspaceId`, and every entry stays workspace-relative.
+- **ADR-038 §2 and §3.** `MergeConflictEntry` is a sealed enum with a derived,
+  discriminated codec, and its identifiers and names are refined types.
+- **ADR-035 §3.** The log line names identifiers and no `WorkspaceId`. The wire
+  carries names and values the caller's own workspace already holds.
+- **ADR-037.** Every new sentence is a named value or a function of its
+  parameters, in `MergeMessages`. `CurrentSchemaVersion` moves to the companion
+  of the type that owns the field. No new closed set: a conflict names its
+  fields with the existing `FieldName`, which gains `Precedence`.
+- **ADR-010 and ADR-033.** No new error case and no catch.
+
+### 17.8 Terminology impact
+
+None. No heading in `docs/user/TERMINOLOGY.md` names a merge, a scenario, a
+conflict or a `meta` value.
+
+### 17.9 File inventory amendment
+
+Three production files are not yet bullets in
+`PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`. The user adds them. Test files in
+`server`, `common` and `app` are covered by the gate's same-module rule, and
+`ScenarioMergeServiceItSpec.scala` is already listed.
+
+```
+docs/dev/plans/PLAN-ERROR-WIRE-BOUNDARY.md
+modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
+modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
+modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala
+```
+
+### 17.10 Steps
+
+1. The wire types of §17.3, `TreeMetadata.toMergeFields` and
+   `CurrentSchemaVersion`, `FieldName.Precedence`, `MergeConflictRule` over
+   `Versions[A]` with `mergeMetadata`, `ConflictFields`, the scan, and the
+   controller.
+2. The staging overload of `set`, the two writes in `mergeOnStaging`, and the
+   history read's filter.
+3. The browser's sentences and rendering of §17.5.
+
+### 17.11 Verification
+
+Tests added:
+
+- `MergeConflictRuleSpec`: `MergeConflictRule.mergeMetadata` resolves two
+  records that differ only in `updatedAt`, with the merged `updatedAt` equal to
+  `at`; it reports `Name` when both sides renamed the tree differently; it
+  resolves a rename on one side and a raised `seedVarHighWater` on the other into
+  a record holding both. The existing `isConflict` and `merged` cases run over
+  `Versions[String]`. `ConflictFields.node` reports `Probability` for two leaves
+  differing only there and `ChildIds` for two portfolios differing only there,
+  and fails with `RepositoryFailure` for a leaf against a portfolio.
+- `ScenarioMergeServiceSpec`: a scan over two `meta` values differing only in
+  `updatedAt` reports no conflict and lists the tree in `metadataToWrite`; a merge
+  of that tree calls the staging `set` twice for its `meta` path, the first with
+  the scenario's record and the `merge-prepare` message, the second with the
+  merged one and the merge message.
+- `TreeHistoryServiceSpec`: a commit list holding a `merge-prepare` commit
+  returns entries without it, and with `limit` entries when more exist.
+- `ScenarioMergeServiceItSpec`, through `RiskTreeRepository.update` on both
+  branches, which is the save path the application uses: edits to different
+  nodes preview `Clean`, merge, keep both edits on main, and leave main's
+  `meta` value with an `updatedAt` no earlier than the merge's start, and add
+  to the tree's history on main the entries `EWB-D-53` rules; the same
+  node edited to different probabilities previews one `NodeConflict` naming the
+  tree and the node, with the field `Probability`.
+- `ScenarioControllerSpec`: a preview with a `NodeConflict` encodes and decodes
+  to the same value.
+- `ErrorMessagesSpec`: `entryLabel` for a node whose name is the same on both
+  branches and for one renamed on main; `fieldLines` for a node conflict and a
+  `meta` conflict; `presenceLine` for a node deleted on main and changed on
+  the scenario, naming the changed fields.
+- `MergeConflictRuleSpec` also covers `ConflictFields.metadata`, and
+  `ConflictFields.node` between a fork version and a changed version.
+
+Changed assertions, because the shape they assert is the one this section
+replaces: `ScenarioMergeServiceItSpec`'s "same node edited differently" and
+`ScenarioControllerSpec`'s preview test assert a `MergeConflictPath` and a
+string-typed entry. They assert the `NodeConflict` of §17.3 instead.
+
+Commands, each green:
+
+```bash
+sbt app/test
+sbt 'commonJVM/test; server/test'
+docker ps -a --filter name=register_it_ -q | xargs -r docker rm -f; docker network ls --filter name=register_it_ -q | xargs -r docker network rm; docker volume ls --filter name=register_it_ -q | xargs -r docker volume rm
+sbt serverIt/test
+```
+
+## 18. An update names only the stored tree's nodes, each under its own type
+
+Found while designing §17, on 2026-11-01. It changes no wire shape: a request the
+browser never sends is refused with 400, where today it is stored.
+
+### 18.1 What is wrong today
+
+ADR-017 §4 states the rule. Its table gives the `portfolios` / `leaves` lists the
+effect "update fields, keep ULID", and new nodes the effect "create, mint ULID".
+Its component table gives `RiskTreeRequests.resolveUpdate` the job "Existing ids
+preserved verbatim; new nodes get `newId()`". ULID (universally unique
+lexicographically sortable identifier) is the format of every node identifier.
+
+Nothing enforces it. `RiskTreeUpdateRequest.resolve` refines an entry's
+identifier by format alone and keeps it:
+`ResolvedNode(p.id, p.name, p.parent, NodeKind.Portfolio)`.
+`RiskTreeServiceLive.buildNodes` builds each node with the type of the list it
+arrived in. `RiskTree.fromNodes` checks the new node set against itself, and
+`RiskTreeRepositoryIrmin.update` writes it. So a request can store a node under
+an identifier the client chose. It can also store a saved leaf as a portfolio
+under the same identifier, which drops the leaf's seed number in
+`carriedOverSeedVarIds`.
+
+### 18.2 The rule
+
+1. **`EWB-D-54` — RULED 2026-11-01.** The check runs in request resolution, the
+   step ADR-017 names as the one that decides node identity. No new validation
+   layer is added. `RiskTreeUpdateRequest.resolve` receives the stored tree's
+   index, which `RiskTreeServiceLive.update` already loads before calling it, so
+   the tree is read once.
+
+Each `portfolios` entry must name a stored `RiskPortfolio`, and each `leaves`
+entry a stored `RiskLeaf`. The node's Scala type is the comparison. The failures
+mirror the existing parent-reference checks in `requireLeafParents`. An
+identifier the stored tree does not hold is `MISSING_REFERENCE`. One held under
+the other type is `INVALID_NODE_TYPE`. Both are located at the entry's
+`FieldName.Id`, and both accumulate with every other error of the request
+(ADR-001 §1).
+
+`ensureUniqueTree` stays in the service. It compares the tree with the other
+trees of the workspace, including a tree identifier the server minted, so it is
+a rule about the workspace's set of trees and not about the request's content.
+
+### 18.3 Signatures
+
+`modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeUpdateRequest.scala`:
+
+```scala
+  def resolve(req: RiskTreeUpdateRequest, stored: TreeIndex, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate]
+```
+
+`modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`:
+
+```scala
+  def resolveUpdate(req: RiskTreeUpdateRequest, stored: TreeIndex, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate]
+
+  /** Every saved-node entry names a node of `stored` of the matching type. */
+  private[requests] def requireStoredNodes(
+    portfolios: Seq[ExistingPortfolio],
+    leaves: Seq[ExistingLeaf],
+    stored: TreeIndex
+  ): Validation[ValidationError, Unit]
+```
+
+`resolve` runs `requireStoredNodes` in the same `Validation.validateWith` as
+`validateTopologyUpdate` and the seed distinctness check.
+
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`,
+beside `parentNameIsLeaf` and `parentNameNotFound`:
+
+```scala
+  def nodeIdNotInTree(id: String): String =
+    s"id '$id' is not a node of this tree; a new node goes in newPortfolios or newLeaves"
+
+  def nodeIdIsLeaf(id: String): String =
+    s"id '$id' is a leaf of this tree; it belongs in leaves"
+
+  def nodeIdIsPortfolio(id: String): String =
+    s"id '$id' is a portfolio of this tree; it belongs in portfolios"
+```
+
+`RiskTreeServiceLive.update` calls
+`RiskTreeUpdateRequest.resolve(req, oldTree.index, idGeneratorFrom(ids))`.
+
+### 18.4 ADR alignment
+
+- **ADR-017 §4.** Brought into line: an existing entry keeps a stored node's
+  identifier, and only the server mints one.
+- **ADR-001 §1 and §2.** The check is part of resolving the request and
+  accumulates with its other errors. The service supplies stored data and does
+  not validate.
+- **ADR-010.** A refusal is a `ValidationError` on the existing
+  `ValidationFailed` path, so it reaches the client as 400.
+- **ADR-037.** The three sentences are functions in `ValidationMessages`.
+- **ADR-036 and ADR-035.** A node identifier is a resource name, which may cross
+  the wire in both directions, so a message may name it.
+
+### 18.5 Open decisions and terminology
+
+None of either.
+
+### 18.6 Inventory
+
+Every file is already a bullet in `PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`:
+`RiskTreeUpdateRequest.scala`, `RiskTreeRequests.scala`,
+`ValidationMessages.scala` and `RiskTreeServiceLive.scala`. The tests fall
+under the gate's same-module rule.
+
+### 18.7 Verification
+
+Tests added to `RiskTreeDefinitionRequestsSpec`:
+
+- a `leaves` entry whose identifier the stored tree does not hold fails with
+  `MISSING_REFERENCE` at that entry's `Id`;
+- a `leaves` entry naming a stored portfolio fails with `INVALID_NODE_TYPE`, and
+  so does a `portfolios` entry naming a stored leaf;
+- such a failure and an invalid probability in the same request are both
+  reported.
+
+`RiskTreeServiceLiveSpec`: an update listing a stored leaf under `portfolios` is
+refused, and the stored tree is unchanged.
+
+Changed calls, with every assertion kept: the existing `resolveUpdate` tests in
+`RiskTreeDefinitionRequestsSpec` pass a stored index holding the nodes they
+list.
+
+Commands: those of §17.11.
