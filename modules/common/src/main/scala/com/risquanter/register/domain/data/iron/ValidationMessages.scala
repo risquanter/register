@@ -65,6 +65,15 @@ object ValidationMessages:
   def parentNameNotFound(parent: String): String =
     s"parentName '$parent' not found in portfolios"
 
+  def nodeIdNotInTree(id: String): String =
+    s"id '$id' is not a node of this tree; a new node goes in newPortfolios or newLeaves"
+
+  def nodeIdIsLeaf(id: String): String =
+    s"id '$id' is a leaf of this tree; it belongs in leaves"
+
+  def nodeIdIsPortfolio(id: String): String =
+    s"id '$id' is a portfolio of this tree; it belongs in portfolios"
+
   def cycleDetected(node: String): String =
     s"Cycle detected at node '$node'"
 

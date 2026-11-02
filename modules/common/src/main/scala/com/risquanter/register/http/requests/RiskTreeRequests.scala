@@ -2,8 +2,9 @@ package com.risquanter.register.http.requests
 
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
-import com.risquanter.register.domain.data.DistributionShape
+import com.risquanter.register.domain.data.{DistributionShape, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, NodeId, OccurrenceProbability}
+import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{
@@ -128,12 +129,12 @@ object RiskTreeRequests {
     rootName: SafeName.SafeName
   )
 
-  // Backwards-compatible entry points delegate to DTO companions.
+  // Entry points that delegate to the request companions.
   def resolveCreate(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] =
     RiskTreeDefinitionRequest.resolve(req, newId)
 
-  def resolveUpdate(req: RiskTreeUpdateRequest, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] =
-    RiskTreeUpdateRequest.resolve(req, newId)
+  def resolveUpdate(req: RiskTreeUpdateRequest, stored: TreeIndex, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] =
+    RiskTreeUpdateRequest.resolve(req, stored, newId)
 
   /** The single place the wire's absent parent and the domain's named case meet.
     * A JSON `null`, an absent key and a blank string all mean the root.
@@ -263,6 +264,45 @@ object RiskTreeRequests {
           Validation.fail(ValidationError(location, ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.leafNeedsPortfolioParent))
       }
     }).as(())
+
+  /** Every saved-node entry names a node of `stored` of the matching type. An
+    * identifier that does not refine is skipped here, because the entry's own
+    * refinement reports it.
+    *
+    * An entry keeps a stored node's identifier, and only the server mints a new
+    * one (ADR-017 §4), so an identifier the stored tree does not hold, or holds
+    * under the other type, is refused rather than stored. The check reads the
+    * raw entries, so its refusals accumulate with every refusal of the entries'
+    * other fields.
+    *
+    * {{{
+    * // `leaves` lists the id of a stored portfolio, and a second entry's id is "not-an-id"
+    * requireStoredNodes(Nil, Seq(entry, malformed), stored) // one INVALID_NODE_TYPE, at the first entry's Id
+    * }}}
+    */
+  private[requests] def requireStoredNodes(
+    portfolios: Seq[RiskPortfolioUpdateRequest],
+    leaves: Seq[RiskLeafUpdateRequest],
+    stored: TreeIndex
+  ): Validation[ValidationError, Unit] =
+    def check(rawId: String, listedAs: NodeKind): Validation[ValidationError, Unit] =
+      ValidationUtil.refineId(rawId, ErrorLocation.requestField(FieldName.Id)).toOption match
+        case None => Validation.succeed(())
+        case Some(id) =>
+          val location = ErrorLocation.Field(ErrorSubject.ExistingNode(NodeId(id)), FieldName.Id)
+          (stored.nodes.get(NodeId(id)), listedAs) match
+            case (Some(_: RiskPortfolio), NodeKind.Portfolio) | (Some(_: RiskLeaf), NodeKind.Leaf) =>
+              Validation.succeed(())
+            case (Some(_: RiskLeaf), NodeKind.Portfolio) =>
+              Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsLeaf(id.value)))
+            case (Some(_: RiskPortfolio), NodeKind.Leaf) =>
+              Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsPortfolio(id.value)))
+            case (None, _) =>
+              Validation.fail(ValidationError(location, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.nodeIdNotInTree(id.value)))
+    Validation.validateAll(
+      portfolios.map(p => check(p.id, NodeKind.Portfolio)) ++
+        leaves.map(l => check(l.id, NodeKind.Leaf))
+    ).as(())
 
   // Guard: portfolios must point to portfolios in the provided set (or be root).
   private[requests] def requirePortfolioParents(

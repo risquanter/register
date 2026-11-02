@@ -127,7 +127,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+      seedVarId = None
     )
 
   // ── Per-branch uniqueness helpers ───────────────────────────────────
@@ -673,6 +674,34 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               case _ => false
             }
           case Exit.Success(_) => false
+        }
+      },
+
+      test("update: a stored leaf listed under portfolios is refused, and the stored tree is unchanged") {
+        val program = for {
+          created <- service(_.create(stubWsId, seedTreeRequest("Kind Tree"), BranchRef.Main))
+          fraudId  = leafIdByName(created, "Fraud")
+          exit    <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
+            name = "Kind Tree",
+            portfolios = Seq(
+              portfolioUpd(created, "Seed Root"),
+              RiskPortfolioUpdateRequest(id = fraudId, name = "Fraud", parentName = Some("Seed Root"))
+            ),
+            leaves = Seq(leafUpd(leafIdByName(created, "Cyber Attack"), "Cyber Attack", "Seed Root")),
+            newPortfolios = Seq.empty,
+            newLeaves = Seq(leafDef("Under Fraud", "Fraud"))
+          ), BranchRef.Main)).exit
+          after   <- service(_.getById(stubWsId, created.id, Revision.Head(BranchRef.Main)))
+        } yield (created, exit, after)
+        program.assert { case (created, exit, after) =>
+          val refused = exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption.exists {
+                case ValidationFailed(errors) => errors.exists(_.code == ValidationErrorCode.INVALID_NODE_TYPE)
+                case _                        => false
+              }
+            case Exit.Success(_) => false
+          refused && after.map(_._1).contains(created)
         }
       },
 

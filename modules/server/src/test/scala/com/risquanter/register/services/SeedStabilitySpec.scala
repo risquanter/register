@@ -92,7 +92,8 @@ object SeedStabilitySpec extends ZIOSpecDefault {
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = shape(minLoss, 50000L)
+      distributionShape = shape(minLoss, 50000L),
+      seedVarId = None
     )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
@@ -179,7 +180,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
         for
           // Build a tree whose surviving seedVarIds are non-contiguous ({1,3}) so
           // that a fresh auto-assignment ({1,2}) could NOT reproduce them — the
-          // round trip genuinely depends on the provided IDs.
+          // round trip depends on the provided IDs.
           created <- service(_.create(wsId, RiskTreeDefinitionRequest(
             name = "Export Source Tree",
             portfolios = Seq(RiskPortfolioDefinitionRequest("Stable Root", None)),

@@ -565,7 +565,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       name              = draft.name.value,
       parentName        = parentNameOf(draft.parent),
       probability       = draft.probability,
-      distributionShape = DistributionShapeRequest.fromShape(draft.shape)
+      distributionShape = DistributionShapeRequest.fromShape(draft.shape),
+      seedVarId         = None
     )
 
   // Identity-preserving variants: emit an update DTO carrying the node's existing id,
@@ -582,6 +583,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       name              = draft.name.value,
       parentName        = parentNameOf(draft.parent),
       probability       = draft.probability,
-      distributionShape = DistributionShapeRequest.fromShape(draft.shape)
+      distributionShape = DistributionShapeRequest.fromShape(draft.shape),
+      seedVarId         = None
     )
 

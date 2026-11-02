@@ -85,7 +85,8 @@ object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
       name = name,
       parentName = Some(parent),
       probability = probability,
-      distributionShape = shape()
+      distributionShape = shape(),
+      seedVarId = None
     )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
@@ -94,15 +95,15 @@ object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
       test("a leaf moved and re-parameterised in one update yields the analytic root exceedance for its new parameters") {
         // All leaves have minLoss ≥ 1000, so any occurrence produces loss ≥ 1:
         // P(root loss ≥ 1) = 1 − ∏(1 − pᵢ)
-        val staleAnalytic   = 1.0 - math.pow(1.0 - 0.25, 3)                  // 0.578… (bug signature)
+        val staleAnalytic   = 1.0 - math.pow(1.0 - 0.25, 3)                  // 0.578…, the figure a stale leaf gives
         val correctAnalytic = 1.0 - (1.0 - 0.6) * (1.0 - 0.25) * (1.0 - 0.25) // 0.775
 
         for
           created <- service(_.create(wsId, createReq, BranchRef.Main))
           resolver <- ZIO.service[CachedResultResolver]
 
-          // Simulate the whole tree BEFORE the edit (warm every cache path —
-          // this is what made the live bug bite)
+          // Simulate the whole tree before the edit, so every cache path is warm
+          // when the update arrives
           before <- resolver.ensureCached(created, created.rootId, entity1)
 
           // ONE update: Cyber moves Sub → Root AND its probability 0.25 → 0.6
@@ -126,7 +127,7 @@ object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
         yield assertTrue(
           // 10K trials ⇒ MC σ ≈ 0.004; ±0.02 pins the correct value…
           math.abs(measured - correctAnalytic) < 0.02,
-          // …and is 10σ+ away from the stale-figure signature (≈ 0.578)
+          // …and is more than 10σ away from the figure a stale leaf gives (≈ 0.578)
           math.abs(measured - staleAnalytic) > 0.1,
           before.probOfExceedance(1L) > 0.0
         )

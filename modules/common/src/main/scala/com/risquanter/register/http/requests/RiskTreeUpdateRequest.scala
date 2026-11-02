@@ -4,6 +4,7 @@ import zio.json.{DeriveJsonCodec, JsonCodec}
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SeedVarId
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, SubmittedCollection, ValidationError}
+import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.http.requests.RiskTreeRequests.*
 
 final case class RiskTreeUpdateRequest(
@@ -16,15 +17,19 @@ final case class RiskTreeUpdateRequest(
 object RiskTreeUpdateRequest:
   given JsonCodec[RiskTreeUpdateRequest] = DeriveJsonCodec.gen
 
-  def resolve(req: RiskTreeUpdateRequest, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] = {
+  /** The request refined and checked against the stored tree it updates:
+    * each `portfolios` entry must name a stored portfolio and each `leaves`
+    * entry a stored leaf, and that check accumulates with every other. */
+  def resolve(req: RiskTreeUpdateRequest, stored: TreeIndex, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] = {
     val treeNameV = refineNameField(req.name, ErrorLocation.requestField(FieldName.Name))
     val portfoliosV = refineExistingPortfolios(req.portfolios)
     val leavesV = refineExistingLeaves(req.leaves)
     val newPortfoliosV = refinePortfolioDefs(req.newPortfolios, SubmittedCollection.NewPortfolios)
     val newLeavesV = refineLeafDefs(req.newLeaves, SubmittedCollection.NewLeaves)
+    val storedNodesV = requireStoredNodes(req.portfolios, req.leaves, stored)
 
-    Validation.validateWith(treeNameV, portfoliosV, leavesV, newPortfoliosV, newLeavesV) {
-      (treeName, portfolios, leaves, newPortfolios, newLeaves) =>
+    Validation.validateWith(treeNameV, portfoliosV, leavesV, newPortfoliosV, newLeavesV, storedNodesV) {
+      (treeName, portfolios, leaves, newPortfolios, newLeaves, _) =>
         val providedSeeds = newLeaves.collect {
           case SubmittedLeaf(_, name, _, _, _, SeedVarIdChoice.Provided(seed)) => name -> seed
         }
@@ -75,7 +80,7 @@ final case class RiskLeafUpdateRequest(
   parentName:        Option[String],
   probability:       Double,
   distributionShape: DistributionShapeRequest,
-  seedVarId:         Option[Long] = None
+  seedVarId:         Option[Long]
 )
 object RiskLeafUpdateRequest:
   given JsonCodec[RiskLeafUpdateRequest] = DeriveJsonCodec.gen

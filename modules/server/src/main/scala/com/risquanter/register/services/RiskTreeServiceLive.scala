@@ -125,7 +125,7 @@ class RiskTreeServiceLive private (
   private def recordOperation(
     operation: String, 
     success: Boolean,
-    errorInfo: Option[ErrorContext] = None
+    errorInfo: Option[ErrorContext]
   ): UIO[Unit] = {
     val attrs = errorInfo match {
       case None =>
@@ -209,7 +209,7 @@ class RiskTreeServiceLive private (
   private def traced[A](name: String)(body: IO[AppError,A]): IO[AppError,A] =
     tracing.span(name, SpanKind.INTERNAL)(body).tapBoth(
       error => recordOperation(name, success = false, Some(extractErrorContext(error))),
-      _ => recordOperation(name, success = true)
+      _ => recordOperation(name, success = true, None)
     )
   
   /** Allocate a fixed pool of SafeIds for request resolution.
@@ -335,7 +335,7 @@ class RiskTreeServiceLive private (
 
     operation.tapBoth(
       error => recordOperation("create", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("create", success = true)
+      _ => recordOperation("create", success = true, None)
     )
   }
 
@@ -343,7 +343,7 @@ class RiskTreeServiceLive private (
     val operation = for {
       (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
-      resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
+      resolved <- RiskTreeUpdateRequest.resolve(req, oldTree.index, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
       allLeafOccurrenceAndShape = resolved.existingLeafOccurrenceAndShape ++ resolved.addedLeafOccurrenceAndShape
@@ -386,7 +386,7 @@ class RiskTreeServiceLive private (
     
     operation.tapBoth(
       error => recordOperation("update", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("update", success = true)
+      _ => recordOperation("update", success = true, None)
     )
   }
   
@@ -395,7 +395,7 @@ class RiskTreeServiceLive private (
       .tap(tree => clientBranch(wsId, branch).flatMap(invalidationHandler.handleTreeDeletion(tree, _)))
       .tapBoth(
       error => recordOperation("delete", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("delete", success = true)
+      _ => recordOperation("delete", success = true, None)
     )
 
   override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
@@ -424,14 +424,14 @@ class RiskTreeServiceLive private (
 
     operation.tapBoth(
       error => recordOperation("revert", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("revert", success = true)
+      _ => recordOperation("revert", success = true, None)
     )
   }
 
   override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,Option[(RiskTree, CommitHash)]] =
     repo.getById(wsId, id, rev).tapBoth(
       error => recordOperation("getById", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("getById", success = true)
+      _ => recordOperation("getById", success = true, None)
     )
   
   // ========================================
@@ -519,7 +519,7 @@ object RiskTreeServiceLive {
   private case class ErrorContext(
     errorType: String,
     errorCode: String,
-    errorField: Option[String] = None
+    errorField: Option[String]
   )
   
   /** Metric names and descriptions - centralized for consistency */
