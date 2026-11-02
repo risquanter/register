@@ -227,3 +227,10 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/app/styles/app.css
 - modules/app/src/main/scala/app/components/FailureNotice.scala
 - modules/app/src/main/scala/app/views/BlockedMessages.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/CommitMessage.scala
