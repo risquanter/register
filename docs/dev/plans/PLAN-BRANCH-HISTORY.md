@@ -163,6 +163,15 @@ Neither case has a test.
 This contradicts ADR-004a §2, which says: "For a merge it shows only the last
 commit."
 
+The same two cases leave `updatedAt` unchanged by the merge. Only a tree whose
+`meta` both branches changed gets the merge time. A tree saved only on the
+scenario keeps the scenario's `updatedAt`. `PLAN-ERROR-WIRE-BOUNDARY.md`'s
+`EWB-D-49` says "A merged tree gets its own `updatedAt`, the time of the merge",
+and the code reads "a merged tree" as a tree whose `meta` the merge merged. The
+routine review of that plan's §17 found this on 2026-11-02. `BH-D-5` and
+`BH-D-6` close it, because the merge then writes every changed tree's `meta`
+with the merge time.
+
 ### 3.6 `updatedAt`
 
 `updatedAt` is written by `RiskTreeRepositoryIrmin` on create, update and
