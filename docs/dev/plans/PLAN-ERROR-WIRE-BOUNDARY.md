@@ -7899,6 +7899,62 @@ docker ps -a --filter name=register_it_ -q | xargs -r docker rm -f; docker netwo
 sbt serverIt/test
 ```
 
+### 17.12 Accepted review findings, awaiting implementation
+
+The complex-tier review of §17 and §18 (coverage entry in
+`docs/dev/reviews/REVIEW-main.md`, tier `complex`) reported six notes besides its
+two findings. The user accepted all six on 2026-11-03 as reported. Each is a
+defect found while working this plan, so each is fixed inside this plan: the
+before/after is presented inline as its echo, then implemented on approval. The
+two findings are ruled elsewhere: finding 1 by `PLAN-TREE-WRITE-CONCURRENCY.md`
+TWC-D-8 and TWC-D-15, finding 2 (the scan reads main by branch name) still open.
+
+1. **A scenario save after the scan is merged without having been previewed.**
+   `mergeOnStaging` merges the scenario branch's live head (`ScenarioMergeService.scala:297`),
+   so a save on a tree outside `metadataToWrite` that lands between the scan and
+   the merge is absorbed unseen. The fix merges the scanned commit instead:
+   irmin-graphql's `merge_with_commit` (`server.ml:821-845`), reached through a
+   new `IrminClient` method, with the container patch
+   `containers/builders/patches/irmin-graphql-3.11.0-merge-conflict.patch`
+   extended so the "merge conflict: " prefix `IrminClientLive.mergeBranch`
+   recognises is also put on `merge_with_commit`'s conflict error. The
+   `IrminClient` signature is a signature echo.
+2. **A scenario deleted between the scan and the merge surfaces as
+   `IrminGraphQLError`** (origin service) instead of the not-found refusal, because
+   Irmin fails `merge_with_branch` on a missing branch with
+   `invalid_arg "… is not a valid branch ID"`. No text matching: item 1's route
+   merges a commit, which exists whether or not the branch does, so this case
+   disappears with it.
+3. **ADR-004a §2 says a merge produces three commits.** With N trees in
+   `metadataToWrite` it produces 2N + 1: one `meta` copy and one merged `meta`
+   per tree, plus Irmin's merge commit. The passage (lines 46-51) and the three
+   bullets under it are rewritten for N trees. An ADR edit, so it waits for the
+   go that item-by-item approval of this list gives.
+4. **A stale comment.** `RiskTree.scala:27` says `seedVarHighWater` "Merges as
+   max across branches". The merge is three-way on the field and never takes a
+   maximum. Comment-only; the sentence is deleted. `PLAN-TREE-WRITE-CONCURRENCY.md`
+   TWC-D-12 may remove the field altogether; if it does first, this item lapses.
+5. **`requireStoredNodes` accepts the same stored id listed twice**
+   (`RiskTreeRequests.scala:283-305`). Later checks refuse the request without
+   naming the cause. The fix adds a `DUPLICATE_VALUE` refusal at the second
+   occurrence, located at `ErrorLocation.Field(ErrorSubject.ExistingNode(id), FieldName.Id)`,
+   a new `ValidationMessages` template, and a `RiskTreeDefinitionRequestsSpec`
+   case.
+6. **Three branches written as `if`/`else` that classify a value.**
+   - The verdict order, conflicts before duplicate names, is decided twice:
+     `ScenarioMergeService.scala:203-205` (preview) and `:223-230` (merge). A
+     `MergeScan.verdict` with cases `Conflicts`, `DuplicateNames` and `Clean`,
+     computed once, is matched in both places. A new type, so its echo carries
+     the family search.
+   - `mergeField` (`:82-85`) is `Either.cond(!isConflict(versions), merged(versions).getOrElse(onMain), field)`.
+   - `IrminClientLive.scala:163`, `:173` and `:183` each read
+     `if applied then ZIO.unit else ZIO.fail(…)`; each becomes
+     `ZIO.fail(…).unless(applied)`.
+
+Every file these touch is on `PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`, except the
+container patch in item 1, which needs an inventory amendment presented when
+that item is taken up.
+
 ## 18. An update names only the stored tree's nodes, each under its own type
 
 Found while designing §17, on 2026-11-01. It changes no wire shape: a request the
