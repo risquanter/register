@@ -220,6 +220,10 @@ allow_empty) && s.head <> None`. The GraphQL `info` input accepts `allow_empty`.
      one of this scenario's commits.
    - **A scenario merged more than once** has one merge marker for each merge.
      Each one names the scenario commit it took, and the view shows each one.
+8. **`BH-D-8` — RULED 2026-11-02.** No Irmin store that holds commits in the
+   current colon-separated message format needs to be kept. Every store is a
+   development environment holding throwaway data. The new message format
+   replaces the old one outright, and no reader for the old format is kept.
 
 ## 5. Consequences that follow from the rulings
 
@@ -253,23 +257,17 @@ allow_empty) && s.head <> None`. The GraphQL `info` input accepts `allow_empty`.
    My recommendation is the JSON envelope. Nobody reads these messages directly,
    and the codec then derives from the type (ADR-037), with
    `parse(render(m)) == Some(m)` as its law.
-2. **Messages already in the store.** Commits written before this plan use the
-   colon-separated format and name no branch. If a store that matters holds such
-   commits, the current `CommitMessage.parse` becomes the reader for that format
-   and maps those saves to "branch unknown". The view then needs a rule for an
-   unknown branch. If no such store exists, the old format can be dropped. This
-   needs a fact only the user holds.
-3. **How the fork marker writes every tree's `meta` in one commit.** The GraphQL
+2. **How the fork marker writes every tree's `meta` in one commit.** The GraphQL
    server has `set_tree`, `update_tree` and `set_all`. Which one writes several
    `meta` values in one commit has not been checked.
-4. **A scenario forked from another scenario, or from a commit in history.** The
+3. **A scenario forked from another scenario, or from a commit in history.** The
    marker names its source branch and commit. The scenario view's "before the
    fork" part then follows that source's line, which may itself be a scenario.
    The rule for how far back to follow has not been settled.
-5. **The fork stop on the wire.** `HistoryOperation` has the cases `TreeWrite`,
+4. **The fork stop on the wire.** `HistoryOperation` has the cases `TreeWrite`,
    `Merge` and `Other`. Showing a fork stop needs a `Fork` case, which changes the
    history response's wire shape (ADR-038).
-6. **A graph view in the slider.** Showing both lines at once needs each entry to
+5. **A graph view in the slider.** Showing both lines at once needs each entry to
    carry its parents or its line, which is a wire change, and a component in
    place of the one-row slider. The user asked whether it is possible, and it has
    not been ruled in or out.
@@ -288,7 +286,7 @@ allow_empty) && s.head <> None`. The GraphQL `info` input accepts `allow_empty`.
   `BranchRef`, because `BranchRef` embeds the `WorkspaceId`. No message reaches
   the browser. Compliant.
 - **ADR-037.** The event kinds are a closed set with a derived codec. Compliant.
-- **ADR-038.** Open decision 5 changes a response's wire shape.
+- **ADR-038.** Open decision 4 changes a response's wire shape.
 - **ADR-039.** A message read back from the store is refined when it is parsed,
   as `CommitMessage.parse` does today. Compliant.
 - **ADR-032.** `meta` is not part of a node's hash projection, so the extra
@@ -311,9 +309,9 @@ None. The glossary has no entries for branches, scenarios, commits or history
    `TreeHistoryService.scala`, `ScenarioServiceLive.scala`,
    `ScenarioMergeService.scala`, `IrminClient.scala`, `IrminClientLive.scala`,
    `IrminQueries.scala`, the `IrminInfoInput` model, `TreeHistoryResponse.scala`
-   if open decision 5 adds `Fork`, and their tests.
+   if open decision 4 adds `Fork`, and their tests.
 3. **ADR alignment.** The two amendments in §7, written out.
-4. **Open decisions.** §6, all six.
+4. **Open decisions.** §6, all five.
 5. **Verification plan.** §10 lists the tests. The commands are the full suite:
    `sbt app/test`, `sbt 'commonJVM/test; server/test'`, the `register_it_`
    cleanup, then `sbt serverIt/test`.
