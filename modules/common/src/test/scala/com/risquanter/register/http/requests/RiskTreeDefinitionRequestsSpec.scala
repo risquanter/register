@@ -523,6 +523,21 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           case ErrorLocation.Field(_, FieldName.Probability) => true
           case _                                            => false)
       )
+    },
+
+    test("resolveUpdate reports an id that does not refine once, as INVALID_FORMAT, and not as a stored-node refusal") {
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate("not-an-id", "Leaf1", Some("Root"))),
+        newPortfolios = Seq.empty,
+        newLeaves = Seq.empty
+      )
+      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
+      assertTrue(
+        errors.count(_.code == ValidationErrorCode.INVALID_FORMAT) == 1,
+        !errors.exists(e => e.code == ValidationErrorCode.MISSING_REFERENCE || e.code == ValidationErrorCode.INVALID_NODE_TYPE)
+      )
     }
   )
 }

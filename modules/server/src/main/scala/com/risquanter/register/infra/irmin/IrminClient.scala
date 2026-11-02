@@ -14,7 +14,8 @@ import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeSta
   * (ADR-010). Repository/service boundaries map IrminError to domain errors.
   *
   * Every read and write of tree data takes a `BranchRef`, which defaults to
-  * main. Irmin creates a branch implicitly on its first write.
+  * main, except one overload of `set` that takes a merge's `MergeStagingRef`.
+  * Irmin creates a branch implicitly on its first write.
   *
   * Irmin's subscriptions (watch) are not used.
   */

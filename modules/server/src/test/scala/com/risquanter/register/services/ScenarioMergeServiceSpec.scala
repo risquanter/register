@@ -11,7 +11,8 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, FieldName, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure}
+import com.risquanter.register.http.responses.MergeConflictEntry
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -352,6 +353,39 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
               failure.exists(_.logMessage.contains("conflicting item(s)")),
               failure.exists(m => !m.logMessage.contains("duplicate node name(s)"))
             )
+        }
+      ),
+
+      suite("a node one branch deleted and the other changed")(
+        test("previews one NodeConflict naming the fields the surviving branch changed since the fork") {
+          val treeId   = treeIdOf("deleted-and-changed")
+          val nodePath = s"risk-trees/${treeId.value}/nodes/${nodeIdOf(1)}"
+          val meta     = Map(s"risk-trees/${treeId.value}/meta" -> metaJson(treeId, Instant.parse("2026-11-01T09:00:00Z")))
+          val atBase   = meta + (nodePath -> leafJson(nodeIdOf(1), "Original", 1L))
+          val onMain   = meta
+          val onScen   = meta + (nodePath -> leafJson(nodeIdOf(1), "Renamed", 1L))
+          for
+            resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
+            revs   <- Ref.make(List.empty[Revision])
+            svc     = ScenarioMergeServiceLive(
+                        FakeMergeIrmin(hash('a'), hash('b'), hash('d'), onMain, onScen, atBase,
+                          ZIO.die(new IllegalStateException("a preview must not merge")),
+                          resets, ZIO.unit, branchOps = None, stagingSets = None),
+                        FakeRepo(List(Right(validTree)), revs)
+                      )
+            result <- svc.preview(ws("ws-deleted-changed"), name("draft-v1"))
+          yield result match
+            case MergePreviewResult.Conflicts(List(MergeConflictEntry.NodeConflict(tree, nodeId, versions, fields))) =>
+              assertTrue(
+                tree.id == treeId,
+                nodeId.value.toString == nodeIdOf(1),
+                versions.base.isDefined,
+                versions.onMain.isEmpty,
+                versions.onScenario.map(_.name.value.toString).contains("Renamed"),
+                fields == List(FieldName.Name)
+              )
+            case other =>
+              assertTrue(false).label(s"expected one NodeConflict, got $other")
         }
       ),
 

@@ -228,7 +228,7 @@ class RiskTreeServiceLive private (
 
   /** Names of all leaves in a resolved request, for seedVarId assignment. */
   private def leafNamesOf(nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode]): Seq[SafeName.SafeName] =
-    nodesByName.values.collect { case n if n.kind == RiskTreeRequests.NodeKind.Leaf => n.name }.toSeq
+    nodesByName.values.collect { case RiskTreeRequests.ResolvedNode(_, name, _, RiskTreeRequests.NodeKind.Leaf) => name }.toSeq
 
   /** seedVarIds of the old tree's leaves that survive the update, keyed by their
     * (possibly renamed) name in the request — matched by stable node id, so

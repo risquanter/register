@@ -263,12 +263,12 @@ final class IrminClientLive private (
       .mapError(mapNetworkError)
 
   private def parseError(error: ResponseException[String, String], status: StatusCode): IrminError =
-    error match
-      case HttpError(body, _) if status == StatusCode.ServiceUnavailable =>
+    (error, status) match
+      case (HttpError(body, _), StatusCode.ServiceUnavailable) =>
         IrminUnavailable(s"Service returned 503: $body")
-      case HttpError(body, _) =>
+      case (HttpError(body, _), _) =>
         IrminHttpError(status, body)
-      case DeserializationException(_, jsonError) =>
+      case (DeserializationException(_, jsonError), _) =>
         IrminHttpError(StatusCode.InternalServerError, s"Invalid response: $jsonError")
 
   /** Two kinds of failure reach this one channel and both become an
@@ -366,7 +366,7 @@ private final case class MainBranchInfo(
 private final case class HeadCommit(
     hash: String,
     key: String,
-    parents: Option[List[String]] = None,
+    parents: Option[List[String]],
     info: InfoData
 )
 
