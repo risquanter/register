@@ -7906,8 +7906,8 @@ The complex-tier review of §17 and §18 (coverage entry in
 two findings. The user accepted all six on 2026-11-03 as reported. Each is a
 defect found while working this plan, so each is fixed inside this plan: the
 before/after is presented inline as its echo, then implemented on approval. The
-two findings are ruled elsewhere: finding 1 by `PLAN-TREE-WRITE-CONCURRENCY.md`
-TWC-D-8 and TWC-D-15, finding 2 (the scan reads main by branch name) still open.
+two findings are ruled as well: finding 1 by `PLAN-TREE-WRITE-CONCURRENCY.md`
+TWC-D-8 and TWC-D-15, and finding 2 as item 7 below.
 
 1. **A scenario save after the scan is merged without having been previewed.**
    `mergeOnStaging` merges the scenario branch's live head (`ScenarioMergeService.scala:297`),
@@ -7950,6 +7950,29 @@ TWC-D-8 and TWC-D-15, finding 2 (the scan reads main by branch name) still open.
    - `IrminClientLive.scala:163`, `:173` and `:183` each read
      `if applied then ZIO.unit else ZIO.fail(…)`; each becomes
      `ZIO.fail(…).unless(applied)`.
+7. **The scan reads both branches' content by branch name after pinning their
+   heads.** Ruled 2026-11-03: read at the pinned commits. `scan` takes
+   `mainHead` (`ScenarioMergeService.scala:376`) and is handed `scenarioHead`,
+   then reads node values with `irmin.get(abs, BranchRef.Main)` and
+   `irmin.get(abs, branch)` (`:479-480`) and path listings with `irmin.list(…, branch)`
+   (`pathsOn`, `:536-541`), each answering from the branch's head at the moment
+   of the call. A save on either branch during a preview therefore yields a
+   verdict that matches no single version; `merge` is already protected by its
+   compare-and-set publish. `comparePaths` and `pathsOn` take the side's
+   `CommitHash` instead of its `BranchRef` and read with `getAtCommit` and
+   `listAtCommit` (`IrminClient.scala:189`, `:202`), the pattern
+   `RiskTreeRepositoryIrmin.getAllForWorkspace` already follows. A commit is a
+   full snapshot, so a pinned read returns what the branch read returned at the
+   moment it pointed there; which side a value is from is carried by the hash
+   the scan holds. The common-ancestor read `irmin.lca(BranchRef.Main, scenarioHead)`
+   (`:377`) stays by branch, because irmin-graphql exposes `lcas` only under the
+   branch type (`server.ml:424-431`); a plain save on main does not move it, and
+   a merge of the same scenario during a preview is caught by the merge's own
+   compare-and-set. The two private signatures and the spec fake's at-commit
+   answers are signature-echo work. The options weighed: re-read both heads
+   after the scan and retry the preview once, which detects rather than
+   prevents and brings back the second head read EWB-D-60 removed; and leaving
+   the preview as it is.
 
 Every file these touch is on `PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`, except the
 container patch in item 1, which needs an inventory amendment presented when
