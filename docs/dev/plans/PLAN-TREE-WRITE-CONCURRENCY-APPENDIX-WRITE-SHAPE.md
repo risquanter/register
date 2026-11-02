@@ -162,10 +162,10 @@ typed `IrminMergeConflict`, consumed by `ScenarioMergeService`.
 *Cons:* a key-value content merge reconciles independent changes but mishandles
 conflicting structural intent (two clients reparenting the same node to different
 parents). Decisively for this question, Irmin creates the merge commit itself, so
-validating the merged result happens after the write — which forces the
-scratch-branch-then-fast-forward machinery that `PLAN-TREE-WRITE-CONCURRENCY.md`
-Decision 2 Option B already identifies as landing in DD-5's branch-lifecycle
-invariants.
+validating the merged result happens after the write. `PLAN-TREE-WRITE-CONCURRENCY.md`
+TWC-D-2 has since ruled that the save itself goes through a staging branch and a
+compare-and-set publish, so that machinery exists either way; what still rules
+Option D out is the structural-intent mishandling.
 
 ---
 
