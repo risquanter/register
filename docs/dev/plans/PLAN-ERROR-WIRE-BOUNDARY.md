@@ -2,10 +2,10 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-59`, is ruled. `EWB-D-1` to
+**Status.** Every decision, `EWB-D-1` to `EWB-D-60`, is ruled. `EWB-D-1` to
 `EWB-D-43` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2 and §16.7,
-`EWB-D-48` to `EWB-D-53` and `EWB-D-55` to `EWB-D-58` in §17, and `EWB-D-54` and
-`EWB-D-59` in §18. Approval
+`EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in §17, and
+`EWB-D-54` and `EWB-D-59` in §18. Approval
 is in place: the token names this document and the file inventory exists beside
 it. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase 3a's
 continuation, and `EWB-D-27`'s projection change landed with them. §17 and §18
@@ -7279,6 +7279,14 @@ tree's history from the `meta` value's change log, because "every mutation
     `meta` value the merge writes: the comparison, holding the scenario's exact
     contents, and the merged `TreeMetadata`. The merge writes those and reads
     nothing again. `scan` takes the merge time once, at its start.
+11. **`EWB-D-60` — RULED 2026-11-02.** The merge is assembled and published
+    against the head of main that the scan compared. The routine review of this
+    section found that `merge` read main's head a second time after the scan. A
+    save on main between the two reads was then overwritten instead of refused:
+    the staging branch started from the newer head, the merge's `meta` writes
+    held values computed from the older one, and the compare-and-set expected the
+    newer head. With one head, any save on main after the scan makes the
+    compare-and-set fail with `MergeTargetMoved`.
 
 Five further choices are mine, derived from those rules. They are reversible:
 
@@ -7543,6 +7551,9 @@ Tree names come from each tree's `meta` value, whose `TreePath.Meta`
 
 ```scala
 private final case class MergeScan(
+  /** Main's head the scan compared against, or `None` when main has none
+    * (EWB-D-60). */
+  mainHead: Option[CommitHash],
   conflicts: List[MergeConflictEntry],
   duplicateNames: Map[TreeId, List[SafeName.SafeName]],
   /** Each `meta` value both branches changed without a conflicting field,
@@ -7555,7 +7566,9 @@ private def scan(wsId: WorkspaceId, branch: BranchRef, scenarioHead: CommitHash,
 ```
 
 `merge` reads the clock once and passes the instant to `scan`. `preview`
-passes the current time, which it never writes.
+passes the current time, which it never writes. `merge` starts the staging
+branch at the scan's `mainHead` and publishes against it, and reads main's head
+nowhere else (EWB-D-60).
 
 `MergePreviewResult.Conflicts` carries `List[MergeConflictEntry]`. The
 controller passes it through, and `MergeConflictPath` is deleted with

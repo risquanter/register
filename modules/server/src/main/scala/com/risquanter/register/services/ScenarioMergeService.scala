@@ -228,17 +228,17 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                         name,
                         MergeRefusal.DuplicateNames(result.duplicateNames)
                       )))
-      // The head the merge is assembled against and published against. A
-      // scenario branch can only be created at a commit that already exists and
-      // a branch head never moves backwards, so main always holds one by the
-      // time a merge into it runs. An absent head therefore means the store no
-      // longer holds what it held, which is a storage failure the caller sees
-      // as one rather than a defect.
-      mainBefore   <- irmin.mainBranch.map(_.flatMap(_.head))
-                        .flatMap {
-                          case Some(c) => ScenarioBranchOps.refineCommitHash(c.hash)
-                          case None    => ZIO.fail(RepositoryFailure("main has no head"))
-                        }
+      // The head the merge is assembled against and published against is the
+      // one the scan compared, so a save on main after the scan moves main and
+      // the publish refuses rather than overwriting it. A scenario branch can
+      // only be created at a commit that already exists and a branch head never
+      // moves backwards, so main always holds one by the time a merge into it
+      // runs. An absent head therefore means the store no longer holds what it
+      // held, which is a storage failure the caller sees as one rather than a
+      // defect.
+      mainBefore   <- result.mainHead match
+                        case Some(head) => ZIO.succeed(head)
+                        case None       => ZIO.fail(RepositoryFailure("main has no head"))
       newHead      <- mergeOnStaging(wsId, name, branch, mainBefore, result.metadataToWrite)
     yield newHead
 
@@ -348,6 +348,8 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   private final case class PathComparison(path: TreePath, versions: Versions[String])
 
   private final case class MergeScan(
+    /** Main's head the scan compared against, or `None` when main has none. */
+    mainHead: Option[CommitHash],
     conflicts: List[MergeConflictEntry],
     duplicateNames: Map[TreeId, List[SafeName.SafeName]],
     /** Each `meta` value both branches changed without a conflicting field,
@@ -368,7 +370,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     */
   private def scan(wsId: WorkspaceId, branch: BranchRef, scenarioHead: CommitHash, at: Instant): IO[AppError, MergeScan] =
     irmin.mainBranch.map(_.flatMap(_.head)).flatMap {
-      case None => ZIO.succeed(MergeScan(Nil, Map.empty, Nil))
+      case None => ZIO.succeed(MergeScan(None, Nil, Map.empty, Nil))
       case Some(mainCommit) =>
         for
           mainHead    <- ScenarioBranchOps.refineCommitHash(mainCommit.hash)
@@ -387,6 +389,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
           decisions   <- ZIO.foreach(conflicting)(decide(_, metas, at))
           duplicates  <- duplicateNodeNames(comparisons)
         yield MergeScan(
+          mainHead = Some(mainHead),
           conflicts = decisions.collect { case Left(entry) => entry },
           duplicateNames = duplicates,
           metadataToWrite = decisions.collect { case Right(write) => write }

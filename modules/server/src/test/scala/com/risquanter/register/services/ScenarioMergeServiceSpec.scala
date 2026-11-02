@@ -116,9 +116,15 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     mainHeadPresent: Boolean = true,
     createResult: IO[IrminError, Unit] = ZIO.unit,
     branchOps: Option[Ref[List[String]]],
-    stagingSets: Option[Ref[List[(String, String, String)]]]
+    stagingSets: Option[Ref[List[(String, String, String)]]],
+    mainMovesTo: List[CommitHash] = Nil
   ) extends IrminClient:
     private def branchOf(n: String, h: CommitHash): IrminBranch = IrminBranch(n, Some(commit(h)))
+
+    /** How many times main's head has been read. The first read answers
+      * `mainHead`, and each later read answers the next of `mainMovesTo`, so a
+      * test can move main between two reads. */
+    private val mainReads = new java.util.concurrent.atomic.AtomicInteger(0)
     private def rel(path: IrminPath): String =
       val v = path.value
       val i = v.indexOf("risk-trees")
@@ -128,7 +134,10 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
       ZIO.foreachDiscard(branchOps)(_.update(_ :+ op))
 
     override def mainBranch: IO[IrminError, Option[IrminBranch]] =
-      ZIO.succeed(Option.when(mainHeadPresent)(branchOf("main", mainHead)))
+      ZIO.succeed {
+        val head = (mainHead :: mainMovesTo).applyOrElse(mainReads.getAndIncrement(), _ => mainMovesTo.lastOption.getOrElse(mainHead))
+        Option.when(mainHeadPresent)(branchOf("main", head))
+      }
 
     /** Answers for the scenario branch and for the staging branch alike: the
       * service reads the first for its head and the second only to find the
@@ -579,8 +588,30 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeTargetMoved => m }
             assertTrue(
               failure.exists(_.scenario.value == "draft-v1"),
-              // the publish was attempted against the head read before the
-              // merge, and refused
+              // the publish was attempted against the head the scan compared
+              // against, and refused
+              calls == List((hash('a'), hash('c')))
+            )
+        },
+        test("a save on main after the scan makes the publish check against the scanned head, so it fails MergeTargetMoved") {
+          for
+            resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
+            revs   <- Ref.make(List.empty[Revision])
+            svc     = ScenarioMergeServiceLive(
+                        FakeMergeIrmin(hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
+                          ZIO.succeed(commit(hash('c'))), resets,
+                          ZIO.fail(BranchHeadStale(BranchRef.Main, hash('a'))), branchOps = None, stagingSets = None,
+                          mainMovesTo = List(hash('d'))),
+                        FakeRepo(List(Right(validTree)), revs)
+                      )
+            exit   <- svc.merge(ws("ws-main-moved"), name("draft-v1")).exit
+            calls  <- resets.get
+          yield
+            val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeTargetMoved => m }
+            assertTrue(
+              failure.exists(_.scenario.value == "draft-v1"),
+              // main reads as 'd' after the scan, and the publish still expects
+              // 'a', the head the scan compared against
               calls == List((hash('a'), hash('c')))
             )
         },
