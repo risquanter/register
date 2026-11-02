@@ -278,6 +278,20 @@ aggregation method. The instance is the contract; methods are consumers of it.
    (Idle, Loading, Failed) that should pass through unchanged? → Functor on the
    success case. Without `map`, every caller repeats the structural threading.
 
+### Totality and inverse-pair recognition
+
+1. Does a function need an answer for a value of its input type that has no
+   correct answer? → The input type is too wide. Narrow it to the values the
+   function is defined on, and connect the narrow type to the wide one by an
+   injection or a coproduct case. A partial function, an unreachable branch or
+   a placeholder answer is the signal.
+2. Do two functions build a value and take it apart again — render and parse,
+   compose and decompose, encode and decode? → The pair is a prism. The build
+   is total, the parse is partial, and `parse(build(x)) == Some(x)` is its law.
+   Both directions have one owner and share each spelling, and a law test pins
+   the pair. A parse that only undoes the module's own build, with no reachable
+   failure, means a typed value was discarded: keep that value instead.
+
 ### Applicative / Validation recognition
 
 1. Multiple fields, each of which can fail independently, all failures surfacing
