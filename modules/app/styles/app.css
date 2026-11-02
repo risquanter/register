@@ -671,7 +671,11 @@ body {
 .merge-modal-conflicts {
   margin: var(--sp-2) 0;
   padding-left: var(--sp-4);
-  font-family: var(--font-mono);
+}
+
+.merge-modal-conflict-detail {
+  color: var(--foreground-muted);
+  padding-left: var(--sp-2);
 }
 
 .merge-modal-actions {

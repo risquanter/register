@@ -17,10 +17,12 @@ import com.risquanter.register.http.responses.MergeConflictEntry
   */
 @jsonDiscriminator(MergeRefusal.TagField)
 enum MergeRefusal:
-  /** Paths changed on both branches. Each entry is the same wire form the merge
-    * preview reports, so a preview and a refusal name a conflict identically.
+  /** Irmin contents both branches changed since the fork into versions that
+    * differ. Each entry is
+    * the same wire form the merge preview reports, so a preview and a refusal
+    * name a conflict identically.
     */
-  case Conflicts(paths: List[MergeConflictEntry])
+  case Conflicts(entries: List[MergeConflictEntry])
 
   /** The merged node set would repeat a name within a tree, listed per tree. */
   case DuplicateNames(perTree: Map[TreeId, List[SafeName.SafeName]])
@@ -68,8 +70,8 @@ object MergeRefusal:
     * case, not prose), so this exists for the log and nowhere else.
     */
   def describe(refusal: MergeRefusal): String = refusal match
-    case Conflicts(paths) =>
-      s"${paths.size} conflicting path(s): ${paths.map(_.path).mkString(", ")}"
+    case Conflicts(entries) =>
+      s"${entries.size} conflicting item(s): ${entries.map(describeEntry).mkString(", ")}"
     case DuplicateNames(perTree) =>
       "duplicate node name(s) — " + perTree.toList
         .sortBy((treeId, _) => treeId.value)
@@ -80,3 +82,22 @@ object MergeRefusal:
       s"(${trees.map(_.value).sorted.mkString(", ")}), so the merge was not applied"
     case BranchesConflict() =>
       "the branches conflict — re-run the preview and retry"
+
+  /** One conflict entry by its kind, identifiers and differing fields, for a log
+    * line. An identifier may appear in a log line, and no entry carries a
+    * `WorkspaceId` (ADR-035).
+    *
+    * {{{
+    * describeEntry(NodeConflict(tree, nodeId, versions, List(FieldName.Probability)))
+    * // "node 01M6… in tree 01M6… (Probability)"
+    * }}}
+    */
+  private def describeEntry(entry: MergeConflictEntry): String =
+    val (subject, fields) = entry match
+      case MergeConflictEntry.TreeMetadataConflict(treeId, _, fields) =>
+        (s"tree ${treeId.value}", fields)
+      case MergeConflictEntry.NodeConflict(tree, nodeId, _, fields) =>
+        (s"node ${nodeId.value} in tree ${tree.id.value}", fields)
+      case MergeConflictEntry.MitigationConflict(tree, mitigationId, _, fields) =>
+        (s"mitigation ${mitigationId.value} in tree ${tree.id.value}", fields)
+    s"$subject (${fields.map(_.toString).mkString(", ")})"

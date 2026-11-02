@@ -5,7 +5,8 @@ import zio.json.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, RepositoryFailure, TreeLoadFailure, IrminError}
-import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
+import com.risquanter.register.http.responses.TreeWriteKind
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 import com.risquanter.register.repositories.model.TreeMetadata
 
@@ -31,11 +32,11 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
                name = riskTree.name,
                rootId = riskTree.rootId,
                seedVarHighWater = riskTree.seedVarHighWater,
-               schemaVersion = CurrentSchemaVersion,
+               schemaVersion = TreeMetadata.CurrentSchemaVersion,
                createdAt = now,
                updatedAt = now
              )
-      _   <- writeTree(basePath, meta, riskTree.nodes, riskTree.mitigations, createMessage(wsId, riskTree.id), branch)
+      _   <- writeTree(basePath, meta, riskTree.nodes, riskTree.mitigations, treeWriteMessage(wsId, riskTree.id, TreeWriteKind.Create), branch)
     yield riskTree
 
   override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError,RiskTree] =
@@ -49,20 +50,20 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
                        name = updatedTree.name,
                        rootId = updatedTree.rootId,
                        seedVarHighWater = updatedTree.seedVarHighWater,
-                       schemaVersion = CurrentSchemaVersion,
+                       schemaVersion = TreeMetadata.CurrentSchemaVersion,
                        updatedAt = now
                      )
-      _           <- writeTree(basePath, updatedMeta, updatedTree.nodes, updatedTree.mitigations, updateMessage(wsId, id), branch)
+      _           <- writeTree(basePath, updatedMeta, updatedTree.nodes, updatedTree.mitigations, treeWriteMessage(wsId, id, TreeWriteKind.Update), branch)
     yield updatedTree
 
   override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError,RiskTree] =
     val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, id))
     for
       existing <- getTreeWithMeta(wsId, id, branch)
-      _        <- handleIrmin(irmin.setTree(basePath, Nil, deleteMessage(wsId, id), branch))
+      _        <- handleIrmin(irmin.setTree(basePath, Nil, treeWriteMessage(wsId, id, TreeWriteKind.Delete), branch))
     yield existing.tree
 
-  /** Revert a tree to `toCommit` (E3/E4/E8, Option A). Loads the tree state at
+  /** Revert a tree to `toCommit`. Loads the tree state at
     * that commit — absent (commit or path) → NotFound — then writes it forward
     * as ONE `set_tree` commit with a `:revert` message. Loading at the commit
     * preserves the tree's original `createdAt` and handles reverting a tree
@@ -75,8 +76,8 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       case Some(existing) =>
         for
           now         <- Clock.instant
-          revertedMeta = existing.meta.copy(updatedAt = now, schemaVersion = CurrentSchemaVersion)
-          _           <- writeTree(basePath, revertedMeta, existing.tree.nodes, existing.tree.mitigations, revertMessage(wsId, id), branch)
+          revertedMeta = existing.meta.copy(updatedAt = now, schemaVersion = TreeMetadata.CurrentSchemaVersion)
+          _           <- writeTree(basePath, revertedMeta, existing.tree.nodes, existing.tree.mitigations, treeWriteMessage(wsId, id, TreeWriteKind.Revert), branch)
         yield existing.tree
     }
 
@@ -245,17 +246,8 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     if nodes.exists(_.id == rootId) then ZIO.unit
     else ZIO.fail(RepositoryFailure(s"Root ${rootId.value} not found in provided nodes"))
 
-  private def createMessage(wsId: WorkspaceId, treeId: TreeId): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:create"
-
-  private def updateMessage(wsId: WorkspaceId, treeId: TreeId): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:update"
-
-  private def deleteMessage(wsId: WorkspaceId, treeId: TreeId): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:delete"
-
-  private def revertMessage(wsId: WorkspaceId, treeId: TreeId): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:revert"
+  private def treeWriteMessage(wsId: WorkspaceId, treeId: TreeId, kind: TreeWriteKind): String =
+    CommitMessage.render(CommitMessage.TreeWritten(wsId, treeId, kind))
 
   private def handleIrmin[A](effect: IO[IrminError, A]): IO[AppError,A] =
     effect.mapError { err =>
@@ -264,10 +256,6 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     }
 
 private final case class TreeWithMeta(meta: TreeMetadata, tree: RiskTree)
-
-// v2: nodes carry seedVarId, meta carries seedVarHighWater. There is no legacy
-// decode path — a v1 store is wiped rather than migrated.
-private val CurrentSchemaVersion: Int = 2
 
 object RiskTreeRepositoryIrmin:
   val layer: ZLayer[IrminClient, Nothing, RiskTreeRepository] =

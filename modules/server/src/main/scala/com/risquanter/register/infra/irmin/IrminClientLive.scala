@@ -8,7 +8,7 @@ import sttp.client3.httpclient.zio.HttpClientZioBackend
 import sttp.model.{Uri, StatusCode}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.errors.*
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, StoreBranch}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
 import com.risquanter.register.infra.irmin.model.*
 import com.risquanter.register.infra.irmin.model.ListTreeResponse
 
@@ -51,6 +51,14 @@ final class IrminClientLive private (
     yield value
 
   override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit] =
+    setOn(path, value, message, branch)
+
+  override def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef): IO[IrminError, IrminCommit] =
+    setOn(path, value, message, staging)
+
+  /** The single `set` mutation both overloads issue. Private, so the branch
+    * types each overload accepts stay the public contract. */
+  private def setOn(path: IrminPath, value: String, message: String, branch: StoreBranch): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin SET: ${path.value} (${value.length} bytes)${branchLog(branch)}")
       query     = IrminQueries.setValue(path, value, message, defaultAuthor, branch)

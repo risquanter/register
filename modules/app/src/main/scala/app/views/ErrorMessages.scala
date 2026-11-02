@@ -225,8 +225,8 @@ object ErrorMessages:
     * re-run the preview.
     */
   def mergeRefused(scenario: ScenarioName.ScenarioName, refusal: MergeRefusal): String = refusal match
-    case MergeRefusal.Conflicts(paths) =>
-      s"${scenario.value} and main both changed ${paths.size} ${if paths.size == 1 then "node" else "nodes"}. " +
+    case MergeRefusal.Conflicts(entries) =>
+      s"${scenario.value} and main both changed ${entries.size} ${if entries.size == 1 then "item" else "items"}. " +
       "Edit either side so they agree, then merge again."
 
     case MergeRefusal.DuplicateNames(perTree) =>

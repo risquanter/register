@@ -1,18 +1,20 @@
 package com.risquanter.register.services
 
 import zio.*
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.numeric.Greater
 import java.time.{DateTimeException, Instant}
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt, CommitHash}
 import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, IrminError}
-import com.risquanter.register.http.responses.{TreeHistoryEntry, HistoryOperation}
-import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
+import com.risquanter.register.http.responses.TreeHistoryEntry
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminCommit}
 
-/** Per-tree commit history on a branch (E1). Returns typed entries; the raw
+/** Per-tree commit history on a branch. Returns typed entries; the raw
   * commit message (which embeds the WorkspaceId) and author never leave the
-  * service — only the parsed `HistoryOperation`, the commit hash, and the
-  * timestamp cross the boundary.
+  * service — only the `HistoryOperation`, the commit hash, and the timestamp
+  * cross the boundary.
   */
 trait TreeHistoryService:
   def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
@@ -22,19 +24,30 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
 
   override def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
     (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]] =
-    // History is read from the tree's meta blob: every mutation (create, update,
-    // revert) rewrites meta with a fresh updatedAt, so its last_modified log is
-    // the tree's full commit history. The tree root holds no contents value —
-    // last_modified on it returns nothing.
+    // History is read from the tree's meta contents: every write (create,
+    // update, revert, and a merge's final write) rewrites meta with a fresh
+    // updatedAt, so its last_modified log is the tree's full commit history.
+    // The tree root holds no contents, so last_modified on it returns nothing.
+    // Irmin lists the newest commits oldest first, and lists a commit once for
+    // every path it is reached by, so one reachable through both parents of a
+    // merge commit appears twice. The entries are the newest `limit` distinct
+    // commits the history shows, oldest first.
     val path = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMeta(wsId, treeId))
-    handleIrmin(irmin.getHistory(path, limit, branch)).flatMap(commits => ZIO.foreach(commits)(toEntry))
+    handleIrmin(irmin.getHistory(path, TreeHistoryServiceLive.requested(limit), branch))
+      .flatMap(commits => ZIO.foreach(commits.distinctBy(_.hash))(toEntry))
+      .map(_.flatten.takeRight(limit))
 
-  private def toEntry(commit: IrminCommit): IO[AppError, TreeHistoryEntry] =
-    ZIO.fromEither(CommitHash.fromString(commit.hash))
-      .mapBoth(
-        errs => RepositoryFailure(s"Invalid commit hash in history: ${errs.map(_.message).mkString("; ")}"),
-        hash => TreeHistoryEntry(hash, TreeHistoryServiceLive.parseOperation(commit.info.message), TreeHistoryServiceLive.toIso(commit.info.date))
-      )
+  /** The entry for one commit, or `None` for a commit the history does not
+    * show: a merge's preparation write is part of the merge commit after it. */
+  private def toEntry(commit: IrminCommit): IO[AppError, Option[TreeHistoryEntry]] =
+    CommitMessage.historyOperation(CommitMessage.parse(commit.info.message)) match
+      case None => ZIO.none
+      case Some(operation) =>
+        ZIO.fromEither(CommitHash.fromString(commit.hash))
+          .mapBoth(
+            errs => RepositoryFailure(s"Invalid commit hash in history: ${errs.map(_.message).mkString("; ")}"),
+            hash => Some(TreeHistoryEntry(hash, operation, TreeHistoryServiceLive.toIso(commit.info.date)))
+          )
 
   private def handleIrmin[A](effect: IO[IrminError, A]): IO[AppError, A] =
     effect.mapError(err => RepositoryFailure(err.logMessage))
@@ -52,16 +65,17 @@ object TreeHistoryServiceLive:
   val layer: ZLayer[IrminClient, Nothing, TreeHistoryService] =
     ZLayer.fromFunction(TreeHistoryServiceLive.apply)
 
-  /** Map the commit-message convention to a typed operation; anything
-    * unrecognized is `Other`. Merge commits carry `:merge-scenario:` in the
-    * middle, the tree mutations carry the operation as the final `:` segment. */
-  def parseOperation(message: String): HistoryOperation = message match
-    case m if m.contains(":merge-scenario:") => HistoryOperation.Merge
-    case m if m.endsWith(":create")          => HistoryOperation.Create
-    case m if m.endsWith(":update")          => HistoryOperation.Update
-    case m if m.endsWith(":delete")          => HistoryOperation.Delete
-    case m if m.endsWith(":revert")          => HistoryOperation.Revert
-    case _                                   => HistoryOperation.Other
+  /** How many commits to ask Irmin for: twice `limit`, saturating at the
+    * largest `Int`. Irmin's `last_modified` stops at `n` commits, and a merge's
+    * preparation commit and a commit listed twice both count toward `n`, so
+    * fewer than `limit` entries can remain.
+    *
+    * {{{
+    * requested(50) // 100
+    * }}}
+    */
+  private[services] def requested(limit: PositiveInt): PositiveInt =
+    (limit.toLong * 2).min(Int.MaxValue.toLong).toInt.refineOption[Greater[0]].getOrElse(limit)
 
   /** Irmin renders the commit date as an epoch-seconds string; normalize to
     * ISO-8601. If it is already non-numeric (a future Irmin change) or outside

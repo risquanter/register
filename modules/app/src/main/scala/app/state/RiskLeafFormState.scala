@@ -688,7 +688,7 @@ object RiskLeafFormState:
           case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
                FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
                FieldName.SeedVarId | FieldName.SeedEntityId | FieldName.Spec | FieldName.ChildAt(_) |
-               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
+               FieldName.Mitigations | FieldName.Precedence | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
                FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
                FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
                FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |

@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt, StoreBranch}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
 import com.risquanter.register.domain.errors.{DataConflict, ErrorLocation, FieldName, ScenarioHeadStale, ValidationFailed, ValidationErrorCode, IrminError}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
@@ -60,6 +60,7 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
 
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def mergeBranch(from: BranchRef, into: StoreBranch, message: String) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))

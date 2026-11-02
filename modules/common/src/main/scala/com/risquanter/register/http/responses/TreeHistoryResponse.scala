@@ -1,26 +1,51 @@
 package com.risquanter.register.http.responses
 
-import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, JsonDecoder}
+import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
+import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.iron.CommitHash
 
-/** The kind of write a history entry records. Parsed server-side from the
-  * commit-message convention; a raw or unrecognized message maps to `Other`.
-  * String-encoded on the wire (the raw commit message, which embeds the
-  * WorkspaceId, never leaves the server).
+/** The four writes a save makes to one tree. */
+@jsonDiscriminator(TreeWriteKind.TagField)
+enum TreeWriteKind:
+  case Create, Update, Delete, Revert
+
+object TreeWriteKind:
+  /** The key naming which case a payload states. Read by this coproduct's
+    * decoder and published in its schema, and stated here once so the two
+    * cannot disagree. */
+  final val TagField = "kind"
+
+  given codec: JsonCodec[TreeWriteKind] = DeriveJsonCodec.gen[TreeWriteKind]
+
+  given schema: Schema[TreeWriteKind] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = Configuration.default.withDiscriminator(TagField)
+    Schema.derived[TreeWriteKind]
+
+/** The kind of write a history entry shows. A tree write is one case holding
+  * its kind, so each write is named once. The server derives it from the
+  * commit message, which embeds the `WorkspaceId` and never leaves the server;
+  * a message the server did not write is `Other`.
   */
+@jsonDiscriminator(HistoryOperation.TagField)
 enum HistoryOperation:
-  case Create, Update, Delete, Merge, Revert, Other
+  case TreeWrite(write: TreeWriteKind)
+  case Merge()
+  case Other()
 
 object HistoryOperation:
-  given JsonEncoder[HistoryOperation] = JsonEncoder[String].contramap(_.toString)
-  given JsonDecoder[HistoryOperation] = JsonDecoder[String].map {
-    case "Create" => Create
-    case "Update" => Update
-    case "Delete" => Delete
-    case "Merge"  => Merge
-    case "Revert" => Revert
-    case _        => Other
-  }
+  /** The key naming which case a payload states. Read by this coproduct's
+    * decoder and published in its schema, and stated here once so the two
+    * cannot disagree. */
+  final val TagField = "kind"
+
+  given codec: JsonCodec[HistoryOperation] = DeriveJsonCodec.gen[HistoryOperation]
+
+  given schema: Schema[HistoryOperation] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = Configuration.default.withDiscriminator(TagField)
+    Schema.derived[HistoryOperation]
 
 /** One commit in a tree's history on a branch. `at` is an ISO-8601 timestamp. */
 final case class TreeHistoryEntry(commitHash: CommitHash, operation: HistoryOperation, at: String)

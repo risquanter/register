@@ -7,10 +7,11 @@ import app.views.BlockedMessages
 import com.risquanter.register.domain.data.iron.ScenarioName
 import com.risquanter.register.http.responses.{MergePreviewResponse, MergePreviewStatus}
 
-/** "Merge into main…" modal (Design view): shows the server's byte-level
-  * conflict preview and offers Merge only when it is clean. Conflicting
-  * paths are listed report-only — the resolution path is editing the nodes
-  * so both branches agree, then Re-check.
+/** "Merge into main…" modal (Design view): shows the server's conflict
+  * preview and offers Merge only when it is clean. Each conflict is listed
+  * report-only, by the tree, node or mitigation it names and the fields both
+  * branches changed — the resolution path is changing either branch so those
+  * fields agree, then Re-check.
   *
   * Owns no state (ADR-019 Pattern 1) — everything lives in
   * `ScenarioMergeState`; `onMerged` is the owning view's success reaction
@@ -45,7 +46,7 @@ object MergeModal:
         cls := "merge-modal",
         onClick.stopPropagation --> { _ => () },
         div(cls := "merge-modal-title", s"Merge '⎇ ${name.value}' into main"),
-        div(cls := "merge-modal-body", child <-- state.preview.signal.map(renderPreview(state, _))),
+        div(cls := "merge-modal-body", child <-- state.preview.signal.map(renderPreview(state, name, _))),
         child.maybe <-- state.submit.signal.map {
           case MergeSubmitState.Failed(failure) =>
             Some(FailureNotice(failure, None))
@@ -67,7 +68,11 @@ object MergeModal:
       )
     )
 
-  private def renderPreview(state: ScenarioMergeState, preview: LoadState[MergePreviewResponse]): HtmlElement =
+  private def renderPreview(
+    state: ScenarioMergeState,
+    name: ScenarioName.ScenarioName,
+    preview: LoadState[MergePreviewResponse]
+  ): HtmlElement =
     preview match
       case LoadState.Loading =>
         div(cls := "merge-modal-status", MergeMessages.Checking)
@@ -102,12 +107,18 @@ object MergeModal:
               recheckButton(state)
             )
 
-          case MergePreviewStatus.Conflicts(paths) =>
+          case MergePreviewStatus.Conflicts(entries) =>
             div(
-              div(cls := "merge-modal-error", MergeMessages.conflictsHeading(paths)),
+              div(cls := "merge-modal-error", MergeMessages.conflictsHeading(entries)),
               ul(
                 cls := "merge-modal-conflicts",
-                paths.map(entry => li(code(entry.path)))
+                entries.map(entry =>
+                  li(
+                    div(MergeMessages.entryLabel(name, entry)),
+                    MergeMessages.fieldLines(name, entry).map(line => div(cls := "merge-modal-conflict-detail", line)),
+                    MergeMessages.presenceLine(name, entry).map(line => div(cls := "merge-modal-conflict-detail", line))
+                  )
+                )
               ),
               div(cls := "merge-modal-hint", MergeMessages.ConflictsHint),
               recheckButton(state)

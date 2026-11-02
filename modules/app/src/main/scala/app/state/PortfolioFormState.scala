@@ -143,7 +143,7 @@ object PortfolioFormState:
                FieldName.Spec | FieldName.Percentiles | FieldName.Quantiles |
                FieldName.PercentileAt(_) | FieldName.QuantileAt(_) | FieldName.ChildAt(_) |
                FieldName.LossRange | FieldName.PercentileQuantilePairing |
-               FieldName.Mitigations | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
+               FieldName.Mitigations | FieldName.Precedence | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
                FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
                FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
                FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |

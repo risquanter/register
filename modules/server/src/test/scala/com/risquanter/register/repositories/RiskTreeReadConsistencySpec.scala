@@ -7,7 +7,7 @@ import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
-import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, Revision, StoreBranch}
+import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
 import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure}
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry}
@@ -135,6 +135,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     private def unused(op: String): Nothing = throw new NotImplementedError(s"$op unused by RiskTreeReadConsistencySpec")
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("get"))
     override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("set"))
+    override def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef) = ZIO.die(unused("set"))
     override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("setTree"))
     override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("remove"))
     override def branches = ZIO.die(unused("branches"))
@@ -145,7 +146,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     override def deleteBranch(branch: StoreBranch, currentHead: CommitHash) = ZIO.die(unused("deleteBranch"))
     override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash) = ZIO.die(unused("moveBranchTo"))
     override def getCommit(hash: CommitHash) = ZIO.die(unused("getCommit"))
-    override def getHistory(path: IrminPath, n: com.risquanter.register.domain.data.iron.PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("getHistory"))
+    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("getHistory"))
     override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(unused("lca"))
     override def healthCheck = ZIO.die(unused("healthCheck"))
     override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("list"))

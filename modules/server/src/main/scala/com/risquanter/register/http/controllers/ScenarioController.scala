@@ -10,7 +10,7 @@ import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.ScenarioSourceDto
 import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergePreviewStatus, MergeScenarioResponse}
 import com.risquanter.register.domain.data.iron.BranchChoice
-import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergeConflictPath, MergePreviewResult}
+import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergePreviewResult}
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.http.errors.TreeScope
 
@@ -87,8 +87,8 @@ class ScenarioController private (
   private def toPreviewResponse(result: MergePreviewResult): MergePreviewResponse = result match
     case MergePreviewResult.Clean =>
       MergePreviewResponse(MergePreviewStatus.Clean())
-    case MergePreviewResult.Conflicts(paths) =>
-      MergePreviewResponse(MergePreviewStatus.Conflicts(paths.map(MergeConflictPath.toWire)))
+    case MergePreviewResult.Conflicts(entries) =>
+      MergePreviewResponse(MergePreviewStatus.Conflicts(entries))
     case MergePreviewResult.DuplicateNames(perTree) =>
       MergePreviewResponse(MergePreviewStatus.DuplicateNames(perTree))
     case MergePreviewResult.ScenarioMissing =>

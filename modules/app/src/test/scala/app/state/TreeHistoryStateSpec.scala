@@ -5,7 +5,7 @@ import zio.test.*
 import app.core.LocalProblem
 import com.risquanter.register.domain.data.iron.{NodeId, CommitHash}
 import com.risquanter.register.domain.data.LECNodeCurve
-import com.risquanter.register.http.responses.{TreeHistoryResponse, TreeHistoryEntry, HistoryOperation}
+import com.risquanter.register.http.responses.{TreeHistoryResponse, TreeHistoryEntry, HistoryOperation, TreeWriteKind}
 
 /** Pure tests for the Slice E-A derivations — no Laminar Var/Signal harness,
   * since both are plain functions of `LoadState`.
@@ -24,8 +24,8 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
 
     test("deriveCommits: Loaded → its entries, unmodified (oldest-first as fetched)") {
       val entries = List(
-        TreeHistoryEntry(c1, HistoryOperation.Create, "2026-01-01T00:00:00Z"),
-        TreeHistoryEntry(c2, HistoryOperation.Update, "2026-01-02T00:00:00Z")
+        TreeHistoryEntry(c1, HistoryOperation.TreeWrite(TreeWriteKind.Create), "2026-01-01T00:00:00Z"),
+        TreeHistoryEntry(c2, HistoryOperation.TreeWrite(TreeWriteKind.Update), "2026-01-02T00:00:00Z")
       )
       assertTrue(TreeHistoryState.deriveCommits(LoadState.Loaded(TreeHistoryResponse(entries))) == entries)
     },

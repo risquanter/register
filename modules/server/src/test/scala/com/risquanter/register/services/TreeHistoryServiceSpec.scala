@@ -3,36 +3,98 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 import java.time.Instant
-import com.risquanter.register.http.responses.HistoryOperation
+import io.github.iltotore.iron.*
+import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, ScenarioName, StoreBranch, WorkspaceId}
+import com.risquanter.register.domain.errors.{AppError, IrminError}
+import com.risquanter.register.http.responses.{HistoryOperation, TreeWriteKind}
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
+import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminPath, IrminTreeEntry}
+import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
 
-/** Pure tests for `TreeHistoryServiceLive`'s commit-message → operation
-  * mapping and timestamp normalization (the parts that don't need Irmin). */
+/** Tests for `TreeHistoryServiceLive`: which commits a history shows, how many
+  * it asks Irmin for, and timestamp normalization. */
 object TreeHistoryServiceSpec extends ZIOSpecDefault:
 
-  private val ws = "01j8zq3fkwp2x9m4v7rtbnd6ea"
-  private val tree = "01j8zq3fkwp2x9m4v7rtbnd6eb"
+  private given Checked[Permission] = TestChecked.value
+
+  private val ws       = WorkspaceId(safeId("history-ws"))
+  private val tree     = treeId("history-tree")
+  private val scenario = ScenarioName.fromString("draft-a").toOption.get
+
+  private def commitWith(fill: Char, message: CommitMessage): IrminCommit =
+    IrminCommit(fill.toString * 40, "", Nil, IrminInfo("0", "test", CommitMessage.render(message)))
+
+  private def limit(n: Int): PositiveInt = n.refineUnsafe
+
+  /** Irmin for the history read only: `getHistory` answers the newest `n`
+    * commits of `log`, oldest first, and records the `n` it was asked for. */
+  private final class FakeHistoryIrmin(log: List[IrminCommit], asked: Ref[List[Int]]) extends IrminClient:
+    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminCommit]] =
+      asked.update(_ :+ (n: Int)).as(log.takeRight(n))
+
+    override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def branches = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def mainBranch: IO[IrminError, Option[IrminBranch]] = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def getBranch(branch: StoreBranch) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def mergeBranch(from: BranchRef, into: StoreBranch, message: String) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def createBranchAt(branch: StoreBranch, at: CommitHash) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def getCommit(hash: CommitHash) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def listAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def healthCheck = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
+
+  // Oldest first, as Irmin's `last_modified` returns them: a create, a save,
+  // then one merge (its preparation write, then its final write). The create
+  // is listed twice, as Irmin lists a commit reached through both parents of
+  // a merge commit.
+  private val log = List(
+    commitWith('d', CommitMessage.TreeWritten(ws, tree, TreeWriteKind.Create)),
+    commitWith('d', CommitMessage.TreeWritten(ws, tree, TreeWriteKind.Create)),
+    commitWith('c', CommitMessage.TreeWritten(ws, tree, TreeWriteKind.Update)),
+    commitWith('b', CommitMessage.MergePrepared(ws, scenario)),
+    commitWith('a', CommitMessage.ScenarioMerged(ws, scenario))
+  )
+
+  private def history(n: Int): IO[AppError, (List[HistoryOperation], List[Int])] =
+    for
+      asked   <- Ref.make(List.empty[Int])
+      entries <- TreeHistoryServiceLive(FakeHistoryIrmin(log, asked))
+                   .history(ws, tree, BranchRef.Main, limit(n))
+      seen    <- asked.get
+    yield (entries.map(_.operation), seen)
 
   def spec = suite("TreeHistoryServiceLive")(
 
-    suite("parseOperation")(
-      test("recognizes the tree-mutation message suffixes") {
-        assertTrue(
-          TreeHistoryServiceLive.parseOperation(s"workspace:$ws:risk-tree:$tree:create") == HistoryOperation.Create,
-          TreeHistoryServiceLive.parseOperation(s"workspace:$ws:risk-tree:$tree:update") == HistoryOperation.Update,
-          TreeHistoryServiceLive.parseOperation(s"workspace:$ws:risk-tree:$tree:delete") == HistoryOperation.Delete,
-          TreeHistoryServiceLive.parseOperation(s"workspace:$ws:risk-tree:$tree:revert") == HistoryOperation.Revert
-        )
+    suite("history")(
+      test("a merge's preparation commit is not shown, a commit listed twice is shown once, oldest first") {
+        history(10).map { case (operations, _) =>
+          assertTrue(operations == List(
+            HistoryOperation.TreeWrite(TreeWriteKind.Create),
+            HistoryOperation.TreeWrite(TreeWriteKind.Update),
+            HistoryOperation.Merge()
+          ))
+        }
       },
-      test("recognizes a merge-scenario message") {
-        assertTrue(
-          TreeHistoryServiceLive.parseOperation(s"workspace:$ws:merge-scenario:cyber") == HistoryOperation.Merge
-        )
+      test("limit counts the entries shown and keeps the newest, and Irmin is asked for twice as many commits") {
+        history(2).map { case (operations, asked) =>
+          assertTrue(
+            operations == List(HistoryOperation.TreeWrite(TreeWriteKind.Update), HistoryOperation.Merge()),
+            asked == List(4)
+          )
+        }
       },
-      test("maps anything unrecognized to Other") {
-        assertTrue(
-          TreeHistoryServiceLive.parseOperation("some external commit") == HistoryOperation.Other,
-          TreeHistoryServiceLive.parseOperation("") == HistoryOperation.Other
-        )
+      test("the number of commits asked for saturates instead of overflowing") {
+        assertTrue(TreeHistoryServiceLive.requested(limit(Int.MaxValue)) == limit(Int.MaxValue))
       }
     ),
 

@@ -102,7 +102,8 @@ object ErrorSubject:
   * text; their index-less siblings are the whole-collection failures, since a
   * monotonicity violation names the collection and not an element.
   *
-  * A case names what a refusal is about, which is not always a single field. A
+  * A case names what a refusal or a merge conflict is about, which is not
+  * always a single field. A
   * rule over two fields is about the pair — `LossRange` and
   * `PercentileQuantilePairing` are those cases — because neither field is at
   * fault alone and either one can be edited to satisfy the rule. Which controls
@@ -141,7 +142,7 @@ enum FieldName:
   case PercentileQuantilePairing
 
   // Mitigations and the transform parameters a mitigation spec carries
-  case Mitigations, Cap, Factor, OverrideParams, TargetingSource
+  case Mitigations, Precedence, Cap, Factor, OverrideParams, TargetingSource
   case Deductible, Threshold
 
   // References to a revision or a branch

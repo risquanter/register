@@ -10,7 +10,7 @@ import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
   * Variables are interpolated directly (Irmin's GraphQL doesn't require parameterized queries
   * for simple string values, and this keeps the implementation simple).
   *
-  * Branch parameterization (milestone 2b, DD-1): read queries select the
+  * Branch parameterization: read queries select the
   * branch via a GraphQL alias — `main: branch(name: "x")` — so branch reads
   * return byte-identical response shapes to main reads and every response
   * model works unchanged. Mutations pass Irmin's optional `branch` argument.
@@ -63,15 +63,6 @@ object IrminQueries:
     |}
     """.stripMargin.trim
 
-  /**
-    * Query to list contents at a path in the tree.
-    *
-    * Returns all direct children of the specified path.
-    * Uses fragment to handle union type (Contents | Tree).
-    *
-    * @param path Path to list (empty string for root)
-    * @param branch Branch to read from (Main = Irmin's default branch)
-    */
   /** The `tree { get_tree(path) { list { … } } }` selection shared by the
     * branch-scoped [[listTree]] and commit-scoped [[listTreeAtCommit]] queries.
     * GraphQL ignores the surrounding whitespace, so a compact single line keeps
@@ -81,6 +72,15 @@ object IrminQueries:
     val pathPart = if path.value.isEmpty then "" else s"""(path: "${path.value}")"""
     s"tree { get_tree$pathPart { list { ... on Contents { path hash value } ... on Tree { path hash } } } }"
 
+  /**
+    * Query to list contents at a path in the tree.
+    *
+    * Returns all direct children of the specified path.
+    * Uses fragment to handle union type (Contents | Tree).
+    *
+    * @param path Path to list (empty string for root)
+    * @param branch Branch to read from (Main = Irmin's default branch)
+    */
   def listTree(path: IrminPath, branch: BranchRef = BranchRef.Main): String =
     s"{ ${branchSelector(branch)} { ${listSelection(path)} } }"
 
@@ -91,9 +91,11 @@ object IrminQueries:
     * @param value JSON value to store
     * @param message Commit message
     * @param author Commit author
-    * @param branch Branch to write to (Main = Irmin's default; Irmin creates a named branch on first write)
+    * @param branch Branch to write to (Main = Irmin's default; Irmin creates a
+    *               named branch on first write). A merge's staging branch is
+    *               accepted, because the merge writes a tree's `meta` value there.
     */
-  def setValue(path: IrminPath, value: String, message: String, author: String, branch: BranchRef = BranchRef.Main): String =
+  def setValue(path: IrminPath, value: String, message: String, author: String, branch: StoreBranch = BranchRef.Main): String =
     // Escape special characters in value for GraphQL string
     val escapedValue = escapeGraphQLString(value)
     val escapedMessage = escapeGraphQLString(message)
@@ -121,7 +123,7 @@ object IrminQueries:
     """.stripMargin.trim
 
   /**
-    * Mutation to replace an entire subtree in one commit (DD-7).
+    * Mutation to replace an entire subtree in one commit.
     *
     * Irmin's `set_tree` has subtree-replace semantics: keys under `path` that
     * are absent from `tree` are deleted; an empty `tree` removes the whole
@@ -225,7 +227,7 @@ object IrminQueries:
   val getMainBranch: String = getBranchInfo(BranchRef.Main)
 
   /**
-    * Mutation to merge one branch into another (Phase D groundwork).
+    * Mutation to merge one branch into another.
     *
     * @param from Source branch
     * @param into Target branch (Main = Irmin's default branch)
@@ -255,7 +257,7 @@ object IrminQueries:
     """.stripMargin.trim
 
   /**
-    * Mutation to revert a branch to a previous commit (Phase E groundwork).
+    * Mutation to revert a branch to a previous commit.
     *
     * @param commitHash Target commit
     * @param branch Branch to revert (Main = Irmin's default branch)
@@ -279,8 +281,8 @@ object IrminQueries:
     """.stripMargin.trim
 
   /**
-    * CAS mutation on a branch head (Phase B: DD-5 scenario create/delete;
-    * A9 fact 2). `test` is the expected current head (`None` = branch must
+    * Compare-and-set mutation on a branch head, used to create, delete and
+    * move a branch. `test` is the expected current head (`None` = branch must
     * not currently exist); `set` is the desired new head (`None` = delete
     * the branch). Returns a raw Boolean: `true` on success, `false` if the
     * branch's actual head didn't match `test` — a stale/collision result,
@@ -378,7 +380,7 @@ object IrminQueries:
 
   /**
     * Query for the lowest common ancestors of a branch head and a commit
-    * (merge-base; Phase D groundwork).
+    * (the merge base).
     *
     * @param branch Branch whose head is one side (Main = Irmin's default branch)
     * @param commitHash The other side's commit hash

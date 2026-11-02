@@ -3,22 +3,20 @@ package com.risquanter.register.infra.irmin
 import zio.*
 import com.risquanter.register.infra.irmin.model.*
 import com.risquanter.register.domain.errors.IrminError
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, StoreBranch}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
 
 /**
   * ZIO service interface for Irmin GraphQL client.
   *
-  * Provides CRUD operations for key-value storage in Irmin's content-addressed tree,
-  * plus branch operations (milestone 2b: scenarios ride on Irmin branches).
-  * All operations return typed IrminError on the error channel (ADR-010).
-  * Repository/service boundaries map IrminError to existing domain errors.
+  * Provides reads and writes of Irmin contents at paths in Irmin's
+  * content-addressed tree, plus branch operations; a scenario is an Irmin
+  * branch. All operations return typed IrminError on the error channel
+  * (ADR-010). Repository/service boundaries map IrminError to domain errors.
   *
-  * Branch parameterization (DD-1): every CRUD op takes an optional `branch`;
-  * `None` reads/writes `main` — fully backward compatible. Irmin creates a
-  * branch implicitly on its first write (there is no create-branch mutation).
+  * Every read and write of tree data takes a `BranchRef`, which defaults to
+  * main. Irmin creates a branch implicitly on its first write.
   *
-  * Note: Subscriptions (watch) are deferred to Phase 5, Task 0 (IMPLEMENTATION-PLAN-PROPOSALS.md).
-  * Requires WebSocket client dep decision; implemented with TreeUpdatePipeline as consumer.
+  * Irmin's subscriptions (watch) are not used.
   */
 trait IrminClient:
 
@@ -44,8 +42,13 @@ trait IrminClient:
     */
   def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit]
 
+  /** Set a value on a merge's staging branch. The one write that accepts the
+    * staging type: every other write takes `BranchRef`, so tree data cannot be
+    * written to a staging branch through them (ADR-036 §2). */
+  def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef): IO[IrminError, IrminCommit]
+
   /**
-    * Replace an entire subtree in ONE commit (DD-7).
+    * Replace an entire subtree in ONE commit.
     *
     * Subtree-replace semantics: keys under `path` absent from `entries` are
     * deleted; an empty `entries` removes the whole subtree cleanly. Entry
@@ -112,7 +115,7 @@ trait IrminClient:
   def mergeBranch(from: BranchRef, into: StoreBranch, message: String): IO[IrminError, IrminCommit]
 
   /**
-    * Revert a branch to a previous commit (Phase E groundwork).
+    * Revert a branch to a previous commit.
     *
     * @param commit Target commit hash
     * @param branch Branch to revert
@@ -121,10 +124,9 @@ trait IrminClient:
   def revert(commit: CommitHash, branch: BranchRef): IO[IrminError, IrminCommit]
 
   /**
-    * Create a branch at a specific commit via CAS (Phase B, DD-5, A9 fact
-    * 2/3). Unlike a bare first write — which starts the branch EMPTY, not as
-    * a fork (A9 fact 3) — this makes the new branch's content `at`'s
-    * content, a true fork.
+    * Create a branch at a specific commit via compare-and-set. Unlike a bare
+    * first write, which starts the branch empty rather than as a fork, this
+    * makes the new branch's content `at`'s content, a true fork.
     *
     * @param branch Branch to create
     * @param at Commit the new branch should point at (e.g. main's head)
@@ -135,8 +137,8 @@ trait IrminClient:
   def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit]
 
   /**
-    * Delete a branch via CAS (Phase B, DD-5, A9 fact 2). Only removes the
-    * branch pointer — commits remain reachable by hash (A9 fact 5).
+    * Delete a branch via compare-and-set. Only removes the branch pointer:
+    * commits remain reachable by hash.
     *
     * @param branch Branch to delete
     * @param currentHead Expected current head
@@ -199,7 +201,7 @@ trait IrminClient:
   def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, List[IrminPath]]
 
   /**
-    * Commit history touching a path (Irmin `last_modified`; Phase E groundwork).
+    * Commit history touching a path (Irmin `last_modified`).
     *
     * @param path Path whose history to read
     * @param n Maximum number of commits to return
@@ -210,7 +212,7 @@ trait IrminClient:
 
   /**
     * Lowest common ancestor(s) of a branch head and a commit — the merge
-    * base (Phase D groundwork).
+    * base.
     *
     * @param branch Branch whose head is one side
     * @param commit The other side's commit hash

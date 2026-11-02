@@ -3,11 +3,14 @@ package app.views
 import zio.test.*
 import sttp.model.StatusCode
 
-import app.components.FormInputs
+import app.components.{FormInputs, MergeMessages}
 import app.core.{LocalProblem, RequestFailure}
-import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId, TreeId}
+import com.risquanter.register.domain.data.{RiskLeaf, RiskNode}
+import com.risquanter.register.domain.data.iron.{SafeName, ScenarioName, SeedVarId, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
 import com.risquanter.register.http.errors.{RejectionDetail, WireError}
+import com.risquanter.register.http.responses.{MergeConflictEntry, TreeLabel, TreeMetadataFields, Versions}
+import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId as treeIdOf, unsafeGet}
 
 /** Which sentence an inline view error display gets for each kind of failure.
   *
@@ -24,7 +27,66 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
-    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite, summaryHeadingSuite)
+    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite, summaryHeadingSuite, mergeConflictSuite)
+
+  // ── merge conflict sentences ──────────────────────────────────────────────
+
+  private val draftA   = ScenarioName.fromString("draft-a").toOption.get
+  private def name(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
+
+  private def leaf(leafName: String, probability: Double): RiskNode =
+    unsafeGet(RiskLeaf.create(
+      id = idStr("fraud"),
+      name = leafName,
+      probability = probability,
+      shape = lognormalShape(1000L, 50000L),
+      parentId = Some(nodeId("root")),
+      seedVarId = 1L
+    ), "leaf")
+
+  private val mergeTree = TreeLabel(treeIdOf("merge-test"), Versions(Some(name("merge-test")), Some(name("merge-test")), Some(name("merge-test"))))
+
+  private def nodeConflict(versions: Versions[RiskNode], fields: List[E.FieldName]): MergeConflictEntry =
+    MergeConflictEntry.NodeConflict(mergeTree, nodeId("fraud"), versions, fields)
+
+  private val mergeConflictSuite =
+    suite("MergeMessages")(
+      test("entryLabel names a node once when both branches agree on its name") {
+        val entry = nodeConflict(Versions(Some(leaf("Fraud", 0.1)), Some(leaf("Fraud", 0.6)), Some(leaf("Fraud", 0.3))), List(E.FieldName.Probability))
+        assertTrue(MergeMessages.entryLabel(draftA, entry) == "Risk 'Fraud' in 'merge-test'")
+      },
+      test("entryLabel names a node per branch when main renamed it") {
+        val entry = nodeConflict(Versions(Some(leaf("Fraud", 0.1)), Some(leaf("Card fraud", 0.1)), Some(leaf("Fraud", 0.3))), List(E.FieldName.Name, E.FieldName.Probability))
+        assertTrue(MergeMessages.entryLabel(draftA, entry) == "Risk 'Fraud' on draft-a, 'Card fraud' on main, in 'merge-test'")
+      },
+      test("fieldLines shows both branches' probability for a node conflict") {
+        val entry = nodeConflict(Versions(Some(leaf("Fraud", 0.1)), Some(leaf("Fraud", 0.6)), Some(leaf("Fraud", 0.3))), List(E.FieldName.Probability))
+        assertTrue(MergeMessages.fieldLines(draftA, entry) == List("Probability: 30% on draft-a, 60% on main"))
+      },
+      test("fieldLines shows both branches' names for a meta conflict, and names other fields only") {
+        val seed  = SeedVarId.fromLong(3L).toOption.get
+        val entry = MergeConflictEntry.TreeMetadataConflict(
+          treeIdOf("merge-test"),
+          Versions(
+            Some(TreeMetadataFields(name("Ops"), nodeId("root"), seed)),
+            Some(TreeMetadataFields(name("Operations"), nodeId("root"), SeedVarId.fromLong(4L).toOption.get)),
+            Some(TreeMetadataFields(name("Ops risk"), nodeId("root"), SeedVarId.fromLong(5L).toOption.get))
+          ),
+          List(E.FieldName.Name, E.FieldName.SeedVarHighWater)
+        )
+        assertTrue(MergeMessages.fieldLines(draftA, entry) == List(
+          "Name: 'Ops risk' on draft-a, 'Operations' on main",
+          "Last random-number stream issued"
+        ))
+      },
+      test("presenceLine names the branch that deleted a node and the fields the other changed") {
+        val entry = nodeConflict(Versions(Some(leaf("Fraud", 0.1)), None, Some(leaf("Card fraud", 0.3))), List(E.FieldName.Name, E.FieldName.Probability))
+        assertTrue(
+          MergeMessages.presenceLine(draftA, entry) == Some("Deleted on main. Changed on draft-a: Name, Probability"),
+          MergeMessages.fieldLines(draftA, entry).isEmpty
+        )
+      }
+    )
 
   private val summaryHeadingSuite =
     suite("FormInputs.summaryHeading")(
