@@ -200,7 +200,7 @@ object LossRange:
   *
   * The mode field is the serialised form's only discriminator: the two cases are
   * distinguished by it rather than by which fields are present. Discriminating
-  * by field presence makes a malformed record of one case report the other
+  * by field presence makes a malformed JSON object of one case report the other
   * case's complaint. Its value is the case name, derived rather than declared,
   * so the tag cannot disagree with the case it names. `LeafSimContent`'s
   * projection declares the same two spellings for its own hash preimage, which

@@ -150,7 +150,7 @@ object RiskLeaf {
     * - Encoder: RiskLeaf (Iron types) → RiskLeafRaw (primitives) → JSON
     *
     * The shape is one field here as it is in the domain, carried by
-    * `DistributionShape`'s own codec. A record naming one mode while carrying
+    * `DistributionShape`'s own codec. A JSON object naming one mode while carrying
     * the other mode's fields therefore has no spelling at all, which is what
     * removes the refusal a flat field set would need.
     */

@@ -38,7 +38,7 @@ case class NodeProvenance(
   *
   * The tag field is the payload's only discriminator: the two cases are
   * distinguished by it rather than by which fields are present. Discriminating
-  * by field presence makes a malformed record of one case report the other
+  * by field presence makes a malformed JSON object of one case report the other
   * case's complaint. Its value is the case name, derived rather than declared.
   */
 @jsonDiscriminator(DistributionShape.TagField)
@@ -96,7 +96,7 @@ object DistributionParams {
   given codec: JsonCodec[DistributionParams] = DeriveJsonCodec.gen[DistributionParams]
 
   /** Declared rather than left to a holder's derivation: auto-derivation driven
-    * from a record holding this trait does not descend into it, so a holder
+    * from a case class holding this trait does not descend into it, so a holder
     * would publish an unconstrained object instead of the two modes. The
     * configuration names the discriminator, so the document states the key the
     * decoder reads rather than leaving a reader to infer the mode from which
@@ -113,7 +113,7 @@ object NodeProvenance {
   import sttp.tapir.Schema
 
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
-  // The published description is the record's real field list, with the
+  // The published description is the case class's real field list, with the
   // parameter union described as the coproduct it is, through the schema
   // `DistributionParams` declares. The auto-derivation import is scoped to this
   // body rather than to the file, so it does not widen implicit scope.

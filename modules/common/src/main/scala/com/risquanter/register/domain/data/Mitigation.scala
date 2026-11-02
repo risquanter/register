@@ -216,7 +216,7 @@ object MitigationSpec {
   // reach it from a holder, because `LeafStageSpec` sits between this trait and
   // its two leaf cases and a derivation driven from the holder does not descend
   // through an intermediate sealed trait. Declaring it here is what lets every
-  // record holding a spec describe it as the coproduct it is. The configuration
+  // case class holding a spec describe it as the coproduct it is. The configuration
   // names the discriminator, so the published description states the key the
   // decoder reads.
   given schema: Schema[MitigationSpec] =
@@ -315,7 +315,7 @@ object Mitigation {
     }
   )
 
-  // The published description is the record's real field list, with the spec
+  // The published description is the case class's real field list, with the spec
   // described as the coproduct it is. The auto-derivation import is scoped to
   // this body, so it reaches the nominal wrappers over Iron identifiers without
   // widening implicit scope across the file.

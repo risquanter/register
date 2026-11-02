@@ -46,7 +46,7 @@ final case class DistributionPreviewResponse(
 object DistributionPreviewResponse:
   // The mode field's schema comes from `IronTapirCodecs`, which is where every
   // refined type's Tapir schema lives, so the derivation describes this response
-  // as the record it is rather than as an unconstrained object.
+  // as the case class it is rather than as an unconstrained object.
   given schema: Schema[DistributionPreviewResponse] =
     import com.risquanter.register.http.codecs.IronTapirCodecs.given
     Schema.derived[DistributionPreviewResponse]

@@ -5,8 +5,8 @@ import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.{
   RiskLeaf, RiskPortfolio, RiskNode, RiskTree,
-  Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  TransformPipeline, ResultTransformSpec
+  Mitigation, MitigationTarget, MitigationPrecedence, TargetingPredicate,
+  ResultTransformSpec
 }
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
@@ -179,8 +179,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   //
   // The same 4-node tree, now carrying three mitigations. `resolvedScopes` maps
   // two of them to node scopes; the third (`mAbsent`) is omitted, modelling a
-  // Failed mitigation excluded upstream from `ResolvedScopes.appliedScopes`
-  // (M3-D2=A) — the KB must treat it as contributing nothing.
+  // Failed mitigation excluded upstream from `ResolvedScopes.appliedScopes` —
+  // the KB must treat it as contributing nothing.
 
   private val mCyberId    = mitigationId("m-cyber")
   private val mHardwareId = mitigationId("m-hardware")
@@ -760,7 +760,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val r = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigate"), List(nodeVal("Hardware"), mitVal(mCyberId)))
       assertTrue(r == Right(false))
     },
-    test("mitigate: mitigation absent from resolvedScopes (Failed, M3-D2) → false") {
+    test("mitigate: mitigation absent from resolvedScopes (Failed) → false") {
       val r = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigate"), List(nodeVal("Cyber"), mitVal(mAbsentId)))
       assertTrue(r == Right(false))
     },
@@ -770,7 +770,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val root     = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigated"), List(nodeVal("Root")))
       assertTrue(cyber == Right(true), hardware == Right(true), root == Right(false))
     },
-    test("unmitigated is the exact complement of mitigated over the node domain (M3-D5)") {
+    test("unmitigated is the exact complement of mitigated over the node domain") {
       val nodes  = List("Root", "IT Risk", "Cyber", "Hardware")
       val agrees = nodes.forall { n =>
         val m = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigated"), List(nodeVal(n)))

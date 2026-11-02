@@ -152,7 +152,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
       },
 
-      test("a malformed metalog record reports the metalog decoder's own complaint") {
+      test("a malformed metalog JSON object reports the metalog decoder's own complaint") {
         // The term count is below `MetalogTermCount`'s floor, so the metalog
         // decoder refuses it. The discriminator sends the body to that decoder
         // alone, so the failure names the term count rather than reporting a

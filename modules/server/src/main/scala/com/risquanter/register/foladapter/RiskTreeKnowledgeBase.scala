@@ -175,8 +175,8 @@ class RiskTreeKnowledgeBase(
 
   /** Union of every resolved mitigation scope. `mitigated(x)` reads this set and
     * `unmitigated(x)` its complement, so `unmitigated ≡ ¬mitigated` holds by
-    * construction (M3-D5). Failed outcomes are already excluded upstream
-    * (`ResolvedScopes.appliedScopes`, M3-D2). */
+    * construction. Failed outcomes are already excluded upstream
+    * (`ResolvedScopes.appliedScopes`). */
   private val mitigatedIds: Set[NodeId] =
     resolvedScopes.valuesIterator.foldLeft(Set.empty[NodeId])(_ union _)
 
@@ -308,7 +308,7 @@ object RiskTreeKnowledgeBase:
 
   /** Tree-derived schema shared across every query bound against the same tree.
     *
-    * Splits the KB's inputs at the natural boundary: this record holds what
+    * Splits the KB's inputs at the natural boundary: this case class holds what
     * depends only on the tree (catalog, name↔id maps, collision diagnostics);
     * simulation results and resolved mitigation scopes are query-time inputs
     * on the `RiskTreeKnowledgeBase` class itself.

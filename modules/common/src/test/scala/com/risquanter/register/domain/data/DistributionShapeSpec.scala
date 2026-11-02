@@ -348,25 +348,25 @@ object DistributionShapeSpec extends ZIOSpecDefault:
         assertTrue(json.fromJson[DistributionShape].isLeft)
       },
 
-      test("a lognormal record survives decode-then-encode byte-identically") {
+      test("a lognormal JSON object survives decode-then-encode byte-identically") {
         val shape: DistributionShape = lognormal(1000L, 50000L).toEither.toOption.get
         val json                     = shape.toJson
         assertTrue(json.fromJson[DistributionShape].map(_.toJson) == Right(json))
       },
 
-      test("a metalog record survives decode-then-encode byte-identically") {
+      test("a metalog JSON object survives decode-then-encode byte-identically") {
         val shape: DistributionShape = metalog(threePercentiles, threeQuantiles, Some(3)).toEither.toOption.get
         val json                     = shape.toJson
         assertTrue(json.fromJson[DistributionShape].map(_.toJson) == Right(json))
       },
 
-      test("a malformed metalog record reports the metalog gate's own complaint, not the lognormal one") {
+      test("a malformed metalog JSON object reports the metalog gate's own complaint, not the lognormal one") {
         val json = """{"distributionType":"Metalog","percentiles":[0.9,0.1],"quantiles":[1000.0,5000.0]}"""
         val message = json.fromJson[DistributionShape].swap.toOption.getOrElse("")
         assertTrue(message.contains(ValidationMessages.percentilesMustBeStrictlyIncreasing))
       },
 
-      test("a metalog record is refused when it carries only the lognormal fields") {
+      test("a metalog JSON object is refused when it carries only the lognormal fields") {
         val json = """{"distributionType":"Metalog","minLoss":1000,"maxLoss":50000}"""
         assertTrue(json.fromJson[DistributionShape].isLeft)
       }

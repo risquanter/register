@@ -31,7 +31,7 @@ object RelativeLikelihood {
   given codec: JsonCodec[RelativeLikelihood] = DeriveJsonCodec.gen[RelativeLikelihood]
 
   // Declared rather than left to a holder's derivation: auto-derivation driven
-  // from a record holding this trait does not descend into it, so every holder
+  // from a case class holding this trait does not descend into it, so every holder
   // would publish an unconstrained object instead of the cases. The
   // configuration names the discriminator, so the published description states
   // the key the decoder reads rather than leaving a reader to infer the case
