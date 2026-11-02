@@ -124,3 +124,7 @@ docs/scratch/ASSURANCE-ANCHORED-PARAMETERS.md
 # it is fit to be transcribed. The transplant works from production's own
 # idioms with the prototype as the shape reference only.
 docs/scratch/valuation-prototypes/
+
+# Review coverage entries. Each review tier appends one; only the newest is
+# read, by the next tier, so the files are local working state.
+docs/dev/reviews/
