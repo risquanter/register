@@ -7972,7 +7972,56 @@ TWC-D-8 and TWC-D-15, and finding 2 as item 7 below.
    answers are signature-echo work. The options weighed: re-read both heads
    after the scan and retry the preview once, which detects rather than
    prevents and brings back the second head read EWB-D-60 removed; and leaving
-   the preview as it is.
+   the preview as it is. Item 7 is implemented on top of item 8.
+8. **The Irmin client's egress and listings are typed.** Ruled 2026-11-03. A
+   `String` on a boundary is justified only by the absence of a type, never by
+   the receiver's signature. Four `String`s on this boundary are not justified:
+   - `WorkspaceStoragePaths`' six builders (`workspaceRoot`, `treesRoot`,
+     `treeRoot`, `treeMeta`, `treeNodes`, `treeMitigations`) return `String`, and
+     every main-code caller wraps them in `IrminPath.unsafeFrom`. They return
+     `IrminPath`. A new `withinTree(path: TreePath): IrminPath` gives the entry
+     paths of a tree write, which `RiskTreeRepositoryIrmin.writeTree` builds by
+     hand today (`IrminPath.unsafeFrom("meta")`, `s"nodes/${node.id.value}"`).
+     §6.4's "No storage-path refinement" stands: no new path type is added.
+   - A path segment has no type, so `IrminPath./` takes a `String` and returns
+     `Either`, and `IrminPath.name` returns `Option[String]`. A segment type is
+     added in `IrminPath.scala`:
+
+     ```scala
+     type IrminSegmentConstraint = Match["^[a-zA-Z0-9_-]+$"]
+     type IrminSegmentStr = String :| IrminSegmentConstraint
+     opaque type IrminSegment = IrminSegmentStr
+
+     object IrminSegment:
+       def apply(s: IrminSegmentStr): IrminSegment
+       /** A name Irmin listed, refined where it arrives (ADR-039). */
+       def from(s: String): Either[String, IrminSegment]
+       /** Total: a ULID's characters, [0-9A-HJKMNP-TV-Z], are segment characters. */
+       def of(id: SafeId.SafeId): IrminSegment
+
+     extension (p: IrminPath)
+       def /(segment: IrminSegment): IrminPath     // total; was Either[String, IrminPath]
+       def name: Option[IrminSegment]              // was Option[String]
+     ```
+
+     The layout's fixed words become named `IrminSegment` constants in
+     `WorkspaceStoragePaths`.
+   - `IrminClient`'s `set`, `setTree`, `remove` and `mergeBranch` take
+     `message: String`, and every caller renders a `CommitMessage` one line
+     before the call. They take `CommitMessage`; `IrminClientLive` and
+     `IrminQueries` render it where the GraphQL document is written.
+   - `list` and `listAtCommit` return child names as `List[IrminPath]`. They
+     return `List[IrminSegment]`, which the consumer refines into the id each
+     names.
+
+   Stored content stays `String` (`get`, `getAtCommit`, `set`'s value,
+   `IrminTreeEntry.value`): its parse is the domain decoder in the same step
+   (Phase 7 step 3), and the merge compares it as bytes (ADR-032). The client's
+   scaladoc states that. On the response side, Phase 7 step 5 gains
+   `IrminCommit.info.message` parsed on arrival as `Option[CommitMessage]`,
+   `None` for a commit this service did not write. `IrminQueries.setValue`'s
+   `author: String` is traced when the echo is written. Every `IrminClient`
+   fake in the test tree follows the trait.
 
 Every file these touch is on `PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`, except the
 container patch in item 1, which needs an inventory amendment presented when

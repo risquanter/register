@@ -64,7 +64,10 @@ document, halt, and get an accepted signal on the document itself.
    carries the family search from `.claude/rules/scala-algebraic-design.md`: the
    family, its file, one existing member quoted, and either the existing type or
    rule it reuses or the statement that no existing one denotes the same
-   concept.
+   concept. Every `String` or other raw primitive in a signature the plan writes
+   or calls — parameter or return — carries either the existing type that
+   replaces it or the stated reason none applies; "the receiver takes `String`"
+   is not a reason.
 2. **File inventory** — every file to create or modify, by full repo-relative
    path with no abbreviation or ellipsis, as **bullet lines** in the plan's
    inventory document. `PLAN-<name>.md` is paired with

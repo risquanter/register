@@ -61,6 +61,15 @@ diff, apply the Layer A₀ questions from `.claude/rules/scala-algebraic-design.
   `String` IDs for distinct concepts.) → Missing nominal wrapper per ADR-018.
   **MUST-FIX.**
 - Does the field originate from user input and lack an Iron refinement? **MUST-FIX.**
+- Does a signature the diff adds, changes **or calls** take or return `String`
+  (or another raw primitive) for a value whose contract is narrower than "any
+  text"? The receiver's signature is never the justification: if it is ours, the
+  signature is the defect. Raw `String` is accepted only where the content's real
+  parse happens in the same step (a decoder over stored JSON) and the site states
+  that justification. **MUST-FIX.** Check both directions at an external
+  boundary: what we send (paths, messages, documents) and what we receive.
+- Is an `unsafeFrom` / `refineUnsafe` applied outside a test or a literal? The
+  value's producer should return the refined type instead. **MUST-FIX.**
 
 **Within-domain adhesion:**
 - Is `.value` called on an Iron type outside of: (a) a Tapir codec or JSON
