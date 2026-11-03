@@ -733,6 +733,13 @@ become unreachable orphans. `EvictionStrategy` exists to reclaim them, and its
 only implementation, `NoOpEvictionStrategy`, reclaims nothing: entries live
 until the process restarts, and a deleted workspace's instance is not released.
 
+**Dropping is always safe.** Because an entry is a pure function of its key,
+removing an entry or a whole instance at any moment changes no figure. The next
+read misses, re-simulates the leaf and stores the same losses. So any eviction
+or release, present or future, may drop an instance without checking who else
+draws with its entity id. The cost of dropping too early is a re-simulation,
+never a wrong result.
+
 ## Scope and Responsibilities
 
 ### **Component Responsibilities**

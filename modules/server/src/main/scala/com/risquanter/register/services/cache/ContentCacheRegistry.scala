@@ -20,6 +20,12 @@ import com.risquanter.register.domain.data.iron.SeedEntityId
   * workspaces hold the same one, so there is one instance per workspace as a
   * consequence. A deleted workspace's instance lingers until restart, because
   * nothing is evicted.
+  *
+  * Dropping an instance is safe at any moment, whoever else draws with its
+  * entity id. An entry is a pure function of its key, so the next read after a
+  * drop misses, re-simulates the leaf and stores the same figures. Releasing an
+  * instance too early costs a re-simulation, never a wrong figure, so a release
+  * needs no check for other holders of the entity id.
   */
 trait ContentCacheRegistry {
 

@@ -594,6 +594,20 @@ endpoint's `seedEntityId`.
 
 **My recommendation: A.**
 
+### TWC-D-17 — Releasing a seed entity id another workspace still draws with — RULED: drop it
+
+Ruled 2026-11-03. After TWC-D-10 a deleted workspace's trees can carry a seed
+entity id that a tree in a live workspace also carries. Releasing the deleted
+workspace's caches drops that entity id's `ContentCache` without checking
+whether another workspace still draws with it.
+
+The survivor's next read of a leaf finds no entry, re-simulates it and stores
+the same figures, because a cache entry is a pure function of its key. Releasing
+too early costs a re-simulation and never a wrong figure. The alternative,
+reading every other workspace's trees before each release to spare a shared
+entity id, was weighed and not taken: it buys a rare cache hit with a scan on
+every workspace deletion.
+
 ---
 
 ## 3. Signatures
@@ -828,25 +842,31 @@ boyscout rule against defaulted parameters on a signature already being changed.
 
 ### 3.7 The cache registry key
 
-`ContentCacheRegistry` keys its caches by `SeedEntityId` today, and ADR-014 §4
-states "One cache per workspace". After TWC-D-10 two workspaces can hold trees
-with one seed entity id. Sharing a cache entry between them is correct, because
-equal content and equal seed entity id give equal figures. A cache keyed by seed
-entity id alone can no longer be released per workspace, though. A workspace's
-trees may draw with another workspace's value, and releasing that value would
-drop the other workspace's cache.
+`ContentCacheRegistry` keeps one `ContentCache` per `SeedEntityId` (ADR-014 §4).
+The key does not change. A figure depends on the leaf's fingerprint and the seed
+entity id it is drawn with, and on nothing that identifies a workspace. After
+TWC-D-10 two workspaces can hold trees with one seed entity id, and their
+content-identical leaves then share entries. That is correct, because equal
+fingerprint and equal entity id give equal figures. A key that added the
+`WorkspaceId` would give one entity id two instances, simulating and holding a
+reproduced tree twice for no change in any figure.
 
-The key becomes the pair:
+What changes is the name. The registry method is named for the workspace, which
+was true only while each workspace held one entity id:
 
 ```scala
 // modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCacheRegistry.scala
-def forTree(wsId: WorkspaceId, seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache]
+def forEntity(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache]
 ```
 
-This changes the signatures of `PLAN-WORKSPACE-CACHE-RELEASE.md`, which is
-approved in direction and not implemented. Its `ContentCacheRegistry.release`
-would take the `WorkspaceId` and drop every key carrying it. That plan is not
-edited by this one, and the change is presented to the user for a ruling (§11).
+Releasing a deleted workspace's caches drops the instance of every seed entity
+id its trees carried, read from their `meta` values before the trees are
+deleted. Under TWC-D-17 an entity id another live workspace still carries is
+dropped as well. `PLAN-WORKSPACE-CACHE-RELEASE.md`'s
+`ContentCacheRegistry.release(seedEntityId)` stands. Its
+`WorkspaceCacheRelease.release(workspaceId, seedEntityId)` takes one entity id,
+and under TWC-D-10 needs the set. That plan is not edited by this one, and the
+change is presented with it (§11).
 
 ---
 
@@ -887,7 +907,7 @@ merge queries and `ScenarioMergeService`'s compare-and-set publish.
 | ADR-007 | Branch kinds | **Amended**: server-only branches that are neither a scenario nor a merge staging branch — the save's, created and deleted inside one save, and the counter's, permanent. DD-5's rule that scenario-shaped branches are created only by `ScenarioService.create` is untouched, because both names have their own prefix |
 | ADR-036 | Branch-name types | Compliant: `SaveStagingRef` and `SeedCounterRef` embed the `WorkspaceId`, join the sealed `StoreBranch`, and the only writes declared over them are the `setTree` and `testAndSet` overloads, so neither can reach a wire type (§2 of the record names the pattern) |
 | ADR-010 | `VersionConflict`, counter failures | Compliant: typed error channel; the first production constructor of an existing case. Counter exhaustion reuses `SeedVarIdAssigner`'s `ValidationError`; repeats exhausted under contention fail with an `IrminError` |
-| ADR-014 | Cache scope | **Amended by this plan.** §4 "One cache per workspace" becomes one cache per workspace and seed entity id (§3.7) |
+| ADR-014 | Cache scope | **Amended by this plan.** §4 already states one cache per seed entity id. Its sentence that each workspace holds one entity id, and its `forWorkspace` example, change with TWC-D-10 and the rename to `forEntity` (§3.7) |
 | ADR-017 | The PUT, the create DTO | **Amended**: the PUT requires `If-Match`; the create request gains an optional field (TWC-D-16 A); the update DTO is unchanged |
 | ADR-032 | The token, the hashed projection | Compliant: the token is a storage-side commit identifier, never a domain content hash. `seedVarId` stays in the projection; the seed entity id stays out of it and stays a cache scope |
 | ADR-035 | 409 body | Compliant: `WireError.Conflict` carries a closed `ConflictKind` and no free text |
@@ -960,8 +980,8 @@ Appendix Option B is a second elevation, not part of this one.
 - Any merge or three-way reconciliation of conflicting edits. This plan makes a
   conflict visible and refuses the write; it does not resolve it.
 - The scenario list's `head` field (TWC-D-7 B keeps it).
-- `PLAN-WORKSPACE-CACHE-RELEASE.md`'s signatures, which §3.7 affects and §11
-  presents.
+- `PLAN-WORKSPACE-CACHE-RELEASE.md`'s `WorkspaceCacheRelease.release`
+  signature, which §3.7 affects and §11 presents.
 
 ## 9. Steps and their order
 
@@ -1003,8 +1023,10 @@ true.
   complex review's finding 1 is closed by TWC-D-8 for server-assigned seeds and
   by TWC-D-15 for provided ones.
 - `PLAN-WORKSPACE-CACHE-RELEASE.md` is approved in direction and not
-  implemented. §3.7 changes its `ContentCacheRegistry.release` signature to take
-  the `WorkspaceId`. Whether that plan is amended to match is the user's ruling,
-  presented with this plan's open decisions.
+  implemented. Its `ContentCacheRegistry.release(seedEntityId)` stands. Under
+  TWC-D-10 its `WorkspaceCacheRelease.release` takes the set of entity ids the
+  workspace's trees carried in place of one, and under TWC-D-17 drops each of
+  them unconditionally. Whether that plan is amended to match is the user's
+  ruling, presented with this plan's open decisions.
 - `PLAN-PHASE-F-SEMANTIC-MERGE.md` and appendix Option B want the same
   domain-level diff-and-merge capability (appendix §5). Neither is designed here.
