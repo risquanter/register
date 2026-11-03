@@ -27,10 +27,11 @@ final case class CacheStats(entries: Int, hits: Long, misses: Long, evictedTotal
   * every read and never enter the cache. Values carry no node identity; the
   * resolver attaches the requested node's ID at the edge.
   *
-  * One instance per workspace, created by `ContentCacheRegistry` — the workspace's
-  * `seedEntityId` determines figures but lives in no leaf's bytes, so
-  * per-workspace instances make cross-workspace contamination structurally
-  * impossible. Cache lifecycle matches workspace lifecycle.
+  * One instance per seed entity id, created by `ContentCacheRegistry`. The
+  * entity id determines figures but lives in no leaf's bytes, so separate
+  * instances are what keep figures drawn under different entity ids apart.
+  * Today each workspace holds one entity id, so this is one instance per
+  * workspace as a consequence.
   */
 trait ContentCache {
 

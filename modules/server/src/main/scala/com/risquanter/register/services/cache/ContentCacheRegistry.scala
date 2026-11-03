@@ -4,25 +4,26 @@ import zio.*
 import com.risquanter.register.domain.data.iron.SeedEntityId
 
 /**
-  * Per-workspace registry of `ContentCache` instances: one cache per workspace
-  * seed identity, created on first request and held until the process exits.
-  * Mirrored by `MitigationScopeResolverRegistry`, which does the same for
-  * `MitigationScopeResolver`.
+  * Registry of `ContentCache` instances, one per seed entity id, created on
+  * first request and held until the process exits.
+  * `MitigationScopeResolverRegistry` does the same for `MitigationScopeResolver`,
+  * keyed by workspace.
   *
-  * The workspace's `seedEntityId` (HDR Entity axis) determines simulated
-  * figures but appears in no leaf's bytes — so it cannot be part of the
-  * content hash. One `ContentCache` instance per workspace makes
-  * cross-workspace contamination structurally impossible: different entity
-  * ⇒ different figures ⇒ entries must never be shared, and with separate
-  * instances they cannot be.
+  * The `seedEntityId` (HDR Entity axis) is an input to every draw, so it
+  * determines the simulated figures, and it appears in no leaf's bytes, so it
+  * cannot be part of the content hash. One instance per entity id is what keeps
+  * figures drawn under different entity ids apart: different entity ⇒ different
+  * figures ⇒ entries must never be shared, and with separate instances they
+  * cannot be. The workspace id takes no part in the key.
   *
-  * Keyed by `seedEntityId` (unique per workspace — assigned at workspace
-  * creation). Cache lifecycle matches workspace lifecycle; a deleted
-  * workspace's cache lingers until restart, because nothing is evicted.
+  * Today a workspace holds one seed entity id, assigned at creation, and no two
+  * workspaces hold the same one, so there is one instance per workspace as a
+  * consequence. A deleted workspace's instance lingers until restart, because
+  * nothing is evicted.
   */
 trait ContentCacheRegistry {
 
-  /** Get or create the owning workspace's cache. */
+  /** Get or create the cache for this seed entity id. */
   def forWorkspace(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache]
 }
 
