@@ -8,7 +8,7 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
-import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure}
+import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminSegment, IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry}
@@ -224,18 +224,18 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     },
 
     // ADR-036 confines WorkspaceId to the server: it must never reach a
-    // client-visible surface. getAllForWorkspace's TreeLoadFailure.reason
-    // embeds it, because loadTreeAt's "missing value" message carries the full
-    // Irmin path built from WorkspaceStoragePaths.treeNodes(wsId, treeId).
-    // This pins that content, which is why the merge guard
-    // (ScenarioMergeServiceLive.guardStagedState) sends the reason to the log
-    // and builds its wire-facing MergeConflict from tree ids and a count.
+    // client-visible surface. The failure a TreeLoadFailure carries embeds it,
+    // because loadTreeAt's "missing value" message carries the full Irmin path
+    // built from WorkspaceStoragePaths.treeNodes(wsId, treeId). This pins that
+    // content, which is why the merge guard
+    // (ScenarioMergeServiceLive.guardStagedState) sends the described problem
+    // to the log and builds its wire-facing MergeConflict from tree ids alone.
     // A node listed by listAtCommit but absent from getAtCommit at the SAME
     // pinned commit should not happen under normal operation (Irmin's content
     // at a fixed commit is immutable), but nothing in the type system rules
     // it out, and this is exactly the kind of anomaly the post-merge guard
     // exists to detect.
-    test("getAllForWorkspace's TreeLoadFailure.reason embeds the WorkspaceId when a listed node's value is missing") {
+    test("the failure a TreeLoadFailure carries embeds the WorkspaceId when a listed node's value is missing") {
       val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
       val leafPath = WorkspaceStoragePaths.of(wsId, TreePath.Node(treeIdF, leaf1Id))
       // listAtCommit lists leaf1Id as a child because this phantom key lies
@@ -248,10 +248,23 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         (repo, _, _) = setup
         result      <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))
       yield
-        val reasons = result.collect { case Left(f) => f.reason }
+        val failures = result.collect { case Left(f) => f }
+        val causes   = failures.collect { case TreeLoadFailure(_, TreeLoadProblem.Failed(cause)) => cause.logMessage }
         assertTrue(
-          reasons.exists(_.contains(wsId.value)),
-          reasons.exists(_.startsWith("Missing node value at"))
+          causes.exists(_.contains(wsId.value)),
+          causes.exists(_.startsWith("Missing node value at")),
+          failures.exists(f => f.logMessage.startsWith(s"Tree ${f.treeId.value} could not be loaded: Missing node value at"))
         )
+    },
+
+    test("a listed tree with neither metadata nor nodes is reported as TreeLoadProblem.Empty") {
+      val mitigationOnly = Map(
+        WorkspaceStoragePaths.of(wsId, TreePath.Mitigation(treeIdF, mitigationId("m1"))) -> "unread"
+      )
+      for
+        setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> mitigationOnly))
+        (repo, _, _) = setup
+        result      <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))
+      yield assertTrue(result == List(Left(TreeLoadFailure(treeIdF, TreeLoadProblem.Empty))))
     }
   )

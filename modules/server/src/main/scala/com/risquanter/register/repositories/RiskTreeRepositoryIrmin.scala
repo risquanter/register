@@ -4,7 +4,7 @@ import zio.*
 import zio.json.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, TreeLoadFailure, IrminError, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, TreeLoadFailure, TreeLoadProblem, IrminError, ValidationError}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -104,8 +104,8 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
               loaded  <- loadTreeAt(wsId, treeId, head).either
             yield loaded match
               case Right(Some(value)) => Right(value.tree)
-              case Right(None)        => Left(TreeLoadFailure(treeId, "missing meta and nodes"))
-              case Left(err)          => Left(TreeLoadFailure(treeId, err.logMessage))
+              case Right(None)        => Left(TreeLoadFailure(treeId, TreeLoadProblem.Empty))
+              case Left(err)          => Left(TreeLoadFailure(treeId, TreeLoadProblem.Failed(err)))
           )
         }
     }

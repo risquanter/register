@@ -205,7 +205,7 @@ object WireErrorSpec extends ZIOSpecDefault:
             BranchHeadStale(branch, commit)                        -> "InternalFault",
             IrminMergeConflict("conflict")                         -> "InternalFault",
             RepositoryFailure("disk")                              -> "InternalFault",
-            TreeLoadFailure(treeId, "corrupt")                     -> "InternalFault",
+            TreeLoadFailure(treeId, TreeLoadProblem.Failed(RepositoryFailure("corrupt"))) -> "InternalFault",
             SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault",
             FolModelValidationFailure(List("x"))                   -> "InternalFault",
             FolEvaluationFailure("x", "bind")                      -> "InternalFault"

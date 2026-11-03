@@ -59,7 +59,7 @@ sealed trait AppError:
     */
   def logAnnotations: Map[String, String] = Map.empty
 
-sealed trait SimError extends AppError
+sealed trait DomainError extends AppError
 sealed trait IrminError extends AppError
 
 /** One refusal: where it is and what it is.
@@ -90,13 +90,13 @@ object ValidationError:
     s"[${ErrorLocation.describe(error.location)}] ${ValidationMessages.render(error.problem)}"
 
 /** Validation failure with accumulated structured errors */
-case class ValidationFailed(errors: List[ValidationError]) extends SimError {
+case class ValidationFailed(errors: List[ValidationError]) extends DomainError {
   override def logMessage: String = errors.map(ValidationError.describe).mkString("; ")
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 
 /** Repository operation failure */
-case class RepositoryFailure(reason: String) extends SimError:
+case class RepositoryFailure(reason: String) extends DomainError:
   override def logMessage: String = reason
   override def origin: FailureOrigin = FailureOrigin.Service
 
@@ -105,27 +105,28 @@ case class RepositoryFailure(reason: String) extends SimError:
   * Separate from `RepositoryFailure`, which also covers failures that are about
   * no single tree — a workspace record, a branch head that will not refine, a
   * failure rebuilt from a wire that never carried an identity. Here the tree is
-  * always known, so its id is a field rather than text inside `reason`, and
-  * every caller can read it without parsing prose.
+  * always known, so its id is a field rather than text inside a sentence, and
+  * the problem is a case of `TreeLoadProblem`, so every caller reads both
+  * without parsing prose.
   */
-case class TreeLoadFailure(treeId: TreeId, reason: String) extends SimError:
-  override def logMessage: String = s"Tree ${treeId.value} could not be loaded: $reason"
+case class TreeLoadFailure(treeId: TreeId, problem: TreeLoadProblem) extends DomainError:
+  override def logMessage: String = s"Tree ${treeId.value} could not be loaded: ${TreeLoadProblem.describe(problem)}"
   override def origin: FailureOrigin = FailureOrigin.Service
   override def logAnnotations: Map[String, String] = Map("tree_id" -> treeId.value)
 
 /** Simulation execution failure - wraps underlying cause with context */
-case class SimulationFailure(simulationId: String, cause: Throwable) extends SimError {
+case class SimulationFailure(simulationId: String, cause: Throwable) extends DomainError {
   override def logMessage: String = s"Simulation $simulationId failed: ${cause.getMessage}"
   override def origin: FailureOrigin = FailureOrigin.Service
 }
 
 /** Data conflict (e.g., duplicate key) */
-case class DataConflict(reason: String) extends SimError:
+case class DataConflict(reason: String) extends DomainError:
   override def logMessage: String = reason
   override def origin: FailureOrigin = FailureOrigin.Caller
 
 /** Authorization failure for disabled/forbidden operations */
-case class AccessDenied(reason: String) extends SimError:
+case class AccessDenied(reason: String) extends DomainError:
   override def logMessage: String = reason
   override def origin: FailureOrigin = FailureOrigin.Caller
 
@@ -145,7 +146,7 @@ case class AccessDenied(reason: String) extends SimError:
   * A parameterless `case class` rather than a `case object`, so that it stays
   * uniform with the hierarchy's other payload-free cases.
   */
-case class WorkspaceNotFound() extends SimError {
+case class WorkspaceNotFound() extends DomainError {
   override def logMessage: String = "Workspace not found"
   override def origin: FailureOrigin = FailureOrigin.Caller
 
@@ -186,7 +187,7 @@ case class WorkspaceExpired(
   idleTimeout: Duration,
   cause:       ExpiryCause,
   expiredAt:   Instant
-) extends SimError {
+) extends DomainError {
   override def logMessage: String = "Workspace expired"
   override def origin: FailureOrigin = FailureOrigin.Caller
   override def logAnnotations: Map[String, String] = Map(
@@ -205,7 +206,7 @@ case class WorkspaceExpired(
   * (ADR-035 §3), and out of every response (ADR-036). The tree identifier is
   * not confidential and is the useful part of the message.
   */
-case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends SimError {
+case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends DomainError {
   override def logMessage: String = s"Tree ${treeId.value} not found in workspace"
   override def origin: FailureOrigin = FailureOrigin.Caller
   override def logAnnotations: Map[String, String] = Map(
@@ -293,7 +294,7 @@ case class IrminMergeConflict(reason: String) extends IrminError {
   * no single node owns. Attributed to the caller, who resolves it by re-reading
   * and resubmitting.
   */
-case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash) extends SimError {
+case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash) extends DomainError {
   override def logMessage: String =
     s"Version conflict on tree ${treeId.value}: expected ${expected.value}, found ${actual.value}"
   override def origin: FailureOrigin = FailureOrigin.Caller
@@ -309,7 +310,7 @@ case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitH
   * no repository text can reach a client through it. The log line renders the
   * same value through `MergeRefusal.describe`.
   */
-case class MergeConflict(scenario: ScenarioName.ScenarioName, refusal: MergeRefusal) extends SimError {
+case class MergeConflict(scenario: ScenarioName.ScenarioName, refusal: MergeRefusal) extends DomainError {
   override def logMessage: String =
     s"Merge conflict on scenario ${scenario.value}: ${MergeRefusal.describe(refusal)}"
   override def origin: FailureOrigin = FailureOrigin.Caller
@@ -322,7 +323,7 @@ case class MergeConflict(scenario: ScenarioName.ScenarioName, refusal: MergeRefu
   * here rather than running alongside the first. Nothing was written. Retriable
   * once the first merge finishes.
   */
-case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends SimError {
+case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends DomainError {
   override def logMessage: String =
     s"A merge of scenario ${scenario.value} is already running"
   override def origin: FailureOrigin = FailureOrigin.Caller
@@ -337,7 +338,7 @@ case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends SimE
   * absorbing the commit and then discarding it. Main is untouched; re-run the
   * preview and retry.
   */
-case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends SimError {
+case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends DomainError {
   override def logMessage: String =
     s"Main changed while merging scenario ${scenario.value}; re-run the preview and retry"
   override def origin: FailureOrigin = FailureOrigin.Caller
@@ -350,7 +351,7 @@ case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends SimErro
   * not a reachable value. `actual` is `None` when the scenario no longer
   * exists at all.
   */
-case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash, actual: Option[CommitHash]) extends SimError {
+case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash, actual: Option[CommitHash]) extends DomainError {
   override def logMessage: String =
     s"Scenario ${scenario.value} head is not ${expected.value}" +
     actual.fold(" (scenario no longer exists)")(a => s" (currently ${a.value})")
@@ -365,7 +366,7 @@ case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: Comm
   * composes what a user reads from that case. `ScenarioServiceNotSupported`
   * fails every method with this.
   */
-case class ScenariosNotSupported(reason: String) extends SimError {
+case class ScenariosNotSupported(reason: String) extends DomainError {
   override def logMessage: String = s"Scenarios not supported: $reason"
   override def origin: FailureOrigin = FailureOrigin.Caller
 }

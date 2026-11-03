@@ -6,7 +6,7 @@ import java.time.Instant
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, Revision, SafeName, TreeId, ValidationUtil}
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, FieldProblem, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, FieldProblem, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, TreeLoadProblem, ValidationFailed, ValidationError}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -315,7 +315,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
         case failures =>
           ZIO.logError(
             s"merge guard rejected ${staged.value} for scenario ${scenario.value}: " +
-            failures.map(f => s"${f.treeId.value}: ${f.reason}").mkString("; ")
+            failures.map(f => s"${f.treeId.value}: ${TreeLoadProblem.describe(f.problem)}").mkString("; ")
           ) *> ZIO.fail(MergeConflict(scenario, MergeRefusal.InvariantBroken(failures.map(_.treeId))))
     }
 

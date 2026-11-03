@@ -11,7 +11,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, FieldName, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, FieldName, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -555,7 +555,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             svc     = ScenarioMergeServiceLive(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Left(TreeLoadFailure(treeIdOf("guard-tree"), "duplicate seedVarId 7"))), revs)
+                        FakeRepo(List(Left(TreeLoadFailure(treeIdOf("guard-tree"), TreeLoadProblem.Failed(RepositoryFailure("duplicate seedVarId 7"))))), revs)
                       )
             exit   <- svc.merge(ws("ws-guard-undo"), name("draft-v1")).exit
             calls  <- resets.get
@@ -582,7 +582,9 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
                         FakeRepo(List(Left(TreeLoadFailure(
                           treeIdOf("guard-tree"),
-                          "Missing node value at workspaces/01ARZ3NDEKTSV4RRFFQ69G5FAV/risk-trees/t/nodes/n"
+                          TreeLoadProblem.Failed(RepositoryFailure(
+                            "Missing node value at workspaces/01ARZ3NDEKTSV4RRFFQ69G5FAV/risk-trees/t/nodes/n"
+                          ))
                         ))), revs)
                       )
             exit   <- svc.merge(ws("ws-guard-leak"), name("draft-v1")).exit
@@ -674,7 +676,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
 
           for
             onSuccess <- run(List(Right(validTree)))
-            onRefusal <- run(List(Left(TreeLoadFailure(treeIdOf("guard-tree"), "duplicate seedVarId 7"))))
+            onRefusal <- run(List(Left(TreeLoadFailure(treeIdOf("guard-tree"), TreeLoadProblem.Failed(RepositoryFailure("duplicate seedVarId 7"))))))
           yield
             val staging = onSuccess.collectFirst { case o if o.startsWith("create:") => o.stripPrefix("create:") }
             assertTrue(
