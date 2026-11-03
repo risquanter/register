@@ -70,6 +70,16 @@ diff, apply the Layer A₀ questions from `.claude/rules/scala-algebraic-design.
   boundary: what we send (paths, messages, documents) and what we receive.
 - Is an `unsafeFrom` / `refineUnsafe` applied outside a test or a literal? The
   value's producer should return the refined type instead. **MUST-FIX.**
+- Is a bare literal one member of a fixed set, or a single constant declared
+  outside the companion of the type that owns it? The set is an `enum` in that
+  companion and the constant a named value there, carrying its origin (ADR-037).
+  A hand-written string survives only where it is a contract with something
+  other than the serialiser, such as a query-language keyword, and says so.
+  **MUST-FIX.**
+- Is `Option[T] = None` a default parameter? The `Option` stays and the default
+  goes, so a caller with nothing to pass writes `None` where it is visible
+  (ADR-037). **MUST-FIX**, at the same severity as a raw primitive standing in
+  for a refined type.
 
 **Within-domain adhesion:**
 - Is `.value` called on an Iron type outside of: (a) a Tapir codec or JSON

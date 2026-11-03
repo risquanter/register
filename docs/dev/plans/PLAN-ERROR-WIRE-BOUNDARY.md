@@ -10,8 +10,8 @@ is in place: the token names this document and the file inventory exists beside
 it. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase 3a's
 continuation, and `EWB-D-27`'s projection change landed with them. §17 and §18
 are implemented as of 2026-11-02. §17.12, the review findings accepted after
-that, is implemented as of 2026-11-03. Phases 3b and 4 are implemented as of
-2026-11-03. What remains is Phases 5 to 7.
+that, is implemented as of 2026-11-03. Phases 3b, 4 and 5 are implemented as
+of 2026-11-03. What remains is Phases 6 and 7.
 Tree history is out of this plan's scope from 2026-11-02 and belongs to
 `PLAN-BRANCH-HISTORY.md` (`BH-D-1`).
 
@@ -2651,6 +2651,21 @@ instruction lines, and the project's own named-constants and defaulted-`Option`
 rules in `.claude/rules/scala-style.md` all landed on 2026-10-11 and are no
 longer this phase's work. The scattered use sites are reached by the standing
 rule as later tasks open those files, not by this phase.
+
+*Implemented 2026-11-03.* `ValuationBasis` as `EWB-D-10` writes it, in
+`modules/common/src/main/scala/com/risquanter/register/common/ValuationBasis.scala`.
+`FolSymbols.reservedNames` appends `ValuationBasis.values.map(_.symbol)` to its
+predicate and function literals. `RiskTreeKnowledgeBase` lost `InherentConst`
+and `ResidualConst`; its constants map is derived from the enum, and its two
+match arms and `QueryServiceLive.fromSlot`'s two arms match on
+`ValuationBasis.Inherent.symbol` and `ValuationBasis.Residual.symbol`. The
+`QueryServiceLive` edit was forced by the deletion rather than left to the
+standing rule. The drift test's baseline keeps its two literals, because it is a
+contract with the query language's keywords. Two criteria went into
+`code-quality-review`'s Pass 0a: a bare literal of a fixed set or a constant
+outside its owner's companion, and a defaulted `Option`. The skill has no mirror
+any more, so there was one copy to edit. ADR-037 already showed the enum, so no
+record changed.
 
 **Phase 6 — the response shapes.** ADR-038 defines the two shapes a response
 may take and forbids a raw primitive where a refined type exists. Bringing the
