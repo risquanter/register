@@ -260,3 +260,5 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/common/src/test/scala/com/risquanter/register/http/responses/SimulationResponseSpec.scala
 - modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala
 - modules/server-it/src/test/scala/com/risquanter/register/testcontainers/IrminCompose.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCacheRegistry.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCache.scala

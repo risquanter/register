@@ -5,9 +5,11 @@ workspace, and a seed entity id per tree.
 
 **Status: DRAFT — TWC-D-3, TWC-D-4, TWC-D-6, TWC-D-7 and TWC-D-11 to TWC-D-16
 are unruled. This document confers no G3 plan coverage and authorizes no source
-edit.** It becomes implementation-grade once those decisions are ruled, §3 is
-presented as the Signature Echo, and the user has written
-`PLAN-TREE-WRITE-CONCURRENCY-INVENTORY.md`.
+edit.** Those decisions, and whether `PLAN-WORKSPACE-CACHE-RELEASE.md` is
+amended to match §3.7, are settled in the pass that makes this plan
+implementation-grade (user, 2026-11-03), not before. It becomes
+implementation-grade once they are ruled, §3 is presented as the Signature
+Echo, and the user has written `PLAN-TREE-WRITE-CONCURRENCY-INVENTORY.md`.
 
 **Origin.** Two findings. The lost update is complex-tier review finding R1,
 recorded in `PLAN-RISKTRANSFORM.md` §7.6.1, and was split into this plan because

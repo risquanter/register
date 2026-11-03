@@ -27,6 +27,15 @@ existing definition" in the `code-quality-review` skill §11. Both now also name
 semantic duplicates explicitly. They bind new work. This plan reaches the code
 written before they did.
 
+A raw primitive standing where an existing type states the value's contract is
+the same defect in a smaller form. It restates that type's contract, without the
+check that makes it true. The `code-quality-review` skill's Pass 0a makes such a
+`String` MUST-FIX on any signature a change adds, changes or calls, and the plan
+gate requires every raw primitive in a plan's signatures to carry its type or
+its reason. Those bind new work as well. Shape 5 in §3 and the second pass in
+§5's step 2 reach the existing code; both were added on 2026-11-03 by the
+user's ruling.
+
 ## 2. Scope
 
 Every Scala source under `src/main/scala` in all four modules:
@@ -42,7 +51,7 @@ files a fix must update.
 ## 3. What counts as a duplicate
 
 Two definitions are a duplicate pair when they denote the same concept. The
-spelling is evidence, not the test. Four shapes cover what has been seen:
+spelling is evidence, not the test. Five shapes cover what has been seen:
 
 1. **Closed sets.** Two enums, or an enum and a set of string literals, whose
    cases name the same domain fields or values.
@@ -52,6 +61,20 @@ spelling is evidence, not the test. Four shapes cover what has been seen:
    the value type or the parameter order.
 4. **Names.** One concept spelled two ways in two places: `base` and `atFork`,
    `kind` and `type`.
+5. **Raw primitives.** A `String`, `Int`, `Long` or `Double` in a parameter, a
+   result or a case-class field, carrying a value whose contract an existing
+   type already states: a storage path held as `String` where `IrminPath`
+   exists, a commit message as `String` where `CommitMessage` exists. The pair
+   is the existing type and the raw site. A `.value` call that widens a refined
+   value into such a site is the same finding seen from the caller.
+
+   Four sites are not findings, as long as the site states its reason: content
+   whose real parse happens in the same step (a decoder over stored JSON), a
+   value handed to a third-party library that cannot take the refined type,
+   serialisation at an output boundary, and a write to the store inside a
+   repository method. A value with no existing type is not a
+   finding of this shape either. Whether it should have one is the Layer A₀
+   question in `.claude/rules/scala-algebraic-design.md`, and it binds new work.
 
 Two concepts that share a spelling are not a pair. `RiskTreeRequests.NodeKind`
 and `MergeConflictEntry.TagField = "kind"` share a word and nothing else.
@@ -92,7 +115,11 @@ Run the semantic-duplicate review defined in docs/dev/plans/PLAN-SEMANTIC-DUPLIC
    c. every method of every object and trait, with its parameter types and
       result type;
    d. every string literal that appears in a `match` arm or an equality test
-      in two or more files.
+      in two or more files;
+   e. every parameter, result and case-class field declared String, Int, Long
+      or Double, with its owner, its name and its type, and every `.value` call
+      on a refined or wrapped type outside a codec, a repository or a
+      third-party bridge.
    Then it prints candidate pairs:
    - enums sharing three or more case names, or sharing over half the cases of
      the smaller one (thresholds chosen in this plan, to keep two-case
@@ -102,7 +129,11 @@ Run the semantic-duplicate review defined in docs/dev/plans/PLAN-SEMANTIC-DUPLIC
    - methods in different owners with the same parameter-type list and result
      type once concrete types are replaced by a type variable;
    - case names and field names spelled differently for one concept, read off
-     the lists by hand in step 2.
+     the lists by hand in step 2;
+   - raw-primitive sites from list e whose name or owner matches an existing
+     refined type, opaque type or nominal wrapper from lists a and b (path,
+     message, id, name, hash and the like), and every `.value` widening from
+     list e.
    The script's output is a candidate list, not a finding list.
 
 2. Read every candidate pair in full: both definitions, their scaladoc, and
@@ -110,8 +141,15 @@ Run the semantic-duplicate review defined in docs/dev/plans/PLAN-SEMANTIC-DUPLIC
    each pair against §3 of the plan, by meaning. Record the reason for every
    pair you drop, in one line.
 
+   Second pass, raw primitives: for every raw-primitive candidate, find the
+   existing type that states the value's contract, quote it with file:line, and
+   trace where the value is produced and consumed. Decide it against §3 shape 5.
+   A site that is exempt there, or that has no existing type, is dropped, and
+   its one-line reason says which.
+
 3. Write docs/dev/reviews/REVIEW-semantic-duplicates.md. For each kept finding:
-   the two definitions with file:line and the code quoted, the shape from §3,
+   the two definitions with file:line and the code quoted (for shape 5, the
+   existing type and the raw site), the shape from §3,
    the concept both denote, every occurrence the fix would touch, and which
    definition should survive and why. List the dropped pairs with their
    one-line reasons at the end.
@@ -162,8 +200,8 @@ None from the review. Each fix in §6 states its own.
 ## 9. Verification
 
 For the review: `docs/dev/reviews/REVIEW-semantic-duplicates.md` exists, and
-every candidate pair the script printed is either a finding or a dropped pair
-with its reason.
+every candidate pair the script printed, raw-primitive candidates included, is
+either a finding or a dropped pair with its reason.
 
 For the fixes, each green:
 
