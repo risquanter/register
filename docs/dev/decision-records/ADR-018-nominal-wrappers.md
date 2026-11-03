@@ -58,17 +58,17 @@ Each wrapper gets its own Tapir codec, JSON codec, and schema. Since the types a
 ```scala
 // Tapir
 given Codec[String, TreeId, CodecFormat.TextPlain] =
-  Codec.string.mapDecode(raw =>
+  Codec.string.mapDecode[TreeId](raw =>
     TreeId.fromString(raw).fold(
-      errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+      refused,                // DecodeResult.InvalidValue carrying each error's FieldProblem
       DecodeResult.Value(_)
     )
-  )(_.value.toString)
+  )(_.value)
 
 // JSON
 given JsonEncoder[TreeId] = JsonEncoder[String].contramap(_.value.toString)
 given JsonDecoder[TreeId] = JsonDecoder[String].mapOrFail(s =>
-  TreeId.fromString(s).left.map(_.mkString(", ")))
+  TreeId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 ```
 
 ### 4. Domain Model Uses Wrapper Type

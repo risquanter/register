@@ -147,8 +147,7 @@ this service.
 
 ```scala
 // BAD: the backend's own text becomes the body
-case RepositoryFailure(reason) => WireError.ValidationRejected(
-  List(ValidationError("db", INTERNAL_ERROR, reason)), trace)
+case RepositoryFailure(reason) => (StatusCode.InternalServerError, reason)
 
 // GOOD: opaque case carrying only the trace; reason logged server-side
 case RepositoryFailure(_) => WireError.InternalFault(trace)

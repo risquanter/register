@@ -47,8 +47,8 @@ The failure has a nameable type; catching it is the conversion layer at the inne
 // Math.addExact is the only checked Long addition the JVM offers
 try Validation.succeed(PortfolioLosses(nodeId, combine(children), children))
 catch case _: ArithmeticException =>
-  Validation.fail(ValidationError(s"riskPortfolio.$nodeId",
-    ValidationErrorCode.CONSTRAINT_VIOLATION, ValidationMessages.aggregatedLossOverflow))
+  Validation.fail(ValidationError(ErrorLocation.nodeField(nodeId, FieldName.AggregatedLoss),
+    FieldProblem.AggregatedLossOverflow))
 ```
 
 `Throwable` here is wider than sound coverage requires — forbidden.

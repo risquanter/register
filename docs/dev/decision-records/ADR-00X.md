@@ -67,7 +67,7 @@ Domain objects expose `create()` returning `Validation[ValidationError, DomainOb
 object RiskLeaf {
   def create(id: String, name: String, ...): Validation[ValidationError, RiskLeaf] = {
     // Layer 1: Iron refinement (per-field)
-    val idV = toValidation(ValidationUtil.refineId(id, "id"))
+    val idV = toValidation(ValidationUtil.refineId(id, ErrorLocation.requestField(FieldName.Id)))
     
     // Layer 2: Business rules (cross-field)
     // e.g., minLoss < maxLoss
@@ -98,8 +98,8 @@ object RiskLeaf {
 // BAD: Service validates raw types
 def computeLEC(nTrials: Int, depth: Int) = {
   val validated = for {
-    validTrials <- ValidationUtil.refinePositiveInt(nTrials, "nTrials")
-    validDepth <- ValidationUtil.refineNonNegativeInt(depth, "depth")
+    validTrials <- ValidationUtil.refinePositiveInt(nTrials, ErrorLocation.Whole)
+    validDepth <- ValidationUtil.refineNonNegativeInt(depth, ErrorLocation.Whole)
   } yield (validTrials, validDepth)
   // ...
 }

@@ -135,7 +135,7 @@ final case class TreeNode(path: IrminPath, hash: Option[CommitHash], value: Opti
 
 ```scala
 // BAD — the structure exists and is discarded where it is richest
-.left.map(errors => RepositoryFailure(errors.map(e => s"${e.message}").mkString("; ")))
+.left.map(errors => RepositoryFailure(errors.map(ValidationError.describe).mkString("; ")))
 
 // GOOD — the errors survive as values
 .left.map(errors => StoredValueRejected(boundary, path, errors))
