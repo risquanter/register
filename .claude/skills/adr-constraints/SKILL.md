@@ -138,7 +138,7 @@ Use this when you already know the topic or the record's name. It answers "where
 | ADR-010 | `ADR-010.md` | Error handling: the sealed hierarchy, validation errors, the channel per layer, mapping to HTTP |
 | ADR-011 | `ADR-011.md` | Import conventions |
 | ADR-012 | `ADR-012.md` | Service mesh: identity, policy layers, what resilience the application must not implement, mesh trust invariants |
-| ADR-014 | `ADR-014.md` | Simulation result caching: what is cached, the content-hash key, no invalidation, per-workspace instances |
+| ADR-014 | `ADR-014.md` | Simulation result caching: what is cached, the content-hash key, no invalidation, one instance per seed entity id |
 | ADR-015 | `ADR-015.md` | The cached-result resolver as the single simulation entry point. **Its storage layer is retired — read it with ADR-014** |
 | ADR-016 | `ADR-016-config-management.md` | Configuration loading and the single canonical source |
 | ADR-017 | `ADR-017-tree-api-design.md` | Tree API shape: create versus update DTOs, whole-tree submission, identity preservation, size limits |

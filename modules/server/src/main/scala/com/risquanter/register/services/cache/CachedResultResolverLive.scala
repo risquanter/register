@@ -33,8 +33,10 @@ import io.github.iltotore.iron.refineUnsafe
   * There is no invalidation path: an edited leaf hashes to a new key and
   * misses; the old entry becomes an orphan for the `EvictionStrategy`.
   *
-  * Cache instances are per-workspace via `ContentCacheRegistry`, keyed by the
-  * workspace's `seedEntityId`.
+  * Cache instances come from `ContentCacheRegistry`, one per `seedEntityId`: the
+  * generator input the hashed leaf content does not carry, so figures drawn
+  * under different entity ids never share an entry. The caller passes the
+  * entity id of the workspace that owns the tree.
   */
 final case class CachedResultResolverLive(
     caches: ContentCacheRegistry,
@@ -250,7 +252,7 @@ object CachedResultResolverLive {
 
   /**
     * Create ZLayer for CachedResultResolver with telemetry.
-    * Uses ContentCacheRegistry for per-workspace content-addressed cache access.
+    * Uses ContentCacheRegistry for the per-entity-id content-addressed caches.
     */
   val layer: ZLayer[ContentCacheRegistry & SimulationConfig & Tracing & Meter, Throwable, CachedResultResolver] =
     ZLayer.fromZIO {

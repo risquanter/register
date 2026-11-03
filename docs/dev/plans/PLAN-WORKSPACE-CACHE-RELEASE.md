@@ -19,7 +19,9 @@ Two registries hand out one per-workspace instance of a service, creating it on
 first request. Neither ever removes one.
 
 - `ContentCacheRegistry` holds `Ref[Map[SeedEntityId, ContentCache]]`, one
-  simulation-result cache per workspace.
+  leaf simulation-result cache per seed entity id. A workspace holds one seed
+  entity id and no two workspaces hold the same one, so this is one cache per
+  workspace as a consequence (ADR-014 §4).
 - `MitigationScopeResolverRegistry` holds
   `Ref[Map[WorkspaceId, MitigationScopeResolver]]`, one mitigation-scope
   resolver, and therefore one memo, per workspace.
@@ -73,7 +75,10 @@ the cache registry by `seedEntityId`, the resolver registry by `id` — so
 releasing needs both.
 
 **A registry** is a keyed collection returning an existing instance or creating
-one on first request. Instances are per workspace so that one workspace's
+one on first request. Cache instances are per seed entity id, because a figure
+depends on the entity id the generator draws with and the cache key does not
+carry it (ADR-014 §4). Resolver instances are per workspace. With one entity id
+per workspace both come to one instance per workspace, so one workspace's
 simulation results and resolved scopes are unreachable from another's; that
 separation is an approved tenancy property and this plan does not alter it.
 
@@ -334,8 +339,9 @@ All four tiers green is the acceptance condition. Report pass or fail only.
 
 ## ADR alignment
 
-- **ADR-030 and ADR-024 (tenancy isolation).** The per-workspace instance
-  structure is unchanged; release removes one key from one map. The registry
+- **ADR-030 and ADR-024 (tenancy isolation).** The instance structure, one
+  cache per seed entity id and one resolver per workspace, is unchanged; release
+  removes one key from each map. The registry
   test asserting that releasing one workspace leaves another intact is the
   direct check on this. Conforms.
 - **ADR-015 (content-addressed cache).** Cache semantics are untouched: the same

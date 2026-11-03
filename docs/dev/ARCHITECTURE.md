@@ -320,8 +320,8 @@ See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogr
 │  - RiskTreeService: Business logic              │
 │  - CachedResultResolver: Simulation orchestration │
 │  - ContentCacheRegistry/ContentCache:            │
-│    content-addressed result caching              │
-│    (per workspace)                               │
+│    content-addressed leaf result caching         │
+│    (one instance per seed entity id)             │
 │  - MitigationScopeResolverRegistry/              │
 │    MitigationScopeResolver: resolves each        │
 │    mitigation's targeting predicate to a node    │
@@ -666,22 +666,72 @@ test("parallel vs sequential produce identical results") {
 - ❌ Tree node pagination not required - full tree loaded on demand
 
 ### **Caching Strategy** ✅ (Implemented — content-addressed)
+
+The domain terms used here — random stream, seed, seed entity id, fingerprint,
+cache entry — are defined in `docs/user/TERMINOLOGY.md` §1.6 and the end of
+Part 2. This section says how they map onto the code.
+
+**What a draw depends on.** Every random number comes from
+`HDR.generate(counter, entityId, varId, seed3, seed4)` in the `hdr-rng` library,
+Hubbard's counter-based generator (WSC 2019). It is a pure function of five
+integers. `SeedDerivation.streams` is the single place those integers are
+chosen for a leaf:
+
+| HDR input | Value | Varies with |
+|---|---|---|
+| `counter` | trial index, `0 until nTrials` | the trial |
+| `varId` | `2 × seedVarId` (occurrence), `2 × seedVarId + 1` (loss) | the leaf |
+| `entityId` | the workspace's `seedEntityId` | the workspace |
+| `seed3`, `seed4` | `SimulationConfig.defaultSeed3`, `defaultSeed4` | the deployment |
+
+`RiskSampler` turns the two streams into a trial's outcome: the occurrence
+number is compared with the leaf's probability, and the loss number is passed to
+the distribution's quantile function. Distribution parameters never enter the
+generator.
+
+**What is cached.** Leaf trial outcomes only (`LeafSimResult`: `TrialOutcomes`
+plus the content-only `NodeProvenance`). Drawing them is the expensive step;
+portfolio totals are re-aggregated from children on every read
+(`PortfolioLosses.create`), and curves are rendered per request against a shared
+tick domain (`LECGenerator.generateCurvePointsMulti`). Result-stage mitigation
+transforms are applied after the fold and never cached; param-stage transforms
+rewrite the leaf before hashing, so they change the key (ADR-034).
+
+**The key.** A leaf's losses depend on its probability, its distribution, its
+`seedVarId`, the `seedEntityId`, the two deployment seeds and `nTrials`. The last
+three are read from configuration at startup and are constant for the lifetime
+of the in-memory cache, so they are not in the key. That is an assumption, not a
+check: if any of them became a per-request value, it would have to join the key.
+The remaining four are held in two levels:
+
 ```scala
-// ContentCacheRegistry: one ContentCache per workspace, keyed by seedEntityId
+// Level 1 — one ContentCache per seedEntityId. The workspace id takes no part.
 trait ContentCacheRegistry:
   def forWorkspace(seedEntityId: SeedEntityId): UIO[ContentCache]
 
-// ContentCache: content-addressed leaf result cache; leaves only
+// Level 2 — the leaf's fingerprint selects the entry.
 trait ContentCache:
   def get(key: ContentHash): UIO[Option[LeafSimResult]]
   def put(key: ContentHash, value: LeafSimResult): UIO[Unit]
   def stats: UIO[CacheStats]
 
-// Cache key: ContentHash = sha256(LeafSimContent projection)
-// There is NO invalidation: an edited leaf hashes to a new key and misses;
-// stale entries become unreachable orphans (EvictionStrategy's concern).
-// Portfolio results are never cached — re-aggregated from children per read.
+// fingerprint: ContentHash = sha256(LeafSimContent(seedVarId, probability, shape))
+//   computed by ContentHashIndex.hashOf on every read
 ```
+
+The lookup is `Map[SeedEntityId, Map[ContentHash, LeafSimResult]]`. The
+fingerprint excludes the entity id because it doubles as an absolute
+mitigation's base stamp, which must describe the leaf alone. Two entity ids
+never share an instance, because the same fingerprint draws different losses
+under them. One entity id has one instance. Each workspace holds one entity id
+today, so the registry holds one instance per workspace as a consequence, and
+`forWorkspace` is named for that coincidence rather than for its key.
+
+**No invalidation.** The fingerprint is recomputed from content on every read,
+so an edited leaf misses by itself and a renamed or moved one hits. Old entries
+become unreachable orphans. `EvictionStrategy` exists to reclaim them, and its
+only implementation, `NoOpEvictionStrategy`, reclaims nothing: entries live
+until the process restarts, and a deleted workspace's instance is not released.
 
 ## Scope and Responsibilities
 

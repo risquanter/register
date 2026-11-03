@@ -25,10 +25,10 @@ A **risk** is an uncertain event with two parts, and only these two:
   drawn from given that the event has happened.
 
 A risk is recorded as a **leaf** of a tree. A leaf carries four further things:
-an identifier, a display name, a link to its parent, and the random-number
-stream it draws from. None of those four describes the risk. That distinction
-becomes load-bearing at Part 3, because a mitigation can change the two parts
-above and nothing else.
+an identifier, a display name, a link to its parent, and its seed, which selects
+the random-number stream it draws from (1.6). None of those four describes the
+risk. That distinction becomes load-bearing at Part 3, because a mitigation can
+change the two parts above and nothing else.
 
 ### 1.2 Portfolio
 
@@ -113,7 +113,7 @@ other three thousand record samples spread across the distribution the author
 stated.
 
 The losses recorded in one trial are then added together up the tree, trial by
-trial, which is the operation 1.6 defines. Doing that for every trial leaves ten
+trial, which is the operation 1.7 defines. Doing that for every trial leaves ten
 thousand totals at each node, and every figure the system reports is read off
 those totals.
 
@@ -121,7 +121,89 @@ That is the whole method behind aggregating losses: a loss either happens or it
 does not, a sample stands in for how large it was, and the rest is ordinary
 addition performed ten thousand times.
 
-### 1.6 Combine
+### 1.6 Random stream
+
+The coin flip and the draw above each need a number between 0 and 1 that
+behaves as if chosen at random. This section says where those numbers come
+from, because two properties of every figure depend on it: that two risks are
+independent of each other, and that the same tree gives the same figures every
+time it is simulated.
+
+A **pseudo-random number generator** (PRNG) computes numbers that pass
+statistical tests for randomness but are fully determined by its inputs. Give it
+the same inputs and it returns the same numbers. That determinism is what makes
+a figure reproducible.
+
+The system uses the **HDR generator** (Hubbard Decision Research), published by
+Douglas Hubbard at the 2019 Winter Simulation Conference as "A
+Multi-Dimensional, Counter-Based Pseudo Random Number Generator as a Standard
+for Monte Carlo Simulations". It is **counter-based**: it keeps no state and no
+running sequence. Every number is a single formula applied to five whole
+numbers, so any one number can be computed on its own, in any order, on any
+machine, with the same result. The five inputs are:
+
+- the **trial number**, 0 to 9 999 for ten thousand trials;
+- a **variable id**, which says which uncertain quantity the number is for;
+- an **entity id**, which says which owner the quantities belong to;
+- two further numbers the paper calls time and agent, which this system fixes
+  for the whole deployment as reproducibility settings, 0 by default.
+
+Each input may be up to eight decimal digits, a limit the paper sets so the
+formula stays exact in a spreadsheet.
+
+A **random stream** is what you get by fixing every input except the trial
+number and walking the trial number from 0 upward: one number per trial. Two
+streams that differ in any fixed input are independent of each other.
+
+A leaf owns two streams, one for the coin flip and one for the draw. Both come
+from its **seed**: a whole number assigned to the leaf when it is created, never
+changed afterwards, and different from every other leaf's seed in the same tree.
+The occurrence stream uses twice the seed as its variable id, and the loss
+stream uses twice the seed plus one, so no two streams in a tree share a
+variable id.
+
+The **seed entity id** is the entity id. It is assigned to a workspace when the
+workspace is created, every tree in the workspace simulates with it, and no two
+workspaces hold the same one. The paper's entity is "an organization or some
+other category of users": the owner whose variables the variable ids number.
+Two workspaces both number their seeds from 1, so without an entity id a leaf
+with seed 6 in one would draw exactly the numbers a leaf with seed 6 draws in
+the other. The entity id is what makes them differ, and it is what a second
+workspace must share with a first to reproduce the first's figures.
+
+The generator never sees the likelihood or the loss distribution. They are
+applied to its output. The coin flip compares the occurrence stream's number
+for that trial with the likelihood. The draw passes the loss stream's number to
+the loss distribution's quantile function, which returns the loss at that
+percentile. A number of 0.37 becomes the loss the distribution places at its
+37th percentile.
+
+Here is one leaf, run through. "Fire" has likelihood 0.3, a lognormal statement
+bounded at 500 thousand and 8 million, and seed 6, so its streams are variable
+ids 12 and 13. Its workspace's seed entity id is 3. The first four numbers of
+each stream:
+
+```
+occurrence stream, entity 3, variable 12:   0.6592  0.9340  0.5262  0.2625
+loss stream,       entity 3, variable 13:   0.8920  0.9344  0.7234  0.3700
+```
+
+In trials 0, 1 and 2 the occurrence number is above 0.3, so the event did not
+happen and the leaf records 0. In trial 3 it is 0.2625, below 0.3, so the event
+happened. The loss number 0.3700 then gives the lognormal's 37th percentile,
+about 1.5 million, a little below its median of 2 million.
+
+Change one input and every number changes. With seed 7 the occurrence stream
+is variable 14 and begins 0.9711, 0.4275, 0.8172, 0.8181. With seed 6 kept but
+entity id 4, it begins 0.2414, 0.1551, 0.6886, 0.7294, so trial 0 now records a
+loss where entity 3 recorded none. The likelihood and the bounds were the same
+in all three cases.
+
+This is why distinct seeds matter. Two leaves in one tree that shared a seed
+would draw the same numbers every trial, so their losses would rise and fall
+together, and adding them as independent risks (1.8) would misstate the total.
+
+### 1.7 Combine
 
 **Combine**, written `(+)`, is per-trial addition: for each trial, add the two
 losses recorded for that trial.
@@ -129,7 +211,7 @@ losses recorded for that trial.
 If child A loses 9 in trial 1 and child B loses 14 in trial 1, then `A (+) B`
 loses 23 in trial 1.
 
-### 1.7 Monoid
+### 1.8 Monoid
 
 A **monoid** is a set of things plus a way of combining two of them, subject to
 two rules:
@@ -150,7 +232,7 @@ Combining this way models risks that are independent of one another. Two risks
 that always strike together, or never together, are not expressed by summing
 their losses trial by trial.
 
-### 1.8 Fold
+### 1.9 Fold
 
 A **fold** collapses a tree into a single value by giving one rule that says how
 a node's value is built from its children's values. The same rule runs at every
@@ -160,7 +242,7 @@ catamorphism mean the same thing here.
 A fold is defined by two clauses: what to do at a leaf, and what to do at a node
 with children.
 
-### 1.9 Homomorphism
+### 1.10 Homomorphism
 
 A function `f` is a **homomorphism** with respect to `(+)` when it does not care
 whether you apply it before or after combining:
@@ -172,7 +254,7 @@ f(a (+) b)  =  f(a) (+) f(b)
 A function with this property can be pushed inside a combine freely. A function
 without it cannot. This single property is the hinge of Part 4.
 
-### 1.10 Loss exceedance curve
+### 1.11 Loss exceedance curve
 
 A **loss exceedance curve**, abbreviated **LEC**, is a function from a loss
 figure to a probability. Given a threshold, it answers one question: how likely
@@ -210,8 +292,9 @@ The property is not decoration. Two things depend on it.
 The first is the cache. Editing one leaf of a large tree should not re-run the
 whole simulation, so each leaf's simulated figures are stored under a key
 computed from the leaf's own simulation-relevant content — its likelihood, its
-loss distribution, and its random-number stream. A portfolio is never stored at
-all, because it can always be rebuilt by combining its children. That is sound
+loss distribution and its seed — together with the seed entity id it was drawn
+with. The end of this part says why both halves are needed. A portfolio is never
+stored at all, because it can always be rebuilt by combining its children. That is sound
 only while the property holds. If a portfolio's stored value stopped equalling
 the combine of its children, rebuilding it would produce a different figure from
 reading it.
@@ -234,6 +317,62 @@ refusal rather than silently wrapping round to a negative loss. Children that
 disagree about how many trials they were run for are a different matter — that
 is a programming mistake rather than something an author can cause, and it is
 not converted into a refusal.
+
+### What a cache entry holds, and under which key
+
+The three computations behind every figure cost very differently. Drawing ten
+thousand losses for a leaf means evaluating its loss distribution's quantile
+function ten thousand times, and that is the expensive step. Adding two
+children's losses trial by trial is cheap, and so is counting how many trials
+exceed a threshold. The expensive step has small inputs and a large output:
+three authored values go in, ten thousand losses come out.
+
+So a **cache entry** holds one leaf's trial losses, nothing more. A portfolio's
+totals are not stored, because they are cheap to rebuild and a stored copy
+would have to be kept equal to its children. A curve is not stored, because
+several curves drawn together share one set of thresholds, which depends on the
+request rather than on the node.
+
+A leaf's losses are a fixed function of everything its two streams and its two
+parts take in (1.6): its likelihood, its loss distribution, its seed, the seed
+entity id, the two deployment-wide settings and the number of trials. A cache
+is correct when two reads that land on one entry would have computed the same
+losses, so the key must tell apart every input that can differ between reads.
+It should tell apart nothing else, so that equal work is shared. A leaf's name,
+identifier, parent and branch enter no draw, so they stay out of the key, and a
+renamed, moved or forked leaf keeps its entry. The deployment-wide settings and
+the trial count stay out too, for a different reason: they are read once when
+the server starts and cannot change while the cache, which lives in memory,
+exists.
+
+That leaves four inputs, held in two places. The leaf's **fingerprint** is a
+hash of its likelihood, its loss distribution and its seed. The seed entity id
+is held by the workspace. The cache is a set of separate stores, one per seed
+entity id. A read picks the store by the seed entity id, then the entry by the
+fingerprint. Both halves together are the key.
+
+The fingerprint leaves out the seed entity id because it serves a second
+purpose. An absolute mitigation records the fingerprint of the leaf it was
+written against (3.6), as evidence of which version of the leaf it describes.
+That is a property of the leaf alone, so it must not change when the same tree
+is held under another seed entity id.
+
+What the seed entity id half prevents is easiest to see with two workspaces. A
+draws with seed entity id 3 and holds "Fire" from 1.6. B draws with seed entity
+id 4 and holds a leaf with the same likelihood, the same bounds and the same
+seed 6. Their fingerprints are equal. Their losses are not: from 1.6, B's leaf
+records a loss in trial 0 where A's records none. With one shared store, B's
+first read would find A's entry under the equal fingerprint and show A's
+losses. With one store per seed entity id, B's read misses, B's leaf is
+simulated with 4, and B sees its own figures. Two stores then hold two
+different sets of losses under one fingerprint, which is the case a single
+store keyed by the fingerprint alone cannot represent.
+
+Two consequences follow, and both are deliberate. Two seed entity ids never
+share a store, because their figures differ. One seed entity id has exactly one
+store, because two stores for it would compute and hold the same figures twice.
+The workspace's own identifier plays no part: today each workspace holds one
+seed entity id, so there is one store per workspace, as a consequence.
 
 ---
 
@@ -449,7 +588,7 @@ Take a portfolio whose children sum to 16, carrying a cap at 10. The cap says it
 value is 10. Part 2's property says its value equals the combine of its children,
 which is 16. One value cannot be both.
 
-The reason is Part 1.9. A cap is not a homomorphism. Take a cap at 10 and two
+The reason is Part 1.10. A cap is not a homomorphism. Take a cap at 10 and two
 children that each lose 8 in the same trial:
 
 ```
@@ -659,10 +798,10 @@ there is no longer a combination to exclude.
 You combine losses, not curves. Two levels are involved and they are different
 operations.
 
-The figures combine through the monoid of Part 1.7, which sums losses trial by
+The figures combine through the monoid of Part 1.8, which sums losses trial by
 trial. A node is then aggregated by a construction that derives the total from
 exactly the children it was handed, as Part 2 describes. Once the figures are
-combined, the curve is read off them by the counting procedure of Part 1.10.
+combined, the curve is read off them by the counting procedure of Part 1.11.
 
 A portfolio's curve is **not** the sum of its children's curves. Three reasons,
 and the first is enough. A curve's values are probabilities, and adding

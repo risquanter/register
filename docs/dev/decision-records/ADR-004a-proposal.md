@@ -104,7 +104,8 @@ implemented as of 2026-07-23]**.
 
 ### 4. Content-Addressed ZIO-Side Result Cache
 
-Computed results live in ZIO, never in Irmin. One `ContentCache` per workspace
+Computed results live in ZIO, never in Irmin. One `ContentCache` per seed entity
+id, which today means one per workspace (ADR-014 §4)
 **[Refined → DD-15…DD-19]**:
 
 ```scala
@@ -170,7 +171,7 @@ es.onmessage = e => refetch(e.data.nodeIds)   // request carries X-Branch
 | `IrminClient` / `IrminClientLive` / `IrminQueries` | GraphQL queries, `set_tree` mutations, branch ops |
 | `RiskTreeRepositoryIrmin` | Domain-to-storage mapping, branch-parameterized methods |
 | `InvalidationHandler` | In-request tree diff → SSE publish |
-| `ContentCache` | Per-workspace content-addressed result cache |
+| `ContentCache` | Content-addressed leaf result cache, one instance per seed entity id |
 | `SSEHub` | Per-tree ZIO Hub fan-out |
 | `SSEController` / `SSEEndpoints` | Tapir `streamBody(ZioStreams)` as `text/event-stream` |
 
