@@ -2709,7 +2709,7 @@ case class IngressRejected(
 ) extends DomainError:
   override def logMessage: String =
     s"${boundary.toString} returned a value this service refuses: " +
-      errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")
+      errors.map(ValidationError.describe).mkString("; ")
   override def origin: FailureOrigin = FailureOrigin.Service
 ```
 
@@ -2761,18 +2761,17 @@ object RiskPortfolio:
    leaf's shape is a coproduct whose cases decode through their own
    `JsonCodec`, so the refusal is composed there rather than in `RiskLeaf`:
    `DistributionShape.Metalog.codec` and `DistributionShape.Lognormal.codec`
-   each end `.map(_.map(_.message).mkString("; "))`, which drops the element
-   index `FieldName.PercentileAt` and `FieldName.QuantileAt` carry — the one
-   part of the refusal that locates the bad value in a twenty-anchor shape.
-   `DistributionParams`' decoder and its two-sided accumulation do the same.
+   each end `.map(_.map(ValidationError.describe).mkString("; "))`. The text
+   keeps the element index `FieldName.PercentileAt` and `FieldName.QuantileAt`
+   carry, but only as text, so a caller can no longer read which anchor of a
+   twenty-anchor shape was refused. `DistributionParams`' decoder and its
+   two-sided accumulation do the same.
    Both are reached on the store-read path through `RiskLeaf`'s decoder, so
    step 3 moves them with it or the accumulated list is already a string by
    the time `decodeValidated` returns.
 
-   `Mitigation` carries both forms today and only one is correct:
-   `MitigationSpec`'s decoder flattens on messages alone while `Mitigation`'s
-   own decoder keeps `ErrorLocation.describe`. The step brings the first to
-   the second before replacing both.
+   `MitigationSpec`'s decoder and `Mitigation`'s own decoder both flatten with
+   `ValidationError.describe`, and the step replaces both.
 
 4. **The database classifies once, from a code rather than from prose.**
    `WorkspaceStorePostgres.db` maps every driver failure to
