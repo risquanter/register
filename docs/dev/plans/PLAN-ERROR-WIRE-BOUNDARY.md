@@ -10,8 +10,8 @@ is in place: the token names this document and the file inventory exists beside
 it. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase 3a's
 continuation, and `EWB-D-27`'s projection change landed with them. §17 and §18
 are implemented as of 2026-11-02. §17.12, the review findings accepted after
-that, is implemented as of 2026-11-03. Phase 3b is implemented as of
-2026-11-03. What remains is Phases 4 to 7.
+that, is implemented as of 2026-11-03. Phases 3b and 4 are implemented as of
+2026-11-03. What remains is Phases 5 to 7.
 Tree history is out of this plan's scope from 2026-11-02 and belongs to
 `PLAN-BRANCH-HISTORY.md` (`BH-D-1`).
 
@@ -1575,8 +1575,10 @@ is a member of `AppError` rather than a match on the wire case.
 ### 6.3 `SimError` becomes `DomainError`
 
 The trait is named for simulation but holds validation, workspace, scenario and
-merge errors. 31 occurrences across five files. Mechanical, and the compiler
-finds every one.
+merge errors. 31 occurrences across five files when this was written; counted
+again on 2026-11-03, sixteen, all in `AppError.scala`, the other four files
+having been reached by earlier phases. Mechanical, and the compiler finds every
+one.
 
 ### 6.4 `ValidationError.field` becomes a typed location
 
@@ -2565,6 +2567,80 @@ day are recorded in `EWB-D-38`'s sweep; the query-parameter location is
 
 **Phase 4 — typed load problems and the rename.** `TreeLoadProblem` replacing
 `TreeLoadFailure.reason: String`; `SimError` renamed to `DomainError`.
+
+*Signatures, written 2026-11-03 when the phase was taken up.* The new type, in
+its own file beside the other closed sets a failure is made of:
+
+```scala
+// modules/common/src/main/scala/com/risquanter/register/domain/errors/TreeLoadProblem.scala
+package com.risquanter.register.domain.errors
+
+/** Why one tree in a workspace listing could not be loaded. */
+enum TreeLoadProblem:
+  /** The listing named the tree, and the commit holds neither its metadata
+    * nor any node under it. */
+  case Empty
+
+  /** Reading or rebuilding the tree failed. The failure is kept whole, so a
+    * reader classifies it by its case rather than by its text. */
+  case Failed(cause: AppError)
+
+object TreeLoadProblem:
+  /** The problem as diagnostic text, for a log line. */
+  def describe(problem: TreeLoadProblem): String = problem match
+    case Empty         => "neither metadata nor nodes are stored"
+    case Failed(cause) => cause.logMessage
+```
+
+The family search. `TreeLoadProblem` joins the closed sets that say what a
+failure is, which live as top-level enums in `domain/errors/`: `FieldProblem` in
+`ErrorLocation.scala` and `MergeRefusal` in `MergeRefusal.scala`. The naming
+pattern is the subject followed by `Problem` or `Refusal`. The companion's
+`describe` joins `ValidationError.describe`, `ErrorLocation.describe` and
+`MergeRefusal.describe`, each a total function from the type to its log text.
+No existing closed set denotes "a stored tree with neither metadata nor nodes",
+so `Empty` is new. `Failed` carries the typed failure `loadTreeAt` produced,
+where the text carried its `logMessage`: today that failure is always a
+`RepositoryFailure`, because `handleIrmin` maps every Irmin failure onto one,
+and Phase 7 widens it to `IrminError` and `IngressRejected` without touching
+this type. The type is not serialised: `TreeLoadFailure` projects to
+`InternalFault`, which carries only the trace, so no codec is declared.
+
+The changed declaration in `AppError.scala`, with the rename applied:
+
+```scala
+sealed trait DomainError extends AppError
+
+case class TreeLoadFailure(treeId: TreeId, problem: TreeLoadProblem) extends DomainError:
+  override def logMessage: String = s"Tree ${treeId.value} could not be loaded: ${TreeLoadProblem.describe(problem)}"
+  override def origin: FailureOrigin = FailureOrigin.Service
+  override def logAnnotations: Map[String, String] = Map("tree_id" -> treeId.value)
+```
+
+`origin` stays `Service` for both cases: a listing that cannot load a tree the
+store holds is this service's problem whatever the cause. The sixteen
+`SimError` occurrences, all in `AppError.scala`, become `DomainError`.
+
+The construction and reading sites. `RiskTreeRepositoryIrmin.getAllForWorkspace`
+builds `TreeLoadFailure(treeId, TreeLoadProblem.Empty)` where it built the
+sentence "missing meta and nodes", and `TreeLoadFailure(treeId,
+TreeLoadProblem.Failed(err))` where it built one from `err.logMessage`.
+`ScenarioMergeService.guardStagedState` logs `TreeLoadProblem.describe(f.problem)`
+where it logged `f.reason`. `RiskTreeServiceLive.collectAllTrees` reads
+`logMessage` and is unchanged. The four test constructions in
+`ScenarioMergeServiceSpec` and `WireErrorSpec` wrap their sentence as
+`Failed(RepositoryFailure(sentence))`, and `RiskTreeReadConsistencySpec`'s
+assertion on the reason reads the `Failed` case's cause.
+
+The two decision records that list the hierarchy, ADR-010 §1 and ADR-002, show
+`SimError` with four leaves and ADR-010's shows `AppError extends Throwable`.
+Both listings are amended to `DomainError`, gain `TreeLoadFailure`, and lose
+`extends Throwable` (`EWB-D-15`). §11's ADR-010 row already records the first.
+
+*Implemented 2026-11-03*, as written above, with one correction to the
+verification text: `WireErrorSpec`'s projection table holds one row per leaf
+type and asserts that count, so `TreeLoadFailure` keeps one row, carrying
+`Failed`, and the `Empty` case is pinned by `RiskTreeReadConsistencySpec` alone.
 
 **Phase 5 — the constants rule and its foundations.** The `ValuationBasis` enum,
 `FolSymbols` deriving its two entries from it, and the deletion of
@@ -6198,6 +6274,18 @@ carries its problem's encoded form and no part of the submitted value.
 in the summary while a pair refusal is listed once. Every suite that compared a
 sentence compares the problem, or the sentence `ValidationMessages.render`
 produces for it.
+
+**Phase 4.** `RiskTreeReadConsistencySpec` gains two properties on the scripted
+store. The existing torn-store test, which pinned that the reason text embeds
+the `WorkspaceId`, now reads the `Failed` case's cause and asserts the same two
+facts of its `logMessage`, and additionally that `TreeLoadFailure.logMessage`
+begins `Tree <id> could not be loaded: ` followed by that text, which pins
+`describe(Failed)` and the composition in one place. A new test stores one
+mitigation under a tree and nothing else, so the listing names the tree while
+neither its metadata nor any node exists, and asserts the listing returns
+`Left(TreeLoadFailure(treeId, TreeLoadProblem.Empty))`, which is the path no
+suite reaches today. `WireErrorSpec`'s projection table keeps `TreeLoadFailure`
+mapped to `InternalFault`.
 
 **Every phase.** All four tiers green: `commonJVM/test`, `server/test`,
 `app/test`, `serverIt/test`. Leaked Docker containers, networks and volumes
