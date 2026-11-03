@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntity
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
+import com.risquanter.register.common.ValuationBasis
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, ScopeResolutionContext, ResolvedScopes}
@@ -186,8 +187,8 @@ object MitigationSelectionScan:
         .toSet
 
     def fromSlot(term: BoundTerm): Set[MitigationSelection] = term match
-      case BoundTerm.ConstRef(RiskTreeKnowledgeBase.InherentConst, _) => Set(MitigationSelection.Inherent)
-      case BoundTerm.ConstRef(RiskTreeKnowledgeBase.ResidualConst, _) => Set(MitigationSelection.Residual)
+      case BoundTerm.ConstRef(ValuationBasis.Inherent.symbol, _) => Set(MitigationSelection.Inherent)
+      case BoundTerm.ConstRef(ValuationBasis.Residual.symbol, _) => Set(MitigationSelection.Residual)
       case BoundTerm.VarRef(BoundVar(_, sort)) if sort == RiskTreeKnowledgeBase.MitigationSort => everyMitigation
       case _ => Set.empty
 

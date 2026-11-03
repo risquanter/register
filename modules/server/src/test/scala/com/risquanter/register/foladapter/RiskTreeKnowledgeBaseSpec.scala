@@ -9,6 +9,7 @@ import com.risquanter.register.domain.data.{
   ResultTransformSpec
 }
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
+import com.risquanter.register.common.ValuationBasis
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
@@ -156,8 +157,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   /** The mitigation-slot values the value functions read: the two aggregate
     * constants (carrying their own name string) and a bound-mitigation value
     * (carrying a `MitigationId`). */
-  private val inherent: Value = Value(mitigationSort, RiskTreeKnowledgeBase.InherentConst)
-  private val residual: Value = Value(mitigationSort, RiskTreeKnowledgeBase.ResidualConst)
+  private val inherent: Value = Value(mitigationSort, ValuationBasis.Inherent.symbol)
+  private val residual: Value = Value(mitigationSort, ValuationBasis.Residual.symbol)
   private def mitVal(id: MitigationId): Value = Value(mitigationSort, id)
 
   /** A node-sorted `Value` carrying the fixture node's `NodeId`, looked up by
@@ -624,7 +625,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val nameV = kb.catalog.literalValidators(nodeNameLiteralSort)
       val idV   = kb.catalog.literalValidators(nodeIdLiteralSort)
       assertTrue(
-        kb.catalog.constants.keySet == Set(RiskTreeKnowledgeBase.InherentConst, RiskTreeKnowledgeBase.ResidualConst),
+        kb.catalog.constants.keySet == ValuationBasis.values.map(_.symbol).toSet,
         kb.riskNameToId.keySet == Set("Root", "IT Risk", "Cyber", "Hardware"),
         nodeV("Cyber")       == Some(cyberId),   // Node slot: quoted node name → its id
         nodeV(cyberId.value) == None,            // Node slot is name-only: an id no longer binds
@@ -826,8 +827,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     test("inherent / residual are declared on the Mitigation sort") {
       assertTrue(
         mitKb.catalog.constants == Map(
-          RiskTreeKnowledgeBase.InherentConst -> mitigationSort,
-          RiskTreeKnowledgeBase.ResidualConst -> mitigationSort
+          ValuationBasis.Inherent.symbol -> mitigationSort,
+          ValuationBasis.Residual.symbol -> mitigationSort
         )
       )
     },

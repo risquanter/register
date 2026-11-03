@@ -6,7 +6,7 @@ import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
-import com.risquanter.register.common.FolSymbols
+import com.risquanter.register.common.{FolSymbols, ValuationBasis}
 
 import vql.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, Value}
 import vql.typed.{Extract, extract}
@@ -155,9 +155,9 @@ class RiskTreeKnowledgeBase(
     * drawn from the runtime domain, which maps to a single-mitigation
     * `Selected`. */
   private def selectionOf(v: Value): Either[String, MitigationSelection] = v.raw match
-    case RiskTreeKnowledgeBase.InherentConst => Right(MitigationSelection.Inherent)
-    case RiskTreeKnowledgeBase.ResidualConst => Right(MitigationSelection.Residual)
-    case id: MitigationId                    =>
+    case ValuationBasis.Inherent.symbol => Right(MitigationSelection.Inherent)
+    case ValuationBasis.Residual.symbol => Right(MitigationSelection.Residual)
+    case id: MitigationId               =>
       Right(MitigationSelection.Selected(Map(id -> ScopeRestriction.FullScope)))
     case other =>
       Left(s"mitigation selection: unrecognised carrier '$other' in sort '${v.sort.value}'")
@@ -389,15 +389,12 @@ object RiskTreeKnowledgeBase:
         TypeDecl.ValueType(mitigationNameLiteralSort),
         TypeDecl.ValueType(mitigationIdLiteralSort)
       ),
-      // The two aggregate-valuation constants; a mitigation-sort constant is legal
-      // (only functions returning a domain sort are rejected). They resolve by name
+      // The two valuation bases; a mitigation-sort constant is legal (only
+      // functions returning a domain sort are rejected). They resolve by name
       // separately from the ∃-domain enumeration, so they are not members of
       // `∃m : mitigation`. Node/mitigation names resolve on demand through the
       // literal validators below, not as pre-registered constants.
-      constants = Map(
-        InherentConst -> mitigationSort,
-        ResidualConst -> mitigationSort
-      ),
+      constants = ValuationBasis.values.map(_.symbol -> mitigationSort).toMap,
       functions = Map(
         SymbolName("p95") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
         SymbolName("p99") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
@@ -470,12 +467,6 @@ object RiskTreeKnowledgeBase:
   /** Value sort for a mitigation reference written as a quoted ID literal
     * (`mitigation_id(m, "01H…")`). Carrier: `MitigationId` via `fromString`. */
   val MitigationIdLiteralSort: TypeId = TypeId("MitigationIdLiteral")
-
-  /** The two aggregate-valuation constants. Mitigation-sort so they sit in the
-    * value functions' selection slot; reserved names (see `FolSymbols`) because
-    * a constant of this sort used in any other slot binds as a type error. */
-  val InherentConst: String = "inherent"
-  val ResidualConst: String = "residual"
 
   /** Consumer carrier for the node sort (ADR-015 §2): the engine holds the
     * register `NodeId` opaquely in `Value.raw`; this lifts it back out. A

@@ -9,18 +9,18 @@ package com.risquanter.register.common
   * Single source of truth shared by:
   *  - `RiskTreeRequests.requireNoReservedNames` (DTO-boundary gate in `common`)
   *  - `RiskTreeKnowledgeBase.reservedFolNames` (alarm-on-bypass safety net in `server`)
-  *
-  * Per PLAN-QUERY-NODE-NAME-LITERALS §6 D-2.b (combined A+B+C).
   */
 object FolSymbols:
 
-  /** A manually maintained mirror of the predicate, function, and constant
-    * symbol names declared in the `RiskTreeKnowledgeBase` catalog. This literal
-    * lives in `common` because the DTO-boundary gate needs it here, where the
-    * `server`-side catalog is not on the dependency graph and its symbol union
-    * cannot be computed. The C4 test in `RiskTreeKnowledgeBaseSpec` guards the
-    * mirror against drift — it asserts `reservedFolNames` equals the catalog's
-    * function ∪ predicate ∪ constant symbol names.
+  /** A manually maintained mirror of the predicate and function symbol names
+    * declared in the `RiskTreeKnowledgeBase` catalog, plus the catalog's two
+    * constants, which are the `ValuationBasis` symbols and are read from that
+    * enum rather than restated. The mirror lives in `common` because the
+    * DTO-boundary gate needs it here, where the `server`-side catalog is not on
+    * the dependency graph and its symbol union cannot be computed. The C4 test
+    * in `RiskTreeKnowledgeBaseSpec` guards the mirror against drift — it
+    * asserts `reservedFolNames` equals the catalog's function ∪ predicate ∪
+    * constant symbol names.
     */
   val reservedNames: Set[String] = Set(
     // predicates
@@ -28,7 +28,5 @@ object FolSymbols:
     "gt_loss", "gt_prob", "eq", "named_risk", "risk_id",
     "named_mitigation", "mitigation_id", "mitigate", "mitigated", "unmitigated",
     // functions
-    "p95", "p99", "lec",
-    // mitigation-sort aggregate-valuation constants
-    "inherent", "residual"
-  )
+    "p95", "p99", "lec"
+  ) ++ ValuationBasis.values.map(_.symbol)
