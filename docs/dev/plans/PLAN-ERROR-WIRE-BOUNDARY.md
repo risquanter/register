@@ -2745,9 +2745,16 @@ object RiskPortfolio:
 ```
 
    A string that is not the expected JSON shape yields one `ValidationError` at
-   `ErrorLocation.Whole` with `INVALID_FORMAT`, so a parse failure and a
-   refinement failure have one shape and the caller is not made to distinguish
-   them. The flattening in the `given decoder` is what `zio-json`'s `mapOrFail`
+   `ErrorLocation.Whole` with the problem `Unreadable(ExpectedInput.Json)`, so
+   a parse failure and a refinement failure have one shape and the caller is
+   not made to distinguish them. `ExpectedInput.Json` is a new case, added in
+   this step beside `Number`, `WholeNumber` and `NumberList`, and
+   `ValidationMessages.render` gains its sentence. `Unreadable` is the case
+   `ExpectedInput`'s own scaladoc reserves for "text that could not be read at
+   all", which is what a non-JSON string is. Its derived code is therefore
+   `TYPE_MISMATCH`, the code `FieldProblem.code` gives every `Unreadable`,
+   and not `INVALID_FORMAT`: the latter means a value that was read and then
+   refused (`EWB-D-25`), and a string that does not parse was never read. The flattening in the `given decoder` is what `zio-json`'s `mapOrFail`
    forces — its function returns `Either[String, A]` — so the storage path stops
    going through `JsonDecoder` and calls `decodeValidated` directly. The
    repository's `decodeNode`, `decodeMeta`, `decodeMitigation` and `rebuildTree`
@@ -2755,6 +2762,8 @@ object RiskPortfolio:
    it into a sentence. Files: `domain/data/RiskNode.scala`,
    `domain/data/RiskTree.scala`, `domain/data/Mitigation.scala`,
    `domain/data/DistributionShape.scala`, `domain/data/Provenance.scala`,
+   `domain/errors/ErrorLocation.scala` for the new `ExpectedInput` case,
+   `domain/data/iron/ValidationMessages.scala` for its sentence, and
    `repositories/RiskTreeRepositoryIrmin.scala`.
 
    The shape and the provenance record hold flattening sites of their own. A
