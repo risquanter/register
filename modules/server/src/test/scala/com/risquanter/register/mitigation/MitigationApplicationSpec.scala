@@ -59,7 +59,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
   private def mkTree(mitigations: Mitigation*): RiskTree =
     RiskTree.fromNodes(treeId("act-tree"), name("Action Tree"), Seq(root, cyber, flood), root.id,
-      mitigations = mitigations.toList).toEither.toOption.get
+      seedVarHighWater = None, mitigations = mitigations.toList).toEither.toOption.get
 
   /** A relative statement scaling severity and leaving likelihood alone. */
   private def leafScaleSeverity(label: String, factor: Double,

@@ -1,7 +1,8 @@
 package com.risquanter.register.infra.irmin
 
+import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, TreeId, WorkspaceId}
-import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.infra.irmin.model.{IrminPath, IrminSegment}
 
 /** Single owner of the workspace storage-path layout in Irmin (ADR-004a):
   *
@@ -9,8 +10,8 @@ import com.risquanter.register.infra.irmin.model.IrminPath
   *   - Tree nodes:       workspaces/{wsId}/risk-trees/{treeId}/nodes/{nodeId}
   *   - Tree mitigations: workspaces/{wsId}/risk-trees/{treeId}/mitigations/{mitigationId}
   *
-  * Every server-side construction of an absolute workspace storage path goes
-  * through this object; the layout can change in exactly one place.
+  * Every server-side construction of a workspace storage path goes through
+  * this object; the layout can change in exactly one place.
   */
 private[register] object WorkspaceStoragePaths:
 
@@ -22,23 +23,30 @@ private[register] object WorkspaceStoragePaths:
 
     def treeId: TreeId
 
-  def workspaceRoot(wsId: WorkspaceId): String =
-    s"workspaces/${wsId.value}"
+  /** The layout's fixed segments, each spelled once. */
+  private val Workspaces: IrminSegment  = IrminSegment("workspaces")
+  private val Trees: IrminSegment       = IrminSegment("risk-trees")
+  private val MetaName: IrminSegment    = IrminSegment("meta")
+  private val Nodes: IrminSegment       = IrminSegment("nodes")
+  private val Mitigations: IrminSegment = IrminSegment("mitigations")
 
-  def treesRoot(wsId: WorkspaceId): String =
-    s"${workspaceRoot(wsId)}/risk-trees"
+  def workspaceRoot(wsId: WorkspaceId): IrminPath =
+    IrminPath.root / Workspaces / IrminSegment.of(wsId.toSafeId)
 
-  def treeRoot(wsId: WorkspaceId, treeId: TreeId): String =
-    s"${treesRoot(wsId)}/${treeId.value}"
+  def treesRoot(wsId: WorkspaceId): IrminPath =
+    workspaceRoot(wsId) / Trees
 
-  def treeMeta(wsId: WorkspaceId, treeId: TreeId): String =
-    s"${treeRoot(wsId, treeId)}/meta"
+  def treeRoot(wsId: WorkspaceId, treeId: TreeId): IrminPath =
+    treesRoot(wsId) / IrminSegment.of(treeId.toSafeId)
 
-  def treeNodes(wsId: WorkspaceId, treeId: TreeId): String =
-    s"${treeRoot(wsId, treeId)}/nodes"
+  def treeMeta(wsId: WorkspaceId, treeId: TreeId): IrminPath =
+    treeRoot(wsId, treeId) / MetaName
 
-  def treeMitigations(wsId: WorkspaceId, treeId: TreeId): String =
-    s"${treeRoot(wsId, treeId)}/mitigations"
+  def treeNodes(wsId: WorkspaceId, treeId: TreeId): IrminPath =
+    treeRoot(wsId, treeId) / Nodes
+
+  def treeMitigations(wsId: WorkspaceId, treeId: TreeId): IrminPath =
+    treeRoot(wsId, treeId) / Mitigations
 
   /** The absolute path of `path`, built by the same functions every other
     * reader and writer uses.
@@ -48,8 +56,20 @@ private[register] object WorkspaceStoragePaths:
     * }}}
     */
   def of(wsId: WorkspaceId, path: TreePath): IrminPath =
-    IrminPath.unsafeFrom(path match
+    path match
       case TreePath.Meta(treeId)                     => treeMeta(wsId, treeId)
-      case TreePath.Node(treeId, nodeId)             => s"${treeNodes(wsId, treeId)}/${nodeId.value}"
-      case TreePath.Mitigation(treeId, mitigationId) => s"${treeMitigations(wsId, treeId)}/${mitigationId.value}"
-    )
+      case TreePath.Node(treeId, nodeId)             => treeNodes(wsId, treeId) / IrminSegment.of(nodeId.toSafeId)
+      case TreePath.Mitigation(treeId, mitigationId) => treeMitigations(wsId, treeId) / IrminSegment.of(mitigationId.toSafeId)
+
+  /** The path of `path` relative to its tree's root, which is how a tree write
+    * names its entries.
+    *
+    * {{{
+    * withinTree(TreePath.Node(t, n)) // nodes/{n}
+    * }}}
+    */
+  def withinTree(path: TreePath): IrminPath =
+    path match
+      case TreePath.Meta(_)                     => IrminPath.root / MetaName
+      case TreePath.Node(_, nodeId)             => IrminPath.root / Nodes / IrminSegment.of(nodeId.toSafeId)
+      case TreePath.Mitigation(_, mitigationId) => IrminPath.root / Mitigations / IrminSegment.of(mitigationId.toSafeId)

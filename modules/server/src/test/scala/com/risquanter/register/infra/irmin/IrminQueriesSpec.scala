@@ -2,8 +2,10 @@ package com.risquanter.register.infra.irmin
 
 import zio.test.*
 
-import com.risquanter.register.domain.data.iron.BranchRef
+import com.risquanter.register.domain.data.iron.{BranchRef, TreeId, WorkspaceId}
+import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 /** Escaping of the free-text values `IrminQueries` interpolates into a GraphQL
   * string literal.
@@ -19,12 +21,14 @@ object IrminQueriesSpec extends ZIOSpecDefault:
 
   private val path = IrminPath.unsafeFrom("nodes/n")
 
+  private val message = CommitMessage.TreeWritten(WorkspaceId(safeId("ws")), TreeId(safeId("tree")), TreeWriteKind.Update)
+
   /** The `value:` argument of a `set` mutation, which is where a stored blob is
     * interpolated. Returned with the surrounding quotes so a literal that ended
     * early is visible.
     */
   private def valueArgOf(raw: String): String =
-    val query = IrminQueries.setValue(path, raw, "msg", "author", BranchRef.Main)
+    val query = IrminQueries.setValue(path, raw, message, "author", BranchRef.Main)
     query.linesIterator.find(_.trim.startsWith("value:")).map(_.trim).getOrElse("")
 
   override def spec = suite("IrminQueries.setValue — GraphQL string escaping")(
@@ -71,7 +75,7 @@ object IrminQueriesSpec extends ZIOSpecDefault:
 
     test("no character below U+0020 survives unescaped in the rendered query") {
       val everyControlChar = (0 until 0x20).map(_.toChar).mkString
-      val query = IrminQueries.setValue(path, everyControlChar, "msg", "author", BranchRef.Main)
+      val query = IrminQueries.setValue(path, everyControlChar, message, "author", BranchRef.Main)
       // The query's own layout holds newlines, so only the value argument is
       // checked rather than the whole document.
       val valueArg = valueArgOf(everyControlChar)

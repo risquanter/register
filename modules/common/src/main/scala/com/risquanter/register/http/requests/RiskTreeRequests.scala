@@ -265,19 +265,22 @@ object RiskTreeRequests {
       }
     }).as(())
 
-  /** Every saved-node entry names a node of `stored` of the matching type. An
-    * identifier that does not refine is skipped here, because the entry's own
-    * refinement reports it.
+  /** Every saved-node entry names a node of `stored` of the matching type, and
+    * no two entries name the same one. An identifier that does not refine is
+    * skipped here, because the entry's own refinement reports it.
     *
     * An entry keeps a stored node's identifier, and only the server mints a new
     * one (ADR-017 §4), so an identifier the stored tree does not hold, or holds
-    * under the other type, is refused rather than stored. The check reads the
-    * raw entries, so its refusals accumulate with every refusal of the entries'
-    * other fields.
+    * under the other type, is refused rather than stored. An identifier listed
+    * a second time, in either collection, is refused at that second entry. The
+    * check reads the raw entries, so its refusals accumulate with every refusal
+    * of the entries' other fields.
     *
     * {{{
     * // `leaves` lists the id of a stored portfolio, and a second entry's id is "not-an-id"
     * requireStoredNodes(Nil, Seq(entry, malformed), stored) // one INVALID_NODE_TYPE, at the first entry's Id
+    * // `leaves` lists one stored leaf's id twice
+    * requireStoredNodes(Nil, Seq(entry, entry), stored)     // one DUPLICATE_VALUE, at that id
     * }}}
     */
   private[requests] def requireStoredNodes(
@@ -285,24 +288,27 @@ object RiskTreeRequests {
     leaves: Seq[RiskLeafUpdateRequest],
     stored: TreeIndex
   ): Validation[ValidationError, Unit] =
-    def check(rawId: String, listedAs: NodeKind): Validation[ValidationError, Unit] =
-      ValidationUtil.refineId(rawId, ErrorLocation.requestField(FieldName.Id)).toOption match
-        case None => Validation.succeed(())
-        case Some(id) =>
-          val location = ErrorLocation.Field(ErrorSubject.ExistingNode(NodeId(id)), FieldName.Id)
-          (stored.nodes.get(NodeId(id)), listedAs) match
-            case (Some(_: RiskPortfolio), NodeKind.Portfolio) | (Some(_: RiskLeaf), NodeKind.Leaf) =>
-              Validation.succeed(())
-            case (Some(_: RiskLeaf), NodeKind.Portfolio) =>
-              Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsLeaf(id.value)))
-            case (Some(_: RiskPortfolio), NodeKind.Leaf) =>
-              Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsPortfolio(id.value)))
-            case (None, _) =>
-              Validation.fail(ValidationError(location, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.nodeIdNotInTree(id.value)))
-    Validation.validateAll(
-      portfolios.map(p => check(p.id, NodeKind.Portfolio)) ++
-        leaves.map(l => check(l.id, NodeKind.Leaf))
-    ).as(())
+    def check(id: SafeId.SafeId, listedAs: NodeKind, seenBefore: Boolean): Validation[ValidationError, Unit] =
+      val location = ErrorLocation.Field(ErrorSubject.ExistingNode(NodeId(id)), FieldName.Id)
+      (seenBefore, stored.nodes.get(NodeId(id)), listedAs) match
+        case (true, _, _) =>
+          Validation.fail(ValidationError(location, ValidationErrorCode.DUPLICATE_VALUE, ValidationMessages.storedNodeListedTwice(id.value)))
+        case (false, Some(_: RiskPortfolio), NodeKind.Portfolio) | (false, Some(_: RiskLeaf), NodeKind.Leaf) =>
+          Validation.succeed(())
+        case (false, Some(_: RiskLeaf), NodeKind.Portfolio) =>
+          Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsLeaf(id.value)))
+        case (false, Some(_: RiskPortfolio), NodeKind.Leaf) =>
+          Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsPortfolio(id.value)))
+        case (false, None, _) =>
+          Validation.fail(ValidationError(location, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.nodeIdNotInTree(id.value)))
+    val listed: Seq[(SafeId.SafeId, NodeKind)] =
+      (portfolios.map(p => (p.id, NodeKind.Portfolio)) ++ leaves.map(l => (l.id, NodeKind.Leaf)))
+        .flatMap((rawId, kind) => ValidationUtil.refineId(rawId, ErrorLocation.requestField(FieldName.Id)).toOption.map(_ -> kind))
+    val (_, checks) =
+      listed.foldLeft((Set.empty[SafeId.SafeId], Vector.empty[Validation[ValidationError, Unit]])) {
+        case ((seen, acc), (id, kind)) => (seen + id, acc :+ check(id, kind, seen.contains(id)))
+      }
+    Validation.validateAll(checks).as(())
 
   // Guard: portfolios must point to portfolios in the provided set (or be root).
   private[requests] def requirePortfolioParents(

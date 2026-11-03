@@ -34,7 +34,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       childIds = leaves.map(_.id.value).toVector,
       parentId = None
     ), "portfolio")
-    RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, mitigations = Nil)
+    RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, seedVarHighWater = None, mitigations = Nil)
   }
 
   def spec = suite("RiskTree seedVarId defense in depth")(

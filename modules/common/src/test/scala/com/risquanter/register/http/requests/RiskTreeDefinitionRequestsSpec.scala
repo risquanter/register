@@ -260,8 +260,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val req = RiskTreeUpdateRequest(
         name = "Tree",
         portfolios = Seq(
-          RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None),
-          RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R9", name = "Child", parentName = Some("Root"))
+          RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None),
+          RiskPortfolioUpdateRequest(id = childIdStr, name = "Child", parentName = Some("Root"))
         ),
         leaves = Seq.empty,
         newPortfolios = Seq.empty,
@@ -276,7 +276,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     test("resolveUpdate fails when names conflict between existing and new nodes") {
       val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq.empty,
         newPortfolios = Seq.empty,
         newLeaves = Seq(validLeafDef("Root", Some("Root"))) // duplicates existing portfolio name
@@ -290,8 +290,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     test("resolveUpdate fails when new leaf parent is a leaf") {
       val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
-        leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "Leaf1", Some("Root"))),
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
         newLeaves = Seq(validLeafDef("Leaf2", Some("Leaf1"))) // parent is a leaf
       )
@@ -316,8 +316,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     test("resolveUpdate fails when an existing node name collides with a reserved FOL symbol") {
       val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
-        leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "p95", Some("Root"))), // "p95" is a reserved function
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate(childIdStr, "p95", Some("Root"))), // "p95" is a reserved function
         newPortfolios = Seq.empty,
         newLeaves = Seq.empty
       )
@@ -388,11 +388,11 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       )
     },
 
-    test("resolveUpdate rejects seedVarId on an existing leaf (immutability §5.3)") {
+    test("resolveUpdate rejects seedVarId on an existing leaf, whose seedVarId is immutable") {
       val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
-        leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "Leaf1", Some("Root")).copy(seedVarId = Some(3L))),
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root")).copy(seedVarId = Some(3L))),
         newPortfolios = Seq.empty,
         newLeaves = Seq.empty
       )
@@ -403,8 +403,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     test("resolveUpdate carries provided seedVarIds for new leaves only") {
       val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
-        leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "Leaf1", Some("Root"))),
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
         newLeaves = Seq(validLeafDef("Leaf2", Some("Root")).copy(seedVarId = Some(9L)))
       )
@@ -423,7 +423,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     test("resolveUpdate rejects duplicate provided seedVarIds among new leaves") {
       val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq.empty,
         newPortfolios = Seq.empty,
         newLeaves = Seq(
@@ -438,12 +438,10 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     test("resolveUpdate preserves existing node ids verbatim (time-travel identity precondition)") {
       // The whole point of the existing buckets: a loaded node's id must survive
       // resolution unchanged so its Irmin path is rewritten in place, not churned.
-      val rootIdStr = "01H0R8Z3F5J2N4R8Z3F5J2N4R8"
-      val leafIdStr = "01H0R8Z3F5J2N4R8Z3F5J2N4R9"
       val req = RiskTreeUpdateRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
-        leaves = Seq(validLeafUpdate(leafIdStr, "Leaf1", Some("Root"))),
+        leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
         newLeaves = Seq.empty
       )
@@ -457,7 +455,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           val leafNode = resolved.existing.values.find(_.name.value == "Leaf1")
           assertTrue(
             rootNode.exists(_.id.value.toString == rootIdStr),
-            leafNode.exists(_.id.value.toString == leafIdStr)
+            leafNode.exists(_.id.value.toString == childIdStr)
           )
         case Validation.Failure(_, errors) =>
           assertTrue(false).label(errors.map(_.message).mkString("; "))
@@ -537,6 +535,24 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       assertTrue(
         errors.count(_.code == ValidationErrorCode.INVALID_FORMAT) == 1,
         !errors.exists(e => e.code == ValidationErrorCode.MISSING_REFERENCE || e.code == ValidationErrorCode.INVALID_NODE_TYPE)
+      )
+    },
+
+    test("resolveUpdate refuses a stored id listed twice, once, at that id") {
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+        leaves = Seq(
+          validLeafUpdate(childIdStr, "Leaf1", Some("Root")),
+          validLeafUpdate(childIdStr, "Leaf2", Some("Root"))
+        ),
+        newPortfolios = Seq.empty,
+        newLeaves = Seq.empty
+      )
+      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
+      val atChildId = ErrorLocation.Field(ErrorSubject.ExistingNode(nodeIdOf(childIdStr)), FieldName.Id)
+      assertTrue(
+        errors.count(e => e.code == ValidationErrorCode.DUPLICATE_VALUE && e.location == atChildId) == 1
       )
     }
   )

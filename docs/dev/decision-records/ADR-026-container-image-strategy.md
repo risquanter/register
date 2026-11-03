@@ -20,15 +20,15 @@
 
 | Tier | Purpose | Lifetime | Images |
 |------|---------|----------|--------|
-| **Builder** | Cached toolchain, reused by a prod build | Survives `docker builder prune` | `local/graalvm-builder:21`, `local/irmin-builder:3.11-p1` |
-| **Prod** | Multi-stage build ending in a minimal runtime | Rebuilt on code or config changes | `local/register-server:<version>`, `local/irmin-prod:3.11-p1`, `local/frontend:<version>` |
+| **Builder** | Cached toolchain, reused by a prod build | Survives `docker builder prune` | `local/graalvm-builder:21`, `local/irmin-builder:3.11-p2` |
+| **Prod** | Multi-stage build ending in a minimal runtime | Rebuilt on code or config changes | `local/register-server:<version>`, `local/irmin-prod:3.11-p2`, `local/frontend:<version>` |
 
 A third image, `local/bats-runner:1.11`, is neither: it is a test harness that
 drives the host's Docker daemon and ships nothing. It lives in `containers/dev/`.
 
 **Purge-and-rebuild workflow:**
 ```bash
-docker rmi local/register-server:<version> local/irmin-prod:3.11-p1   # purge deployed
+docker rmi local/register-server:<version> local/irmin-prod:3.11-p2   # purge deployed
 docker compose build                                      # rebuild in seconds
 # Builder images untouched — no 40-min opam reinstall
 ```
@@ -122,7 +122,7 @@ ENTRYPOINT ["opam", "exec", "--", "irmin", "graphql"]
 
 ```dockerfile
 # GOOD: only the binary + minimal shared libs (~87 MB)
-FROM local/irmin-builder:3.11-p1 AS builder
+FROM local/irmin-builder:3.11-p2 AS builder
 FROM alpine:3.24.2@sha256:<digest>
 COPY --from=builder /home/opam/.opam/default/bin/irmin /usr/local/bin/irmin
 ENTRYPOINT ["/usr/local/bin/irmin", "graphql"]
@@ -138,7 +138,7 @@ docker compose build irmin  # 40-minute rebuild
 
 ```bash
 # GOOD: named builder image survives prune
-docker rmi local/irmin-prod:3.11-p1
+docker rmi local/irmin-prod:3.11-p2
 docker compose build irmin  # seconds — builder image intact
 ```
 

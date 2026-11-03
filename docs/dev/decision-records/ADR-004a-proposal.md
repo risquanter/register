@@ -43,26 +43,32 @@ selector = `main` **[Refined → DD-8]**.
 `IrminClient` / `IrminQueries`: queries for reads, `set_tree` mutations for
 writes, branch ops (create/delete/CAS) for scenarios **[Refined → DD-7]**.
 
-Each user action is saved atomically. A save produces one commit. A merge
-produces three, because Irmin's merge cannot take a `meta` value both branches
-changed: the scenario's `meta` copied onto the staging branch, Irmin's merge
-commit, and the merged `meta`. The history a user sees is a filtered view of the
-persisted commits. It leaves out the commits of intermediate states in which no
-business information changed. For a merge it shows only the last commit.
+Each user action is saved atomically. A save produces one commit. Irmin's merge
+cannot take a `meta` value both branches changed, so a merge produces 2N + 1
+commits, where N is the number of trees whose `meta` both branches changed. For
+each such tree the scenario's `meta` is copied onto the staging branch, one
+commit per tree. Irmin's merge commit follows. Then each tree's merged `meta` is
+written, one commit per tree. With N = 0 the merge is Irmin's merge commit
+alone, or no new commit when main has not moved since the fork and Irmin
+fast-forwards. The history a user sees is a filtered view of the persisted
+commits. It leaves out the commits of intermediate states in which no business
+information changed. For a merge it shows, per tree, only the commit that wrote
+that tree's merged `meta`.
 
 From this it follows that:
 
-- **Irmin does not list the merge commit.** The history read asks Irmin for the
-  commits that changed `meta`. Irmin's merge commit does not change `meta`,
-  because the copy already made it equal to the scenario's, so its `meta` equals
-  both of its parents. Irmin never returns that commit, and the history read has
+- **Irmin does not list the merge commit for a tree whose `meta` was copied.**
+  The history read asks Irmin for the commits that changed a tree's `meta`. For
+  each of the N trees the copy already made staging's `meta` equal to the
+  scenario's, so that tree's `meta` in the merge commit equals both of its
+  parents. Irmin never returns the merge commit for it, and the history read has
   nothing to filter.
-- **The history read drops the copy.** The copy does change `meta`, so Irmin
-  returns it. The history read's filter then removes it.
-- **Main holds all three commits or none.** All three are written on the
+- **The history read drops the copies.** Each copy changes its tree's `meta`,
+  so Irmin returns it. The history read's filter then removes it.
+- **Main holds all 2N + 1 commits or none.** All of them are written on the
   staging branch, which nothing reads. At the end, main is switched to the last
   commit in one compare-and-set. If that step fails, main stays where it was, so
-  main never holds the copy without the other two.
+  main never holds a copy without the commits after it.
 
 ZIO is the **only writer** to Irmin, so change detection happens at the
 mutation path, not via watch subscriptions **[Refined]**:

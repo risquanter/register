@@ -272,7 +272,7 @@ sbt app/test
 
 ## Integration Tests (serverIt)
 
-Requires `local/irmin-prod:3.11-p1` Docker image (built once — see Image Builds).
+Requires `local/irmin-prod:3.11-p2` Docker image (built once — see Image Builds).
 `IrminCompose` starts/stops a scoped Irmin container automatically per run using
 `docker-compose.server-it.yml` (dynamic host port — multiple specs run concurrently
 without port conflicts).
@@ -356,7 +356,7 @@ What each tier needs, and whether it can build it on demand:
 |---|---|---|
 | `commonJVM/test`, `app/test` | nothing | no Docker at all |
 | `server/test` | `postgres:17-alpine` | yes — public image, pulled |
-| `serverIt/test` | `local/irmin-prod:3.11-p1`, `authzed/spicedb:latest` | irmin is a **fixed** tag, unaffected by version bumps; build it once (see Image Builds). spicedb is pulled |
+| `serverIt/test` | `local/irmin-prod:3.11-p2`, `authzed/spicedb:latest` | irmin is a **fixed** tag, unaffected by version bumps; build it once (see Image Builds). spicedb is pulled |
 | BATS A/B/C, manual stack | `local/register-server:${APP_VERSION}`, `local/frontend:${APP_VERSION}`, `local/bats-runner:1.11` | server and frontend build on first `up` after a bump; the runner is built once |
 
 So the unit and integration tiers never need a rebuild after a cleanup. Only the
@@ -577,11 +577,11 @@ docker build -f containers/builders/Dockerfile.graalvm-builder \
 
 # Irmin builder base (~15-40 min first run; rebuild only on Irmin/OCaml version change)
 docker build -f containers/builders/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11-p1 containers/builders/
+  -t local/irmin-builder:3.11-p2 containers/builders/
 
 # Irmin production image (~10s; requires irmin-builder)
 docker build -f containers/prod/Dockerfile.irmin-prod \
-  -t local/irmin-prod:3.11-p1 containers/prod/
+  -t local/irmin-prod:3.11-p2 containers/prod/
 
 # Frontend SPA (~10-15 min first run)
 source .env

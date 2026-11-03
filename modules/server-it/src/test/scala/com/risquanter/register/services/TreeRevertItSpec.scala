@@ -6,8 +6,9 @@ import zio.test.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, RiskLeaf}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
-import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.http.responses.TreeWriteKind
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
+import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.configs.TestConfigs
@@ -63,7 +64,6 @@ object TreeRevertItSpec extends ZIOSpecDefault:
       shape = lognormalShape(1500L, 3000L),
       parentId = Some(rootId), seedVarId = 2L).toEither.toOption.get.toJson
 
-  private def treeRoot(id: TreeId): String = s"workspaces/${wsId.value}/risk-trees/${id.value}"
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe
 
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient & RiskTreeService] =
@@ -90,13 +90,13 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           repo    <- ZIO.service[RiskTreeRepository]
           irmin   <- ZIO.service[IrminClient]
           _       <- repo.create(wsId, v1, BranchRef.Main)
-          histC   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
+          histC   <- irmin.getHistory(WorkspaceStoragePaths.treeMeta(wsId, tid), positiveInt(20), BranchRef.Main)
           c1Hash  <- ZIO.fromEither(CommitHash.fromString(histC.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
           _       <- repo.update(wsId, tid, _ => treeV2(v1), BranchRef.Main)
-          histU   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
+          histU   <- irmin.getHistory(WorkspaceStoragePaths.treeMeta(wsId, tid), positiveInt(20), BranchRef.Main)
           reverted <- repo.revert(wsId, tid, c1Hash, BranchRef.Main)
           loaded  <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
-          histR   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
+          histR   <- irmin.getHistory(WorkspaceStoragePaths.treeMeta(wsId, tid), positiveInt(20), BranchRef.Main)
           headAfter <- irmin.mainBranch.map(_.flatMap(_.head))
         yield assertTrue(
           // restored to v1 — leaf-2 is back (3 nodes)
@@ -124,14 +124,14 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           repo     <- ZIO.service[RiskTreeRepository]
           irmin    <- ZIO.service[IrminClient]
           _        <- repo.create(wsId, v1, BranchRef.Main)
-          hist     <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
+          hist     <- irmin.getHistory(WorkspaceStoragePaths.treeMeta(wsId, tid), positiveInt(20), BranchRef.Main)
           goodHash <- ZIO.fromEither(CommitHash.fromString(hist.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
           // Written one blob at a time, the way a merge writes, so no
           // whole-set check runs and the invalid state lands.
           _        <- irmin.set(
-                        IrminPath.unsafeFrom(s"${treeRoot(tid)}/nodes/${leaf2Id.value}"),
+                        WorkspaceStoragePaths.of(wsId, TreePath.Node(tid, leaf2Id)),
                         duplicateNameLeafJson,
-                        s"workspace:${wsId.value}:risk-tree:${tid.value}:break-invariant",
+                        CommitMessage.TreeWritten(wsId, tid, TreeWriteKind.Update),
                         BranchRef.Main
                       )
           brokenRead <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).exit

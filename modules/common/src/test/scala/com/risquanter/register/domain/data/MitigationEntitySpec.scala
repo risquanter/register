@@ -83,7 +83,7 @@ object MitigationEntitySpec extends ZIOSpecDefault {
       id = idStr("root-pf"), name = "Root Portfolio",
       childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
     RiskTree.fromNodes(treeId("mit-tree"), name("Mit Tree"), Seq(root, l1, l2), root.id,
-      mitigations = mitigations.toList)
+      seedVarHighWater = None, mitigations = mitigations.toList)
   }
 
   def spec = suite("MitigationEntitySpec")(

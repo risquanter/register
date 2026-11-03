@@ -18,11 +18,11 @@ import com.risquanter.register.domain.errors.{AppError, FieldName, IrminError}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioResponse, ScenarioSummaryResponse, TreeLabel, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
-import com.risquanter.register.infra.irmin.IrminClient
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory}
-import com.risquanter.register.services.{MergePreviewResult, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
+import com.risquanter.register.services.{ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 
 /** HTTP-layer tests for [[ScenarioController]].
@@ -78,11 +78,11 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, expectedHead)))
 
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
-    override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
-    override def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef) = ZIO.die(new NotImplementedError("unused"))
-    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
-    override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
-    override def mergeBranch(from: BranchRef, into: StoreBranch, message: String) = ZIO.die(new NotImplementedError("unused"))
+    override def set(path: IrminPath, value: String, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def set(path: IrminPath, value: String, message: CommitMessage, staging: MergeStagingRef) = ZIO.die(new NotImplementedError("unused"))
+    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage) = ZIO.die(new NotImplementedError("unused"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused"))
     override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused"))
@@ -195,8 +195,8 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         fields = List(FieldName.Probability)
       )
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewResult] =
-          ZIO.succeed(MergePreviewResult.Conflicts(List(conflict)))
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+          ZIO.succeed(MergePreviewStatus.Conflicts(List(conflict)))
         override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
@@ -218,8 +218,8 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
           List(SafeName.fromString("Alpha").toOption.get)
       )
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewResult] =
-          ZIO.succeed(MergePreviewResult.DuplicateNames(dupMap))
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+          ZIO.succeed(MergePreviewStatus.DuplicateNames(dupMap))
         override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
@@ -235,8 +235,8 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("merge-preview clean wire mapping: duplicateNames absent/None when the preview is clean") {
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewResult] =
-          ZIO.succeed(MergePreviewResult.Clean)
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+          ZIO.succeed(MergePreviewStatus.Clean())
         override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for

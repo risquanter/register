@@ -6,11 +6,11 @@
 #
 # Requires builder base (one-time):
 #   docker build -f containers/builders/Dockerfile.irmin-builder \
-#     -t local/irmin-builder:3.11-p1 containers/builders/
+#     -t local/irmin-builder:3.11-p2 containers/builders/
 #
 # Build:   docker compose build irmin
-#   or:    docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11-p1 .
-# Run:     docker run -p 8080:8080 -v irmin-data:/data local/irmin-prod:3.11-p1
+#   or:    docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11-p2 .
+# Run:     docker run -p 8080:8080 -v irmin-data:/data local/irmin-prod:3.11-p2
 #
 # Tag suffix -p1: upstream 3.11.0 plus the local irmin-graphql merge-conflict
 # patch carried by the builder (containers/builders/patches/).
@@ -21,7 +21,7 @@
 # consumes it, so no publisher digest exists to pin against. Its content is
 # fixed by the base digest and package versions inside
 # containers/builders/Dockerfile.irmin-builder (ADR-020 §1).
-FROM local/irmin-builder:3.11-p1 AS builder
+FROM local/irmin-builder:3.11-p2 AS builder
 
 # Stage 2: Minimal Alpine runtime ("distroless in spirit")
 # alpine:3.24.2 — the one Alpine branch every image in this repository uses, and
@@ -31,7 +31,7 @@ FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4c
 
 LABEL maintainer="risquanter"
 LABEL description="Irmin GraphQL server — production (slim; local merge-conflict patch)"
-LABEL version="3.11-p1"
+LABEL version="3.11-p2"
 
 # Install only the shared libraries the irmin binary needs.
 # gmp:       GNU Multiple Precision Arithmetic (libgmp.so.10)

@@ -9,7 +9,9 @@ Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 is in place: the token names this document and the file inventory exists beside
 it. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase 3a's
 continuation, and `EWB-D-27`'s projection change landed with them. §17 and §18
-are implemented as of 2026-11-02. What remains is Phase 3b, then Phases 4 to 7.
+are implemented as of 2026-11-02. §17.12, the review findings accepted after
+that, is implemented as of 2026-11-03. What remains is Phase 3b, then Phases 4
+to 7.
 Tree history is out of this plan's scope from 2026-11-02 and belongs to
 `PLAN-BRANCH-HISTORY.md` (`BH-D-1`).
 
@@ -7570,9 +7572,10 @@ passes the current time, which it never writes. `merge` starts the staging
 branch at the scan's `mainHead` and publishes against it, and reads main's head
 nowhere else (EWB-D-60).
 
-`MergePreviewResult.Conflicts` carries `List[MergeConflictEntry]`. The
-controller passes it through, and `MergeConflictPath` is deleted with
-`toWire` and `fromRelativePath`.
+`preview` returns the wire outcome `MergePreviewStatus`, whose `Conflicts`
+carries `List[MergeConflictEntry]`. The controller wraps it in
+`MergePreviewResponse`, and `MergeConflictPath` is deleted with `toWire` and
+`fromRelativePath`.
 
 **The staging write (EWB-D-50).**
 `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala`:
@@ -7919,37 +7922,138 @@ TWC-D-8 and TWC-D-15, and finding 2 as item 7 below.
    extended so the "merge conflict: " prefix `IrminClientLive.mergeBranch`
    recognises is also put on `merge_with_commit`'s conflict error. The
    `IrminClient` signature is a signature echo.
+
+   Ruled 2026-11-03, after a pinned-branch alternative was weighed and dropped.
+   Irmin's source (`irmin/store.ml:1053-1065`) shows `merge_with_branch` and
+   `merge_with_commit` both run `Head.merge`, and `Commit.merge_commit`
+   (`irmin/commit.ml:179-213`) either fast-forwards or writes a commit with both
+   heads as parents. A probe of 24 merges into an unmoved target, on a fresh
+   store and on one with a refused merge and a `revert`-created branch, gave a
+   fast-forward every time. The ancestry loss recorded in
+   `docs/dev/NOTE-irmin-merge-with-commit-ancestry.md` is therefore not
+   reachable, and the two mutations differ only in how they find the source,
+   in the conflict error's text and in the missing-source failure.
+
+   Echo approved 2026-11-03:
+
+   ```scala
+   // IrminClient — replaces mergeBranch in the trait and the companion
+   /** Merge one commit into a branch (Irmin `merge_with_commit`).
+     *
+     * Fast-forwards when `into`'s head is the common ancestor of the two;
+     * otherwise writes a merge commit whose parents are both heads. Requires the
+     * patched Irmin image: a conflicting merge fails as `IrminMergeConflict`
+     * and leaves `into`'s head untouched.
+     */
+   def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage): IO[IrminError, IrminCommit]
+
+   // IrminQueries — replaces mergeWithBranch; `from` interpolated as the hex-refined `from.value`
+   def mergeWithCommit(from: CommitHash, into: StoreBranch, message: CommitMessage, author: String): String
+   ```
+
+   - `IrminResponses.MergeBranchResponse` becomes `MergeCommitResponse`, same
+     shape, data field `merge_with_commit: Option[CommitData]`. The file needs
+     an inventory amendment.
+   - `IrminClientLive.mergeCommit` keeps `mergeBranch`'s body and its
+     `MergeConflictPrefix` handling. Only the query and the field read change.
+   - `ScenarioMergeService.mergeOnStaging` takes `scenarioHead: CommitHash` in
+     place of `scenarioBranch: BranchRef`, and merges with
+     `irmin.mergeCommit(scenarioHead, staging, mergedMessage)`. `merge` passes
+     the head the scan compared.
+   - The container patch gains a hunk putting the "merge conflict: " prefix on
+     `merge_with_commit`'s conflict arm. The `merge_with_branch` hunk stays.
+     The "invalid hash" arm keeps its text.
+   - `IrminMergeSemanticsSpec` merges through `mergeCommit`. Its fast-forward
+     test pins `ffCommit.hash == headA.hash`, and a second fast-forward case
+     runs after a refused merge. The "comparison: unpatched-style
+     merge_with_commit" test and the `mergeWithCommitRaw` helper are removed:
+     the patched-contract test now runs on that mutation and asserts the typed
+     conflict and the unchanged head. The header states that both mutations
+     run `Head.merge`.
+   - `IrminClientIntegrationSpec`'s two merges, and the `IrminClient` fakes in
+     `RiskTreeReadConsistencySpec`, `ScenarioServiceLiveSpec`,
+     `ScenarioMergeServiceSpec`, `TreeHistoryServiceSpec` and
+     `ScenarioControllerSpec`, move to `mergeCommit`.
+     `ScenarioMergeServiceSpec` gains "merge merges the scenario commit the
+     scan compared": the fake records the `from` hash and the test asserts it
+     equals the head the scan read.
+   - The `mergeBranch` mentions in the `ScenarioMergeService` and `AppError`
+     scaladoc, the note, ADR-020 §11 and `docs/dev/VERSION-UPGRADE-PROTOCOL.md`'s
+     description of the patch's scope are brought to current state.
+
+   The patched image is retagged `3.11-p2` (ruled 2026-11-03). The tag names
+   the patch revision, and a new tag makes a machine without the rebuilt image
+   fail on the missing image instead of reporting a conflict as
+   `IrminGraphQLError`. Every current-state reference to `3.11-p1` moves with
+   it:
+   - `docker-compose.yml` and `docker-compose.server-it.yml`;
+   - the two Irmin Dockerfiles;
+   - BATS suites A and B;
+   - the user guides and `docs/test/TESTING.md`;
+   - ADR-020, ADR-026 and `docs/dev/VERSION-UPGRADE-PROTOCOL.md`;
+   - `CLAUDE.md` and the `register-dev` skill.
+
+   Plans and archived plans keep `3.11-p1` as the record of their time.
+
+   Verification: rebuild `irmin-builder` and `irmin-prod` at `3.11-p2`, then
+   run `commonJVM/test`, `server/test`, `app/test` and `serverIt/test`, then
+   BATS suites B and A.
+
+   Implemented 2026-11-03, all of the above green. Three things went beyond
+   the list:
+   - `IrminCompose.scala`'s comment names the image, so it moved to
+     `3.11-p2` with the others, added to the inventory.
+   - `docs/dev/TODO.md` and ADR-007-appendix and ADR-032 (approved
+     2026-11-03) named the image or `merge_with_branch` / `mergeBranch` as
+     current state, and now name `3.11-p2` and `mergeCommit`.
+   - Suite A needed a frontend image at the current version, and its build
+     failed because Alpine 3.24 no longer serves `openjdk21-jdk=21.0.12_p8-r0`.
+     The pin in `containers/prod/Dockerfile.frontend-prod` moved to
+     `21.0.13.0.3_p1-r0`, built 2026-10-31, with the ADR-020 §10 cooldown
+     waived by the user on 2026-11-03. Before adoption the package was checked
+     against upstream tag `jdk-21.0.13.0.3-ga` (`openjdk/jdk21u`, 2026-10-27),
+     and published sources were checked for an Alpine compromise: none names
+     one. The package was built after Alpine rebuilt its GitLab server, which
+     closed the CVE-2026-97229 incident on 2026-10-28.
 2. **A scenario deleted between the scan and the merge surfaces as
    `IrminGraphQLError`** (origin service) instead of the not-found refusal, because
    Irmin fails `merge_with_branch` on a missing branch with
    `invalid_arg "… is not a valid branch ID"`. No text matching: item 1's route
    merges a commit, which exists whether or not the branch does, so this case
-   disappears with it.
+   disappears with it. Implemented 2026-11-03 with item 1.
 3. **ADR-004a §2 says a merge produces three commits.** With N trees in
    `metadataToWrite` it produces 2N + 1: one `meta` copy and one merged `meta`
    per tree, plus Irmin's merge commit. The passage (lines 46-51) and the three
    bullets under it are rewritten for N trees. An ADR edit, so it waits for the
-   go that item-by-item approval of this list gives.
+   go that item-by-item approval of this list gives. Implemented 2026-11-03.
 4. **A stale comment.** `RiskTree.scala:27` says `seedVarHighWater` "Merges as
    max across branches". The merge is three-way on the field and never takes a
    maximum. Comment-only; the sentence is deleted. `PLAN-TREE-WRITE-CONCURRENCY.md`
    TWC-D-12 may remove the field altogether; if it does first, this item lapses.
+   Implemented 2026-11-03.
 5. **`requireStoredNodes` accepts the same stored id listed twice**
    (`RiskTreeRequests.scala:283-305`). Later checks refuse the request without
    naming the cause. The fix adds a `DUPLICATE_VALUE` refusal at the second
    occurrence, located at `ErrorLocation.Field(ErrorSubject.ExistingNode(id), FieldName.Id)`,
    a new `ValidationMessages` template, and a `RiskTreeDefinitionRequestsSpec`
-   case.
+   case. Implemented 2026-11-03.
 6. **Three branches written as `if`/`else` that classify a value.**
    - The verdict order, conflicts before duplicate names, is decided twice:
      `ScenarioMergeService.scala:203-205` (preview) and `:223-230` (merge). A
      `MergeScan.verdict` with cases `Conflicts`, `DuplicateNames` and `Clean`,
      computed once, is matched in both places. A new type, so its echo carries
-     the family search.
+     the family search. Ruled 2026-11-03: the server's `MergePreviewResult` was
+     an isomorphic copy of the wire outcome `MergePreviewStatus` and is deleted,
+     so `ScenarioMergeService.preview` returns `MergePreviewStatus` and the
+     controller's `toPreviewResponse` goes. `MergeVerdict` is a private enum in
+     `ScenarioMergeServiceLive` with total maps `preview: MergePreviewStatus` and
+     `refusal: Option[MergeRefusal]`; `MergeScan.verdict` decides conflicts
+     before duplicate names. Implemented 2026-11-03.
    - `mergeField` (`:82-85`) is `Either.cond(!isConflict(versions), merged(versions).getOrElse(onMain), field)`.
+     Implemented 2026-11-03.
    - `IrminClientLive.scala:163`, `:173` and `:183` each read
      `if applied then ZIO.unit else ZIO.fail(…)`; each becomes
-     `ZIO.fail(…).unless(applied)`.
+     `ZIO.fail(…).unless(applied)`. Implemented 2026-11-03 with item 8.
 7. **The scan reads both branches' content by branch name after pinning their
    heads.** Ruled 2026-11-03: read at the pinned commits. `scan` takes
    `mainHead` (`ScenarioMergeService.scala:376`) and is handed `scenarioHead`,
@@ -7972,7 +8076,9 @@ TWC-D-8 and TWC-D-15, and finding 2 as item 7 below.
    answers are signature-echo work. The options weighed: re-read both heads
    after the scan and retry the preview once, which detects rather than
    prevents and brings back the second head read EWB-D-60 removed; and leaving
-   the preview as it is. Item 7 is implemented on top of item 8.
+   the preview as it is. Implemented 2026-11-03 on top of item 8; the spec's
+   fake no longer answers a read by branch name, so every preview and merge
+   case pins the pinned reads.
 8. **The Irmin client's egress and listings are typed.** Ruled 2026-11-03. A
    `String` on a boundary is justified only by the absence of a type, never by
    the receiver's signature. Four `String`s on this boundary are not justified:
@@ -8019,9 +8125,11 @@ TWC-D-8 and TWC-D-15, and finding 2 as item 7 below.
    (Phase 7 step 3), and the merge compares it as bytes (ADR-032). The client's
    scaladoc states that. On the response side, Phase 7 step 5 gains
    `IrminCommit.info.message` parsed on arrival as `Option[CommitMessage]`,
-   `None` for a commit this service did not write. `IrminQueries.setValue`'s
-   `author: String` is traced when the echo is written. Every `IrminClient`
-   fake in the test tree follows the trait.
+   `None` for a commit this service did not write. `IrminQueries`'
+   `author: String` is the client's one named constant `defaultAuthor`, the
+   text Irmin records as a commit's author, so it stays. Every `IrminClient`
+   fake in the test tree follows the trait. Implemented 2026-11-03, except the
+   Phase 7 step 5 extension, which lands with that step.
 
 Every file these touch is on `PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`, except the
 container patch in item 1, which needs an inventory amendment presented when

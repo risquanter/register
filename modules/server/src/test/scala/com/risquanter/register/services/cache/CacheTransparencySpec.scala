@@ -57,6 +57,7 @@ object CacheTransparencySpec extends ZIOSpecDefault {
         name = SafeName.SafeName("Transparency Tree".refineUnsafe),
         nodes = nodes,
         rootId = nodeId("root"),
+        seedVarHighWater = None,
         mitigations = Nil
       ),
       "Transparency fixture has invalid RiskTree"

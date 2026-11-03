@@ -8,6 +8,7 @@ import com.risquanter.register.domain.errors.FieldName
 import com.risquanter.register.http.responses.{TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
+import com.risquanter.register.infra.irmin.model.IrminSegment
 import com.risquanter.register.repositories.model.TreeMetadata
 import com.risquanter.register.testutil.TestHelpers.*
 
@@ -208,13 +209,13 @@ object MergeConflictRuleSpec extends ZIOSpecDefault:
         val ws         = WorkspaceId.fromString(idStr("workspace")).toOption.get
         val node       = nodeId("cyber")
         val mitigation = mitigationId("backups")
-        val meta       = WorkspaceStoragePaths.of(ws, TreePath.Meta(tree)).value
-        val nodePath   = WorkspaceStoragePaths.of(ws, TreePath.Node(tree, node)).value
-        val mitPath    = WorkspaceStoragePaths.of(ws, TreePath.Mitigation(tree, mitigation)).value
+        val meta       = WorkspaceStoragePaths.of(ws, TreePath.Meta(tree))
+        val nodePath   = WorkspaceStoragePaths.of(ws, TreePath.Node(tree, node))
+        val mitPath    = WorkspaceStoragePaths.of(ws, TreePath.Mitigation(tree, mitigation))
         assertTrue(
           meta == WorkspaceStoragePaths.treeMeta(ws, tree),
-          nodePath == s"${WorkspaceStoragePaths.treeNodes(ws, tree)}/${node.value}",
-          mitPath == s"${WorkspaceStoragePaths.treeMitigations(ws, tree)}/${mitigation.value}",
+          nodePath == WorkspaceStoragePaths.treeNodes(ws, tree) / IrminSegment.of(node.toSafeId),
+          mitPath == WorkspaceStoragePaths.treeMitigations(ws, tree) / IrminSegment.of(mitigation.toSafeId),
           Set(meta, nodePath, mitPath).size == 3
         )
       }

@@ -95,10 +95,10 @@ object IrminQueries:
     *               named branch on first write). A merge's staging branch is
     *               accepted, because the merge writes a tree's `meta` value there.
     */
-  def setValue(path: IrminPath, value: String, message: String, author: String, branch: StoreBranch = BranchRef.Main): String =
+  def setValue(path: IrminPath, value: String, message: CommitMessage, author: String, branch: StoreBranch = BranchRef.Main): String =
     // Escape special characters in value for GraphQL string
     val escapedValue = escapeGraphQLString(value)
-    val escapedMessage = escapeGraphQLString(message)
+    val escapedMessage = escapeGraphQLString(CommitMessage.render(message))
     val escapedAuthor = escapeGraphQLString(author)
     s"""
     |mutation {
@@ -136,8 +136,8 @@ object IrminQueries:
     * @param author Commit author
     * @param branch Branch to write to (Main = Irmin's default; Irmin creates a named branch on first write)
     */
-  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, author: String, branch: BranchRef = BranchRef.Main): String =
-    val escapedMessage = escapeGraphQLString(message)
+  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, author: String, branch: BranchRef = BranchRef.Main): String =
+    val escapedMessage = escapeGraphQLString(CommitMessage.render(message))
     val escapedAuthor = escapeGraphQLString(author)
     val items = entries
       .map(e => s"""{path: "${e.path.value}", value: "${escapeGraphQLString(e.value)}"}""")
@@ -172,8 +172,8 @@ object IrminQueries:
     * @param author Commit author
     * @param branch Branch to write to (Main = Irmin's default branch)
     */
-  def removeValue(path: IrminPath, message: String, author: String, branch: BranchRef = BranchRef.Main): String =
-    val escapedMessage = escapeGraphQLString(message)
+  def removeValue(path: IrminPath, message: CommitMessage, author: String, branch: BranchRef = BranchRef.Main): String =
+    val escapedMessage = escapeGraphQLString(CommitMessage.render(message))
     val escapedAuthor = escapeGraphQLString(author)
     s"""
     |mutation {
@@ -227,18 +227,18 @@ object IrminQueries:
   val getMainBranch: String = getBranchInfo(BranchRef.Main)
 
   /**
-    * Mutation to merge one branch into another.
+    * Mutation to merge one commit into a branch.
     *
-    * @param from Source branch
+    * @param from Source commit, interpolated as its hex-refined hash
     * @param into Target branch (Main = Irmin's default branch)
     */
-  def mergeWithBranch(from: BranchRef, into: StoreBranch, message: String, author: String): String =
-    val escapedMessage = escapeGraphQLString(message)
+  def mergeWithCommit(from: CommitHash, into: StoreBranch, message: CommitMessage, author: String): String =
+    val escapedMessage = escapeGraphQLString(CommitMessage.render(message))
     val escapedAuthor = escapeGraphQLString(author)
     s"""
     |mutation {
-    |  merge_with_branch(
-    |    ${branchArg(into)}from: "${from.toBranchRef}",
+    |  merge_with_commit(
+    |    ${branchArg(into)}from: "${from.value}",
     |    info: {
     |      message: "$escapedMessage",
     |      author: "$escapedAuthor"

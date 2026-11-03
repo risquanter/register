@@ -171,21 +171,21 @@ object RemoveValueResponse:
   given JsonCodec[RemoveValueResponse] = DeriveJsonCodec.gen[RemoveValueResponse]
 
 /**
-  * Response for `merge_with_branch(from, branch, info)` mutation.
+  * Response for `merge_with_commit(branch, from, info)` mutation.
   */
-final case class MergeBranchResponse(
-    data: Option[MergeBranchData],
+final case class MergeCommitResponse(
+    data: Option[MergeCommitData],
     errors: Option[List[GraphQLError]]
 )
 
-final case class MergeBranchData(
-    merge_with_branch: Option[CommitData]
+final case class MergeCommitData(
+    merge_with_commit: Option[CommitData]
 )
 
-object MergeBranchResponse:
+object MergeCommitResponse:
   import SetValueResponse.given
-  given JsonCodec[MergeBranchData] = DeriveJsonCodec.gen[MergeBranchData]
-  given JsonCodec[MergeBranchResponse] = DeriveJsonCodec.gen[MergeBranchResponse]
+  given JsonCodec[MergeCommitData] = DeriveJsonCodec.gen[MergeCommitData]
+  given JsonCodec[MergeCommitResponse] = DeriveJsonCodec.gen[MergeCommitResponse]
 
 /**
   * Response for `revert(commit, branch)` mutation.

@@ -141,7 +141,7 @@ mandatory rather than optional: without one, a digest-pinned base silently ages.
 The image scanning that supplies the trigger is commissioned in `TODO.md` item 39.
 
 Two `FROM` lines are not digest-pinned and cannot be: `local/graalvm-builder:21`
-and `local/irmin-builder:3.11-p1` are built on the machine that consumes them, so
+and `local/irmin-builder:3.11-p2` are built on the machine that consumes them, so
 there is no publisher digest to pin against. Their content is fixed by the pins
 inside their own Dockerfiles.
 

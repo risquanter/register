@@ -24,8 +24,8 @@ import zio.prelude.Validation
   * @param index Tree index for O(1) node lookup and O(depth) ancestor path (built from nodes)
   * @param seedVarHighWater Highest seedVarId ever assigned in this tree — never
   *        decreases, so deleted leaves' stream IDs are never reused by
-  *        auto-assignment. Merges as max across
-  *        branches. Invariant: >= every leaf's seedVarId (checked in fromNodes).
+  *        auto-assignment. Invariant: >= every leaf's seedVarId (checked in
+  *        fromNodes).
   * @param mitigations Tree-level mitigation collection — explicit first-class
   *        entities scoping nodes by stable id, versioned with the tree content
   *        Application semantics: the server's MitigationApplication.
@@ -67,7 +67,7 @@ object RiskTree {
 
   private def toRawShape(t: RiskTree): RiskTreeRaw =
     RiskTreeRaw(t.id, t.name, t.nodes, t.rootId, t.seedVarHighWater,
-      if (t.mitigations.isEmpty) None else Some(t.mitigations))
+      Option.when(t.mitigations.nonEmpty)(t.mitigations))
 
   given schema: Schema[RiskTree] =
     Schema.derived[RiskTreeRaw]
@@ -128,7 +128,7 @@ object RiskTree {
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId,
-    seedVarHighWater: Option[SeedVarId.SeedVarId] = None,
+    seedVarHighWater: Option[SeedVarId.SeedVarId],
     mitigations: Seq[Mitigation]
   ): Validation[ValidationError, RiskTree] = {
     // Both uniqueness rules are defined once in their type's companion and
@@ -231,7 +231,7 @@ object RiskTree {
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId,
-    seedVarHighWater: Option[SeedVarId.SeedVarId] = None,
+    seedVarHighWater: Option[SeedVarId.SeedVarId],
     mitigations: Seq[Mitigation]
   ): RiskTree = {
     fromNodes(id, name, nodes, rootId, seedVarHighWater, mitigations).toEither match {

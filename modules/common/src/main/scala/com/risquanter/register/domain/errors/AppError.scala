@@ -262,13 +262,13 @@ case class BranchHeadStale(branch: StoreBranch, expectedHead: CommitHash) extend
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 
-/** A merge refused by the (patched) Irmin backend: the two branches hold
-  * conflicting values for at least one path, so no merge commit was created
-  * and the target branch's head is unchanged. Raised only by
-  * `IrminClient.mergeBranch`, which recognises the patched resolver's
-  * `"merge conflict: "` error prefix; `reason` is Irmin's conflict
-  * description with that prefix stripped. Not retriable as-is — the
-  * branches must first be brought into byte agreement (ADR-032). */
+/** A merge refused by the (patched) Irmin backend: the merged commit and the
+  * target branch hold conflicting values for at least one path, so no merge
+  * commit was created and the target branch's head is unchanged. Raised only
+  * by `IrminClient.mergeCommit`, which recognises the patched resolver's
+  * `"merge conflict: "` error prefix. `reason` is Irmin's conflict
+  * description with that prefix stripped. Not retriable as-is: the two sides
+  * must first be brought into byte agreement (ADR-032). */
 case class IrminMergeConflict(reason: String) extends IrminError {
   override def logMessage: String = s"Irmin merge conflict: $reason"
   override def origin: FailureOrigin = FailureOrigin.Caller

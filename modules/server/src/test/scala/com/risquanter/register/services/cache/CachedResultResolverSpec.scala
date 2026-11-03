@@ -64,7 +64,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       name = SafeName.SafeName("Test Tree".refineUnsafe),
       nodes = allNodes,
       rootId = rootId,
-      mitigations = Nil
+      seedVarHighWater = None,
+      mitigations =Nil
     ),
     "Test fixture has invalid RiskTree"
   )
@@ -90,7 +91,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       name = SafeName.SafeName("Test Tree".refineUnsafe),
       nodes = allNodes,
       rootId = rootId,
-      mitigations = mits.toList
+      seedVarHighWater = None,
+      mitigations =mits.toList
     ),
     "Mitigated fixture has invalid RiskTree"
   )
@@ -210,7 +212,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
             name = SafeName.SafeName("Test Tree".refineUnsafe),
             nodes = Seq(rootNode, editedLeaf, risk2Leaf),
             rootId = rootId,
-            mitigations = Nil
+            seedVarHighWater = None,
+            mitigations =Nil
           ),
           "Edited fixture has invalid RiskTree"
         )
@@ -260,7 +263,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
               risk1Leaf
             ),
             rootId = rootId,
-            mitigations = Nil
+            seedVarHighWater = None,
+            mitigations =Nil
           ),
           "Other fixture has invalid RiskTree"
         )

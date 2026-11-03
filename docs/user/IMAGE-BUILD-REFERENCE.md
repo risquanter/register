@@ -19,7 +19,7 @@ docker build -f containers/builders/Dockerfile.graalvm-builder \
 # Irmin builder base — OCaml toolchain + opam packages (~15-40 min, once)
 # Rebuild when: Irmin version changes or OCaml version changes.
 docker build -f containers/builders/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11-p1 \
+  -t local/irmin-builder:3.11-p2 \
   containers/builders/
 ```
 
@@ -38,9 +38,9 @@ source .env    # makes APP_VERSION available to the commands below
 
 ```bash
 # Irmin production image — slim Alpine runtime (~10s)
-# Requires: local/irmin-builder:3.11-p1
+# Requires: local/irmin-builder:3.11-p2
 docker build -f containers/prod/Dockerfile.irmin-prod \
-  -t local/irmin-prod:3.11-p1 \
+  -t local/irmin-prod:3.11-p2 \
   containers/prod/
 
 # Register server — GraalVM native binary on distroless (~5-10 min)
@@ -61,10 +61,10 @@ docker images | grep -E 'irmin|register|graalvm|frontend'
 | Image | Rebuild when |
 |-------|-------------|
 | `local/graalvm-builder:21` | GraalVM or sbt version bump |
-| `local/irmin-builder:3.11-p1` | OCaml or Irmin version change |
+| `local/irmin-builder:3.11-p2` | OCaml or Irmin version change |
 | `local/register-server:*` | Server or common source changes — `docker compose up` handles this automatically |
 | `local/frontend:*` | Frontend or common source changes — `docker compose up` handles this automatically |
-| `local/irmin-prod:3.11-p1` | Irmin version change (requires irmin-builder rebuild first) |
+| `local/irmin-prod:3.11-p2` | Irmin version change (requires irmin-builder rebuild first) |
 
 ## After a first-party library release (metalog-distribution, vql-engine, hdr-rng)
 

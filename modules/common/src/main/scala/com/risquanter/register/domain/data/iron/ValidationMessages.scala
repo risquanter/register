@@ -21,6 +21,9 @@ object ValidationMessages:
   val scenarioNameInvalidChars: String = "Scenario name must use only letters, digits, spaces, hyphens, and underscores"
   val scenarioNameInvalidStart: String = "Scenario name must start with a letter or digit"
 
+  def scenarioNotFound(name: String): String =
+    s"Scenario not found: $name"
+
   // ══════════════════════════════════════════════════════════════════
   // Reserved FOL symbol names
   // ══════════════════════════════════════════════════════════════════
@@ -73,6 +76,9 @@ object ValidationMessages:
 
   def nodeIdIsPortfolio(id: String): String =
     s"id '$id' is a portfolio of this tree; it belongs in portfolios"
+
+  def storedNodeListedTwice(id: String): String =
+    s"id '$id' is listed more than once; each stored node appears once, in portfolios or in leaves"
 
   def cycleDetected(node: String): String =
     s"Cycle detected at node '$node'"

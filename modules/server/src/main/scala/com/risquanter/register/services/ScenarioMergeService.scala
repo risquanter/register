@@ -5,12 +5,12 @@ import zio.json.*
 import java.time.Instant
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, Revision, SafeName, TreeId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, Revision, SafeName, TreeId, ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode}
-import com.risquanter.register.http.responses.{MergeConflictEntry, TreeLabel, TreeMetadataFields, Versions}
+import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
-import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.infra.irmin.model.IrminSegment
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.repositories.model.TreeMetadata
 
@@ -81,8 +81,7 @@ object MergeConflictRule:
     * main's value stands in only for that unreachable absence. */
   private def mergeField[A](field: FieldName, base: Option[A], onMain: A, onScenario: A): Either[FieldName, A] =
     val versions = Versions(base, Some(onMain), Some(onScenario))
-    if isConflict(versions) then Left(field)
-    else Right(merged(versions).getOrElse(onMain))
+    Either.cond(!isConflict(versions), merged(versions).getOrElse(onMain), field)
 
 /** The fields that differ between two versions of one node, one mitigation or
   * one tree's `meta` fields. The scan passes main's and the scenario's versions
@@ -131,26 +130,17 @@ object ConflictFields:
   private def differing(comparisons: (FieldName, Boolean)*): List[FieldName] =
     comparisons.collect { case (field, true) => field }.toList
 
-/** Outcome of a merge preview. A plain multi-case enum (mirrors
-  * `ChangedNodesResult`): a missing scenario is a distinct non-error outcome
-  * of a read-only preview, not a failure.
-  */
-enum MergePreviewResult:
-  case Clean
-  case Conflicts(entries: List[MergeConflictEntry])
-  case DuplicateNames(perTree: Map[TreeId, List[SafeName.SafeName]])
-  case ScenarioMissing
-
 /** Scenario → main merge.
   *
   * Conflict handling is two-layered. The pre-check names every node,
   * mitigation and tree `meta` value both branches changed into versions that
   * differ (Irmin's conflict error names nothing), and lets both `preview` and
   * `merge` answer with that list; `merge` refuses up front when it is not
-  * empty. The patched Irmin backend (see `IrminClient.mergeBranch`) is the
-  * backstop for the remaining race: a write that introduces a conflict between
-  * the scan and the merge makes the merge itself fail typed
-  * (`IrminMergeConflict`), which is mapped to the domain `MergeConflict` here.
+  * empty. The merge joins the two commits the scan compared, so a write on
+  * either branch after the scan cannot reach it. The patched Irmin backend
+  * (see `IrminClient.mergeCommit`) is the backstop for a conflict the
+  * pre-check did not name: the merge itself fails typed (`IrminMergeConflict`),
+  * which is mapped to the domain `MergeConflict` here.
   *
   * The pre-check compares full persisted contents byte-for-byte between main,
   * the scenario, and their lowest common ancestor — the storage relation of
@@ -168,16 +158,17 @@ enum MergePreviewResult:
 trait ScenarioMergeService:
 
   /** Report whether merging the scenario into main would conflict, without
-    * changing anything.
+    * changing anything. A missing scenario is an outcome of the preview rather
+    * than a failure.
     */
   def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, MergePreviewResult]
+    (using Checked[Permission]): IO[AppError, MergePreviewStatus]
 
   /** Merge the scenario into main via Irmin's native three-way merge.
     *
     * @return main's new head commit
-    * @see MergeConflict — pre-check found conflicting values (409), or a
-    *      concurrent write introduced one mid-merge
+    * @see MergeConflict — pre-check found conflicting values (409), or Irmin
+    *      refused the merge of the two commits the scan compared
     * @see ValidationFailed NOT_FOUND — the scenario does not exist
     */
   def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
@@ -186,12 +177,12 @@ trait ScenarioMergeService:
 final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepository) extends ScenarioMergeService:
 
   override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, MergePreviewResult] =
+    (using Checked[Permission]): IO[AppError, MergePreviewStatus] =
     for
       branch    <- ScenarioBranchOps.scenarioBranch(wsId, name)
       maybeHead <- irmin.getBranch(branch).map(_.flatMap(_.head))
       result    <- maybeHead match
-                     case None => ZIO.succeed(MergePreviewResult.ScenarioMissing)
+                     case None => ZIO.succeed(MergePreviewStatus.ScenarioMissing())
                      case Some(commit) =>
                        for
                          head <- ScenarioBranchOps.refineCommitHash(commit.hash)
@@ -199,10 +190,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                          // values it computes only need some instant.
                          now  <- Clock.instant
                          s    <- scan(wsId, branch, head, now)
-                       yield
-                         if s.conflicts.nonEmpty then MergePreviewResult.Conflicts(s.conflicts)
-                         else if s.duplicateNames.nonEmpty then MergePreviewResult.DuplicateNames(s.duplicateNames)
-                         else MergePreviewResult.Clean
+                       yield s.verdict.preview
     yield result
 
   override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
@@ -216,18 +204,11 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                           ZIO.fail(ValidationFailed(List(ValidationError(
                             location = ErrorLocation.requestField(FieldName.Scenario),
                             code = ValidationErrorCode.NOT_FOUND,
-                            message = s"Scenario not found: ${name.value}"
+                            message = ValidationMessages.scenarioNotFound(name.value)
                           ))))
       at           <- Clock.instant
       result       <- scan(wsId, branch, scenarioHead, at)
-      _            <- ZIO.when(result.conflicts.nonEmpty)(ZIO.fail(MergeConflict(
-                        name,
-                        MergeRefusal.Conflicts(result.conflicts)
-                      )))
-      _            <- ZIO.when(result.duplicateNames.nonEmpty)(ZIO.fail(MergeConflict(
-                        name,
-                        MergeRefusal.DuplicateNames(result.duplicateNames)
-                      )))
+      _            <- ZIO.foreachDiscard(result.verdict.refusal)(refusal => ZIO.fail(MergeConflict(name, refusal)))
       // The head the merge is assembled against and published against is the
       // one the scan compared, so a save on main after the scan moves main and
       // the publish refuses rather than overwriting it. A scenario branch can
@@ -239,19 +220,19 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       mainBefore   <- result.mainHead match
                         case Some(head) => ZIO.succeed(head)
                         case None       => ZIO.fail(RepositoryFailure("main has no head"))
-      newHead      <- mergeOnStaging(wsId, name, branch, mainBefore, result.metadataToWrite)
+      newHead      <- mergeOnStaging(wsId, name, scenarioHead, mainBefore, result.metadataToWrite)
     yield newHead
 
   /** Assemble the merge on a staging branch, validate it there, and publish it
     * to main with one compare-and-set against the head observed before the
     * merge began.
     *
-    * For each `meta` value in `metadataToWrite`, the scenario's contents the
-    * scan compared are written to staging before Irmin's merge, so Irmin finds
-    * equal bytes on both sides of that path. The merged value is written after
-    * it. A scenario save between the scan and the merge leaves different bytes
-    * on the scenario, and Irmin's merge then refuses rather than taking a value
-    * the scan never compared.
+    * The scenario side of the merge is `scenarioHead`, the commit the scan
+    * compared, so a scenario save after the scan stays on the scenario and is
+    * not merged unseen. For each `meta` value in `metadataToWrite`, the
+    * scenario's contents the scan compared are written to staging before
+    * Irmin's merge, so Irmin finds equal bytes on both sides of that path. The
+    * merged value is written after it.
     *
     * Main is never pointed at an unvalidated commit. A guard failure discards
     * the staging branch and leaves main untouched, so there is nothing to undo.
@@ -266,12 +247,12 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   private def mergeOnStaging(
     wsId: WorkspaceId,
     name: ScenarioName.ScenarioName,
-    scenarioBranch: BranchRef,
+    scenarioHead: CommitHash,
     mainBefore: CommitHash,
     metadataToWrite: List[(PathComparison, TreeMetadata)]
   ): IO[AppError, CommitHash] =
-    val prepareMessage = CommitMessage.render(CommitMessage.MergePrepared(wsId, name))
-    val mergedMessage  = CommitMessage.render(CommitMessage.ScenarioMerged(wsId, name))
+    val prepareMessage = CommitMessage.MergePrepared(wsId, name)
+    val mergedMessage  = CommitMessage.ScenarioMerged(wsId, name)
     for
       staging <- ZIO.fromEither(MergeStagingRef.forScenario(wsId, name))
                    .orElseFail(RepositoryFailure(
@@ -294,7 +275,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                                  ZIO.foreachDiscard(comparison.versions.onScenario)(contents =>
                                    irmin.set(WorkspaceStoragePaths.of(wsId, comparison.path), contents, prepareMessage, staging))
                                }
-                     merge  <- irmin.mergeBranch(scenarioBranch, staging, mergedMessage)
+                     merge  <- irmin.mergeCommit(scenarioHead, staging, mergedMessage)
                                  .catchSome { case IrminMergeConflict(_) =>
                                    ZIO.fail(MergeConflict(name, MergeRefusal.BranchesConflict()))
                                  }
@@ -356,7 +337,33 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       * as the comparison the scan made and the merged value: the merge writes
       * these itself. */
     metadataToWrite: List[(PathComparison, TreeMetadata)]
-  )
+  ):
+    /** The scan's outcome. A conflict outranks a repeated name, so a merge
+      * with both is reported as conflicting. */
+    def verdict: MergeVerdict = conflicts match
+      case Nil if duplicateNames.isEmpty => MergeVerdict.Clean
+      case Nil                           => MergeVerdict.DuplicateNames(duplicateNames)
+      case entries                       => MergeVerdict.Conflicts(entries)
+
+  /** What a scan decides about a merge: it applies cleanly, or it is refused
+    * for one of two reasons. Narrower than the preview's outcome, which also
+    * reports a missing scenario, and than a merge refusal, which also covers
+    * failures after the scan; each wider type is reached by a total map.
+    */
+  private enum MergeVerdict:
+    case Clean
+    case Conflicts(entries: List[MergeConflictEntry])
+    case DuplicateNames(perTree: Map[TreeId, List[SafeName.SafeName]])
+
+    def preview: MergePreviewStatus = this match
+      case Clean             => MergePreviewStatus.Clean()
+      case Conflicts(e)      => MergePreviewStatus.Conflicts(e)
+      case DuplicateNames(d) => MergePreviewStatus.DuplicateNames(d)
+
+    def refusal: Option[MergeRefusal] = this match
+      case Clean             => None
+      case Conflicts(e)      => Some(MergeRefusal.Conflicts(e))
+      case DuplicateNames(d) => Some(MergeRefusal.DuplicateNames(d))
 
   /** Compute the conflict set between main and the scenario against their
     * merge base. No conflicts by construction when main has no head (nothing
@@ -383,7 +390,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                                "a scenario always forks from an existing commit"
                              ))
           comparisons <- if base == scenarioHead || base == mainHead then ZIO.succeed(Nil)
-                         else comparePaths(wsId, branch, base)
+                         else comparePaths(wsId, mainHead, scenarioHead, base)
           conflicting  = comparisons.filter(c => MergeConflictRule.isConflict(c.versions))
           metas       <- treeMetadata(comparisons, conflicting.map(_.path.treeId).toSet)
           decisions   <- ZIO.foreach(conflicting)(decide(_, metas, at))
@@ -466,18 +473,21 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   private def decodeVersions[A](versions: Versions[String], what: String)(decode: String => Either[String, A]): IO[AppError, Versions[A]] =
     ZIO.fromEither(versions.traverse(decode)).mapError(err => RepositoryFailure(s"Decode $what: $err"))
 
-  /** Fetch, for every candidate path, the contents on main, on the scenario
-    * branch, and at the merge base. The conflict verdict and the merged node
-    * set are both derived from these three, so they are fetched once and kept.
+  /** Fetch, for every candidate path, the contents at main's head and at the
+    * scenario's head as the scan observed them, and at the merge base. Every
+    * read names its commit, so a save on either branch while the scan runs
+    * cannot mix two versions of one side. The conflict verdict and the merged
+    * node set are both derived from these three, so they are fetched once and
+    * kept.
     */
-  private def comparePaths(wsId: WorkspaceId, branch: BranchRef, base: CommitHash): IO[AppError, List[PathComparison]] =
+  private def comparePaths(wsId: WorkspaceId, mainHead: CommitHash, scenarioHead: CommitHash, base: CommitHash): IO[AppError, List[PathComparison]] =
     for
-      paths       <- candidatePaths(wsId, branch)
+      paths       <- candidatePaths(wsId, mainHead, scenarioHead)
       comparisons <- ZIO.withParallelism(8) {
                        ZIO.foreachPar(paths.toList.sortBy(WorkspaceStoragePaths.of(wsId, _).value)) { path =>
                          val abs = WorkspaceStoragePaths.of(wsId, path)
-                         irmin.get(abs, BranchRef.Main)
-                           .zipPar(irmin.get(abs, branch))
+                         irmin.getAtCommit(mainHead, abs)
+                           .zipPar(irmin.getAtCommit(scenarioHead, abs))
                            .zipPar(irmin.getAtCommit(base, abs))
                            .map { case (onMain, onScenario, atBase) =>
                              PathComparison(path, Versions(atBase, onMain, onScenario))
@@ -522,23 +532,23 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
         .toMap
     }
 
-  /** Union of the workspace's tree paths on both branches. Paths present at
-    * the base but deleted on both branches need no entry: both sides agree
+  /** Union of the workspace's tree paths at both scanned heads. Paths present
+    * at the base but deleted on both branches need no entry: both sides agree
     * (absent = absent), which is never a conflict.
     */
-  private def candidatePaths(wsId: WorkspaceId, branch: BranchRef): IO[AppError, Set[TreePath]] =
-    pathsOn(wsId, BranchRef.Main).zipPar(pathsOn(wsId, branch)).map(_ ++ _)
+  private def candidatePaths(wsId: WorkspaceId, mainHead: CommitHash, scenarioHead: CommitHash): IO[AppError, Set[TreePath]] =
+    pathsOn(wsId, mainHead).zipPar(pathsOn(wsId, scenarioHead)).map(_ ++ _)
 
-  /** Every path of the workspace's trees on one branch, with the identifiers
-    * Irmin lists refined where they arrive (ADR-039). */
-  private def pathsOn(wsId: WorkspaceId, branch: BranchRef): IO[AppError, Set[TreePath]] =
+  /** Every path of the workspace's trees as of one commit, with the
+    * identifiers Irmin lists refined where they arrive (ADR-039). */
+  private def pathsOn(wsId: WorkspaceId, at: CommitHash): IO[AppError, Set[TreePath]] =
     for
-      listedTrees <- irmin.list(IrminPath.unsafeFrom(WorkspaceStoragePaths.treesRoot(wsId)), branch)
+      listedTrees <- irmin.listAtCommit(at, WorkspaceStoragePaths.treesRoot(wsId))
       perTree     <- ZIO.foreach(listedTrees) { listedTree =>
                        for
                          treeId        <- refineListed(listedTree, "tree")(TreeId.fromString)
-                         listed        <- irmin.list(IrminPath.unsafeFrom(WorkspaceStoragePaths.treeNodes(wsId, treeId)), branch)
-                                            .zipPar(irmin.list(IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMitigations(wsId, treeId)), branch))
+                         listed        <- irmin.listAtCommit(at, WorkspaceStoragePaths.treeNodes(wsId, treeId))
+                                            .zipPar(irmin.listAtCommit(at, WorkspaceStoragePaths.treeMitigations(wsId, treeId)))
                          (nodes, mits)  = listed
                          nodeIds       <- ZIO.foreach(nodes)(refineListed(_, s"node of tree ${treeId.value}")(NodeId.fromString))
                          mitigationIds <- ZIO.foreach(mits)(refineListed(_, s"mitigation of tree ${treeId.value}")(MitigationId.fromString))
@@ -551,7 +561,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   /** One identifier Irmin listed, refined, or a `RepositoryFailure`: this
     * server writes only refined identifiers, so one that does not refine means
     * the store holds what this code did not write. */
-  private def refineListed[A](segment: IrminPath, what: String)(refine: String => Either[List[ValidationError], A]): IO[AppError, A] =
+  private def refineListed[A](segment: IrminSegment, what: String)(refine: String => Either[List[ValidationError], A]): IO[AppError, A] =
     ZIO.fromEither(refine(segment.value)).mapError(errs =>
       RepositoryFailure(s"Listed $what '${segment.value}' does not refine: ${errs.map(_.message).mkString("; ")}"))
 

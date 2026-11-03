@@ -74,6 +74,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       name = SafeName.SafeName("Test Tree".refineUnsafe),
       nodes = allNodes,
       rootId = nodeId("ops-risk"),
+      seedVarHighWater = None,
       mitigations = Nil
     ),
     "Test fixture has invalid RiskTree"
@@ -86,6 +87,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         name = SafeName.SafeName("Test Tree".refineUnsafe),
         nodes = nodes,
         rootId = nodeId("ops-risk"),
+        seedVarHighWater = None,
         mitigations = Nil
       ),
       "Mutated fixture has invalid RiskTree"

@@ -57,7 +57,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
       shape = lognormalShape(1000L, 100000L),
       parentId = Some(rootId), seedVarId = 1L
     ).toEither.toOption.get
-    RiskTree.fromNodes(tid, sname("Mit Persist"), Seq(root, cyber), rootId, mitigations = mits.toList)
+    RiskTree.fromNodes(tid, sname("Mit Persist"), Seq(root, cyber), rootId, seedVarHighWater = None, mitigations = mits.toList)
       .toEither.toOption.get
 
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =

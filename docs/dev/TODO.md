@@ -1520,9 +1520,9 @@ its final form (commits 53a575f, ca82acc, 8e03e00):
 the entire scenario/history UI in in-memory mode. Demos and manual testing of
 branch features therefore require the persistence profile and accumulate a
 permanent irmin-pack store. An "ephemeral Irmin" mode runs the **unchanged**
-`local/irmin-prod:3.11-p1` image with throwaway storage: `/data` on a tmpfs
+`local/irmin-prod:3.11-p2` image with throwaway storage: `/data` on a tmpfs
 mount (or an anonymous volume discarded on teardown). Exact prod code path —
-irmin-pack, GraphQL, the 3.11-p1 merge patch — but all state dies with the
+irmin-pack, GraphQL, the 3.11-p2 merge patch — but all state dies with the
 container. This does NOT replace the in-memory repository: Docker-free unit
 tests (`sbt server/test`) and BATS suite C keep using the TrieMap backend.
 

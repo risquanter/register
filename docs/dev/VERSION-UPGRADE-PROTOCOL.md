@@ -106,9 +106,12 @@ Verification and cooldown rules: ADR-020 §8–§12 (via the supply-chain skill)
 ### opam / Irmin (`containers/builders/Dockerfile.irmin-builder`)
 
 - **Pinned in:** `opam install pkg.<version>` lines; the Irmin version also
-  appears in the image **tags** (`local/irmin-builder:3.11-p1`,
-  `local/irmin-prod:3.11-p1`), in `docker-compose*.yml` references, and in
-  register-dev skill text — all move together on a bump.
+  appears in the image **tags** (`local/irmin-builder:3.11-p2`,
+  `local/irmin-prod:3.11-p2`), in `docker-compose*.yml` references, and in
+  register-dev skill text — all move together on a bump. The `-pN` suffix
+  names the revision of the local patch and moves whenever the patch changes,
+  so a machine still holding the previous image fails on the missing tag
+  rather than running the old patch.
 - **Add/update:** edit the pinned versions; source-level patches go through
   `opam pin add <pkg> <patched-source>` before the install step.
 - **Rebuild:** irmin-builder (15–40 min) → irmin-prod (~10 s) → run
@@ -117,9 +120,11 @@ Verification and cooldown rules: ADR-020 §8–§12 (via the supply-chain skill)
 **Source compilation is mandatory here, not incidental.** Irmin is built from
 OCaml source inside the builder image specifically so the project can carry
 its own local patches to upstream packages via `opam pin` (the concrete case:
-a patch to `irmin-graphql`'s `merge_with_branch` resolver to surface merge
-conflicts that upstream silently swallows — see ADR-032 / the phase-D merge
-work; adopted 2026-07-24). Consequences for the update
+a patch to `irmin-graphql`'s two merge resolvers, `merge_with_branch` and
+`merge_with_commit`, so that both report a conflict as a GraphQL error
+prefixed `"merge conflict: "`; upstream `merge_with_branch` swallows the
+conflict silently and upstream `merge_with_commit` reports it unprefixed —
+see ADR-032; adopted 2026-07-24). Consequences for the update
 policy that do **not** apply to prebuilt-consumed dependencies:
 
 - **The build cannot be switched to a prebuilt Irmin distribution** (a

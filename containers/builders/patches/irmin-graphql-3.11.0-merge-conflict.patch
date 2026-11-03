@@ -16,3 +16,14 @@
          io_field "merge_with_commit"
            ~doc:"Merge a branch with a specific commit" ~typ:store_schema.commit
            ~args:
+@@ -833,7 +838,9 @@
+                 | Ok _ -> Store.Head.find t >|= Result.ok
+                 | Error e ->
+                     Lwt.return
+-                      (Error (Irmin.Type.to_string Irmin.Merge.conflict_t e)))
++                      (Error
++                         ("merge conflict: "
++                         ^ Irmin.Type.to_string Irmin.Merge.conflict_t e)))
+             | None -> Lwt.return (Error "invalid hash"));
+         io_field "revert" ~doc:"Revert to a previous commit"
+           ~typ:store_schema.commit

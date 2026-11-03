@@ -154,7 +154,7 @@ at that path. The system surfaces this as a `MergeConflict` error with
 three-way diff information (base value from the LCA, main's value, scenario's
 value), requiring user intervention.
 
-The `merge_with_branch` GraphQL mutation handles this internally by finding
+The `merge_with_commit` GraphQL mutation handles this internally by finding
 the lowest common ancestor (LCA) commit and performing a three-way diff per
 path. The `lcas(commit:)` query on `Branch` enables pre-computing the LCA
 for merge previews before the user commits to the merge.

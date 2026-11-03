@@ -9,8 +9,9 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
 import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure}
-import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
-import com.risquanter.register.infra.irmin.model.{IrminPath, IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry}
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
+import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
+import com.risquanter.register.infra.irmin.model.{IrminPath, IrminSegment, IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry}
 import com.risquanter.register.repositories.model.TreeMetadata
 import com.risquanter.register.testutil.TestHelpers.*
 
@@ -57,6 +58,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
           parentId = None
         ), "portfolio") +: children,
         rootId = rootId,
+        seedVarHighWater = None,
         mitigations = Nil
       ),
       "Test fixture has invalid RiskTree"
@@ -79,18 +81,23 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
 
   /** Serialize a tree into a commit's path→value store, exactly as
     * `RiskTreeRepositoryIrmin.writeTree` lays it out. */
-  private def storeOf(ts: RiskTree*): Map[String, String] =
+  private def storeOf(ts: RiskTree*): Map[IrminPath, String] =
     ts.flatMap { t =>
-      val nodesBase = WorkspaceStoragePaths.treeNodes(wsId, t.id)
       Map(WorkspaceStoragePaths.treeMeta(wsId, t.id) -> metaOf(t).toJson) ++
-        t.nodes.map(n => s"$nodesBase/${n.id.value}" -> nodeJson(n))
+        t.nodes.map(n => WorkspaceStoragePaths.of(wsId, TreePath.Node(t.id, n.id)) -> nodeJson(n))
     }.toMap
 
   /** Same layout minus the meta blob — the "meta absent but nodes present"
     * behaviour-preservation case. */
-  private def storeWithoutMeta(t: RiskTree): Map[String, String] =
-    val nodesBase = WorkspaceStoragePaths.treeNodes(wsId, t.id)
-    t.nodes.map(n => s"$nodesBase/${n.id.value}" -> nodeJson(n)).toMap
+  private def storeWithoutMeta(t: RiskTree): Map[IrminPath, String] =
+    t.nodes.map(n => WorkspaceStoragePaths.of(wsId, TreePath.Node(t.id, n.id)) -> nodeJson(n)).toMap
+
+  /** The name Irmin lists for `full` under `prefix`: the ancestor of `full`
+    * one level below `prefix`, named by its last segment. */
+  private def childUnder(prefix: IrminPath, full: IrminPath): Option[IrminSegment] =
+    Iterator.iterate(Option(full))(_.flatMap(_.parent)).takeWhile(_.isDefined).flatten
+      .find(_.parent.contains(prefix))
+      .flatMap(_.name)
 
   private def emptyInfo: IrminInfo = IrminInfo(date = "", author = "", message = "")
 
@@ -103,7 +110,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       branchCalls: Ref[Int],
       queriedCommits: Ref[Set[CommitHash]],
       advanceTo: Option[CommitHash],
-      store: Map[CommitHash, Map[String, String]]
+      store: Map[CommitHash, Map[IrminPath, String]]
   ) extends IrminClient:
 
     override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
@@ -117,30 +124,24 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
 
     override def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, Option[String]] =
       queriedCommits.update(_ + commit) *>
-        ZIO.succeed(store.getOrElse(commit, Map.empty).get(path.value))
+        ZIO.succeed(store.getOrElse(commit, Map.empty).get(path))
 
-    override def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, List[IrminPath]] =
-      queriedCommits.update(_ + commit) *> ZIO.succeed {
-        val base = if path.value.isEmpty then "" else s"${path.value}/"
-        store
-          .getOrElse(commit, Map.empty)
-          .keySet
-          .collect { case p if p.startsWith(base) && p != path.value => p.stripPrefix(base).takeWhile(_ != '/') }
-          .filter(_.nonEmpty)
-          .toList
+    override def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, List[IrminSegment]] =
+      queriedCommits.update(_ + commit) *> ZIO.succeed(
+        store.getOrElse(commit, Map.empty).keySet.toList
+          .flatMap(childUnder(path, _))
           .distinct
-          .map(IrminPath.unsafeFrom)
-      }
+      )
 
     private def unused(op: String): Nothing = throw new NotImplementedError(s"$op unused by RiskTreeReadConsistencySpec")
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("get"))
-    override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("set"))
-    override def set(path: IrminPath, value: String, message: String, staging: MergeStagingRef) = ZIO.die(unused("set"))
-    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("setTree"))
-    override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("remove"))
+    override def set(path: IrminPath, value: String, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("set"))
+    override def set(path: IrminPath, value: String, message: CommitMessage, staging: MergeStagingRef) = ZIO.die(unused("set"))
+    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("setTree"))
+    override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("remove"))
     override def branches = ZIO.die(unused("branches"))
     override def mainBranch = ZIO.die(unused("mainBranch"))
-    override def mergeBranch(from: BranchRef, into: StoreBranch, message: String) = ZIO.die(unused("mergeBranch"))
+    override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage) = ZIO.die(unused("mergeCommit"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(unused("revert"))
     override def createBranchAt(branch: StoreBranch, at: CommitHash) = ZIO.die(unused("createBranchAt"))
     override def deleteBranch(branch: StoreBranch, currentHead: CommitHash) = ZIO.die(unused("deleteBranch"))
@@ -154,7 +155,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
   private def scripted(
       initialHead: Option[CommitHash],
       advanceTo: Option[CommitHash],
-      store: Map[CommitHash, Map[String, String]]
+      store: Map[CommitHash, Map[IrminPath, String]]
   ): UIO[(RiskTreeRepositoryIrmin, Ref[Int], Ref[Set[CommitHash]])] =
     for
       headRef  <- Ref.make(initialHead)
@@ -236,12 +237,12 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     // exists to detect.
     test("getAllForWorkspace's TreeLoadFailure.reason embeds the WorkspaceId when a listed node's value is missing") {
       val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
-      val nodesBase = WorkspaceStoragePaths.treeNodes(wsId, treeIdF)
-      // listAtCommit lists leaf1Id as a child because this phantom key starts
-      // with "$nodesBase/leaf1Id/", but no key equals "$nodesBase/leaf1Id"
-      // itself, so getAtCommit for that exact path returns None.
+      val leafPath = WorkspaceStoragePaths.of(wsId, TreePath.Node(treeIdF, leaf1Id))
+      // listAtCommit lists leaf1Id as a child because this phantom key lies
+      // below the leaf's own path, but no key equals that path itself, so
+      // getAtCommit for it returns None.
       val tornStore = Map(WorkspaceStoragePaths.treeMeta(wsId, treeIdF) -> metaOf(treeF).toJson) +
-        (s"$nodesBase/${leaf1Id.value}/phantom" -> "unreachable")
+        ((leafPath / IrminSegment("phantom")) -> "unreachable")
       for
         setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> tornStore))
         (repo, _, _) = setup

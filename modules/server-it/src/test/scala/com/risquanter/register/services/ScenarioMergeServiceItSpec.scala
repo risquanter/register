@@ -14,8 +14,9 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, SafeName, TreeId, NodeId, MitigationId}
 import com.risquanter.register.domain.errors.{AppError, FieldName, MergeConflict, RepositoryFailure, ValidationFailed}
-import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, TreeWriteKind}
-import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
+import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
+import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.repositories.model.TreeMetadata
@@ -117,7 +118,8 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       treeId, sname("Merge Tree"),
       Seq(root(nodeA, nodeB), leaf(nodeA, "Alpha", 0.2, 1L), leaf(nodeB, "Beta", 0.3, 2L)),
       rootId,
-      mitigations = mits.toList
+      seedVarHighWater = None,
+      mitigations =mits.toList
     ).toEither.toOption.get
 
   /** The seeded tree with the two leaves' probabilities as given, for a save
@@ -127,22 +129,29 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       treeId, sname("Merge Tree"),
       Seq(root(nodeA, nodeB), leaf(nodeA, "Alpha", alpha, 1L), leaf(nodeB, "Beta", beta, 2L)),
       rootId,
-      mitigations = Nil
+      seedVarHighWater = None,
+      mitigations =Nil
     ).toEither.toOption.get
 
   // ── paths ────────────────────────────────────────────────────────────────
 
   private def metaPath(wsId: WorkspaceId): IrminPath =
-    IrminPath.unsafeFrom(s"workspaces/${wsId.value}/risk-trees/${treeId.value}/meta")
+    WorkspaceStoragePaths.of(wsId, TreePath.Meta(treeId))
 
   private def nodePath(wsId: WorkspaceId, node: NodeId): IrminPath =
-    IrminPath.unsafeFrom(s"workspaces/${wsId.value}/risk-trees/${treeId.value}/nodes/${node.value}")
+    WorkspaceStoragePaths.of(wsId, TreePath.Node(treeId, node))
 
   private def mitPath(wsId: WorkspaceId, mit: MitigationId): IrminPath =
-    IrminPath.unsafeFrom(s"workspaces/${wsId.value}/risk-trees/${treeId.value}/mitigations/${mit.value}")
+    WorkspaceStoragePaths.of(wsId, TreePath.Mitigation(treeId, mit))
+
+  /** One blob written by itself, the way a merge writes, under the message a
+    * tree save carries. A blob write leaves `meta` alone, so it never appears
+    * in the tree's history. */
+  private def blobMessage(wsId: WorkspaceId): CommitMessage =
+    CommitMessage.TreeWritten(wsId, treeId, TreeWriteKind.Update)
 
   private def writeNodeBlob(wsId: WorkspaceId, node: NodeId, json: String, branch: BranchRef = BranchRef.Main) =
-    IrminClient.set(nodePath(wsId, node), json, s"write ${node.value}", branch)
+    IrminClient.set(nodePath(wsId, node), json, blobMessage(wsId), branch)
 
   private def writeLeaf(wsId: WorkspaceId, node: NodeId, leafName: String, probability: Double, seedVarId: Long, branch: BranchRef = BranchRef.Main) =
     writeNodeBlob(wsId, node, leaf(node, leafName, probability, seedVarId).toJson, branch)
@@ -151,7 +160,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     writeNodeBlob(wsId, rootId, root(childIds*).toJson, branch)
 
   private def writeMit(wsId: WorkspaceId, mit: MitigationId, label: String, likelihood: Double, branch: BranchRef = BranchRef.Main) =
-    IrminClient.set(mitPath(wsId, mit), mitigation(mit, label, likelihood).toJson, s"write mit ${mit.value}", branch)
+    IrminClient.set(mitPath(wsId, mit), mitigation(mit, label, likelihood).toJson, blobMessage(wsId), branch)
 
   private def mainHeadHash: ZIO[IrminClient, AppError, String] =
     IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
@@ -188,7 +197,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         a         <- IrminClient.get(nodePath(wsId, nodeA))
         b         <- IrminClient.get(nodePath(wsId, nodeB))
       yield assertTrue(
-        previewed == MergePreviewResult.Clean,
+        previewed == MergePreviewStatus.Clean(),
         mainHead.contains(merged.value),
         // each side's edit survives: the scenario's probability on A, main's on B
         a.exists(_.contains("0.45")),
@@ -208,7 +217,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         a         <- IrminClient.get(nodePath(wsId, nodeA))
       yield assertTrue(
         previewed match
-          case MergePreviewResult.Conflicts(List(MergeConflictEntry.NodeConflict(tree, node, _, fields))) =>
+          case MergePreviewStatus.Conflicts(List(MergeConflictEntry.NodeConflict(tree, node, _, fields))) =>
             tree.id == treeId && node == nodeA && fields == List(FieldName.Probability)
           case _ => false,
         a.exists(_.contains("0.65"))
@@ -233,7 +242,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         history   <- TreeHistoryServiceLive(irmin).history(wsId, treeId, BranchRef.Main, 10)
         operations = history.map(_.operation)
       yield assertTrue(
-        previewed == MergePreviewResult.Clean,
+        previewed == MergePreviewStatus.Clean(),
         a.exists(_.contains("0.45")),
         b.exists(_.contains("0.55")),
         meta.exists(m => !m.updatedAt.isBefore(started)),
@@ -258,7 +267,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         previewed <- svc.preview(wsId, scenario)
       yield assertTrue(
         previewed match
-          case MergePreviewResult.Conflicts(List(MergeConflictEntry.NodeConflict(tree, node, _, fields))) =>
+          case MergePreviewStatus.Conflicts(List(MergeConflictEntry.NodeConflict(tree, node, _, fields))) =>
             tree.id == treeId && tree.names.onMain.contains(sname("Merge Tree")) &&
               node == nodeA && fields == List(FieldName.Probability)
           case _ => false
@@ -279,7 +288,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         m         <- IrminClient.get(mitPath(wsId, mitM))
         n         <- IrminClient.get(mitPath(wsId, mitN))
       yield assertTrue(
-        previewed == MergePreviewResult.Clean,
+        previewed == MergePreviewStatus.Clean(),
         mainHead.contains(merged.value),
         m.exists(_.contains("0.15")),
         n.exists(_.contains("0.16"))
@@ -299,7 +308,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         m         <- IrminClient.get(mitPath(wsId, mitM))
       yield assertTrue(
         previewed match
-          case MergePreviewResult.Conflicts(List(MergeConflictEntry.MitigationConflict(tree, mit, _, fields))) =>
+          case MergePreviewStatus.Conflicts(List(MergeConflictEntry.MitigationConflict(tree, mit, _, fields))) =>
             tree.id == treeId && mit == mitM && fields == List(FieldName.Spec)
           case _ => false,
         m.exists(_.contains("0.25"))
@@ -322,8 +331,8 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         mainHead   <- IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
         a          <- IrminClient.get(nodePath(wsId, nodeA))
       yield assertTrue(
-        conflicted match { case MergePreviewResult.Conflicts(_) => true; case _ => false },
-        resolved == MergePreviewResult.Clean,
+        conflicted match { case MergePreviewStatus.Conflicts(_) => true; case _ => false },
+        resolved == MergePreviewStatus.Clean(),
         mainHead.contains(merged.value),
         a.exists(_.contains("0.65"))
       )
@@ -412,7 +421,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         svc       <- ZIO.service[ScenarioMergeService]
         previewed <- svc.preview(wsId, scenario)
         mergeExit <- svc.merge(wsId, scenario).exit
-      yield assertTrue(previewed == MergePreviewResult.ScenarioMissing) &&
+      yield assertTrue(previewed == MergePreviewStatus.ScenarioMissing()) &&
         assert(mergeExit)(fails(isSubtype[ValidationFailed](anything)))
     }
 

@@ -3,7 +3,6 @@ package com.risquanter.register.http.responses
 import zio.test.*
 import zio.json.*
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf}
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, treeId, unsafeGet}
@@ -44,6 +43,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         name = SafeName.SafeName("Risk Assessment".refineUnsafe),
         nodes = Seq(root),
         rootId = root.id,
+        seedVarHighWater = None,
         mitigations = Nil
       ), "tree")
       
@@ -71,6 +71,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         name = SafeName.SafeName("Test".refineUnsafe),
         nodes = Seq(root),
         rootId = root.id,
+        seedVarHighWater = None,
         mitigations = Nil
       ), "tree")
       
@@ -112,6 +113,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         name = SafeName.SafeName("Round Trip".refineUnsafe),
         nodes = Seq(root),
         rootId = root.id,
+        seedVarHighWater = None,
         mitigations = Nil
       ), "tree")
       

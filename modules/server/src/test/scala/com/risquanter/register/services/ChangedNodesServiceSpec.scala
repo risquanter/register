@@ -50,6 +50,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
           parentId = None
         ), "portfolio") +: children,
         rootId = rootId,
+        seedVarHighWater = None,
         mitigations = Nil
       ),
       "Test fixture has invalid RiskTree"

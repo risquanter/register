@@ -8,9 +8,9 @@ import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, 
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.ScenarioSourceDto
-import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergePreviewStatus, MergeScenarioResponse}
+import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergeScenarioResponse}
 import com.risquanter.register.domain.data.iron.BranchChoice
-import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergePreviewResult}
+import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService}
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.http.errors.TreeScope
 
@@ -68,7 +68,7 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         result <- scenarioMergeService.preview(ws.id, name)
-      yield toPreviewResponse(result)).wireEither(TreeScope.NoTree)
+      yield MergePreviewResponse(result)).wireEither(TreeScope.NoTree)
   }
 
   val mergeScenario: ServerEndpoint[Any, Task] = mergeScenarioEndpoint.serverLogic {
@@ -80,19 +80,6 @@ class ScenarioController private (
         head   <- scenarioMergeService.merge(ws.id, name)
       yield MergeScenarioResponse(head)).wireEither(TreeScope.NoTree)
   }
-
-  /** Wire mapping colocated with the routes (mirrors `NodeDiffStatus.toWire`'s
-    * "cases and wire strings live together" rationale).
-    */
-  private def toPreviewResponse(result: MergePreviewResult): MergePreviewResponse = result match
-    case MergePreviewResult.Clean =>
-      MergePreviewResponse(MergePreviewStatus.Clean())
-    case MergePreviewResult.Conflicts(entries) =>
-      MergePreviewResponse(MergePreviewStatus.Conflicts(entries))
-    case MergePreviewResult.DuplicateNames(perTree) =>
-      MergePreviewResponse(MergePreviewStatus.DuplicateNames(perTree))
-    case MergePreviewResult.ScenarioMissing =>
-      MergePreviewResponse(MergePreviewStatus.ScenarioMissing())
 
   val deleteScenario: ServerEndpoint[Any, Task] = deleteScenarioEndpoint.serverLogic {
     case (maybeUserId, key, name, expectedHead) =>

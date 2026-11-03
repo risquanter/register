@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef,
 import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, IrminError}
 import com.risquanter.register.http.responses.TreeHistoryEntry
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
-import com.risquanter.register.infra.irmin.model.{IrminPath, IrminCommit}
+import com.risquanter.register.infra.irmin.model.IrminCommit
 
 /** Per-tree commit history on a branch. Returns typed entries; the raw
   * commit message (which embeds the WorkspaceId) and author never leave the
@@ -32,7 +32,7 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
     // every path it is reached by, so one reachable through both parents of a
     // merge commit appears twice. The entries are the newest `limit` distinct
     // commits the history shows, oldest first.
-    val path = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMeta(wsId, treeId))
+    val path = WorkspaceStoragePaths.treeMeta(wsId, treeId)
     handleIrmin(irmin.getHistory(path, TreeHistoryServiceLive.requested(limit), branch))
       .flatMap(commits => ZIO.foreach(commits.distinctBy(_.hash))(toEntry))
       .map(_.flatten.takeRight(limit))

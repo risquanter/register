@@ -141,7 +141,7 @@ final case class LeafSimContent(seedVarId: SeedVarId.SeedVarId, /* ... */)
 | `LeafSimContent` | Domain | The hashed projection; also the cache-key preimage |
 | `ChangedNodesService` | Domain | Branch-to-branch semantic changed-nodes comparison |
 | `RiskTreeRepositoryIrmin.encodeStoredNode` | Storage | Defines the persisted blob Irmin hashes |
-| `IrminClient.mergeBranch` / `lca` | Storage | Byte-level three-way merge and its base |
+| `IrminClient.mergeCommit` / `lca` | Storage | Byte-level three-way merge and its base |
 
 ---
 

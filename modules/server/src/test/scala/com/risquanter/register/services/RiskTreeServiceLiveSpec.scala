@@ -209,6 +209,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       name = SafeName.SafeName("Restored Tree".refineUnsafe),
       nodes = Seq(root, leaf),
       rootId = revertRootId,
+      seedVarHighWater = None,
       mitigations = Nil
     ), "revert tree")
 

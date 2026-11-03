@@ -187,6 +187,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree".refineUnsafe),
           nodes = Seq(leaf),
           rootId = leaf.id,
+          seedVarHighWater = None,
           mitigations = Nil
         ), "tree")
         
@@ -220,6 +221,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree 2".refineUnsafe),
           nodes = Seq(leaf),
           rootId = leaf.id,
+          seedVarHighWater = None,
           mitigations = Nil
         ), "tree")
         
@@ -251,6 +253,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree 3".refineUnsafe),
           nodes = Seq(leaf),
           rootId = leaf.id,
+          seedVarHighWater = None,
           mitigations = Nil
         ), "tree")
 
@@ -285,6 +288,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree 4".refineUnsafe),
           nodes = Seq(leaf),
           rootId = leaf.id,
+          seedVarHighWater = None,
           mitigations = Nil
         ), "tree")
         
@@ -335,6 +339,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree 5".refineUnsafe),
           nodes = Seq(portfolio, risk1, risk2),
           rootId = nodeId("portfolio"),
+          seedVarHighWater = None,
           mitigations = Nil
         )
         
@@ -377,6 +382,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree 6".refineUnsafe),
           nodes = Seq(leaf),
           rootId = leaf.id,
+          seedVarHighWater = None,
           mitigations = Nil
         ), "tree")
 
@@ -385,6 +391,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree 7".refineUnsafe),
           nodes = Seq(leaf),
           rootId = leaf.id,
+          seedVarHighWater = None,
           mitigations = Nil
         ), "tree")
         
@@ -415,6 +422,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           name = SafeName.SafeName("Test Tree 8".refineUnsafe),
           nodes = Seq(leaf),
           rootId = leaf.id,
+          seedVarHighWater = None,
           mitigations = Nil
         ), "tree")
         
