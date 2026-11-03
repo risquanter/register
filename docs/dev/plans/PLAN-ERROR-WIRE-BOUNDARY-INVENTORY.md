@@ -262,3 +262,6 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/testcontainers/IrminCompose.scala
 - modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCacheRegistry.scala
 - modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCache.scala
+- modules/server/src/main/scala/com/risquanter/register/util/IdGenerators.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/persistence/QuillMappings.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/support/TestSafeUrls.scala

@@ -2,16 +2,16 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-60`, is ruled. `EWB-D-1` to
-`EWB-D-43` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2 and §16.7,
-`EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in §17, and
-`EWB-D-54` and `EWB-D-59` in §18. Approval
+**Status.** Every decision, `EWB-D-1` to `EWB-D-61`, is ruled. `EWB-D-1` to
+`EWB-D-43` and `EWB-D-61` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
+and §16.7, `EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in
+§17, and `EWB-D-54` and `EWB-D-59` in §18. Approval
 is in place: the token names this document and the file inventory exists beside
 it. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase 3a's
 continuation, and `EWB-D-27`'s projection change landed with them. §17 and §18
 are implemented as of 2026-11-02. §17.12, the review findings accepted after
-that, is implemented as of 2026-11-03. What remains is Phase 3b, then Phases 4
-to 7.
+that, is implemented as of 2026-11-03. Phase 3b is implemented as of
+2026-11-03. What remains is Phases 4 to 7.
 Tree history is out of this plan's scope from 2026-11-02 and belongs to
 `PLAN-BRANCH-HISTORY.md` (`BH-D-1`).
 
@@ -1836,6 +1836,15 @@ with `inputName(input)` — the header's own name if it had one, otherwise
 Tapir's rendering of the input. Putting the name in both places would print
 `X-Branch` twice in one refusal.
 
+**Superseded by Phase 3b (2026-11-03).** The two paragraphs above describe
+Phase 2b as it landed. Phase 3b changed both halves. A query parameter this
+application declares reaches its own case, `ErrorLocation.QueryParameter`, as
+`EWB-D-61` rules; a path segment, the body and an undeclared parameter still
+reach `Whole`. And a `ValidationError` no longer carries a sentence, so there is
+no message for a name to travel in: the handler's log line names the input by
+Tapir's rendering of it and the wire names it by the location alone. The
+handler as it now stands is in `EWB-D-38`'s sweep.
+
 ### 6.5 Deletions from `AppError.scala`
 
 `RepositoryFailure.WorkspaceSentinelPrefix` and
@@ -2546,6 +2555,13 @@ read. The browser needs one. `FormState.parseRequired` refuses such text with
 the leaf form uses it for "must be a number" and "must be a whole number". Phase
 3b adds that case, with `FieldProblem.code` mapping it to `TYPE_MISMATCH`, and
 `parseRequired` then takes the case in place of its two sentences.
+
+*Implemented 2026-11-03.* The count measured when the work started was 126
+construction sites, not 152: `PLAN-LOSS-SHAPE-ALGEBRA.md` landed between the
+ruling and the work and removed the rest. The full case set as implemented, the
+four payload enums beside it, the handler, and the deviations accepted on the
+day are recorded in `EWB-D-38`'s sweep; the query-parameter location is
+`EWB-D-61`.
 
 **Phase 4 — typed load problems and the rename.** `TreeLoadProblem` replacing
 `TreeLoadFailure.reason: String`; `SimError` renamed to `DomainError`.
@@ -5095,6 +5111,173 @@ argument at each of those sites; this changes the argument's shape at all of
 them, so interleaving the two would leave neither verifiable until both were
 done.
 
+**Sweep, 2026-11-03 — the case set as implemented.** The nine cases above were
+the ruling's illustration. The implementation derived the full set from the 126
+construction sites and 65 templates that existed on the day (the loss-shape
+plan had removed 26 sites in between), grouped by the sentence each renders.
+Four closed sets carry the values a sentence names where the value is itself
+one of a fixed set, so no case carries free text:
+
+```scala
+@jsonDiscriminator(TagField) enum ExpectedInput: case Number, WholeNumber, NumberList, SingleValue, Declared
+@jsonDiscriminator(TagField) enum Alphabet:      case NodeName, ScenarioName
+@jsonDiscriminator(TagField) enum ValueFormat:
+  case Ulid, WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, SecureUrl, ExternalToken, TraceId
+  case CommitHash, ContentHash, BranchName, StagingBranchName, DistributionTypeName, ScenarioNameStart
+@jsonDiscriminator(TagField) enum ValueRange:
+  case NonNegative, Positive, SeedEntityId, SeedVarId, OpenUnitInterval, ClosedUnitInterval, Percent,
+       Percentile, PositiveLoss, LossCap, MetalogTerms, RetentionFactor, ResidualProbability
+
+@jsonDiscriminator(TagField)
+enum FieldProblem:
+  // Presence and readability
+  case Required                                              // REQUIRED_FIELD
+  case Unreadable(expected: ExpectedInput)                   // TYPE_MISMATCH
+  case DeclaredConstraintNotMet                              // INVALID_FORMAT
+  // The shape of one value
+  case TooLong(limit: NonNegativeInt)                        // INVALID_LENGTH
+  case LengthOutOfRange(min: NonNegativeInt, max: NonNegativeInt) // INVALID_LENGTH
+  case InvalidCharacters(allowed: Alphabet)                  // INVALID_PATTERN
+  case WrongFormat(expected: ValueFormat)                    // INVALID_FORMAT
+  case OutOfRange(range: ValueRange)                         // INVALID_RANGE
+  case ScenarioNameReserved                                  // INVALID_FORMAT
+  // Names and seed identity within a tree
+  case ReservedNodeNames(names: List[SafeName.SafeName])     // RESERVED_NAME
+  case DuplicateNodeName(name: SafeName.SafeName, occurrences: NonNegativeInt)       // AMBIGUOUS_REFERENCE
+  case DuplicateMitigationName(name: SafeName.SafeName, occurrences: NonNegativeInt) // AMBIGUOUS_REFERENCE
+  case DuplicateMitigationId(id: MitigationId, occurrences: NonNegativeInt)          // DUPLICATE_VALUE
+  case SeedVarIdInUse(seedVarId: SeedVarId.SeedVarId, holders: List[SafeName.SafeName]) // DUPLICATE_VALUE
+  case SeedVarIdImmutable                                    // CONSTRAINT_VIOLATION
+  case SeedVarIdExhausted(next: NonNegativeLong)             // CONSTRAINT_VIOLATION
+  case SeedVarHighWaterBelowMax(highWater: SeedVarId.SeedVarId, maxAssigned: SeedVarId.SeedVarId) // CONSTRAINT_VIOLATION
+  case SeedVarHighWaterNotDerivable                          // CONSTRAINT_VIOLATION
+  // Topology of a submitted tree, referenced by name
+  case RootRequired                                          // REQUIRED_FIELD
+  case MultipleRoots                                         // AMBIGUOUS_REFERENCE
+  case RootIdNotFound(rootId: NodeId)                        // CONSTRAINT_VIOLATION
+  case ParentPortfolioRequired                               // REQUIRED_FIELD
+  case ParentNotFound(parent: SafeName.SafeName)             // MISSING_REFERENCE
+  case ParentIsLeaf(parent: SafeName.SafeName)               // INVALID_NODE_TYPE
+  case CycleDetected(node: SafeName.SafeName)                // CONSTRAINT_VIOLATION
+  case PortfolioHasNoChildren(portfolios: List[SafeName.SafeName]) // EMPTY_COLLECTION
+  case TooManyChildren(count: NonNegativeInt, limit: NonNegativeInt)    // CONSTRAINT_VIOLATION
+  case TooManyNodes(count: NonNegativeInt, limit: NonNegativeInt)       // CONSTRAINT_VIOLATION
+  case TooManyMitigations(count: NonNegativeInt, limit: NonNegativeInt) // CONSTRAINT_VIOLATION
+  // A stored node named by a tree update; the location carries its id
+  case StoredNodeListedTwice                                 // DUPLICATE_VALUE
+  case StoredNodeIsLeaf                                      // INVALID_NODE_TYPE
+  case StoredNodeIsPortfolio                                 // INVALID_NODE_TYPE
+  case StoredNodeNotInTree                                   // MISSING_REFERENCE
+  // The index of a built tree, referenced by id
+  case ChildParentMismatch(child: NodeId, declaredParent: Option[NodeId]) // CONSTRAINT_VIOLATION
+  case ChildNotFound(child: NodeId)                          // CONSTRAINT_VIOLATION
+  case ParentDoesNotListChild(parent: NodeId)                // CONSTRAINT_VIOLATION
+  case ParentIdIsLeaf(parent: NodeId)                        // CONSTRAINT_VIOLATION
+  case ParentIdNotFound(parent: NodeId)                      // CONSTRAINT_VIOLATION
+  case NodeNotInIndex                                        // CONSTRAINT_VIOLATION
+  case LeafUnreachable                                       // CONSTRAINT_VIOLATION
+  // Loss distribution
+  case AnchorCountOutOfRange(count: NonNegativeInt, min: NonNegativeInt, max: NonNegativeInt) // CONSTRAINT_VIOLATION
+  case PercentileQuantileLengthMismatch(percentiles: NonNegativeInt, quantiles: NonNegativeInt) // INVALID_COMBINATION
+  case PercentilesNotIncreasing                              // INVALID_COMBINATION
+  case QuantilesNotIncreasing                                // INVALID_COMBINATION
+  case TermsAboveAnchorCount                                 // INVALID_COMBINATION
+  case LossRangeNotOrdered(min: PositiveLong, max: PositiveLong) // INVALID_RANGE
+  case MetalogFitFailed                                      // INVALID_METALOG_PARAMS
+  case LognormalFitFailed                                    // INVALID_LOGNORMAL_PARAMS
+  // Mitigation
+  case PipelineEmpty(min: NonNegativeInt)                    // CONSTRAINT_VIOLATION
+  case PipelineTooLong(count: NonNegativeInt, limit: NonNegativeInt) // CONSTRAINT_VIOLATION
+  case CapMustExceedDeductible                               // INVALID_COMBINATION
+  case AggregatedLossOverflow                                // CONSTRAINT_VIOLATION
+  case MitigationEliminatesRisk                              // CONSTRAINT_VIOLATION
+  case MitigationLowersMinLossBelowFloor(min: PositiveLong, minFactor: PositiveDouble)      // INVALID_LOGNORMAL_PARAMS
+  case MitigationLowersAnchorLossBelowFloor(min: PositiveDouble, minFactor: PositiveDouble) // INVALID_METALOG_PARAMS
+  case TargetingPredicateUnparseable                         // INVALID_FORMAT
+  case TargetingQuantifierNotAllowed                         // CONSTRAINT_VIOLATION
+  case TargetingFunctionNotAllowed                           // CONSTRAINT_VIOLATION
+  case TargetingQuantifierDepthExceeded(limit: NonNegativeInt, found: NonNegativeInt) // CONSTRAINT_VIOLATION
+  case TargetingNoFreeVariable                               // CONSTRAINT_VIOLATION
+  case TargetingSeveralFreeVariables                         // CONSTRAINT_VIOLATION
+  case TargetingMitigationStateReferenced                    // CONSTRAINT_VIOLATION
+  // Workspace limits and lookups the services report through ValidationFailed
+  case SeedEntityIdInUse(seedEntityId: SeedEntityId.SeedEntityId) // DUPLICATE_VALUE
+  case MaxTreesReached(limit: NonNegativeInt)                // CONSTRAINT_VIOLATION
+  case TreeNotFound(treeId: TreeId)                          // NOT_FOUND
+  case NodeNotFound                                          // NOT_FOUND
+  case NodeIdsEmpty                                          // EMPTY_COLLECTION
+  case TreeIdAlreadyExists(treeId: TreeId)                   // DUPLICATE_VALUE
+  case TreeNameAlreadyExists(name: SafeName.SafeName)        // DUPLICATE_VALUE
+  case ScenarioNotFound(scenario: ScenarioName.ScenarioName) // NOT_FOUND
+  case CommitNotFound(commit: CommitHash)                    // NOT_FOUND
+  case WorkspaceHasNoContent                                 // NOT_FOUND
+  case RequiresIrminBackend                                  // NOT_SUPPORTED
+  case Unspecified                                           // CONSTRAINT_VIOLATION
+```
+
+The companion carries `codec`, `schema` and `code`, as the ruling says. The
+signatures around it:
+
+```scala
+case class ValidationError(location: ErrorLocation, problem: FieldProblem)
+object ValidationError:
+  def describe(error: ValidationError): String   // "[<location>] <rendered sentence>", for logs and flattened decoder messages
+object ValidationMessages:
+  def render(problem: FieldProblem): String
+// modules/app
+case class Located[+A](value: A, location: ErrorLocation):
+  def reject(problem: FieldProblem): ValidationError
+trait FormState[Field]:
+  protected def parseRequired[A](input: Located[String], parse: String => Option[A], expected: ExpectedInput): Validation[ValidationError, Located[A]]
+// modules/server
+private final case class FitRefusal(problem: FieldProblem, diagnostic: String)   // Simulator
+// IronTapirCodecs: `refused` keeps its signature and writes `problem.toJson` into `customMessage`
+def problemIn(customMessage: String): Option[FieldProblem]                        // the other half of that prism
+// WireDecodeFailureHandler.toValidationError keeps its signature:
+//   Missing → Required; Multiple → Unreadable(SingleValue); Mismatch, Error → Unreadable(Declared);
+//   InvalidValue → the first problemIn(customMessage), else DeclaredConstraintNotMet
+```
+
+Deviations from the ruling's illustration, each accepted on 2026-11-03 before
+the work started: `Unreadable` carries what the text was expected to read as,
+because the leaf form has three kinds of unreadable text; `InvalidCharacters`
+carries the alphabet, because two names admit two alphabets;
+`DeclaredConstraintNotMet` exists for the one input whose validator is declared
+on the endpoint rather than in a refinement (`query[Int]("n").validate(Validator.min(1))`);
+the targeting-predicate cases carry no payload, because the words a parser
+found are the user's typed text and no refusal may echo them (ADR-035); and a
+case about a stored node carries no identifier, because the location already
+does.
+
+Four classifications moved where the old code was wrong about the refusal:
+`TreeBuilderLogic`'s lone leaf at the root was `INVALID_COMBINATION` and is
+`ParentPortfolioRequired`; `RiskPortfolio.create`'s empty child list was
+`REQUIRED_FIELD` and is `PortfolioHasNoChildren`; the distribution-type
+refinement was `INVALID_PATTERN` and is `WrongFormat`; and the metrics
+fallback for an empty error list was `INTERNAL_ERROR` and is `Unspecified`. One
+more moved as a consequence the compiler forced rather than a choice: a child
+identifier that does not refine in `RiskPortfolio.createFromStrings` was a
+`CONSTRAINT_VIOLATION` carrying the refinement's sentence, and is now that
+refinement's own `WrongFormat(Ulid)` at the child's position.
+
+What the implementation added that the ruling did not name, each a mechanical
+consequence of the payload types: JSON codecs for `SafeName`, `PositiveLong`,
+`PositiveDouble` and `NonNegativeLong` in their companions (the `SafeName` pair
+moved there from `RiskTree`, where two other files were importing it); a Tapir
+`Schema[PositiveDouble]`; a named `PositiveDoubleConstraint`; `NonNegativeInt.count`
+and `NonNegativeLong.count`, which refine a size or a count the type system
+cannot prove non-negative and answer zero to a value that is not one, on the
+same terms as `ErrorSubject.nodeAtIndex`; and `ValidationErrorCode`'s JSON codec
+removed, because nothing serialises the code any more.
+
+Two consequences in the browser. The summary list deduplicated by sentence,
+which was correct while every sentence named its field; two required fields now
+share one sentence, so `SubmitRefusals.summaryOf` deduplicates by the refusal
+value instead and the forms carry refusals rather than sentences down to it. And
+the leaf form's pair rule for the lognormal bounds now evaluates only over two
+positive bounds, as `LossRange.create` does, so a bound that is not positive is
+that input's own refusal and the pair rule does not also fire on it.
+
 ---
 
 ### EWB-D-39 — where a cross-field rule's choice of field lives — RULED 2026-10-21
@@ -5526,6 +5709,61 @@ limit is superseded by §16.5, which moves the curve limit inline.
 
 ---
 
+### EWB-D-61 — where a refused query parameter reports — RULED 2026-11-03
+
+**Ruled: a query parameter this application declares reports at its own
+location, `ErrorLocation.QueryParameter(param: RequestQueryParam)`, where
+`RequestQueryParam` is a closed set of the ten parameters the endpoint
+definitions declare, each carrying its wire spelling. The body and a path
+segment keep reporting at `Whole`.**
+
+**What had to be decided.** Phase 2b sent every input but a declared header to
+`Whole` and put the input's name in the sentence. Phase 3b removes the
+sentence, so a refused query parameter would have arrived at `Whole` with
+nothing saying which parameter it was. The ruling that put query parameters at
+`Whole` was made before the sentence was known to go, so it was set aside for
+this case.
+
+**The set.** Ten parameters, read off the endpoint definitions on 2026-11-03:
+`n` (tree history), `at` (structure, exceedance and multi-curve reads),
+`threshold` and `includeProvenance` (analysis), `omitAbsent` (multi-curve), `a`,
+`aAt`, `b` and `bAt` (the two revisions a changed-nodes comparison reads, each
+a branch choice optionally pinned to a commit), and `seedEntityId` (workspace
+bootstrap). The merge endpoints declare none.
+
+```scala
+@jsonDiscriminator(TagField)
+enum RequestQueryParam(val wireName: String):
+  case Limit             extends RequestQueryParam("n")
+  case At                extends RequestQueryParam("at")
+  case SideA             extends RequestQueryParam("a")
+  case SideAPin          extends RequestQueryParam("aAt")
+  case SideB             extends RequestQueryParam("b")
+  case SideBPin          extends RequestQueryParam("bAt")
+  case Threshold         extends RequestQueryParam("threshold")
+  case SeedEntityId      extends RequestQueryParam("seedEntityId")
+  case IncludeProvenance extends RequestQueryParam("includeProvenance")
+  case OmitAbsent        extends RequestQueryParam("omitAbsent")
+
+object RequestQueryParam:
+  def fromWireName(name: String): Option[RequestQueryParam]   // exact match: a query parameter name is case-sensitive
+```
+
+The comparison sides are named `SideA`, `SideAPin`, `SideB` and `SideBPin`,
+because the parameters name two revisions of one comparison and not two
+branches. `WireDecodeFailureHandler.locationOf` gains one arm, matching
+`EndpointInput.Query`; a name the set does not hold reaches `Whole`. The two
+browser forms' `inputsFor` gain one arm each, answering no target, because no
+form renders a query parameter.
+
+**Options set aside.** Reporting at `Whole` and naming the parameter only in the
+log line loses the name on the wire. Reusing `Field(Request, FieldName.X)` with
+six new `FieldName` cases would make every form's exhaustive mapping grow by six
+arms for inputs no form has, and would describe a parameter as a field of the
+body, which it is not.
+
+---
+
 ## 11. ADR alignment
 
 | ADR | What this plan touches | Status |
@@ -5939,6 +6177,19 @@ and asserts the name refusal is gone and the pair refusal stays under both bound
 inputs. A `clearFor(MinLoss)` then removes the pair refusal from both. The
 display gate is asserted as well: a stored refusal is not selected for an input
 until the input is touched or the form submitted.
+
+**Phase 3b.** `WireDecodeFailureHandlerSpec` pins the mapping from each
+`DecodeResult` kind to its `FieldProblem`, the ten query parameters to their
+`RequestQueryParam` case and an undeclared or differently cased name to `Whole`,
+and that a refusal a real Iron codec produced arrives as the refinement's own
+problem: `problemIn(refused(e).customMessage) == Some(e.problem)`, read through
+the `ScenarioName` codec. `IronTapirCodecsSpec` asserts every refining codec
+carries its problem's encoded form and no part of the submitted value.
+`TargetingPredicateSpec` asserts the quoting hint names no word the user typed.
+`FormErrorRoutingSpec` asserts two inputs sharing one sentence are both listed
+in the summary while a pair refusal is listed once. Every suite that compared a
+sentence compares the problem, or the sentence `ValidationMessages.render`
+produces for it.
 
 **Every phase.** All four tiers green: `commonJVM/test`, `server/test`,
 `app/test`, `serverIt/test`. Leaked Docker containers, networks and volumes

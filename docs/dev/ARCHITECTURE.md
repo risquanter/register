@@ -42,7 +42,7 @@ roadmap, no future sections and no status markers.
 - ✅ Core simulation engine functional with parallel execution
 - ✅ Type-safe domain model using Iron refinement types
 - ✅ Clean separation of concerns (domain/service/HTTP layers)
-- ✅ Typed error codes with field path context (ValidationErrorCode)
+- ✅ Typed refusals: a `ValidationError` is a location and a `FieldProblem`, both closed sets; the sentence is rendered where it is shown, and `ValidationErrorCode` is derived from the problem
 - ✅ BuildInfo integration for version management
 - ✅ Sparse storage architecture validated and optimized
 - ✅ Configuration externalized via ZIO Config + application.conf with env-var overrides
