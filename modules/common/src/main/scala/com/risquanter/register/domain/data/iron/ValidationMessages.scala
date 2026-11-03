@@ -1,373 +1,204 @@
 package com.risquanter.register.domain.data.iron
 
-import com.risquanter.register.common.Constants
+import com.risquanter.register.domain.errors.{Alphabet, ExpectedInput, FieldProblem, ValueFormat, ValueRange}
 
-/** All user-facing validation message strings. Shared across JVM and JS. Numeric limits reference `Constants`. */
+/** The sentence for each refusal, shared across JVM and JS.
+  *
+  * One total function over `FieldProblem`, so every case has a sentence and a
+  * sentence names only the values its case carries (ADR-037). The browser calls
+  * it where a refusal is shown and a server log line calls it where one is
+  * recorded; nothing on the wire is a sentence.
+  */
 object ValidationMessages:
 
-  // ══════════════════════════════════════════════════════════════════
-  // Name (SafeName: Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9 /\\-]+$"])
-  // ══════════════════════════════════════════════════════════════════
-  val nameRequired: String      = "Name must not be blank"
-  val nameTooLong: String       = s"Name must be at most ${Constants.MaxNameLength} characters"
-  val nameInvalidChars: String  = "Name must use only letters, digits, spaces, hyphens, and forward slashes"
+  def render(problem: FieldProblem): String = problem match
+    // Presence and readability
+    case FieldProblem.Required                 => "A value is required"
+    case FieldProblem.Unreadable(expected)     => unreadable(expected)
+    case FieldProblem.DeclaredConstraintNotMet => "The value is not valid"
 
-  // ══════════════════════════════════════════════════════════════════
-  // Scenario name — the input whitelist folds to a BranchRef segment slug:
-  // letters -> lowercase, space -> '-'
-  // ══════════════════════════════════════════════════════════════════
-  val scenarioNameRequired: String     = "Scenario name must not be blank"
-  val scenarioNameTooLong: String      = s"Scenario name must be at most ${Constants.MaxScenarioNameLength} characters"
-  val scenarioNameInvalidChars: String = "Scenario name must use only letters, digits, spaces, hyphens, and underscores"
-  val scenarioNameInvalidStart: String = "Scenario name must start with a letter or digit"
+    // The shape of one value
+    case FieldProblem.TooLong(limit)                => s"Value must be at most $limit characters"
+    case FieldProblem.LengthOutOfRange(min, max)    => s"Value must be between $min and $max characters"
+    case FieldProblem.InvalidCharacters(allowed)    => s"Value must use only ${alphabet(allowed)}"
+    case FieldProblem.WrongFormat(expected)         => format(expected)
+    case FieldProblem.OutOfRange(range)             => outOfRange(range)
+    case FieldProblem.ScenarioNameReserved          => "'main' is reserved and cannot be used as a scenario name"
 
-  def scenarioNotFound(name: String): String =
-    s"Scenario not found: $name"
+    // Names and seed identity within a tree
+    case FieldProblem.ReservedNodeNames(names) =>
+      s"Node name must not be a reserved query symbol (e.g. 'leaf', 'p95'): ${names.map(_.value).mkString(", ")}"
+    case FieldProblem.DuplicateNodeName(name, occurrences) =>
+      s"duplicate node name: ${name.value} — used by $occurrences nodes; names must be unique within a tree. " +
+      "Rename all but one of them."
+    case FieldProblem.DuplicateMitigationName(name, occurrences) =>
+      s"duplicate mitigation name: ${name.value} — used by $occurrences mitigations; names must be unique within a tree. " +
+      "Rename all but one of them."
+    case FieldProblem.DuplicateMitigationId(id, occurrences) =>
+      s"duplicate mitigation id: ${id.value} — carried by $occurrences mitigations; identifiers must be unique within a tree. " +
+      "Remove all but one of them, or give each its own identifier."
+    case FieldProblem.SeedVarIdInUse(seedVarId, holders) =>
+      s"seedVarId ${seedVarId.value} is used by multiple nodes: ${holders.map(_.value).mkString(", ")}. Only one may keep it. " +
+      "A seedVarId cannot be changed once it is assigned, so change or omit the one you supplied."
+    case FieldProblem.SeedVarIdImmutable =>
+      "seedVarId is immutable once assigned — omit it for existing nodes; " +
+      "to change a risk's stream, delete the leaf and recreate it"
+    case FieldProblem.SeedVarIdExhausted(next) =>
+      s"seedVarId assignment space exhausted: next value $next exceeds the valid range"
+    case FieldProblem.SeedVarHighWaterBelowMax(highWater, maxAssigned) =>
+      s"seedVarHighWater ${highWater.value} is below the highest assigned seedVarId ${maxAssigned.value}"
+    case FieldProblem.SeedVarHighWaterNotDerivable =>
+      "tree has no leaves — seedVarHighWater cannot be derived"
 
-  // ══════════════════════════════════════════════════════════════════
-  // Reserved FOL symbol names
-  // ══════════════════════════════════════════════════════════════════
-  val reservedNodeName: String  = "Node name must not be a reserved query symbol (e.g. 'leaf', 'p95')"
+    // Topology of a submitted tree, referenced by name
+    case FieldProblem.RootRequired              => "Exactly one root is required"
+    case FieldProblem.MultipleRoots             => "Multiple roots found"
+    case FieldProblem.RootIdNotFound(rootId)    => s"rootId '${rootId.value}' not found in nodes"
+    case FieldProblem.ParentPortfolioRequired   => "leaf must have a parent portfolio"
+    case FieldProblem.ParentNotFound(parent)    => s"parentName '${parent.value}' not found in portfolios"
+    case FieldProblem.ParentIsLeaf(parent)      => s"parentName '${parent.value}' refers to a leaf; must reference a portfolio"
+    case FieldProblem.CycleDetected(node)       => s"Cycle detected at node '${node.value}'"
+    case FieldProblem.PortfolioHasNoChildren(Nil) =>
+      "Portfolio must have at least one child"
+    case FieldProblem.PortfolioHasNoChildren(portfolios) =>
+      s"Every portfolio must have at least one child: ${portfolios.map(_.value).mkString(", ")}"
+    case FieldProblem.TooManyChildren(count, limit)    => s"too many children: $count exceeds the limit of $limit"
+    case FieldProblem.TooManyNodes(count, limit)       => s"too many nodes: $count exceeds the limit of $limit"
+    case FieldProblem.TooManyMitigations(count, limit) => s"too many mitigations: $count exceeds the limit of $limit"
 
-  def reservedNodeNames(names: Seq[String]): String =
-    s"$reservedNodeName: ${names.mkString(", ")}"
+    // A stored node named by a tree update
+    case FieldProblem.StoredNodeListedTwice => "this id is listed more than once; each stored node appears once, in portfolios or in leaves"
+    case FieldProblem.StoredNodeIsLeaf      => "this id is a leaf of this tree; it belongs in leaves"
+    case FieldProblem.StoredNodeIsPortfolio => "this id is a portfolio of this tree; it belongs in portfolios"
+    case FieldProblem.StoredNodeNotInTree   => "this id is not a node of this tree; a new node goes in newPortfolios or newLeaves"
 
-  // ══════════════════════════════════════════════════════════════════
-  // Tree topology — the rules a submitted or stored node set must satisfy
-  // ══════════════════════════════════════════════════════════════════
-  /** Why a name was refused as repeated, with how many nodes carry it and what
-    * resolves it.
-    *
-    * The count is there so a user resolving one of several repetitions sees it
-    * fall rather than an unchanged sentence. The last clause is there because no
-    * holder of the name is more at fault than its twins — any of them may be
-    * the one renamed, and the error names none of them individually.
-    *
-    * {{{
-    * duplicateNodeNames("Fire", 3)
-    * // duplicate node name: Fire — used by 3 nodes; names must be unique
-    * // within a tree. Rename all but one of them.
-    * }}}
-    */
-  def duplicateNodeNames(name: String, occurrences: Int): String =
-    s"duplicate node name: $name — used by $occurrences nodes; names must be unique within a tree. " +
-    "Rename all but one of them."
+    // The index of a built tree
+    case FieldProblem.ChildParentMismatch(child, declaredParent) =>
+      s"Node '${child.value}' is listed as a child but has parentId=${declaredParent.fold("None")(_.value)}"
+    case FieldProblem.ChildNotFound(child)             => s"Child '${child.value}' does not exist in nodes"
+    case FieldProblem.ParentDoesNotListChild(parent)   => s"parent '${parent.value}' does not list this node as a child"
+    case FieldProblem.ParentIdIsLeaf(parent)           => s"parent '${parent.value}' is a leaf, not a portfolio"
+    case FieldProblem.ParentIdNotFound(parent)         => s"parent '${parent.value}' does not exist in nodes"
+    case FieldProblem.NodeNotInIndex                   => "Node not found in tree index"
+    case FieldProblem.LeafUnreachable                  => "Leaf not reachable from tree root (no content hash)"
 
-  val exactlyOneRootRequired: String = "Exactly one root is required"
-  val multipleRootsFound: String     = "Multiple roots found"
-  val leafNeedsPortfolioParent: String = "leaf must have a parent portfolio"
+    // Loss distribution
+    case FieldProblem.AnchorCountOutOfRange(count, min, max) =>
+      s"Metalog mode takes between $min and $max percentile-quantile pairs (got $count)"
+    case FieldProblem.PercentileQuantileLengthMismatch(percentiles, quantiles) =>
+      s"Percentiles and quantiles must have same length ($percentiles vs $quantiles)"
+    case FieldProblem.PercentilesNotIncreasing =>
+      "Percentiles must be strictly increasing — values must be in ascending order"
+    case FieldProblem.QuantilesNotIncreasing =>
+      "Quantiles must be strictly increasing — a higher percentile must correspond to a higher loss value"
+    case FieldProblem.TermsAboveAnchorCount =>
+      "Terms must be between 2 and the number of percentile-quantile pairs"
+    case FieldProblem.LossRangeNotOrdered(min, max) =>
+      s"Minimum loss ($min) must be less than maximum loss ($max)"
+    case FieldProblem.MetalogFitFailed =>
+      "The inputs could not be fitted to a valid distribution. " +
+      "Try reducing Terms, check that quantile values are strictly increasing, " +
+      "or remove conflicting estimates."
+    case FieldProblem.LognormalFitFailed =>
+      "The bounds could not be fitted to a lognormal distribution. " +
+      "Check that the minimum loss is above zero and below the maximum, " +
+      "and that the two are far enough apart to describe a spread."
 
-  /** A form submitted with nothing chosen in its parent control. Distinct from
-    * `leafNeedsPortfolioParent`, which refuses a parent that was chosen and is
-    * the wrong kind of node. */
-  val parentRequired: String = "Parent is required"
+    // Mitigation
+    case FieldProblem.PipelineEmpty(min) =>
+      s"result-stage pipeline is empty: at least $min step is required"
+    case FieldProblem.PipelineTooLong(count, limit) =>
+      s"result-stage pipeline has too many steps: $count exceeds the limit of $limit"
+    case FieldProblem.CapMustExceedDeductible => "Cap must be greater than deductible"
+    case FieldProblem.AggregatedLossOverflow  => "Aggregated loss exceeds the maximum representable value"
+    case FieldProblem.MitigationEliminatesRisk =>
+      "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap or the scale factor, lower the deductible, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
+    case FieldProblem.MitigationLowersMinLossBelowFloor(min, minFactor) =>
+      f"This mitigation reduces the minimum loss below 1, the smallest representable whole unit. The leaf's minimum loss is $min, so the smallest severity factor that still applies here is $minFactor%.3e (1 / $min)."
+    case FieldProblem.MitigationLowersAnchorLossBelowFloor(min, minFactor) =>
+      f"This mitigation reduces the smallest anchor loss to zero, below the positive floor an anchor loss must stay above. The leaf's smallest anchor loss is $min%.3e, so the smallest severity factor that still applies here is $minFactor%.3e."
+    case FieldProblem.TargetingPredicateUnparseable  => "Targeting predicate is not valid syntax"
+    case FieldProblem.TargetingQuantifierNotAllowed  => "Targeting predicates may not use quantifiers"
+    case FieldProblem.TargetingFunctionNotAllowed    => "Targeting predicates may not use function application"
+    case FieldProblem.TargetingQuantifierDepthExceeded(limit, found) =>
+      s"Targeting predicate quantifier depth $found exceeds the limit of $limit"
+    case FieldProblem.TargetingNoFreeVariable =>
+      "Targeting predicate must reference exactly one variable; found none"
+    case FieldProblem.TargetingSeveralFreeVariables =>
+      "Targeting predicate must have exactly one free variable. " +
+      "Unquoted words are read as variables — if one was meant as a literal value, quote it (e.g. \"cyber\")."
+    case FieldProblem.TargetingMitigationStateReferenced =>
+      "Targeting predicates may not reference mitigation state (mitigate, mitigated, unmitigated)"
 
-  def parentNameIsLeaf(parent: String): String =
-    s"parentName '$parent' refers to a leaf; must reference a portfolio"
+    // Workspace limits and lookups
+    case FieldProblem.SeedEntityIdInUse(seedEntityId) =>
+      s"seedEntityId ${seedEntityId.value} is already used by another workspace — choose another value or omit to auto-assign"
+    case FieldProblem.MaxTreesReached(limit) =>
+      s"workspace already holds the maximum of $limit risk trees — delete one before creating another"
+    case FieldProblem.TreeNotFound(treeId)         => s"Tree not found: ${treeId.value}"
+    case FieldProblem.NodeNotFound                 => "Node not found in tree"
+    case FieldProblem.NodeIdsEmpty                 => "nodeIds set is empty"
+    case FieldProblem.TreeIdAlreadyExists(treeId)  => s"Tree ID '${treeId.value}' already exists"
+    case FieldProblem.TreeNameAlreadyExists(name)  => s"Tree name '${name.value}' already exists"
+    case FieldProblem.ScenarioNotFound(scenario)   => s"Scenario not found: ${scenario.value}"
+    case FieldProblem.CommitNotFound(commit)       => s"Commit not found: ${commit.value}"
+    case FieldProblem.WorkspaceHasNoContent        => "Workspace has no content yet — nothing to fork a scenario from"
+    case FieldProblem.RequiresIrminBackend         => "This read requires the Irmin backend"
+    case FieldProblem.Unspecified                  => "Unknown validation error"
 
-  def parentNameNotFound(parent: String): String =
-    s"parentName '$parent' not found in portfolios"
+  private def unreadable(expected: ExpectedInput): String = expected match
+    case ExpectedInput.Number      => "Value must be a number"
+    case ExpectedInput.WholeNumber => "Value must be a whole number"
+    case ExpectedInput.NumberList  => "Enter comma-separated numbers"
+    case ExpectedInput.SingleValue => "A single value is expected"
+    case ExpectedInput.Declared    => "The value could not be read"
 
-  def nodeIdNotInTree(id: String): String =
-    s"id '$id' is not a node of this tree; a new node goes in newPortfolios or newLeaves"
+  private def alphabet(allowed: Alphabet): String = allowed match
+    case Alphabet.NodeName     => "letters, digits, spaces, hyphens, and forward slashes"
+    case Alphabet.ScenarioName => "letters, digits, spaces, hyphens, and underscores"
 
-  def nodeIdIsLeaf(id: String): String =
-    s"id '$id' is a leaf of this tree; it belongs in leaves"
+  /** The refused value is deliberately absent from every format sentence. It is
+    * client-supplied text, and a sentence reaches a client inside a refusal, so
+    * it is a disclosure surface whether or not the value came from the same
+    * client (ADR-035). The ULID's 26 characters and alphabet are fixed by the
+    * ULID specification; the hash lengths by SHA-1 and SHA-256; the trace id by
+    * the W3C Trace Context specification. */
+  private def format(expected: ValueFormat): String = expected match
+    case ValueFormat.Ulid =>
+      "Invalid ID (expected a 26-character ULID in Crockford base32: digits and uppercase letters, excluding I, L, O and U)"
+    case ValueFormat.WorkspaceKey         => "Invalid workspace key (expected 22-character base64url token)"
+    case ValueFormat.WorkspaceKeyHash     => "Invalid workspace key hash (expected 64-character lowercase hex SHA-256 digest)"
+    case ValueFormat.UserId               => "User ID must be a valid UUID (e.g. 8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf)"
+    case ValueFormat.Email                => "Please enter a valid email address"
+    case ValueFormat.Url                  => "Please enter a valid URL (e.g. https://example.com)"
+    case ValueFormat.SecureUrl            => "URL must be a valid HTTPS endpoint (http:// is not permitted for external service credentials)"
+    case ValueFormat.ExternalToken        => "Token must be non-empty, at most 2048 characters, and contain only printable ASCII (0x21–0x7E)"
+    case ValueFormat.TraceId              => "Trace id is invalid (expected 32 lowercase hexadecimal characters)"
+    case ValueFormat.CommitHash           => "Commit hash is invalid (expected 40 lowercase hexadecimal characters)"
+    case ValueFormat.ContentHash          => "Content hash is invalid (expected 64 lowercase hexadecimal characters)"
+    case ValueFormat.BranchName           => "Branch name is invalid"
+    case ValueFormat.StagingBranchName    => "Merge staging branch name is invalid"
+    case ValueFormat.DistributionTypeName => "Distribution type must be 'Metalog' or 'Lognormal'"
+    case ValueFormat.ScenarioNameStart    => "Scenario name must start with a letter or digit"
 
-  def nodeIdIsPortfolio(id: String): String =
-    s"id '$id' is a portfolio of this tree; it belongs in portfolios"
-
-  def storedNodeListedTwice(id: String): String =
-    s"id '$id' is listed more than once; each stored node appears once, in portfolios or in leaves"
-
-  def cycleDetected(node: String): String =
-    s"Cycle detected at node '$node'"
-
-  def portfoliosWithoutChildren(names: Seq[String]): String =
-    s"Every portfolio must have at least one child: ${names.mkString(", ")}"
-
-  def tooManyNodes(count: Int, limit: Int): String =
-    s"too many nodes: $count exceeds the limit of $limit"
-
-  def tooManyMitigations(count: Int, limit: Int): String =
-    s"too many mitigations: $count exceeds the limit of $limit"
-
-  /** Why a result-stage pipeline with no steps was refused. The bound is the
-    * caller's, so the sentence cannot state one the caller does not enforce.
-    *
-    * {{{
-    * resultStagePipelineEmpty(1)
-    * // result-stage pipeline is empty: at least 1 step is required
-    * }}}
-    */
-  def resultStagePipelineEmpty(min: Int): String =
-    s"result-stage pipeline is empty: at least $min step is required"
-
-  /** Why a result-stage pipeline's step count was refused as too long, on the
-    * same terms as `resultStagePipelineEmpty`. */
-  def resultStagePipelineTooLong(count: Int, limit: Int): String =
-    s"result-stage pipeline has too many steps: $count exceeds the limit of $limit"
-
-  /** Why a portfolio's direct child count was refused, with the count and the
-    * limit. The limit is the caller's, so the sentence cannot state one the
-    * caller does not enforce.
-    *
-    * {{{
-    * tooManyChildren(1001, 1000)
-    * // too many children: 1001 exceeds the limit of 1000
-    * }}}
-    */
-  def tooManyChildren(count: Int, limit: Int): String =
-    s"too many children: $count exceeds the limit of $limit"
-
-  def rootIdNotFound(rootId: String): String =
-    s"rootId '$rootId' not found in nodes"
-
-  def duplicateMitigationIds(id: String, occurrences: Int): String =
-    s"duplicate mitigation id: $id — carried by $occurrences mitigations; identifiers must be unique within a tree. " +
-    s"Remove all but one of them, or give each its own identifier."
-
-  def duplicateMitigationNames(name: String, occurrences: Int): String =
-    s"duplicate mitigation name: $name — used by $occurrences mitigations; names must be unique within a tree. " +
-    s"Rename all but one of them."
-
-  // ══════════════════════════════════════════════════════════════════
-  // ULID identifiers (SafeId and the nominal wrappers over it)
-  // ══════════════════════════════════════════════════════════════════
-  /** Why a ULID was refused, stating the constraint and not the value.
-    *
-    * The submitted value is deliberately absent. It is client-supplied text,
-    * and a validation message reaches a client inside
-    * `WireError.ValidationRejected`, so it is a disclosure surface whether or
-    * not the value came from the same client (ADR-035). The 26 characters and
-    * the alphabet are fixed by the ULID specification rather than chosen here.
-    */
-  val invalidUlid: String =
-    "Invalid ID (expected a 26-character ULID in Crockford base32: digits and uppercase letters, excluding I, L, O and U)"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Email
-  // ══════════════════════════════════════════════════════════════════
-  val emailInvalid: String      = "Please enter a valid email address"
-
-  // ══════════════════════════════════════════════════════════════════
-  // URL
-  // ══════════════════════════════════════════════════════════════════
-  val urlInvalid: String        = "Please enter a valid URL (e.g. https://example.com)"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Numeric — non-negative / positive
-  // ══════════════════════════════════════════════════════════════════
-  val valueMustBeNonNegative: String    = "Value must be zero or greater"
-  val valueMustBePositive: String       = "Value must be greater than zero"
-  val capMustExceedDeductible: String   = "Cap must be greater than deductible"
-  val aggregatedLossOverflow: String    = "Aggregated loss exceeds the maximum representable value"
-  val retentionFactorOutOfRange: String =
-    "Mitigation factor must be greater than 0 and at most 1 — a mitigation reduces a figure, so it can neither increase it nor remove it entirely"
-  val residualProbabilityOutOfRange: String =
-    "Mitigated probability must be greater than 0 and at most 1 — a mitigation reduces the chance a risk occurs, so it cannot remove the possibility entirely"
-  val lossCapMustBePositive: String =
-    "Loss cap must be greater than 0 — a cap of zero would leave the entity bearing nothing, which states that the transfer cannot fail"
-  val portfolioHasNoChildren: String    = "Portfolio must have at least one child"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Probability (open interval 0 < p < 1)
-  // ══════════════════════════════════════════════════════════════════
-  val probabilityRequired: String       = "Probability is required"
-  val probabilityNotANumber: String     = "Probability must be a number"
-  val probabilityOutOfRange: String     = "Probability must be between 0 and 1 (exclusive)"
-
-  // Occurrence probability (closed interval 0 ≤ p ≤ 1)
-  // ══════════════════════════════════════════════════════════════════
-  val occurrenceProbabilityOutOfRange: String = "Occurrence probability must be between 0 and 1 (inclusive)"
-  /** The same interval on the 0–100 scale the leaf form's probability input is
-    * entered on. */
-  val probabilityPercentOutOfRange: String = "Probability must be between 0 and 100 (inclusive)"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Distribution type
-  // ══════════════════════════════════════════════════════════════════
-  val distributionTypeInvalid: String   = "Distribution type must be 'Metalog' or 'Lognormal'"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Workspace key (base64url, 22 chars)
-  // ══════════════════════════════════════════════════════════════════
-  val workspaceKeyInvalid: String = "Invalid workspace key (expected 22-character base64url token)"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Workspace key hash (sha256, 64 lowercase hex chars)
-  // ══════════════════════════════════════════════════════════════════
-  val workspaceKeyHashInvalid: String = "Invalid workspace key hash (expected 64-character lowercase hex SHA-256 digest)"
-
-  // ══════════════════════════════════════════════════════════════════
-  // User ID (UUID v4 — from Keycloak JWT sub claim via x-user-id header)
-  // ══════════════════════════════════════════════════════════════════
-  val userIdInvalid: String = "User ID must be a valid UUID (e.g. 8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf)"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Short optional text (MaxLength[20])
-  // ══════════════════════════════════════════════════════════════════
-  val shortTextTooLong: String  =
-    s"Value must be at most ${Constants.MaxShortTextLength} characters"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Lognormal mode — min/max loss fields
-  // ══════════════════════════════════════════════════════════════════
-  val minLossRequired: String           = "Minimum loss is required for lognormal mode"
-  val maxLossRequired: String           = "Maximum loss is required for lognormal mode"
-  private def lossMustBeWholeNumber(field: String): String =
-    s"$field must be a whole number"
-  val minLossNotWholeNumber: String     = lossMustBeWholeNumber("Minimum loss")
-  val maxLossNotWholeNumber: String     = lossMustBeWholeNumber("Maximum loss")
-  val minMustBeLessThanMax: String      = "Minimum loss must be less than maximum loss"
-
-  /** Why a loss range was refused, naming both bounds. The pair is the subject
-    * of the refusal: neither bound is wrong on its own and editing either one
-    * satisfies the rule, so the sentence names both rather than blaming one.
-    *
-    * {{{
-    * lossRangeNotOrdered(120, 20)
-    * // Minimum loss (120) must be less than maximum loss (20)
-    * }}}
-    */
-  def lossRangeNotOrdered(min: Long, max: Long): String =
-    s"Minimum loss ($min) must be less than maximum loss ($max)"
-
-  val mitigationEliminatesRisk: String =
-    "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap or the scale factor, lower the deductible, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
-
-  /** Why a severity scaling was refused on a lognormal shape, with the leaf's
-    * own minimum and the smallest factor that still applies to it. The leaf's
-    * figures are the caller's, so the sentence cannot state a floor the caller
-    * can derive for a different leaf.
-    *
-    * {{{
-    * mitigationLowersMinLossBelowFloor(2000, 5.0e-4)
-    * // ... The leaf's minimum loss is 2000, so the smallest severity factor
-    * // that still applies here is 5.000e-04 (1 / 2000).
-    * }}}
-    */
-  def mitigationLowersMinLossBelowFloor(min: Long, minFactor: Double): String =
-    f"This mitigation reduces the minimum loss below 1, the smallest representable whole unit. The leaf's minimum loss is $min, so the smallest severity factor that still applies here is $minFactor%.3e (1 / $min)."
-
-  /** The metalog mode's counterpart to `mitigationLowersMinLossBelowFloor`. An
-    * anchor loss is a positive double rather than a whole unit, so its floor is
-    * the smallest positive double and only underflow reaches it. The sentence
-    * names the same actionable number: the smallest factor this leaf tolerates.
-    *
-    * {{{
-    * mitigationLowersAnchorLossBelowFloor(2.0, 2.5e-324)
-    * // ... The leaf's smallest anchor loss is 2.000e+00, so the smallest
-    * // severity factor that still applies here is 2.470e-324.
-    * }}}
-    */
-  def mitigationLowersAnchorLossBelowFloor(min: Double, minFactor: Double): String =
-    f"This mitigation reduces the smallest anchor loss to zero, below the positive floor an anchor loss must stay above. The leaf's smallest anchor loss is $min%.3e, so the smallest severity factor that still applies here is $minFactor%.3e."
-
-  // ══════════════════════════════════════════════════════════════════
-  // Metalog mode — percentiles / quantiles
-  // ══════════════════════════════════════════════════════════════════
-  val percentilesRequired: String       = "Percentiles are required for metalog mode"
-  val percentilesFormat: String         = "Enter comma-separated percentile values"
-  val percentilesOutOfRange: String     = "Percentiles must be between 0 and 100 (exclusive)"
-  val percentilesMustBeStrictlyIncreasing: String =
-    "Percentiles must be strictly increasing — values must be in ascending order"
-
-  val quantilesRequired: String         = "Quantiles are required for metalog mode"
-  val quantilesFormat: String           = "Enter comma-separated quantile values (loss amounts)"
-  val quantilesMustBePositive: String =
-    "Quantile loss amounts must be greater than zero — the distribution fit takes their logarithm"
-  val quantilesMustBeStrictlyIncreasing: String =
-    "Quantiles must be strictly increasing — a higher percentile must correspond to a higher loss value"
-
-  def metalogLengthMismatch(pLen: Int, qLen: Int): String =
-    s"Percentiles and quantiles must have same length ($pLen vs $qLen)"
-
-  /** Why an anchor count was refused, with the bounds and the count supplied.
-    *
-    * The bounds are the caller's, so the sentence cannot state one the caller
-    * does not enforce. They originate in the metalog fitter: below the minimum
-    * there is no curve to fit, and above the maximum the fitter throws.
-    *
-    * {{{
-    * anchorCountOutOfRange(1, 2, 20)
-    * // Metalog mode takes between 2 and 20 percentile-quantile pairs (got 1)
-    * }}}
-    */
-  def anchorCountOutOfRange(count: Int, min: Int, max: Int): String =
-    s"Metalog mode takes between $min and $max percentile-quantile pairs (got $count)"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Metalog mode — term count
-  // ══════════════════════════════════════════════════════════════════
-  val termsOutOfRange: String =
-    "Terms must be between 2 and the number of percentile-quantile pairs"
-  val termsMustBeWholeNumber: String = "Terms must be a whole number"
-
-  /** Why a stated term count was refused as outside the fit's own range.
-    *
-    * Distinct from `termsOutOfRange`, which refuses a count inside this range
-    * that exceeds the number of anchors supplied. The bounds are
-    * `Metalog.validateInputs`' precondition, which throws outside [2, 20], and
-    * must match the type-level literals of `MetalogTermCount` in OpaqueTypes
-    * and `refineMetalogTermCount` in ValidationUtil (type-level constraints
-    * cannot reference runtime constants).
-    */
-  val termsOutsideFitterRange: String =
-    "Terms must be between 2 and 20 — a fit with fewer has no curve to describe, and the fitter accepts no more"
-
-  // ══════════════════════════════════════════════════════════════════
-  // Distribution fit failure
-  // ══════════════════════════════════════════════════════════════════
-  /** Why a metalog shape that passed every boundary rule still could not be
-    * fitted. The remaining failure is the metalog system itself having no
-    * solution at this term count, so the sentence names the levers that change
-    * it. The fitter's own text is an internal diagnostic and stays server-side
-    * (ADR-035). */
-  val metalogFitFailed: String =
-    "The inputs could not be fitted to a valid distribution. " +
-    "Try reducing Terms, check that quantile values are strictly increasing, " +
-    "or remove conflicting estimates."
-
-  /** The lognormal counterpart. A lognormal is fitted from the two bounds
-    * alone, so the only lever is the bounds themselves. */
-  val lognormalFitFailed: String =
-    "The bounds could not be fitted to a lognormal distribution. " +
-    "Check that the minimum loss is above zero and below the maximum, " +
-    "and that the two are far enough apart to describe a spread."
-
-  // ══════════════════════════════════════════════════════════════════
-  // Seed identity
-  // ══════════════════════════════════════════════════════════════════
-  // Bounds are fixed by the HDR generator's 8-decimal-digit ID budget and
-  // must match the Iron type-level literals in OpaqueTypes/ValidationUtil
-  // (type-level constraints cannot reference runtime constants).
-  val seedEntityIdOutOfRange: String =
-    "seedEntityId must be between 1 and 99999999 (0 is reserved)"
-  val seedVarIdOutOfRange: String =
-    "seedVarId must be between 1 and 49999999"
-
-  def seedVarIdInUse(id: Long, holders: Seq[String]): String =
-    s"seedVarId $id is used by multiple nodes: ${holders.mkString(", ")}. Only one may keep it. " +
-    "A seedVarId cannot be changed once it is assigned, so change or omit the one you supplied."
-
-  def seedEntityIdInUse(id: Long): String =
-    s"seedEntityId $id is already used by another workspace — " +
-    "choose another value or omit to auto-assign"
-
-  def maxTreesPerWorkspaceReached(limit: Int): String =
-    s"workspace already holds the maximum of $limit risk trees — " +
-    "delete one before creating another"
-
-  val seedVarIdImmutable: String =
-    "seedVarId is immutable once assigned — omit it for existing nodes; " +
-    "to change a risk's stream, delete the leaf and recreate it"
-
-  def seedVarIdAssignmentExhausted(next: Long): String =
-    s"seedVarId assignment space exhausted: next value $next exceeds the valid range"
-
-  def seedVarHighWaterBelowMax(highWater: Long, maxAssigned: Long): String =
-    s"seedVarHighWater $highWater is below the highest assigned seedVarId $maxAssigned"
-
-  val seedVarHighWaterNotDerivable: String =
-    "tree has no leaves — seedVarHighWater cannot be derived"
+  /** Each bound is the one the matching refinement in `ValidationUtil` enforces.
+    * The seed bounds are fixed by the HDR generator's 8-decimal-digit id budget,
+    * and the metalog term bounds by the fitter's own precondition. */
+  private def outOfRange(range: ValueRange): String = range match
+    case ValueRange.NonNegative        => "Value must be zero or greater"
+    case ValueRange.Positive           => "Value must be greater than zero"
+    case ValueRange.SeedEntityId       => "seedEntityId must be between 1 and 99999999 (0 is reserved)"
+    case ValueRange.SeedVarId          => "seedVarId must be between 1 and 49999999"
+    case ValueRange.OpenUnitInterval   => "Probability must be between 0 and 1 (exclusive)"
+    case ValueRange.ClosedUnitInterval => "Occurrence probability must be between 0 and 1 (inclusive)"
+    case ValueRange.Percent            => "Probability must be between 0 and 100 (inclusive)"
+    case ValueRange.Percentile         => "Percentiles must be between 0 and 100 (exclusive)"
+    case ValueRange.PositiveLoss       => "Quantile loss amounts must be greater than zero — the distribution fit takes their logarithm"
+    case ValueRange.LossCap =>
+      "Loss cap must be greater than 0 — a cap of zero would leave the entity bearing nothing, which states that the transfer cannot fail"
+    case ValueRange.MetalogTerms =>
+      "Terms must be between 2 and 20 — a fit with fewer has no curve to describe, and the fitter accepts no more"
+    case ValueRange.RetentionFactor =>
+      "Mitigation factor must be greater than 0 and at most 1 — a mitigation reduces a figure, so it can neither increase it nor remove it entirely"
+    case ValueRange.ResidualProbability =>
+      "Mitigated probability must be greater than 0 and at most 1 — a mitigation reduces the chance a risk occurs, so it cannot remove the possibility entirely"

@@ -28,11 +28,7 @@ object GlobalErrorSpec extends ZIOSpecDefault:
     TreeId.fromString("01HX9ABCDE0000000000000001").toOption.get
 
   private val fieldErrors: List[E.ValidationError] = List(
-    E.ValidationError(
-      E.ErrorLocation.requestField(E.FieldName.Name),
-      E.ValidationErrorCode.INTERNAL_ERROR,
-      "must not be empty"
-    )
+    E.ValidationError(E.ErrorLocation.requestField(E.FieldName.Name), E.FieldProblem.Required)
   )
 
   private def wire(error: WireError): Option[GlobalError] =

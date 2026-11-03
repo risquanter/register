@@ -4,11 +4,12 @@ import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
+import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.iron.{
-  ContentHash, MitigationId, NodeId, OccurrenceProbability, ResidualProbability,
-  SafeName, ValidationMessages, ValidationUtil
+  ContentHash, MitigationId, NodeId, NonNegativeInt, OccurrenceProbability, ResidualProbability,
+  SafeName, ValidationUtil
 }
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 
 /** What a mitigation applies to; resolves server-side to the scoped node set. */
 sealed trait MitigationTarget
@@ -165,11 +166,11 @@ object MitigationSpec {
   object ResultStage {
 
     /** A pipeline with no steps has no effect. */
-    private val MinPipelineSteps = 1
+    private val MinPipelineSteps: NonNegativeInt = 1
 
     /** Above ten steps a pipeline is restating operations: a realistic one uses
       * at most one of each of the five operation types. */
-    private val MaxPipelineSteps = 10
+    private val MaxPipelineSteps: NonNegativeInt = 10
 
     def create(
       pipeline: TransformPipeline,
@@ -177,17 +178,10 @@ object MitigationSpec {
     ): Validation[ValidationError, ResultStage] =
       pipeline.steps.size match {
         case n if n < MinPipelineSteps =>
-          Validation.fail(ValidationError(
-            location = location,
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = ValidationMessages.resultStagePipelineEmpty(MinPipelineSteps)
-          ))
+          Validation.fail(ValidationError(location, FieldProblem.PipelineEmpty(MinPipelineSteps)))
         case n if n > MaxPipelineSteps =>
           Validation.fail(ValidationError(
-            location = location,
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = ValidationMessages.resultStagePipelineTooLong(n, MaxPipelineSteps)
-          ))
+            location, FieldProblem.PipelineTooLong(NonNegativeInt.count(n), MaxPipelineSteps)))
         case _ => Validation.succeed(new ResultStage(pipeline))
       }
 
@@ -202,8 +196,7 @@ object MitigationSpec {
       JsonEncoder[Raw].contramap(stage => Raw(stage.pipeline)),
       Raw.rawCodec.decoder.mapOrFail(raw =>
         create(raw.pipeline, ErrorLocation.requestField(FieldName.Spec))
-          .toEither.left.map(_.map(e =>
-            s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
+          .toEither.left.map(_.map(ValidationError.describe).mkString("; "))
       )
     )
   }
@@ -263,14 +256,10 @@ object Mitigation {
   ): Validation[ValidationError, Unit] =
     ValidationUtil.requireDistinctBy(
       mitigations,
-      _.id.value,
+      _.id,
       (id, group) =>
-        ValidationError(
-          location = location,
-          code = ValidationErrorCode.DUPLICATE_VALUE,
-          message = ValidationMessages.duplicateMitigationIds(id.toString, group.size)
-        )
-    )
+        ValidationError(location, FieldProblem.DuplicateMitigationId(id, NonNegativeInt.count(group.size)))
+    )(using scala.math.Ordering.by(_.value))
 
   /** Mitigation names are unique within one tree, so a user naming one in a
     * selection cannot mean two. */
@@ -280,14 +269,10 @@ object Mitigation {
   ): Validation[ValidationError, Unit] =
     ValidationUtil.requireDistinctBy(
       mitigations,
-      _.name.value,
+      _.name,
       (name, group) =>
-        ValidationError(
-          location = location,
-          code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
-          message = ValidationMessages.duplicateMitigationNames(name.toString, group.size)
-        )
-    )
+        ValidationError(location, FieldProblem.DuplicateMitigationName(name, NonNegativeInt.count(group.size)))
+    )(using scala.math.Ordering.by(_.value))
 
   given Equal[Mitigation] = Equal.default
 
@@ -311,7 +296,7 @@ object Mitigation {
         .flatMap { case (id, name) =>
           create(id, name, raw.target, raw.spec, MitigationPrecedence(raw.precedence))
         }
-        .toEither.left.map(_.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
+        .toEither.left.map(_.toChunk.map(ValidationError.describe).mkString("; "))
     }
   )
 

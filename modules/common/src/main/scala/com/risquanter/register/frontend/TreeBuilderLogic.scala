@@ -2,10 +2,8 @@ package com.risquanter.register.frontend
 
 import zio.prelude.Validation
 
-import com.risquanter.register.domain.data.iron.{SafeName, ValidationMessages}
-import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
-}
+import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /** Pure topology rules for a tree that is still being assembled, shared by the
@@ -32,6 +30,14 @@ object TreeBuilderLogic:
   /** The parent that draft node selects. */
   private val draftParent: ErrorLocation =
     ErrorLocation.Field(ErrorSubject.DraftNode, FieldName.ParentName)
+
+  /** A refusal about the shape of the whole draft. */
+  private def whole(problem: FieldProblem): Validation[ValidationError, Unit] =
+    Validation.fail(ValidationError(ErrorLocation.Whole, problem))
+
+  /** A refusal about the draft node's parent. */
+  private def atParent(problem: FieldProblem): Validation[ValidationError, Unit] =
+    Validation.fail(ValidationError(draftParent, problem))
 
   /** Structural topology rules safe for incremental construction:
     * uniqueness, single root, valid parent references.
@@ -75,8 +81,8 @@ object TreeBuilderLogic:
     if portfolios.isEmpty then
       leaves match
         case (_, ParentRef.Root) :: Nil => Validation.succeed(())
-        case Nil => Validation.fail(ValidationError(ErrorLocation.Whole, ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.exactlyOneRootRequired))
-        case _ => Validation.fail(ValidationError(ErrorLocation.Whole, ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.leafNeedsPortfolioParent))
+        case Nil => whole(FieldProblem.RootRequired)
+        case _   => whole(FieldProblem.ParentPortfolioRequired)
     else
       // Distinct by name: a duplicate-name resubmission of the same root
       // (already flagged separately by the uniqueness check above) must not
@@ -84,17 +90,16 @@ object TreeBuilderLogic:
       // temporarily holds two entries with the same name.
       val roots = portfolios.collect { case (name, ParentRef.Root) => name }.distinct
       roots match
-        case Nil => Validation.fail(ValidationError(ErrorLocation.Whole, ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.exactlyOneRootRequired))
+        case Nil      => whole(FieldProblem.RootRequired)
         case _ :: Nil => Validation.succeed(())
-        case _ => Validation.fail(ValidationError(ErrorLocation.Whole, ValidationErrorCode.AMBIGUOUS_REFERENCE, ValidationMessages.multipleRootsFound))
+        case _        => whole(FieldProblem.MultipleRoots)
 
   private def validatePortfolioParents(portfolios: List[(Name, Parent)], portfolioNames: Set[Name]): Validation[ValidationError, Unit] =
     val checks = portfolios.map { case (_, parent) =>
       parent match
         case ParentRef.Root => Validation.succeed(())
         case ParentRef.Under(parentName) if portfolioNames.contains(parentName) => Validation.succeed(())
-        case ParentRef.Under(parentName) =>
-          Validation.fail(ValidationError(draftParent, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.parentNameNotFound(parentName.value.toString)))
+        case ParentRef.Under(parentName) => atParent(FieldProblem.ParentNotFound(parentName))
     }
     Validation.validateAll(checks).as(())
 
@@ -103,10 +108,8 @@ object TreeBuilderLogic:
     val checks = leaves.map { case (_, parent) =>
       parent match
         case ParentRef.Under(parentName) if portfolioNames.contains(parentName) => Validation.succeed(())
-        case ParentRef.Under(parentName) =>
-          Validation.fail(ValidationError(draftParent, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.parentNameNotFound(parentName.value.toString)))
-        case ParentRef.Root if hasPortfolios =>
-          Validation.fail(ValidationError(draftParent, ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.leafNeedsPortfolioParent))
+        case ParentRef.Under(parentName) => atParent(FieldProblem.ParentNotFound(parentName))
+        case ParentRef.Root if hasPortfolios => atParent(FieldProblem.ParentPortfolioRequired)
         case ParentRef.Root => Validation.succeed(())
     }
     Validation.validateAll(checks).as(())
@@ -123,8 +126,4 @@ object TreeBuilderLogic:
       (portfolios.flatMap(p => ParentRef.nameOf(p._2)) ++ leaves.flatMap(l => ParentRef.nameOf(l._2))).toSet
     val empty = portfolios.map(_._1).filterNot(namedParents.contains)
     if empty.isEmpty then Validation.succeed(())
-    else Validation.fail(ValidationError(
-      ErrorLocation.Whole, ValidationErrorCode.EMPTY_COLLECTION,
-      ValidationMessages.portfoliosWithoutChildren(empty.map(_.value.toString))
-    ))
-
+    else whole(FieldProblem.PortfolioHasNoChildren(empty))

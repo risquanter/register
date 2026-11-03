@@ -2,8 +2,8 @@ package com.risquanter.register.services.workspace
 
 import zio.*
 import com.risquanter.register.domain.data.WorkspaceRecord
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, SeedEntityId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, TreeNotInWorkspace, ValidationError, ValidationErrorCode, ValidationFailed}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, WorkspaceKeySecret, TreeId, SeedEntityId}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, TreeNotInWorkspace, ValidationError, ValidationFailed}
 
 /** Workspace lifecycle service — association/token index.
   *
@@ -126,16 +126,14 @@ object WorkspaceStore:
   def checkTreeCapacity(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.checkTreeCapacity(key))
 
-  /** Refuses room for a tree the workspace does not already hold. */
   /** The refusal a workspace already holding `limit` trees produces. A value
     * rather than a function of a record, because a backend deciding capacity
     * inside a transaction holds the count there and no record.
     */
   def maxTreesReached(limit: Int): AppError =
     ValidationFailed(List(ValidationError(
-      location = ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
-      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = ValidationMessages.maxTreesPerWorkspaceReached(limit)
+      ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
+      FieldProblem.MaxTreesReached(NonNegativeInt.count(limit))
     )))
 
   def treeCapacityForNew(ws: WorkspaceRecord, limit: Int): Either[AppError, Unit] =

@@ -4,7 +4,7 @@ import zio.test.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
 object OpaqueTypesSpec extends ZIOSpecDefault {
 
@@ -349,11 +349,7 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
 
   /** The refusal one repeated name produces. */
   private def duplicateName(name: String, occurrences: Int): ValidationError =
-    ValidationError(
-      location = at,
-      code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
-      message = ValidationMessages.duplicateNodeNames(name, occurrences)
-    )
+    ValidationError(at, FieldProblem.DuplicateNodeName(names(name).head, NonNegativeInt.count(occurrences)))
 
   /** Refines each literal, failing the test immediately on one that does not —
     * every literal here is inside SafeName's whitelist. */

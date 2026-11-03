@@ -4,8 +4,8 @@ import java.time.Duration
 import sttp.model.StatusCode
 import app.core.{LocalProblem, RequestFailure, ViewFailure}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{ScenarioName, TraceId}
-import com.risquanter.register.domain.errors.MergeRefusal
+import com.risquanter.register.domain.data.iron.{ScenarioName, TraceId, ValidationMessages}
+import com.risquanter.register.domain.errors.{MergeRefusal, ValidationError}
 import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProblem, RejectionDetail, WireError}
 
 /** Every sentence the browser shows for a failure.
@@ -105,8 +105,12 @@ object ErrorMessages:
     case RequestFailure.Wire(error)            => wire(error)
     case RequestFailure.Transport(_)           => TransportFailed
     case RequestFailure.Undecodable(status)    => undecodableAnswer(status)
-    case LocalProblem.FormInvalid(errors)      => errors.map(_.message).mkString("; ")
+    case LocalProblem.FormInvalid(errors)      => errors.map(refusal).mkString("; ")
     case LocalProblem.NoActiveWorkspace        => NoActiveWorkspace
+
+  /** The sentence for one refused field: rendered here from the problem and
+    * its values, because the wire carries no sentence (ADR-035). */
+  def refusal(error: ValidationError): String = ValidationMessages.render(error.problem)
 
   /** The lines a view shows for a failure, one per refusal when the failure is
     * a refusal of fields, and otherwise the one sentence `viewFailed` gives.
@@ -115,16 +119,16 @@ object ErrorMessages:
     *
     * {{{
     * viewFailedLines(LocalProblem.FormInvalid(List(blankName, rootTaken)))
-    * // List(blankName.message, rootTaken.message)
+    * // List(refusal(blankName), refusal(rootTaken))
     * }}}
     */
   def viewFailedLines(failure: ViewFailure): List[String] = failure match
     case LocalProblem.FormInvalid(errors) =>
-      errors.map(_.message).toList
+      errors.map(refusal).toList
     case RequestFailure.Wire(WireError.RequestRejected(errors, _)) =>
-      errors.map(_.message).toList
+      errors.map(refusal).toList
     case RequestFailure.Wire(WireError.ValidationRejected(_, RejectionDetail.Fields(errors), _)) =>
-      errors.map(_.message).toList
+      errors.map(refusal).toList
     case other =>
       List(viewFailed(other))
 
@@ -142,9 +146,9 @@ object ErrorMessages:
     * compile error here until it has a sentence.
     */
   def wire(error: WireError): String = error match
-    case WireError.RequestRejected(errors, _)         => errors.map(_.message).mkString("; ")
+    case WireError.RequestRejected(errors, _)         => errors.map(refusal).mkString("; ")
     case WireError.ValidationRejected(_, detail, _)   => detail match
-      case RejectionDetail.Fields(errors)             => errors.map(_.message).mkString("; ")
+      case RejectionDetail.Fields(errors)             => errors.map(refusal).mkString("; ")
       case RejectionDetail.Query(problem)             => query(problem)
     case WireError.NotFound(_)                        => NotFound
     case WireError.WorkspaceExpired(c, life, idle, _) => workspaceExpired(c, life, idle)

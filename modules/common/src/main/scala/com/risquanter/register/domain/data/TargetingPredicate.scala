@@ -6,8 +6,8 @@ import sttp.tapir.Schema
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 
-import com.risquanter.register.domain.data.iron.TargetingSource
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, TargetingSource}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 
 import parser.FOLParser
 import logic.{Formula, FOL, FOLUtil}
@@ -31,12 +31,17 @@ object TargetingPredicate:
 
   private val location: ErrorLocation = ErrorLocation.requestField(FieldName.TargetingSource)
 
+  /** The length bounds of `TargetingSource`, as the values a refusal carries.
+    * They mirror the type's `MinLength` and `MaxLength` literals, which cannot
+    * be read back at runtime. */
+  private val MinSourceLength: NonNegativeInt = 1
+  private val MaxSourceLength: NonNegativeInt = 256
+
   /** Mitigation-state predicates a targeting predicate may not reference — a
     * mitigation targeting by its own effect would be self-referential. These
     * are atoms (not function terms), so the targeting fragment does not exclude
     * them; this check does. Matched case-insensitively (see
-    * `requireNoMitigationPredicate`); the M3 knowledge base is the eventual
-    * authority (marks its own predicates non-targetable), superseding this list. */
+    * `requireNoMitigationPredicate`). */
   private val reservedPredicates: Set[String] = Set("mitigate", "mitigated", "unmitigated")
 
   /** Boundary validation, cross-compiled (browser and server), in two phases:
@@ -47,17 +52,19 @@ object TargetingPredicate:
     *    accumulate so an authoring form reports every problem at once:
     *    3. targeting-fragment membership (no quantifiers, no function terms);
     *    4. exactly one free variable (the target variable);
-    *    5. no `mitigate` / `mitigated` predicate. */
+    *    5. no `mitigate` / `mitigated` predicate.
+    *
+    * No refusal carries the parser's own text or the names it found: both are
+    * the user's typed input coming back, which no refusal may carry (ADR-035).
+    */
   def create(source: String): Validation[ValidationError, TargetingPredicate] =
     val gate: Either[ValidationError, (TargetingSource, Formula[FOL])] =
       for
         refined <- source
           .refineEither[MinLength[1] & MaxLength[256]]
-          .left.map(_ => err(ValidationErrorCode.INVALID_LENGTH,
-            "Targeting predicate must be between 1 and 256 characters"))
+          .left.map(_ => err(FieldProblem.LengthOutOfRange(MinSourceLength, MaxSourceLength)))
         formula <- FOLParser.parse(refined)
-          .left.map(pe => err(ValidationErrorCode.INVALID_FORMAT,
-            s"Targeting predicate is not valid syntax: ${pe.message}"))
+          .left.map(_ => err(FieldProblem.TargetingPredicateUnparseable))
       yield (refined, formula)
 
     Validation.fromEither(gate).flatMap { case (refined, formula) =>
@@ -68,35 +75,29 @@ object TargetingPredicate:
       )((_, _, _) => new TargetingPredicate(refined))
     }
 
-  private def err(code: ValidationErrorCode, message: String): ValidationError =
-    ValidationError(location = location, code = code, message = message)
+  private def err(problem: FieldProblem): ValidationError =
+    ValidationError(location, problem)
 
   private def checkFragment(formula: Formula[FOL]): Either[ValidationError, Unit] =
     FragmentCheck.check(formula, Fragment.Targeting)
-      .left.map(v => err(ValidationErrorCode.CONSTRAINT_VIOLATION, fragmentMessage(v)))
+      .left.map(v => err(fragmentProblem(v)))
 
-  private def fragmentMessage(v: FragmentViolation): String = v match
-    case FragmentViolation.QuantifierNotAllowed =>
-      "Targeting predicates may not use quantifiers"
-    case FragmentViolation.FunctionApplicationNotAllowed(fn) =>
-      s"Targeting predicates may not use function application: '$fn'"
+  private def fragmentProblem(v: FragmentViolation): FieldProblem = v match
+    case FragmentViolation.QuantifierNotAllowed            => FieldProblem.TargetingQuantifierNotAllowed
+    case FragmentViolation.FunctionApplicationNotAllowed(_) => FieldProblem.TargetingFunctionNotAllowed
     case FragmentViolation.QuantifierDepthExceeded(limit, found) =>
-      s"Targeting predicate quantifier depth $found exceeds the limit of $limit"
+      FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(limit), NonNegativeInt.count(found))
 
   private def requireSingleFreeVariable(formula: Formula[FOL]): Either[ValidationError, Unit] =
     FOLUtil.fvFOL(formula).distinct match
       case _ :: Nil => Right(())
-      case Nil      => Left(err(ValidationErrorCode.CONSTRAINT_VIOLATION,
-        "Targeting predicate must reference exactly one variable; found none"))
-      case vars     => Left(err(ValidationErrorCode.CONSTRAINT_VIOLATION,
-        s"Targeting predicate must have exactly one free variable; found: ${vars.sorted.mkString(", ")}. " +
-          "Unquoted words are read as variables — if one was meant as a literal value, quote it (e.g. \"cyber\")."))
+      case Nil      => Left(err(FieldProblem.TargetingNoFreeVariable))
+      case _        => Left(err(FieldProblem.TargetingSeveralFreeVariables))
 
   private def requireNoMitigationPredicate(formula: Formula[FOL]): Either[ValidationError, Unit] =
     val offending = atomPredicates(formula).filter(p => reservedPredicates.contains(p.toLowerCase))
     if offending.isEmpty then Right(())
-    else Left(err(ValidationErrorCode.CONSTRAINT_VIOLATION,
-      s"Targeting predicates may not reference mitigation state: ${offending.toList.sorted.mkString(", ")}"))
+    else Left(err(FieldProblem.TargetingMitigationStateReferenced))
 
   /** The predicate names of every atom in the formula. Total over the tree;
     * quantifier nodes never appear in a targeting-fragment formula but are
@@ -117,8 +118,7 @@ object TargetingPredicate:
   /** Wire format is the source string; decode == create (boundary validation). */
   given JsonCodec[TargetingPredicate] =
     JsonCodec[String].transformOrFail(
-      s => create(s).toEither.left.map(errs =>
-        errs.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")),
+      s => create(s).toEither.left.map(_.map(ValidationError.describe).mkString("; ")),
       _.source
     )
 

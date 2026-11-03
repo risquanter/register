@@ -6,7 +6,7 @@ import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem}
 
 object RiskLeafFormStateSpec extends ZIOSpecDefault:
 
@@ -54,7 +54,8 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
   /** The sentences a submission reports at one field. */
   private def submittedAt(st: RiskLeafFormState, field: FieldName): List[String] =
     st.toDraft match
-      case Validation.Failure(_, es) => es.toList.filter(_.location == at(field)).map(_.message)
+      case Validation.Failure(_, es) =>
+        es.toList.filter(_.location == at(field)).map(e => ValidationMessages.render(e.problem))
       case Validation.Success(_, _)  => Nil
 
   def spec = suite("RiskLeafFormState")(
@@ -361,7 +362,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         val reasons = current(st.blockingReasons)
         assertTrue(
           reasons.size == 2,
-          reasons.contains(ValidationMessages.parentRequired),
+          reasons.contains(ValidationMessages.render(FieldProblem.Required)),
           current(st.nameError).isEmpty
         )
       }

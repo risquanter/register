@@ -3,10 +3,8 @@ package com.risquanter.register.services
 import zio.*
 
 import com.risquanter.register.domain.data.{DistributionShape, DistributionParams}
-import com.risquanter.register.domain.data.iron.{
-  IronConstants, MetalogTermCount, PositiveLong, ValidationMessages
-}
-import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode, ValidationFailed}
+import com.risquanter.register.domain.data.iron.{IronConstants, MetalogTermCount, PositiveLong}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError, ValidationFailed}
 import com.risquanter.register.http.requests.{DistributionPreviewResponse, DistributionPreviewPoint}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
 
@@ -63,11 +61,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
           lower       = Some(0.0),
           upper       = None
         )
-      ).mapError(_ => ValidationFailed(List(ValidationError(
-        location = ErrorLocation.Whole,
-        code    = ValidationErrorCode.INVALID_METALOG_PARAMS,
-        message = ValidationMessages.metalogFitFailed
-      ))))
+      ).mapError(_ => ValidationFailed(List(ValidationError(ErrorLocation.Whole, FieldProblem.MetalogFitFailed))))
       points = sampleMetalog(metalog)
     yield DistributionPreviewResponse(
       distributionType = IronConstants.Metalog,
@@ -82,11 +76,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
   ): IO[ValidationFailed, DistributionPreviewResponse] =
     for
       lognormal <- ZIO.fromEither(LognormalHelper.fromLognormal90CI(minLoss, maxLoss))
-        .mapError(_ => ValidationFailed(List(ValidationError(
-          location = ErrorLocation.Whole,
-          code    = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-          message = ValidationMessages.lognormalFitFailed
-        ))))
+        .mapError(_ => ValidationFailed(List(ValidationError(ErrorLocation.Whole, FieldProblem.LognormalFitFailed))))
       points = pGrid.map { p =>
         val x = lognormal.quantile(p)
         DistributionPreviewPoint(x = x, pdf = lognormal.density(x), cdf = p)

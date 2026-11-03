@@ -6,9 +6,8 @@ import com.risquanter.register.domain.data.{DistributionShape, RiskLeaf, RiskPor
 import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError, ValidationErrorCode
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedCollection, ValidationError
 }
 
 /** ADR-017 DTO validators for hierarchical risk tree operations. */
@@ -188,7 +187,7 @@ object RiskTreeRequests {
     * stream. */
   private[requests] def requireAbsentSeedVarId(raw: Option[Long], location: ErrorLocation): Validation[ValidationError, Unit] =
     raw match {
-      case Some(_) => Validation.fail(ValidationError(location, ValidationErrorCode.CONSTRAINT_VIOLATION, ValidationMessages.seedVarIdImmutable))
+      case Some(_) => Validation.fail(ValidationError(location, FieldProblem.SeedVarIdImmutable))
       case None => Validation.succeed(())
     }
 
@@ -225,8 +224,7 @@ object RiskTreeRequests {
     if collisions.nonEmpty then
       Validation.fail(ValidationError(
         ErrorLocation.requestField(FieldName.Name),
-        ValidationErrorCode.RESERVED_NAME,
-        ValidationMessages.reservedNodeNames(collisions.map(_.value.toString))
+        FieldProblem.ReservedNodeNames(collisions.toList)
       ))
     else Validation.succeed(())
   }
@@ -238,9 +236,9 @@ object RiskTreeRequests {
     val roots = nodes.collect { case (name, ParentRef.Root) => name }
 
     roots match {
-      case Seq()     => Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.RootId), ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.exactlyOneRootRequired))
+      case Seq()     => Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.RootId), FieldProblem.RootRequired))
       case Seq(root) => Validation.succeed(root)
-      case _         => Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.RootId), ValidationErrorCode.AMBIGUOUS_REFERENCE, ValidationMessages.multipleRootsFound))
+      case _         => Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.RootId), FieldProblem.MultipleRoots))
     }
   }
 
@@ -256,12 +254,12 @@ object RiskTreeRequests {
       l.parent match {
         case ParentRef.Under(parent) if portfolioNames.contains(parent) => Validation.succeed(())
         case ParentRef.Under(parent) if allNameSet.contains(parent) =>
-          Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.parentNameIsLeaf(parent.value.toString)))
+          Validation.fail(ValidationError(location, FieldProblem.ParentIsLeaf(parent)))
         case ParentRef.Under(parent) =>
-          Validation.fail(ValidationError(location, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.parentNameNotFound(parent.value.toString)))
+          Validation.fail(ValidationError(location, FieldProblem.ParentNotFound(parent)))
         case ParentRef.Root if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
         case ParentRef.Root =>
-          Validation.fail(ValidationError(location, ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.leafNeedsPortfolioParent))
+          Validation.fail(ValidationError(location, FieldProblem.ParentPortfolioRequired))
       }
     }).as(())
 
@@ -292,15 +290,15 @@ object RiskTreeRequests {
       val location = ErrorLocation.Field(ErrorSubject.ExistingNode(NodeId(id)), FieldName.Id)
       (seenBefore, stored.nodes.get(NodeId(id)), listedAs) match
         case (true, _, _) =>
-          Validation.fail(ValidationError(location, ValidationErrorCode.DUPLICATE_VALUE, ValidationMessages.storedNodeListedTwice(id.value)))
+          Validation.fail(ValidationError(location, FieldProblem.StoredNodeListedTwice))
         case (false, Some(_: RiskPortfolio), NodeKind.Portfolio) | (false, Some(_: RiskLeaf), NodeKind.Leaf) =>
           Validation.succeed(())
         case (false, Some(_: RiskLeaf), NodeKind.Portfolio) =>
-          Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsLeaf(id.value)))
+          Validation.fail(ValidationError(location, FieldProblem.StoredNodeIsLeaf))
         case (false, Some(_: RiskPortfolio), NodeKind.Leaf) =>
-          Validation.fail(ValidationError(location, ValidationErrorCode.INVALID_NODE_TYPE, ValidationMessages.nodeIdIsPortfolio(id.value)))
+          Validation.fail(ValidationError(location, FieldProblem.StoredNodeIsPortfolio))
         case (false, None, _) =>
-          Validation.fail(ValidationError(location, ValidationErrorCode.MISSING_REFERENCE, ValidationMessages.nodeIdNotInTree(id.value)))
+          Validation.fail(ValidationError(location, FieldProblem.StoredNodeNotInTree))
     val listed: Seq[(SafeId.SafeId, NodeKind)] =
       (portfolios.map(p => (p.id, NodeKind.Portfolio)) ++ leaves.map(l => (l.id, NodeKind.Leaf)))
         .flatMap((rawId, kind) => ValidationUtil.refineId(rawId, ErrorLocation.requestField(FieldName.Id)).toOption.map(_ -> kind))
@@ -321,8 +319,7 @@ object RiskTreeRequests {
         case ParentRef.Under(parent) =>
           Validation.fail(ValidationError(
             ErrorLocation.Field(p.subject, FieldName.ParentName),
-            ValidationErrorCode.MISSING_REFERENCE,
-            ValidationMessages.parentNameNotFound(parent.value.toString)
+            FieldProblem.ParentNotFound(parent)
           ))
         case ParentRef.Root => Validation.succeed(())
       }
@@ -401,8 +398,7 @@ object RiskTreeRequests {
     parentMap.keys.find(n => isCycle(n, Set(n))) match {
       case Some(cycle) => Validation.fail(ValidationError(
         ErrorLocation.requestField(FieldName.ParentName),
-        ValidationErrorCode.CONSTRAINT_VIOLATION,
-        ValidationMessages.cycleDetected(cycle.value.toString)
+        FieldProblem.CycleDetected(cycle)
       ))
       case None => Validation.succeed(())
     }
@@ -459,8 +455,7 @@ object RiskTreeRequests {
     if emptyParents.nonEmpty then
       Validation.fail(ValidationError(
         ErrorLocation.requestField(FieldName.ChildIds),
-        ValidationErrorCode.EMPTY_COLLECTION,
-        ValidationMessages.portfoliosWithoutChildren(emptyParents.map(_.value.toString))
+        FieldProblem.PortfolioHasNoChildren(emptyParents.toList)
       ))
     else Validation.succeed(())
   }

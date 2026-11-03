@@ -2,7 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.data.iron.ValidationMessages
+import com.risquanter.register.domain.errors.{FieldProblem, ValidationErrorCode}
 
 /** Boundary validation for the targeting sublanguage: a bare single-free-variable
   * FOL formula, in the targeting fragment (no quantifiers, no function terms),
@@ -12,7 +13,7 @@ import com.risquanter.register.domain.errors.ValidationErrorCode
 object TargetingPredicateSpec extends ZIOSpecDefault:
 
   private def firstCode(source: String): Option[ValidationErrorCode] =
-    TargetingPredicate.create(source).toEither.swap.toOption.map(_.head.code)
+    TargetingPredicate.create(source).toEither.swap.toOption.map(errs => FieldProblem.code(errs.head.problem))
 
   def spec = suite("TargetingPredicateSpec")(
     suite("accepts")(
@@ -42,10 +43,16 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       test("more than one free variable") {
         assertTrue(firstCode("child_of(x, y)") == Some(ValidationErrorCode.CONSTRAINT_VIOLATION))
       },
-      test("an unquoted attribute value is reported with a quoting hint") {
-        // `cyber` parses as a second variable; the message must point at quoting.
-        val msg = TargetingPredicate.create("category(x, cyber)").toEither.swap.toOption.get.head.message
-        assertTrue(msg.contains("quote"))
+      test("an unquoted attribute value is reported with a quoting hint, and the typed words are not echoed") {
+        // `fraud` parses as a second variable; the sentence must point at
+        // quoting without repeating what was typed (ADR-035).
+        val problem = TargetingPredicate.create("category(x, fraud)").toEither.swap.toOption.get.head.problem
+        val msg     = ValidationMessages.render(problem)
+        assertTrue(
+          problem == FieldProblem.TargetingSeveralFreeVariables,
+          msg.contains("quote"),
+          !msg.contains("fraud")
+        )
       },
       test("the mitigate / mitigated / unmitigated predicates, case-insensitively") {
         assertTrue(
@@ -58,12 +65,12 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       test("accumulates every independent formula-level violation at once") {
         // A quantifier (fragment) and a reserved predicate (mitigation state)
         // are independent checks on the parsed formula; both must be reported.
-        val errs = TargetingPredicate.create("forall x . mitigated(y)").toEither.swap.toOption.get
-        val messages = errs.map(_.message).mkString(" | ")
+        val errs     = TargetingPredicate.create("forall x . mitigated(y)").toEither.swap.toOption.get
+        val problems = errs.map(_.problem).toList
         assertTrue(
           errs.size >= 2,
-          messages.contains("quantifiers"),
-          messages.contains("mitigation state")
+          problems.contains(FieldProblem.TargetingQuantifierNotAllowed),
+          problems.contains(FieldProblem.TargetingMitigationStateReferenced)
         )
       }
     ),

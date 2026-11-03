@@ -6,7 +6,7 @@ import io.github.iltotore.iron.constraint.numeric.Greater
 import java.time.{DateTimeException, Instant}
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt, CommitHash}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, IrminError}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, IrminError, ValidationError}
 import com.risquanter.register.http.responses.TreeHistoryEntry
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.IrminCommit
@@ -45,7 +45,7 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
       case Some(operation) =>
         ZIO.fromEither(CommitHash.fromString(commit.hash))
           .mapBoth(
-            errs => RepositoryFailure(s"Invalid commit hash in history: ${errs.map(_.message).mkString("; ")}"),
+            errs => RepositoryFailure(s"Invalid commit hash in history: ${errs.map(ValidationError.describe).mkString("; ")}"),
             hash => Some(TreeHistoryEntry(hash, operation, TreeHistoryServiceLive.toIso(commit.info.date)))
           )
 

@@ -6,7 +6,7 @@ import zio.test.Assertion.*
 
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
-import com.risquanter.register.domain.errors.{DataConflict, ErrorLocation, FieldName, ScenarioHeadStale, ValidationFailed, ValidationErrorCode, IrminError}
+import com.risquanter.register.domain.errors.{DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, IrminError}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.testutil.TestHelpers.safeId
@@ -236,7 +236,7 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
           assertTrue(
             exit.causeOption.flatMap(_.failureOption) match
               case Some(ValidationFailed(errs)) =>
-                errs.exists(e => e.code == ValidationErrorCode.NOT_FOUND &&
+                errs.exists(e => e.problem == FieldProblem.CommitNotFound(hash('e')) &&
                   e.location == ErrorLocation.requestField(FieldName.Source))
               case _ => false,
             list.isEmpty

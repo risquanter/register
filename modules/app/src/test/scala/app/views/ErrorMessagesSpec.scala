@@ -123,10 +123,16 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
     )
 
   private val blankName: E.ValidationError =
-    E.ValidationError(E.ErrorLocation.requestField(E.FieldName.Name), E.ValidationErrorCode.REQUIRED_FIELD, "must not be empty")
+    E.ValidationError(E.ErrorLocation.requestField(E.FieldName.Name), E.FieldProblem.Required)
 
   private val badProbability: E.ValidationError =
-    E.ValidationError(E.ErrorLocation.requestField(E.FieldName.Probability), E.ValidationErrorCode.INVALID_RANGE, "must be between 0 and 1")
+    E.ValidationError(
+      E.ErrorLocation.requestField(E.FieldName.Probability),
+      E.FieldProblem.OutOfRange(E.ValueRange.ClosedUnitInterval)
+    )
+
+  /** The two refusals' sentences, one line each, in the order given. */
+  private val twoLines: List[String] = List(blankName, badProbability).map(ErrorMessages.refusal)
 
   private val treeId: TreeId = TreeId.fromString("01HX9ABCDE0000000000000001").toOption.get
 
@@ -134,19 +140,18 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
     suite("ErrorMessages.viewFailedLines")(
       test("a refusal the form made here gives one line per refusal") {
         assertTrue(
-          ErrorMessages.viewFailedLines(LocalProblem.FormInvalid(List(blankName, badProbability))) ==
-            List("must not be empty", "must be between 0 and 1")
+          ErrorMessages.viewFailedLines(LocalProblem.FormInvalid(List(blankName, badProbability))) == twoLines
         )
       },
       test("a request the server refused gives one line per refusal") {
         val failure = RequestFailure.Wire(WireError.RequestRejected(List(blankName, badProbability), trace))
-        assertTrue(ErrorMessages.viewFailedLines(failure) == List("must not be empty", "must be between 0 and 1"))
+        assertTrue(ErrorMessages.viewFailedLines(failure) == twoLines)
       },
       test("a tree's fields the server refused give one line per refusal") {
         val failure = RequestFailure.Wire(
           WireError.ValidationRejected(treeId, RejectionDetail.Fields(List(blankName, badProbability)), trace)
         )
-        assertTrue(ErrorMessages.viewFailedLines(failure) == List("must not be empty", "must be between 0 and 1"))
+        assertTrue(ErrorMessages.viewFailedLines(failure) == twoLines)
       },
       test("any other failure gives the one sentence viewFailed gives") {
         val failure = RequestFailure.Wire(WireError.InternalFault(trace))
@@ -182,23 +187,8 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
         )
       },
       test("input the form rejected here shows every entry, not only the first") {
-        val errors = List(
-          E.ValidationError(
-            E.ErrorLocation.requestField(E.FieldName.Name),
-            E.ValidationErrorCode.REQUIRED_FIELD,
-            "must not be empty"
-          ),
-          E.ValidationError(
-            E.ErrorLocation.requestField(E.FieldName.Probability),
-            E.ValidationErrorCode.INVALID_FORMAT,
-            "must be between 0 and 1"
-          )
-        )
-        val sentence = ErrorMessages.viewFailed(LocalProblem.FormInvalid(errors))
-        assertTrue(
-          sentence.contains("must not be empty"),
-          sentence.contains("must be between 0 and 1")
-        )
+        val sentence = ErrorMessages.viewFailed(LocalProblem.FormInvalid(List(blankName, badProbability)))
+        assertTrue(twoLines.forall(sentence.contains))
       },
       test("an action needing a workspace the browser does not hold says what starts one") {
         assertTrue(

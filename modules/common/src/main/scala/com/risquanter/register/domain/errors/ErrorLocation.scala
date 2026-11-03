@@ -6,7 +6,10 @@ import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 
-import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, NonNegativeInt, given}
+import com.risquanter.register.domain.data.iron.{
+  CommitHash, MitigationId, NodeId, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong,
+  SafeName, ScenarioName, SeedEntityId, SeedVarId, TreeId, given
+}
 
 /** The key naming which case a value is, read by every decoder in this file and
   * published in every schema. Stated once so the two cannot disagree. */
@@ -202,6 +205,10 @@ enum ErrorLocation:
     * client never supplied can reach the wire as free text. */
   case Header(header: RequestHeaderName)
 
+  /** A query parameter of the request, on the same terms as `Header`: the set is
+    * closed by this application's endpoint definitions. */
+  case QueryParameter(param: RequestQueryParam)
+
   /** The failure is about the whole of whatever was being validated, with no
     * narrower location. A request body with no field to blame, or a tree built
     * from a store read or a merge, where no field of a request exists at all. */
@@ -230,6 +237,7 @@ object ErrorLocation:
   def describe(location: ErrorLocation): String = location match
     case Field(subject, field) => s"${describeSubject(subject)}.${field.toString}"
     case Header(header)        => header.wireName
+    case QueryParameter(param) => param.wireName
     case Whole                 => "request"
 
   private def describeSubject(subject: ErrorSubject): String = subject match
@@ -280,3 +288,339 @@ object RequestHeaderName:
     */
   def fromWireName(name: String): Option[RequestHeaderName] =
     values.find(_.wireName.equalsIgnoreCase(name))
+
+/** The query parameters this application's endpoints declare.
+  *
+  * Each spelling is declared rather than derived from the case name, on the
+  * same terms as `RequestHeaderName`: the string is a contract with the URL, so
+  * a Scala rename must not reach it (ADR-037). The set is closed by the endpoint
+  * definitions, and Tapir reports a decode failure against a declared input, so
+  * the name comes from the definition and never from the request.
+  */
+@jsonDiscriminator(TagField)
+enum RequestQueryParam(val wireName: String):
+  /** How many entries the tree history endpoint returns. */
+  case Limit extends RequestQueryParam("n")
+
+  /** The commit a point-in-time read is pinned to. */
+  case At extends RequestQueryParam("at")
+
+  /** The two revisions a changed-nodes comparison reads: each side is a branch
+    * choice, and each may be pinned to a commit. */
+  case SideA    extends RequestQueryParam("a")
+  case SideAPin extends RequestQueryParam("aAt")
+  case SideB    extends RequestQueryParam("b")
+  case SideBPin extends RequestQueryParam("bAt")
+
+  /** The loss figure an exceedance read answers for. */
+  case Threshold extends RequestQueryParam("threshold")
+
+  /** The entity id a bootstrapped workspace draws with. */
+  case SeedEntityId extends RequestQueryParam("seedEntityId")
+
+  /** Whether an analysis read carries each leaf's provenance record. */
+  case IncludeProvenance extends RequestQueryParam("includeProvenance")
+
+  /** Whether a multi-node read leaves out a node absent at the revision read. */
+  case OmitAbsent extends RequestQueryParam("omitAbsent")
+
+object RequestQueryParam:
+  given codec: JsonCodec[RequestQueryParam] = DeriveJsonCodec.gen[RequestQueryParam]
+
+  given schema: Schema[RequestQueryParam] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[RequestQueryParam]
+
+  /** The declared parameter carrying this wire name, or `None` for a name this
+    * application does not declare. An exact match, because a query parameter
+    * name is case-sensitive.
+    *
+    * {{{
+    * fromWireName("aAt") // Some(SideAPin)
+    * fromWireName("aat") // None
+    * }}}
+    */
+  def fromWireName(name: String): Option[RequestQueryParam] =
+    values.find(_.wireName == name)
+
+/** What a value's text was expected to read as, for a refusal of text that could
+  * not be read at all — as against a value that was read and then refused. */
+@jsonDiscriminator(TagField)
+enum ExpectedInput:
+  /** A decimal number. */
+  case Number
+
+  /** An integer. */
+  case WholeNumber
+
+  /** A comma-separated list of numbers. */
+  case NumberList
+
+  /** One value, where the request carried several for the same input. */
+  case SingleValue
+
+  /** Whatever type the endpoint declares for the input. */
+  case Declared
+
+object ExpectedInput:
+  given codec: JsonCodec[ExpectedInput] = DeriveJsonCodec.gen[ExpectedInput]
+
+  given schema: Schema[ExpectedInput] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[ExpectedInput]
+
+/** The character set a name admits, for a refusal naming a character outside it. */
+@jsonDiscriminator(TagField)
+enum Alphabet:
+  /** Letters, digits, spaces, hyphens and forward slashes. */
+  case NodeName
+
+  /** Letters, digits, spaces, hyphens and underscores. */
+  case ScenarioName
+
+object Alphabet:
+  given codec: JsonCodec[Alphabet] = DeriveJsonCodec.gen[Alphabet]
+
+  given schema: Schema[Alphabet] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[Alphabet]
+
+/** The format a value had to follow, for a refusal of a value that did not. The
+  * refused value itself never travels (ADR-035). */
+@jsonDiscriminator(TagField)
+enum ValueFormat:
+  case Ulid, WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, SecureUrl, ExternalToken, TraceId
+  case CommitHash, ContentHash, BranchName, StagingBranchName, DistributionTypeName
+
+  /** A scenario name's first character, which must be a letter or a digit. */
+  case ScenarioNameStart
+
+object ValueFormat:
+  given codec: JsonCodec[ValueFormat] = DeriveJsonCodec.gen[ValueFormat]
+
+  given schema: Schema[ValueFormat] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[ValueFormat]
+
+/** The range a value had to fall in, for a refusal of a value outside it. Each
+  * case is one of the refinements in `ValidationUtil`, so the sentence states
+  * the bound the refinement enforces. */
+@jsonDiscriminator(TagField)
+enum ValueRange:
+  case NonNegative, Positive, SeedEntityId, SeedVarId
+  case OpenUnitInterval, ClosedUnitInterval, Percent, Percentile
+  case PositiveLoss, LossCap, MetalogTerms, RetentionFactor, ResidualProbability
+
+object ValueRange:
+  given codec: JsonCodec[ValueRange] = DeriveJsonCodec.gen[ValueRange]
+
+  given schema: Schema[ValueRange] =
+    import sttp.tapir.generic.auto.*
+    given Configuration = discriminated
+    Schema.derived[ValueRange]
+
+/** Why one value was refused, with the values its sentence names.
+  *
+  * The sibling of `QueryProblem`: the query half of a content rejection carries
+  * its structure in one discriminated enum, and this is the field half. A case
+  * carries what a sentence about it has to name and nothing else, so the
+  * sentence is written where it is shown — `ValidationMessages.render` — and
+  * no text a client submitted can travel inside a refusal (ADR-035). The
+  * location on the `ValidationError` names the field, so a case does not
+  * repeat it: `Required` at the name field is the name being required, and a
+  * case about a stored node names nothing the location does not already carry.
+  *
+  * The coarse classification a client filters on is derived by `code`, so the
+  * two cannot disagree.
+  */
+@jsonDiscriminator(TagField)
+enum FieldProblem:
+  // Presence and readability
+  case Required
+  case Unreadable(expected: ExpectedInput)
+
+  /** A validator the endpoint declares on the input refused the value, with no
+    * refinement of this application's own behind it. */
+  case DeclaredConstraintNotMet
+
+  // The shape of one value
+  case TooLong(limit: NonNegativeInt)
+  case LengthOutOfRange(min: NonNegativeInt, max: NonNegativeInt)
+  case InvalidCharacters(allowed: Alphabet)
+  case WrongFormat(expected: ValueFormat)
+  case OutOfRange(range: ValueRange)
+  case ScenarioNameReserved
+
+  // Names and seed identity within a tree
+  case ReservedNodeNames(names: List[SafeName.SafeName])
+  case DuplicateNodeName(name: SafeName.SafeName, occurrences: NonNegativeInt)
+  case DuplicateMitigationName(name: SafeName.SafeName, occurrences: NonNegativeInt)
+  case DuplicateMitigationId(id: MitigationId, occurrences: NonNegativeInt)
+  case SeedVarIdInUse(seedVarId: SeedVarId.SeedVarId, holders: List[SafeName.SafeName])
+  case SeedVarIdImmutable
+  case SeedVarIdExhausted(next: NonNegativeLong)
+  case SeedVarHighWaterBelowMax(highWater: SeedVarId.SeedVarId, maxAssigned: SeedVarId.SeedVarId)
+  case SeedVarHighWaterNotDerivable
+
+  // Topology of a submitted tree, referenced by name
+  case RootRequired
+  case MultipleRoots
+  case RootIdNotFound(rootId: NodeId)
+  case ParentPortfolioRequired
+  case ParentNotFound(parent: SafeName.SafeName)
+  case ParentIsLeaf(parent: SafeName.SafeName)
+  case CycleDetected(node: SafeName.SafeName)
+  case PortfolioHasNoChildren(portfolios: List[SafeName.SafeName])
+  case TooManyChildren(count: NonNegativeInt, limit: NonNegativeInt)
+  case TooManyNodes(count: NonNegativeInt, limit: NonNegativeInt)
+  case TooManyMitigations(count: NonNegativeInt, limit: NonNegativeInt)
+
+  // A stored node named by a tree update; the location carries its id
+  case StoredNodeListedTwice
+  case StoredNodeIsLeaf
+  case StoredNodeIsPortfolio
+  case StoredNodeNotInTree
+
+  // The index of a built tree, referenced by id
+  case ChildParentMismatch(child: NodeId, declaredParent: Option[NodeId])
+  case ChildNotFound(child: NodeId)
+  case ParentDoesNotListChild(parent: NodeId)
+  case ParentIdIsLeaf(parent: NodeId)
+  case ParentIdNotFound(parent: NodeId)
+  case NodeNotInIndex
+  case LeafUnreachable
+
+  // Loss distribution
+  case AnchorCountOutOfRange(count: NonNegativeInt, min: NonNegativeInt, max: NonNegativeInt)
+  case PercentileQuantileLengthMismatch(percentiles: NonNegativeInt, quantiles: NonNegativeInt)
+  case PercentilesNotIncreasing
+  case QuantilesNotIncreasing
+  case TermsAboveAnchorCount
+  case LossRangeNotOrdered(min: PositiveLong, max: PositiveLong)
+  case MetalogFitFailed
+  case LognormalFitFailed
+
+  // Mitigation
+  case PipelineEmpty(min: NonNegativeInt)
+  case PipelineTooLong(count: NonNegativeInt, limit: NonNegativeInt)
+  case CapMustExceedDeductible
+  case AggregatedLossOverflow
+  case MitigationEliminatesRisk
+  case MitigationLowersMinLossBelowFloor(min: PositiveLong, minFactor: PositiveDouble)
+  case MitigationLowersAnchorLossBelowFloor(min: PositiveDouble, minFactor: PositiveDouble)
+  case TargetingPredicateUnparseable
+  case TargetingQuantifierNotAllowed
+  case TargetingFunctionNotAllowed
+  case TargetingQuantifierDepthExceeded(limit: NonNegativeInt, found: NonNegativeInt)
+  case TargetingNoFreeVariable
+  case TargetingSeveralFreeVariables
+  case TargetingMitigationStateReferenced
+
+  // Workspace limits and lookups the services report through ValidationFailed
+  case SeedEntityIdInUse(seedEntityId: SeedEntityId.SeedEntityId)
+  case MaxTreesReached(limit: NonNegativeInt)
+  case TreeNotFound(treeId: TreeId)
+  case NodeNotFound
+  case NodeIdsEmpty
+  case TreeIdAlreadyExists(treeId: TreeId)
+  case TreeNameAlreadyExists(name: SafeName.SafeName)
+  case ScenarioNotFound(scenario: ScenarioName.ScenarioName)
+  case CommitNotFound(commit: CommitHash)
+  case WorkspaceHasNoContent
+  case RequiresIrminBackend
+
+  /** The error-accumulation branch that cannot be reached: a failed refinement
+    * always produces at least one error, so an empty list has no problem to
+    * report. */
+  case Unspecified
+
+object FieldProblem:
+  given codec: JsonCodec[FieldProblem] = DeriveJsonCodec.gen[FieldProblem]
+
+  given schema: Schema[FieldProblem] =
+    import sttp.tapir.generic.auto.*
+    import com.risquanter.register.http.codecs.IronTapirCodecs.given
+    given Configuration = discriminated
+    Schema.derived[FieldProblem]
+
+  /** The coarse, filterable classification, derived from the case rather than
+    * stored beside it — the same relation `WireError` has to its status. */
+  def code(problem: FieldProblem): ValidationErrorCode = problem match
+    case Required                                   => ValidationErrorCode.REQUIRED_FIELD
+    case Unreadable(_)                              => ValidationErrorCode.TYPE_MISMATCH
+    case DeclaredConstraintNotMet                   => ValidationErrorCode.INVALID_FORMAT
+    case TooLong(_)                                 => ValidationErrorCode.INVALID_LENGTH
+    case LengthOutOfRange(_, _)                     => ValidationErrorCode.INVALID_LENGTH
+    case InvalidCharacters(_)                       => ValidationErrorCode.INVALID_PATTERN
+    case WrongFormat(_)                             => ValidationErrorCode.INVALID_FORMAT
+    case OutOfRange(_)                              => ValidationErrorCode.INVALID_RANGE
+    case ScenarioNameReserved                       => ValidationErrorCode.INVALID_FORMAT
+    case ReservedNodeNames(_)                       => ValidationErrorCode.RESERVED_NAME
+    case DuplicateNodeName(_, _)                    => ValidationErrorCode.AMBIGUOUS_REFERENCE
+    case DuplicateMitigationName(_, _)              => ValidationErrorCode.AMBIGUOUS_REFERENCE
+    case DuplicateMitigationId(_, _)                => ValidationErrorCode.DUPLICATE_VALUE
+    case SeedVarIdInUse(_, _)                       => ValidationErrorCode.DUPLICATE_VALUE
+    case SeedVarIdImmutable                         => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case SeedVarIdExhausted(_)                      => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case SeedVarHighWaterBelowMax(_, _)             => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case SeedVarHighWaterNotDerivable               => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case RootRequired                               => ValidationErrorCode.REQUIRED_FIELD
+    case MultipleRoots                              => ValidationErrorCode.AMBIGUOUS_REFERENCE
+    case RootIdNotFound(_)                          => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case ParentPortfolioRequired                    => ValidationErrorCode.REQUIRED_FIELD
+    case ParentNotFound(_)                          => ValidationErrorCode.MISSING_REFERENCE
+    case ParentIsLeaf(_)                            => ValidationErrorCode.INVALID_NODE_TYPE
+    case CycleDetected(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case PortfolioHasNoChildren(_)                  => ValidationErrorCode.EMPTY_COLLECTION
+    case TooManyChildren(_, _)                      => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TooManyNodes(_, _)                         => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TooManyMitigations(_, _)                   => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case StoredNodeListedTwice                      => ValidationErrorCode.DUPLICATE_VALUE
+    case StoredNodeIsLeaf                           => ValidationErrorCode.INVALID_NODE_TYPE
+    case StoredNodeIsPortfolio                      => ValidationErrorCode.INVALID_NODE_TYPE
+    case StoredNodeNotInTree                        => ValidationErrorCode.MISSING_REFERENCE
+    case ChildParentMismatch(_, _)                  => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case ChildNotFound(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case ParentDoesNotListChild(_)                  => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case ParentIdIsLeaf(_)                          => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case ParentIdNotFound(_)                        => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case NodeNotInIndex                             => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case LeafUnreachable                            => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case AnchorCountOutOfRange(_, _, _)             => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case PercentileQuantileLengthMismatch(_, _)     => ValidationErrorCode.INVALID_COMBINATION
+    case PercentilesNotIncreasing                   => ValidationErrorCode.INVALID_COMBINATION
+    case QuantilesNotIncreasing                     => ValidationErrorCode.INVALID_COMBINATION
+    case TermsAboveAnchorCount                      => ValidationErrorCode.INVALID_COMBINATION
+    case LossRangeNotOrdered(_, _)                  => ValidationErrorCode.INVALID_RANGE
+    case MetalogFitFailed                           => ValidationErrorCode.INVALID_METALOG_PARAMS
+    case LognormalFitFailed                         => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS
+    case PipelineEmpty(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case PipelineTooLong(_, _)                      => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case CapMustExceedDeductible                    => ValidationErrorCode.INVALID_COMBINATION
+    case AggregatedLossOverflow                     => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case MitigationEliminatesRisk                   => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case MitigationLowersMinLossBelowFloor(_, _)    => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS
+    case MitigationLowersAnchorLossBelowFloor(_, _) => ValidationErrorCode.INVALID_METALOG_PARAMS
+    case TargetingPredicateUnparseable              => ValidationErrorCode.INVALID_FORMAT
+    case TargetingQuantifierNotAllowed              => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TargetingFunctionNotAllowed                => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TargetingQuantifierDepthExceeded(_, _)     => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TargetingNoFreeVariable                    => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TargetingSeveralFreeVariables              => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TargetingMitigationStateReferenced         => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case SeedEntityIdInUse(_)                       => ValidationErrorCode.DUPLICATE_VALUE
+    case MaxTreesReached(_)                         => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TreeNotFound(_)                            => ValidationErrorCode.NOT_FOUND
+    case NodeNotFound                               => ValidationErrorCode.NOT_FOUND
+    case NodeIdsEmpty                               => ValidationErrorCode.EMPTY_COLLECTION
+    case TreeIdAlreadyExists(_)                     => ValidationErrorCode.DUPLICATE_VALUE
+    case TreeNameAlreadyExists(_)                   => ValidationErrorCode.DUPLICATE_VALUE
+    case ScenarioNotFound(_)                        => ValidationErrorCode.NOT_FOUND
+    case CommitNotFound(_)                          => ValidationErrorCode.NOT_FOUND
+    case WorkspaceHasNoContent                      => ValidationErrorCode.NOT_FOUND
+    case RequiresIrminBackend                       => ValidationErrorCode.NOT_SUPPORTED
+    case Unspecified                                => ValidationErrorCode.CONSTRAINT_VIOLATION

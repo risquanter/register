@@ -14,8 +14,8 @@ import sttp.tapir.server.ziohttp.ZioHttpServerOptions
 import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.iron.{ScenarioName, TelemetryPlaceholders}
-import com.risquanter.register.domain.errors.{ErrorLocation, RequestHeaderName, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{ScenarioName, TelemetryPlaceholders, ValidationMessages}
+import com.risquanter.register.domain.errors.{ErrorLocation, ExpectedInput, FieldProblem, RequestHeaderName, RequestQueryParam, ValidationErrorCode}
 import com.risquanter.register.http.codecs.IronTapirCodecs
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
@@ -104,53 +104,61 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
         val error = WireDecodeFailureHandler.toValidationError(DecodeResult.Missing, branchInput)
         assertTrue(
           error.location == ErrorLocation.Header(RequestHeaderName.Branch),
-          error.code == ValidationErrorCode.REQUIRED_FIELD
+          error.problem == FieldProblem.Required
         )
       },
-      test("a value the codec could not read is a type mismatch") {
+      test("a value the codec could not read is unreadable as the declared type") {
         val error = WireDecodeFailureHandler.toValidationError(
           DecodeResult.Error("not-a-branch", new RuntimeException("boom")),
           branchInput
         )
-        assertTrue(error.code == ValidationErrorCode.TYPE_MISMATCH)
+        assertTrue(
+          error.problem == FieldProblem.Unreadable(ExpectedInput.Declared),
+          FieldProblem.code(error.problem) == ValidationErrorCode.TYPE_MISMATCH
+        )
       },
       /** `Mismatch` is the second of the two failure kinds carrying a value the
-        * client submitted, so the message must drop it for the same reason
-        * `Error`'s must. The expected value is the service's own and may appear.
+        * client submitted. Neither value reaches the problem: a closed case
+        * carries no text at all.
         */
-      test("a value of the wrong shape is a type mismatch naming only what was expected") {
+      test("a value of the wrong shape is unreadable, and carries neither value") {
         val submitted = "LEAKCANARY-the-value-a-client-sent"
         val error = WireDecodeFailureHandler.toValidationError(
           DecodeResult.Mismatch("main", submitted),
           branchInput
         )
         assertTrue(
-          error.code == ValidationErrorCode.TYPE_MISMATCH,
-          error.message.contains("main"),
-          !error.message.contains(submitted)
+          error.problem == FieldProblem.Unreadable(ExpectedInput.Declared),
+          !ValidationMessages.render(error.problem).contains(submitted)
         )
       },
-      test("several values where one was expected is a type mismatch") {
+      test("several values where one was expected is unreadable as a single value") {
         val error = WireDecodeFailureHandler.toValidationError(
           DecodeResult.Multiple(List("main", "other")),
           branchInput
         )
-        assertTrue(error.code == ValidationErrorCode.TYPE_MISMATCH)
+        assertTrue(
+          error.problem == FieldProblem.Unreadable(ExpectedInput.SingleValue),
+          FieldProblem.code(error.problem) == ValidationErrorCode.TYPE_MISMATCH
+        )
       },
-      test("a value read and then refused is an invalid format") {
+      test("a value a declared validator refused, with no problem of ours behind it, is a declared constraint not met") {
         val error = WireDecodeFailureHandler.toValidationError(
           DecodeResult.InvalidValue(Nil),
           branchInput
         )
-        assertTrue(error.code == ValidationErrorCode.INVALID_FORMAT)
+        assertTrue(
+          error.problem == FieldProblem.DeclaredConstraintNotMet,
+          FieldProblem.code(error.problem) == ValidationErrorCode.INVALID_FORMAT
+        )
       },
-      test("no message repeats the value that was rejected") {
+      test("no sentence repeats the value that was rejected") {
         val rejected = "a-value-a-client-supplied"
         val error = WireDecodeFailureHandler.toValidationError(
           DecodeResult.Error(rejected, new RuntimeException(rejected)),
           branchInput
         )
-        assertTrue(!error.message.contains(rejected))
+        assertTrue(!ValidationMessages.render(error.problem).contains(rejected))
       }
     ),
 
@@ -197,27 +205,72 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
       }
     ),
 
+    /** The same mapping for a query parameter, which the endpoint definitions
+      * close in the same way: the name comes from the definition, so each
+      * declared spelling reaches its own case and nothing else does.
+      */
+    suite("a declared query parameter reports at its own case")(
+      test("each declared parameter maps to the case that names it") {
+        def caseFor(name: String): ErrorLocation =
+          WireDecodeFailureHandler.toValidationError(DecodeResult.Missing, query[String](name)).location
+        assertTrue(
+          caseFor("n")                 == ErrorLocation.QueryParameter(RequestQueryParam.Limit),
+          caseFor("at")                == ErrorLocation.QueryParameter(RequestQueryParam.At),
+          caseFor("a")                 == ErrorLocation.QueryParameter(RequestQueryParam.SideA),
+          caseFor("aAt")               == ErrorLocation.QueryParameter(RequestQueryParam.SideAPin),
+          caseFor("b")                 == ErrorLocation.QueryParameter(RequestQueryParam.SideB),
+          caseFor("bAt")               == ErrorLocation.QueryParameter(RequestQueryParam.SideBPin),
+          caseFor("threshold")         == ErrorLocation.QueryParameter(RequestQueryParam.Threshold),
+          caseFor("seedEntityId")      == ErrorLocation.QueryParameter(RequestQueryParam.SeedEntityId),
+          caseFor("includeProvenance") == ErrorLocation.QueryParameter(RequestQueryParam.IncludeProvenance),
+          caseFor("omitAbsent")        == ErrorLocation.QueryParameter(RequestQueryParam.OmitAbsent)
+        )
+      },
+      test("the match is exact, because a query parameter name is case-sensitive") {
+        val error = WireDecodeFailureHandler.toValidationError(DecodeResult.Missing, query[String]("aat"))
+        assertTrue(error.location == ErrorLocation.Whole)
+      },
+      test("a parameter this application does not declare reports at the whole request") {
+        val error = WireDecodeFailureHandler.toValidationError(DecodeResult.Missing, query[String]("notDeclared"))
+        assertTrue(error.location == ErrorLocation.Whole)
+      },
+      test("a declared validator the parameter fails is a declared constraint not met at the parameter") {
+        val error = WireDecodeFailureHandler.toValidationError(
+          DecodeResult.InvalidValue(List(ValidationError(Validator.min(1), 0, Nil, None))),
+          query[Int]("n").validate(Validator.min(1))
+        )
+        assertTrue(
+          error.location == ErrorLocation.QueryParameter(RequestQueryParam.Limit),
+          error.problem == FieldProblem.DeclaredConstraintNotMet
+        )
+      }
+    ),
+
     suite("a refusal that a real Iron codec produced")(
 
       /** The cases above hand `toValidationError` a `DecodeResult` built by
         * hand, which tests the mapping and not what the codecs actually emit.
-        * These two drive a real codec, so the classification and the message
-        * are checked against the value a request would really carry.
+        * These drive a real codec, so the problem is checked against the value a
+        * request would really carry: it crosses Tapir's one text slot encoded and
+        * is read back as the case the refinement produced, which is the law of
+        * the `refused` / `problemIn` pair.
         */
-      test("is an invalid format, not a type mismatch") {
-        assertTrue(
-          refusalOf(ScenarioNameTooLong).map(_.code).contains(ValidationErrorCode.INVALID_FORMAT)
-        )
-      },
-      test("carries the refinement's own sentence") {
-        val expected = ScenarioName.fromString(ScenarioNameTooLong).left.getOrElse(Nil).map(_.message)
+      test("carries the refinement's own problem, read back from the slot it crossed in") {
+        val expected = ScenarioName.fromString(ScenarioNameTooLong).left.getOrElse(Nil).map(_.problem)
         assertTrue(
           expected.nonEmpty,
-          refusalOf(ScenarioNameTooLong).map(_.message).contains(expected.mkString("; "))
+          refusalOf(ScenarioNameTooLong).map(_.problem) == expected.headOption
+        )
+      },
+      test("is classified by that problem, not as unreadable") {
+        assertTrue(
+          refusalOf(ScenarioNameTooLong).map(e => FieldProblem.code(e.problem)).contains(ValidationErrorCode.INVALID_LENGTH)
         )
       },
       test("repeats no part of the submitted value") {
-        assertTrue(!refusalOf(ScenarioNameTooLong).exists(_.message.contains(ScenarioNameTooLong)))
+        assertTrue(
+          !refusalOf(ScenarioNameTooLong).exists(e => ValidationMessages.render(e.problem).contains(ScenarioNameTooLong))
+        )
       }
     ),
 
@@ -230,7 +283,7 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
           response.code.code == 400,
           body.isDefined,
           body.exists(_.errors.exists(_.location == ErrorLocation.Header(RequestHeaderName.Branch))),
-          body.exists(_.errors.exists(_.code == ValidationErrorCode.REQUIRED_FIELD))
+          body.exists(_.errors.exists(_.problem == FieldProblem.Required))
         )
       },
       test("the rejection carries the trace of a real span") {

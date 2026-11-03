@@ -36,7 +36,7 @@ final case class SimulationConfig(
 
 object SimulationConfig {
   private def errorsToString(errs: List[ValidationError]): Config.Error =
-    Config.Error.InvalidData(message = errs.map(_.message).mkString("; "))
+    Config.Error.InvalidData(message = errs.map(ValidationError.describe).mkString("; "))
 
   private val positiveIntConfig: Config[PositiveInt] =
     deriveConfig[Int].mapOrFail { value =>

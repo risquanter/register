@@ -90,7 +90,7 @@ object SpiceDbConfig:
   // Following the IrminConfig / SimulationConfig pattern exactly.
 
   private def errorsToConfigError(errs: List[ValidationError]): Config.Error =
-    Config.Error.InvalidData(message = errs.map(_.message).mkString("; "))
+    Config.Error.InvalidData(message = errs.map(ValidationError.describe).mkString("; "))
 
   /** A configuration value is not a field of any request, and the descriptor
     * above keeps only the message, so a narrower location would reach nothing. */

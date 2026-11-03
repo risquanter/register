@@ -4,7 +4,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.*
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, lognormalShape, unsafeGet}
 
 object TreeIndexSpec extends ZIOSpecDefault {
@@ -13,7 +13,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
   private def getIndex(nodes: Seq[RiskNode]): TreeIndex =
     TreeIndex.fromNodeSeq(nodes).toEither match {
       case Right(idx) => idx
-      case Left(errors) => throw new AssertionError(s"Expected valid TreeIndex but got errors: ${errors.map(_.message).mkString("; ")}")
+      case Left(errors) => throw new AssertionError(s"Expected valid TreeIndex but got errors: ${errors.map(ValidationError.describe).mkString("; ")}")
     }
 
   private def idStr(label: String): String = safeId(label).value.toString
@@ -232,10 +232,10 @@ object TreeIndexSpec extends ZIOSpecDefault {
         assertTrue(
           result.toEither.isLeft,
           result.toEither.left.exists(errors =>
-            errors.exists(e => 
-              e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-              e.message.contains(idStr("orphan")) &&
-              e.message.contains("parentId")
+            errors.exists(e =>
+              e.problem match
+                case FieldProblem.ChildParentMismatch(child, _) => child == nodeId("orphan")
+                case _                                          => false
             )
           )
         )
@@ -253,11 +253,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         assertTrue(
           result.toEither.isLeft,
           result.toEither.left.exists(errors =>
-            errors.exists(e => 
-              e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-              e.message.contains(idStr("ghost-child")) &&
-              e.message.contains("does not exist")
-            )
+            errors.exists(_.problem == FieldProblem.ChildNotFound(nodeId("ghost-child")))
           )
         )
       },
@@ -293,10 +289,9 @@ object TreeIndexSpec extends ZIOSpecDefault {
         assertTrue(
           result.toEither.isLeft,
           result.toEither.left.exists(errors =>
-            errors.exists(e => 
-              e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-              e.message.contains(idStr("lonely")) &&
-              e.message.contains("doesn't list it as child")
+            errors.exists(e =>
+              e.location == ErrorLocation.nodeField(nodeId("lonely"), FieldName.ParentId) &&
+              e.problem == FieldProblem.ParentDoesNotListChild(nodeId("root"))
             )
           )
         )
@@ -325,11 +320,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         assertTrue(
           result.toEither.isLeft,
           result.toEither.left.exists(errors =>
-            errors.exists(e => 
-              e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-              e.message.contains("leaf") &&
-              e.message.contains("not a portfolio")
-            )
+            errors.exists(_.problem == FieldProblem.ParentIdIsLeaf(nodeId("parent-leaf")))
           )
         )
       },
@@ -348,11 +339,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         assertTrue(
           result.toEither.isLeft,
           result.toEither.left.exists(errors =>
-            errors.exists(e => 
-              e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
-              e.message.contains(safeId("non-existent").value.toString) &&
-              e.message.contains("doesn't exist")
-            )
+            errors.exists(_.problem == FieldProblem.ParentIdNotFound(nodeId("non-existent")))
           )
         )
       },

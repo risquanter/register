@@ -2,8 +2,14 @@ package com.risquanter.register.services.helper
 
 import zio.test.*
 import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId}
+import com.risquanter.register.domain.errors.FieldProblem
 
 object SeedVarIdAssignerSpec extends ZIOSpecDefault:
+
+  /** Whether a refusal says the assignment space ran out. */
+  private def exhausted(problem: FieldProblem): Boolean = problem match
+    case FieldProblem.SeedVarIdExhausted(_) => true
+    case _                                  => false
 
   private def name(s: String): SafeName.SafeName =
     SafeName.fromString(s).toOption.get
@@ -72,7 +78,7 @@ object SeedVarIdAssignerSpec extends ZIOSpecDefault:
       val result = SeedVarIdAssigner.assign(Seq(name("Overflow")), Map.empty, highWater = 49999999L)
       assertTrue(
         result.isLeft,
-        result.swap.toOption.get.message.contains("exhausted")
+        result.swap.toOption.exists(e => exhausted(e.problem))
       )
     },
     test("a provided ID above the watermark raises the allocation base (no collision with auto-assignment)") {
@@ -107,7 +113,7 @@ object SeedVarIdAssignerSpec extends ZIOSpecDefault:
       val result = SeedVarIdAssigner.assign(Seq(name("Near Cap"), name("Auto")), fixed, highWater = 0L)
       assertTrue(
         result.isLeft,
-        result.swap.toOption.get.message.contains("exhausted")
+        result.swap.toOption.exists(e => exhausted(e.problem))
       )
     }
   )

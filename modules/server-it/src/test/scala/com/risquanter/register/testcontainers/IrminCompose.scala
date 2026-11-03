@@ -9,6 +9,7 @@ import zio.*
 
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.iron.Url
+import com.risquanter.register.domain.errors.ValidationError
 
 /**
  * Starts the repo's docker-compose (persistence profile) via local docker compose CLI and exposes IRMIN_URL.
@@ -27,7 +28,7 @@ object IrminCompose:
   val irminConfigLayer: ZLayer[Any, Throwable, IrminConfig] =
     layer >>> ZLayer.fromZIO(
       ZIO.serviceWithZIO[Resource] { res =>
-        ZIO.fromEither(Url.fromString(res.irminUrl).left.map(errs => new RuntimeException(errs.map(_.message).mkString("; "))))
+        ZIO.fromEither(Url.fromString(res.irminUrl).left.map(errs => new RuntimeException(errs.map(ValidationError.describe).mkString("; "))))
           // Short budget: the container was started by this harness moments ago, so a
           // broken irmin should fail the suite fast, not after the 45s production default.
           .map(url => IrminConfig(url = url, healthCheckBudget = Duration.ofSeconds(10)))

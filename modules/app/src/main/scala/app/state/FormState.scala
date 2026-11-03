@@ -2,7 +2,8 @@ package app.state
 
 import com.raquo.laminar.api.L.*
 
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.ValidationMessages
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldProblem, ValidationError}
 import zio.prelude.Validation
 
 /**
@@ -101,27 +102,26 @@ trait FormState[Field]:
     else s.split(",").toList.flatMap(part => parseDouble(part.trim))
 
   /** A required text input parsed into a value. Blank text is refused as
-    * missing (`REQUIRED_FIELD`), and text `parse` cannot read is refused as
-    * unreadable (`TYPE_MISMATCH`) — the codes the wire uses for the same two
-    * situations. The parsed value keeps the input's location, so a refinement
-    * applied to it next refuses at the same field.
+    * `Required`, and text `parse` cannot read is refused as `Unreadable` with
+    * what it was expected to read as — the problems the wire reports for the
+    * same two situations. The parsed value keeps the input's location, so a
+    * refinement applied to it next refuses at the same field.
     *
     * {{{
-    * parseRequired(Located(" 12 ", at), parseLong, required, unreadable)  // Success(Located(12L, at))
-    * parseRequired(Located("abc", at), parseLong, required, unreadable)   // Failure: TYPE_MISMATCH at `at`
+    * parseRequired(Located(" 12 ", at), parseLong, ExpectedInput.WholeNumber)  // Success(Located(12L, at))
+    * parseRequired(Located("abc", at), parseLong, ExpectedInput.WholeNumber)   // Failure: Unreadable(WholeNumber) at `at`
     * }}}
     */
   protected def parseRequired[A](
-    input:      Located[String],
-    parse:      String => Option[A],
-    required:   String,
-    unreadable: String
+    input:    Located[String],
+    parse:    String => Option[A],
+    expected: ExpectedInput
   ): Validation[ValidationError, Located[A]] =
     if input.value.isBlank then
-      Validation.fail(input.reject(ValidationErrorCode.REQUIRED_FIELD, required))
+      Validation.fail(input.reject(FieldProblem.Required))
     else
       parse(input.value).fold[Validation[ValidationError, Located[A]]](
-        Validation.fail(input.reject(ValidationErrorCode.TYPE_MISMATCH, unreadable))
+        Validation.fail(input.reject(FieldProblem.Unreadable(expected)))
       )(value => Validation.succeed(input.as(value)))
 
 /** A form that keeps the refusals of its last submit and lets each of its
@@ -172,20 +172,26 @@ trait SubmitRefusals[Field] extends FormState[Field]:
 
   /** The sentences of the refusals a target shows, for the input components. */
   protected def messagesOf(errors: Signal[List[ValidationError]]): Signal[List[String]] =
-    errors.map(_.map(_.message))
+    errors.map(_.map(e => ValidationMessages.render(e.problem)))
 
-  /** The form's own line: a submit refusal about the form's inputs together,
-    * then any refusal no target of this form claims. */
-  lazy val formLevelError: Signal[List[String]] =
-    messagesOf(errorsFor(formLine, Val(None)).combineWith(unclaimed).map(_ ++ _))
+  /** The refusals on the form's own line: a submit refusal about the form's
+    * inputs together, then any refusal no target of this form claims. */
+  lazy val formLevelRefusals: Signal[List[ValidationError]] =
+    errorsFor(formLine, Val(None)).combineWith(unclaimed).map(_ ++ _)
 
-  /** Each input this form renders, in display order, with what it shows. */
-  protected def displayed: List[(Field, Signal[List[String]])]
+  /** The form's own line, as sentences. */
+  lazy val formLevelError: Signal[List[String]] = messagesOf(formLevelRefusals)
+
+  /** Each input this form renders, in display order, with the refusals it
+    * shows. Refusals rather than sentences, because the summary tells one
+    * refusal shown under two inputs apart from two refusals that happen to
+    * read the same. */
+  protected def displayed: List[(Field, Signal[List[ValidationError]])]
 
   /** Every refusal the form shows now, input by input, then its own line. */
   lazy val summary: Signal[List[SummaryEntry[Field]]] =
-    Signal.combineSeq(displayed.map((field, messages) => messages.map(field -> _)))
-      .combineWith(formLevelError)
+    Signal.combineSeq(displayed.map((field, refusals) => refusals.map(field -> _)))
+      .combineWith(formLevelRefusals)
       .map((perInput, line) => SubmitRefusals.summaryOf(perInput.toList, line))
 
 /** The rules a form with a refusal store applies to the refusals of its last
@@ -225,21 +231,23 @@ object SubmitRefusals:
     val targets = inputsFor(error.location)
     targets.isEmpty || targets.contains(field) || targets.contains(formLine)
 
-  /** The summary of what a form shows, a sentence shown under two inputs listed
-    * once under the first.
+  /** The summary of what a form shows: a refusal shown under two inputs — a
+    * rule over the pair of them — is listed once, under the first. Two
+    * refusals of different inputs are both listed even when their sentences
+    * read the same, which is why the key is the refusal and not its sentence.
     * {{{
-    * summaryOf(List(MinLoss -> List("min under max"), MaxLoss -> List("min under max")), Nil)
-    * // List(SummaryEntry(Some(MinLoss), "min under max"))
+    * summaryOf(List(MinLoss -> List(rangeRefusal), MaxLoss -> List(rangeRefusal)), Nil)
+    * // List(SummaryEntry(Some(MinLoss), render(rangeRefusal.problem)))
     * }}} */
   def summaryOf[Field](
-    perInput: List[(Field, List[String])],
-    line:     List[String]
+    perInput: List[(Field, List[ValidationError])],
+    line:     List[ValidationError]
   ): List[SummaryEntry[Field]] =
     perInput
-      .flatMap((field, messages) => messages.map(field -> _))
-      .distinctBy((_, message) => message)
-      .map((field, message) => SummaryEntry(Some(field), message)) ++
-      line.map(SummaryEntry(None, _))
+      .flatMap((field, refusals) => refusals.map(field -> _))
+      .distinctBy((_, refusal) => refusal)
+      .map((field, refusal) => SummaryEntry(Some(field), ValidationMessages.render(refusal.problem))) ++
+      line.map(refusal => SummaryEntry(None, ValidationMessages.render(refusal.problem)))
 
 /** One refusal in a form's summary list: the sentence and the input it is
   * shown under, or none for the form's own line. */

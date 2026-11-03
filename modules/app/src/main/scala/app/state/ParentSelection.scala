@@ -2,9 +2,9 @@ package app.state
 
 import zio.prelude.Validation
 
-import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.data.iron.ValidationUtil
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{FieldProblem, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /** A form's in-progress parent-field selection.
@@ -58,4 +58,4 @@ object ParentSelection:
       case ParentSelection.Under(name) =>
         toValidation(selection.as(name).refine(ValidationUtil.refineName)).map(ParentRef.Under(_))
       case ParentSelection.Unset =>
-        Validation.fail(selection.reject(ValidationErrorCode.REQUIRED_FIELD, ValidationMessages.parentRequired))
+        Validation.fail(selection.reject(FieldProblem.Required))

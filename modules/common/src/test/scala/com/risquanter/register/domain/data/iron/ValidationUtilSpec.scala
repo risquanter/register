@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data.iron
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
+import com.risquanter.register.domain.errors.{Alphabet, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValueFormat}
 
 object ValidationUtilSpec extends ZIOSpecDefault {
 
@@ -38,7 +38,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineName("   ", at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message == ValidationMessages.nameRequired)
+          result.left.exists(_.head.problem == FieldProblem.Required)
         )
       },
 
@@ -57,16 +57,16 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineName(longName, at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message == ValidationMessages.nameTooLong)
+          result.left.exists(_.head.problem == FieldProblem.TooLong(50))
         )
       },
 
-      test("returns descriptive error message") {
+      test("refuses an empty name as required") {
         val result = ValidationUtil.refineName("", at)
         assertTrue(
           result.isLeft &&
           result.left.exists(errors =>
-            errors.head.message == ValidationMessages.nameRequired
+            errors.head.problem == FieldProblem.Required
           )
         )
       }
@@ -117,7 +117,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineScenarioName("   ", at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message == ValidationMessages.scenarioNameRequired)
+          result.left.exists(_.head.problem == FieldProblem.Required)
         )
       },
 
@@ -131,7 +131,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineScenarioName(longName, at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message == ValidationMessages.scenarioNameTooLong)
+          result.left.exists(_.head.problem == FieldProblem.TooLong(64))
         )
       },
 
@@ -139,7 +139,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineScenarioName("stress!2026", at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message == ValidationMessages.scenarioNameInvalidChars)
+          result.left.exists(_.head.problem == FieldProblem.InvalidCharacters(Alphabet.ScenarioName))
         )
       },
 
@@ -147,7 +147,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineScenarioName("-leading-hyphen", at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message == ValidationMessages.scenarioNameInvalidStart)
+          result.left.exists(_.head.problem == FieldProblem.WrongFormat(ValueFormat.ScenarioNameStart))
         )
       },
 
@@ -155,7 +155,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineScenarioName("_leading_underscore", at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message == ValidationMessages.scenarioNameInvalidStart)
+          result.left.exists(_.head.problem == FieldProblem.WrongFormat(ValueFormat.ScenarioNameStart))
         )
       }
     ),
@@ -187,8 +187,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         assertTrue(
           result.isLeft &&
           result.left.exists(errors =>
-            errors.head.message.toLowerCase.contains("email") ||
-            errors.head.message.contains("@")
+            errors.head.problem == FieldProblem.WrongFormat(ValueFormat.Email)
           )
         )
       },
@@ -245,8 +244,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         assertTrue(
           result.isLeft &&
           result.left.exists(errors =>
-            errors.head.message.toLowerCase.contains("url") ||
-            errors.head.message.contains(".")
+            errors.head.problem == FieldProblem.WrongFormat(ValueFormat.Url)
           )
         )
       }
@@ -409,7 +407,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineLossCap(0L, at)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message.contains("transfer cannot fail"))
+          result.left.exists(errs => ValidationMessages.render(errs.head.problem).contains("transfer cannot fail"))
         )
       }
     ),
@@ -473,7 +471,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
       test("error message references inclusive range") {
         val result = ValidationUtil.refineOccurrenceProbability(-0.1, at)
         assertTrue(result.left.exists(errs =>
-          errs.exists(e => e.message.contains("inclusive"))
+          errs.exists(e => ValidationMessages.render(e.problem).contains("inclusive"))
         ))
       },
 

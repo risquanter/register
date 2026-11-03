@@ -1,10 +1,11 @@
 package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
+import io.github.iltotore.iron.autoRefine
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, NodeId, SeedVarId}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 
 /** Recursive ADT representing a risk hierarchy tree.
   *
@@ -188,7 +189,7 @@ object RiskLeaf {
         seedVarId = raw.seedVarId,
         subject = ErrorSubject.Request
       )
-        .toEither.left.map(errors => errors.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
+        .toEither.left.map(errors => errors.toChunk.map(ValidationError.describe).mkString("; "))
     }
   }
 
@@ -258,7 +259,7 @@ object RiskPortfolio {
 
   /** Upper bound on a portfolio's direct child count — a resource limit
     * against oversized fan-out. */
-  private val MaxChildren = 1000
+  private val MaxChildren: NonNegativeInt = 1000
 
   /** Smart constructor: Validates all fields and returns Validation.
     *
@@ -291,17 +292,12 @@ object RiskPortfolio {
 
     // Step 3: Validate childIds (business rule): non-empty AND count-bounded, accumulated
     val nonEmptyV = Validation.fromPredicateWith[ValidationError, Vector[NodeId]](
-      ValidationError(
-        location = ErrorLocation.Field(subject, FieldName.ChildIds),
-        code = ValidationErrorCode.REQUIRED_FIELD,
-        message = ValidationMessages.portfolioHasNoChildren
-      )
+      ValidationError(ErrorLocation.Field(subject, FieldName.ChildIds), FieldProblem.PortfolioHasNoChildren(Nil))
     )(childIds)(_.nonEmpty)
     val countV = Validation.fromPredicateWith[ValidationError, Vector[NodeId]](
       ValidationError(
-        location = ErrorLocation.Field(subject, FieldName.ChildIds),
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = ValidationMessages.tooManyChildren(childIds.length, MaxChildren)
+        ErrorLocation.Field(subject, FieldName.ChildIds),
+        FieldProblem.TooManyChildren(NonNegativeInt.count(childIds.length), MaxChildren)
       )
     )(childIds)(_.length <= MaxChildren)
     val childIdsValidation: Validation[ValidationError, Vector[NodeId]] =
@@ -332,18 +328,13 @@ object RiskPortfolio {
     subject: ErrorSubject = ErrorSubject.Request
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
 
-    // Convert string childIds to NodeIds
+    // Each child identifier is refined at its own position, so a malformed one
+    // is refused where it was submitted.
     val childIdResults = childIds.zipWithIndex.map { case (cid, idx) =>
-      SafeId.fromString(cid).left.map { errors =>
-        ValidationError(
-          location = ErrorLocation.Field(subject, FieldName.childAt(idx)),
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = errors.mkString(", ")
-        )
-      }
+      ValidationUtil.refineId(cid, ErrorLocation.Field(subject, FieldName.childAt(idx)))
     }
 
-    val errors = childIdResults.collect { case Left(e) => e }
+    val errors = childIdResults.collect { case Left(es) => es }.flatten
     if (errors.nonEmpty) {
       // Accumulate all errors using NonEmptyChunk
       val nonEmpty = zio.NonEmptyChunk.fromIterable(errors.head, errors.tail)
@@ -378,7 +369,7 @@ object RiskPortfolio {
     }
     parentIdOpt.flatMap { validParentId =>
       createFromStrings(raw.id, raw.name, raw.childIds, parentId = validParentId, subject = ErrorSubject.Request)
-        .toEither.left.map(errors => errors.toChunk.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; "))
+        .toEither.left.map(errors => errors.toChunk.map(ValidationError.describe).mkString("; "))
     }
   }
 

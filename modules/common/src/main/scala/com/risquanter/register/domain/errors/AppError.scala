@@ -5,7 +5,7 @@ import scala.concurrent.duration.Duration as ScalaDuration
 import sttp.model.StatusCode
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, TreeId, ValidationMessages, WorkspaceId}
 
 /** Who a failure is attributable to, which decides the level its log line is
   * written at (ADR-002).
@@ -62,26 +62,36 @@ sealed trait AppError:
 sealed trait SimError extends AppError
 sealed trait IrminError extends AppError
 
-/** Validation error with structured information.
+/** One refusal: where it is and what it is.
   *
   * The one internal error type that is also a wire type: it crosses inside
   * `WireError.ValidationRejected`, because a form needs to know which field
-  * failed and why, and that is the whole content of this type.
+  * failed and why, and that is the whole content of this type. Both halves are
+  * closed sets, so no sentence crosses: the browser renders one from the
+  * problem and its values, and a log line renders its own (ADR-035).
   */
 case class ValidationError(
   location: ErrorLocation,
-  code: ValidationErrorCode,
-  message: String
+  problem: FieldProblem
 )
 
 object ValidationError:
-  // JSON codec (companion object placement ensures implicit scope)
   given codec: JsonCodec[ValidationError] = DeriveJsonCodec.gen[ValidationError]
+
+  /** The refusal as diagnostic text, for a log line or a decoder's flattened
+    * message: the location, then the rendered sentence.
+    *
+    * {{{
+    * describe(ValidationError(requestField(FieldName.Name), FieldProblem.Required))
+    * // [request.Name] A value is required
+    * }}}
+    */
+  def describe(error: ValidationError): String =
+    s"[${ErrorLocation.describe(error.location)}] ${ValidationMessages.render(error.problem)}"
 
 /** Validation failure with accumulated structured errors */
 case class ValidationFailed(errors: List[ValidationError]) extends SimError {
-  override def logMessage: String =
-    errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")
+  override def logMessage: String = errors.map(ValidationError.describe).mkString("; ")
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 

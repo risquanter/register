@@ -4,7 +4,7 @@ import zio.*
 import zio.json.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, RepositoryFailure, TreeLoadFailure, IrminError}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, TreeLoadFailure, IrminError, ValidationError}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -172,13 +172,11 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         RiskTree
           .fromNodes(meta.id, meta.name, nodes, meta.rootId, Some(meta.seedVarHighWater), mitigations.toList)
           .toEither
-          .left.map(errors => RepositoryFailure(
-            errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")
-          ))
+          .left.map(errors => RepositoryFailure(errors.map(ValidationError.describe).mkString("; ")))
       )
 
   private def parseTreeId(raw: String): IO[AppError,TreeId] =
-    ZIO.fromEither(TreeId.fromString(raw)).mapError(errs => RepositoryFailure(errs.map(_.message).mkString("; ")))
+    ZIO.fromEither(TreeId.fromString(raw)).mapError(errs => RepositoryFailure(errs.map(ValidationError.describe).mkString("; ")))
 
   /** Resolve the branch head once, then read every constituent path pinned to
     * that commit — a commit landing mid-load cannot tear the read. A branch
@@ -207,7 +205,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         case Some(commit) =>
           ZIO.fromEither(CommitHash.fromString(commit.hash))
             .mapBoth(
-              errs => RepositoryFailure(s"Invalid branch head hash: ${errs.map(_.message).mkString("; ")}"),
+              errs => RepositoryFailure(s"Invalid branch head hash: ${errs.map(ValidationError.describe).mkString("; ")}"),
               Some(_)
             )
     }

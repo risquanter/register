@@ -4,12 +4,13 @@ import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import zio.prelude.Validation
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
+import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.iron.{
-  OccurrenceProbability, ResidualProbability, RetentionFactor, ValidationMessages
+  OccurrenceProbability, PositiveDouble, PositiveDoubleConstraint, PositiveLong, ResidualProbability, RetentionFactor
 }
 import com.risquanter.register.domain.data.iron.given
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError
 }
 
 /**
@@ -161,8 +162,16 @@ object RiskLeafTransform {
     * (≥ 1 whole unit). Below that it floors to 0 and cannot be fit. */
   def lowerBoundRepresentable(scaledMin: Long): Boolean = scaledMin >= 1L
 
-  /** Smallest severity factor that keeps `min` representable (`min * f ≥ 1`). */
-  def minRepresentableFactor(min: Long): Double = 1.0 / min.toDouble
+  /** The factor that changes nothing: the answer where a smallest factor is
+    * asked for and the arithmetic cannot produce one, which the two functions
+    * below reach for no input their types admit. */
+  private val NoReduction: PositiveDouble = 1.0
+
+  /** Smallest severity factor that keeps `min` representable (`min * f ≥ 1`).
+    * The reciprocal of a positive whole number lies in (0, 1], so the fold's
+    * fallback is never taken. */
+  def minRepresentableFactor(min: PositiveLong): PositiveDouble =
+    (1.0 / min.toDouble).refineEither[PositiveDoubleConstraint].getOrElse(NoReduction)
 
   /** A scaled anchor loss is representable while it stays above zero. An anchor
     * loss is a `PositiveDouble`, so its floor is the smallest positive double
@@ -170,8 +179,11 @@ object RiskLeafTransform {
   def anchorLossRepresentable(scaledLoss: Double): Boolean = scaledLoss > 0.0
 
   /** Smallest severity factor that keeps `min` above the positive-double floor
-    * (`min * f > 0`). */
-  def minAnchorFactor(min: Double): Double = Double.MinPositiveValue / min
+    * (`min * f > 0`). Reached only when a scaling underflowed, which bounds
+    * `min` well below one and the quotient well above zero, so the fold's
+    * fallback is never taken. */
+  def minAnchorFactor(min: PositiveDouble): PositiveDouble =
+    (Double.MinPositiveValue / min).refineEither[PositiveDoubleConstraint].getOrElse(NoReduction)
 
   /** Severity scaling interpreted onto a shape, one reading per mode.
     *
@@ -199,10 +211,8 @@ object RiskLeafTransform {
 
         case _ =>
           Validation.fail(ValidationError(
-            location = ErrorLocation.Field(subject, FieldName.MinLoss),
-            code = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-            message = ValidationMessages.mitigationLowersMinLossBelowFloor(
-              bounds.min, minRepresentableFactor(bounds.min))
+            ErrorLocation.Field(subject, FieldName.MinLoss),
+            FieldProblem.MitigationLowersMinLossBelowFloor(bounds.min, minRepresentableFactor(bounds.min))
           ))
       }
 
@@ -217,12 +227,11 @@ object RiskLeafTransform {
           )
 
         case _ =>
-          val smallest = anchors.losses.min
+          // Anchors hold at least two entries by construction, so the minimum exists.
+          val smallest = anchors.values.map(_.loss).minBy(loss => loss: Double)
           Validation.fail(ValidationError(
-            location = ErrorLocation.Field(subject, FieldName.Quantiles),
-            code = ValidationErrorCode.INVALID_METALOG_PARAMS,
-            message = ValidationMessages.mitigationLowersAnchorLossBelowFloor(
-              smallest, minAnchorFactor(smallest))
+            ErrorLocation.Field(subject, FieldName.Quantiles),
+            FieldProblem.MitigationLowersAnchorLossBelowFloor(smallest, minAnchorFactor(smallest))
           ))
       }
   }

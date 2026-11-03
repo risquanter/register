@@ -8,7 +8,7 @@ import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{FieldProblem, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
@@ -149,7 +149,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         _     <- store.create(Some(id))
         exit  <- store.create(Some(id)).exit
       yield assert(exit)(fails(isSubtype[ValidationFailed](
-        hasField("errors", _.errors.map(_.code), contains(ValidationErrorCode.DUPLICATE_VALUE))
+        hasField("errors", _.errors.map(e => FieldProblem.code(e.problem)), contains(ValidationErrorCode.DUPLICATE_VALUE))
       )))
     },
 

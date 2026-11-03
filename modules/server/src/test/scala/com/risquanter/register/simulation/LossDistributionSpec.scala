@@ -8,7 +8,7 @@ import com.risquanter.register.domain.data.{
   NodeProvenance, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem}
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage, retentionFactor}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -233,7 +233,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         result.toEither match {
           case Left(errors) =>
             assertTrue(
-              errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+              errors.head.problem == FieldProblem.AggregatedLossOverflow,
               errors.head.location == ErrorLocation.nodeField(id, FieldName.MitigatedResult)
             )
           case Right(_) => assertTrue(false)
@@ -251,9 +251,8 @@ object LossDistributionSpec extends ZIOSpecDefault {
         result.toEither match {
           case Left(errors) =>
             assertTrue(
-              errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
-              errors.head.location == ErrorLocation.nodeField(id, FieldName.MitigatedResult),
-              errors.head.message.contains("residual of exactly zero")
+              errors.head.problem == FieldProblem.MitigationEliminatesRisk,
+              errors.head.location == ErrorLocation.nodeField(id, FieldName.MitigatedResult)
             )
           case Right(_) => assertTrue(false)
         }
@@ -266,7 +265,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
 
         result.toEither match {
           case Left(errors) =>
-            assertTrue(errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION)
+            assertTrue(errors.head.problem == FieldProblem.MitigationEliminatesRisk)
           case Right(_) => assertTrue(false)
         }
       },
@@ -290,7 +289,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
 
         result.toEither match {
           case Left(errors) =>
-            assertTrue(errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION)
+            assertTrue(errors.head.problem == FieldProblem.MitigationEliminatesRisk)
           case Right(_) => assertTrue(false)
         }
       },

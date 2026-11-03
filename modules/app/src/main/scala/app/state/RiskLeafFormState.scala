@@ -2,8 +2,8 @@ package app.state
 
 import com.raquo.laminar.api.L.*
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, ValidationMessages, OccurrenceProbability}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, OccurrenceProbability, SafeName, ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError, ValueRange}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import zio.prelude.Validation
 
@@ -178,7 +178,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   /** A located check's sentence, for the cross-field gates and `errorSignals`,
     * which carry text. */
   private def messageOf(check: Signal[Option[ValidationError]]): Signal[Option[String]] =
-    check.map(_.map(_.message))
+    check.map(_.map(e => ValidationMessages.render(e.problem)))
 
   // ============================================================
   // Submit Refusals
@@ -210,12 +210,12 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     * and the submit both call it, so they refuse the same input with the same
     * sentence. */
   private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, OccurrenceProbability] =
-    parseRequired(input, parseDouble, ValidationMessages.probabilityRequired, ValidationMessages.probabilityNotANumber)
+    parseRequired(input, parseDouble, ExpectedInput.Number)
       .flatMap { pct =>
         Validation.fromEither(
           pct.map(RiskLeafFormState.pctToDomain)
             .refine(ValidationUtil.refineOccurrenceProbability)
-            .left.map(_ => pct.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.probabilityPercentOutOfRange))
+            .left.map(_ => pct.reject(FieldProblem.OutOfRange(ValueRange.Percent)))
         )
       }
 
@@ -226,15 +226,15 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   private val percentilesErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(percentilesVar, percentilesField)).map {
       case (DistributionMode.Metalog, input) =>
-        parseRequired(input, parseNonEmptyList, ValidationMessages.percentilesRequired, ValidationMessages.percentilesFormat)
+        parseRequired(input, parseNonEmptyList, ExpectedInput.NumberList)
           .toEither
           .fold(
             refusals => Some(refusals.head),
             percentiles =>
               if percentiles.value.exists(p => p <= 0 || p >= RiskLeafFormState.percentScale) then
-                Some(percentiles.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.percentilesOutOfRange))
+                Some(percentiles.reject(FieldProblem.OutOfRange(ValueRange.Percentile)))
               else if !ValidationUtil.isStrictlyIncreasing(percentiles.value) then
-                Some(percentiles.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.percentilesMustBeStrictlyIncreasing))
+                Some(percentiles.reject(FieldProblem.PercentilesNotIncreasing))
               else None
           )
       case _ => None
@@ -244,15 +244,15 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   private val quantilesErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(quantilesVar, quantilesField)).map {
       case (DistributionMode.Metalog, input) =>
-        parseRequired(input, parseNonEmptyList, ValidationMessages.quantilesRequired, ValidationMessages.quantilesFormat)
+        parseRequired(input, parseNonEmptyList, ExpectedInput.NumberList)
           .toEither
           .fold(
             refusals => Some(refusals.head),
             quantiles =>
               if quantiles.value.exists(_ <= 0) then
-                Some(quantiles.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.quantilesMustBePositive))
+                Some(quantiles.reject(FieldProblem.OutOfRange(ValueRange.PositiveLoss)))
               else if !ValidationUtil.isStrictlyIncreasing(quantiles.value) then
-                Some(quantiles.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.quantilesMustBeStrictlyIncreasing))
+                Some(quantiles.reject(FieldProblem.QuantilesNotIncreasing))
               else None
           )
       case _ => None
@@ -269,10 +269,8 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
           val pList = parseDoubleList(pStr)
           val qList = parseDoubleList(qStr)
           Option.when(pList.nonEmpty && qList.nonEmpty && pList.length != qList.length)(
-            pair.reject(
-              ValidationErrorCode.INVALID_COMBINATION,
-              ValidationMessages.metalogLengthMismatch(pList.length, qList.length)
-            )
+            pair.reject(FieldProblem.PercentileQuantileLengthMismatch(
+              NonNegativeInt.count(pList.length), NonNegativeInt.count(qList.length)))
           )
         case _ => None
       }
@@ -280,37 +278,35 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   /** Lognormal mode: minLoss validation using Iron PositiveLong */
   private val minLossErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(minLossVar, minLossField)).map {
-      case (DistributionMode.Lognormal, input) =>
-        boundError(input, ValidationMessages.minLossRequired, ValidationMessages.minLossNotWholeNumber)
+      case (DistributionMode.Lognormal, input) => boundError(input)
       case _                                   => None
     }
 
   /** Lognormal mode: maxLoss validation using Iron PositiveLong */
   private val maxLossErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal.combineWith(located(maxLossVar, maxLossField)).map {
-      case (DistributionMode.Lognormal, input) =>
-        boundError(input, ValidationMessages.maxLossRequired, ValidationMessages.maxLossNotWholeNumber)
+      case (DistributionMode.Lognormal, input) => boundError(input)
       case _                                   => None
     }
 
   /** One lognormal bound's own check: present, a whole number, and positive.
     * The submit parses the bound the same way, so both refuse the same text
-    * with the same sentence. */
-  private def boundError(input: Located[String], required: String, notWhole: String): Option[ValidationError] =
+    * with the same problem. */
+  private def boundError(input: Located[String]): Option[ValidationError] =
     firstRefusal(
-      parseRequired(input, parseLong, required, notWhole)
+      parseRequired(input, parseLong, ExpectedInput.WholeNumber)
         .flatMap(bound => ValidationUtil.toValidation(bound.refine(ValidationUtil.refinePositiveLong)))
     )
 
   /** The terms input read as a count. Blank text means one term per anchor and
     * reads as no count; text that is not a whole number is refused as
     * unreadable. The live check and the shape builder both read terms through
-    * this, so they refuse the same text with the same sentence. */
+    * this, so they refuse the same text with the same problem. */
   private def readTerms(input: Located[String]): Validation[ValidationError, Option[Int]] =
     if input.value.isBlank then Validation.succeed(None)
     else
       input.value.toIntOption.fold[Validation[ValidationError, Option[Int]]](
-        Validation.fail(input.reject(ValidationErrorCode.TYPE_MISMATCH, ValidationMessages.termsMustBeWholeNumber))
+        Validation.fail(input.reject(FieldProblem.Unreadable(ExpectedInput.WholeNumber)))
       )(t => Validation.succeed(Some(t)))
 
   /** A stated term count checked as the shape's own gate checks it: first the
@@ -321,7 +317,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   private def termsWithinFit(input: Located[String], terms: Int, anchors: Option[Int]): Validation[ValidationError, Unit] =
     ValidationUtil.toValidation(input.as(terms).refine(ValidationUtil.refineMetalogTermCount)).flatMap { count =>
       if anchors.exists(count > _) then
-        Validation.fail(input.reject(ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
+        Validation.fail(input.reject(FieldProblem.TermsAboveAnchorCount))
       else Validation.unit
     }
 
@@ -340,16 +336,20 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
       }
 
   /** Lognormal mode: cross-field validation (minLoss < maxLoss). Located at
-    * the pair, as the shared shape factory reports the same rule. */
+    * the pair, as the shared shape factory reports the same rule, and over the
+    * same positive bounds that factory compares: a bound that is not positive
+    * is each input's own refusal, and the pair rule is not evaluated for it. */
   private val lognormalCrossFieldErrorRaw: Signal[Option[ValidationError]] =
     distributionModeVar.signal
       .combineWith(minLossVar.signal, maxLossVar.signal, subject)
       .map {
         case (DistributionMode.Lognormal, minStr, maxStr, s) =>
-          val pair = Located((minStr, maxStr), ErrorLocation.Field(s, lossRangeField))
-          (parseLong(minStr), parseLong(maxStr)) match
+          val pair  = Located((minStr, maxStr), ErrorLocation.Field(s, lossRangeField))
+          val minLoss = parseLong(minStr).flatMap(ValidationUtil.refinePositiveLong(_, pair.location).toOption)
+          val maxLoss = parseLong(maxStr).flatMap(ValidationUtil.refinePositiveLong(_, pair.location).toOption)
+          (minLoss, maxLoss) match
             case (Some(min), Some(max)) if min >= max =>
-              Some(pair.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.minMustBeLessThanMax))
+              Some(pair.reject(FieldProblem.LossRangeNotOrdered(min, max)))
             case _ => None
         case _ => None
       }
@@ -358,15 +358,20 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   // Display-controlled Error Signals (for UI binding)
   // ============================================================
 
-  val nameError: Signal[List[String]] = messagesOf(errorsFor(Name, nameErrorRaw))
+  // Each input's refusals, then the sentences the input components bind to.
+  // The refusals are what the summary is built from.
+  private val nameRefusals: Signal[List[ValidationError]] = errorsFor(Name, nameErrorRaw)
+  val nameError: Signal[List[String]] = messagesOf(nameRefusals)
 
   /** The dropdown shows only submit-time refusals (`ParentSelection.toParentRef`
     * refusing the selection in `toDraft`, or the builder's topology check),
     * from the stored refusals. Its live check, `parentErrorRaw`, blocks the
     * submit and is not shown here. */
-  val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
+  private val parentRefusals: Signal[List[ValidationError]] = errorsFor(Parent, Val(None))
+  val parentError: Signal[List[String]] = messagesOf(parentRefusals)
 
-  val probabilityError: Signal[List[String]] = messagesOf(errorsFor(Probability, probabilityErrorRaw))
+  private val probabilityRefusals: Signal[List[ValidationError]] = errorsFor(Probability, probabilityErrorRaw)
+  val probabilityError: Signal[List[String]] = messagesOf(probabilityRefusals)
 
   // A cross-field error has its own gate, separate from the per-field touch gate:
   // the constraint is evaluable once both fields of the pair have content, so it
@@ -404,9 +409,9 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     thisField:       RiskLeafField,
     fieldA:          Var[String],
     fieldB:          Var[String],
-    raw:             Signal[Option[String]],
+    raw:             Signal[Option[ValidationError]],
     isThisFieldLast: Signal[Boolean]
-  ): Signal[Option[String]] =
+  ): Signal[Option[ValidationError]] =
     val bothFilled =
       fieldA.signal.map(_.nonEmpty)
         .combineWith(fieldB.signal.map(_.nonEmpty))
@@ -421,42 +426,51 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
       .combineWith(raw)
       .map { (show, err) => err.filter(_ => show) }
 
-  private val metalogCrossFieldGated_Pct: Signal[Option[String]] =
-    crossFieldGated(Percentiles, percentilesVar, quantilesVar, messageOf(metalogCrossFieldErrorRaw), lastMetalogEdited)
+  private val metalogCrossFieldGated_Pct: Signal[Option[ValidationError]] =
+    crossFieldGated(Percentiles, percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited)
 
-  private val metalogCrossFieldGated_Qt: Signal[Option[String]] =
-    crossFieldGated(Quantiles, percentilesVar, quantilesVar, messageOf(metalogCrossFieldErrorRaw), lastMetalogEdited.map(!_))
+  private val metalogCrossFieldGated_Qt: Signal[Option[ValidationError]] =
+    crossFieldGated(Quantiles, percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited.map(!_))
 
-  private val lognormalCrossFieldGated_Min: Signal[Option[String]] =
-    crossFieldGated(MinLoss, minLossVar, maxLossVar, messageOf(lognormalCrossFieldErrorRaw), lastLognormalEdited)
+  private val lognormalCrossFieldGated_Min: Signal[Option[ValidationError]] =
+    crossFieldGated(MinLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited)
 
-  private val lognormalCrossFieldGated_Max: Signal[Option[String]] =
-    crossFieldGated(MaxLoss, minLossVar, maxLossVar, messageOf(lognormalCrossFieldErrorRaw), lastLognormalEdited.map(!_))
+  private val lognormalCrossFieldGated_Max: Signal[Option[ValidationError]] =
+    crossFieldGated(MaxLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited.map(!_))
 
   /** An input's own and stored refusals, or the pair rule's refusal when the
     * input shows none of its own. */
-  private def withCrossField(own: Signal[List[String]], cross: Signal[Option[String]]): Signal[List[String]] =
+  private def withCrossField(
+    own:   Signal[List[ValidationError]],
+    cross: Signal[Option[ValidationError]]
+  ): Signal[List[ValidationError]] =
     own.combineWith(cross).map {
       case (Nil, pair) => pair.toList
       case (shown, _)  => shown
     }
 
-  /** Percentiles: own error (touch-gated) ∪ metalog cross-field (last-edited-gated) */
-  val percentilesError: Signal[List[String]] =
-    withCrossField(messagesOf(errorsFor(Percentiles, percentilesErrorRaw)), metalogCrossFieldGated_Pct)
+  /** Percentiles: own refusals (touch-gated) ∪ metalog cross-field (last-edited-gated) */
+  private val percentilesRefusals: Signal[List[ValidationError]] =
+    withCrossField(errorsFor(Percentiles, percentilesErrorRaw), metalogCrossFieldGated_Pct)
+  val percentilesError: Signal[List[String]] = messagesOf(percentilesRefusals)
 
-  /** Quantiles: own error (touch-gated) ∪ metalog cross-field (last-edited-gated) */
-  val quantilesError: Signal[List[String]] =
-    withCrossField(messagesOf(errorsFor(Quantiles, quantilesErrorRaw)), metalogCrossFieldGated_Qt)
+  /** Quantiles: own refusals (touch-gated) ∪ metalog cross-field (last-edited-gated) */
+  private val quantilesRefusals: Signal[List[ValidationError]] =
+    withCrossField(errorsFor(Quantiles, quantilesErrorRaw), metalogCrossFieldGated_Qt)
+  val quantilesError: Signal[List[String]] = messagesOf(quantilesRefusals)
 
-  /** Min loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
-  val minLossError: Signal[List[String]] =
-    withCrossField(messagesOf(errorsFor(MinLoss, minLossErrorRaw)), lognormalCrossFieldGated_Min)
+  /** Min loss: own refusals (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
+  private val minLossRefusals: Signal[List[ValidationError]] =
+    withCrossField(errorsFor(MinLoss, minLossErrorRaw), lognormalCrossFieldGated_Min)
+  val minLossError: Signal[List[String]] = messagesOf(minLossRefusals)
 
-  /** Max loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
-  val maxLossError: Signal[List[String]] =
-    withCrossField(messagesOf(errorsFor(MaxLoss, maxLossErrorRaw)), lognormalCrossFieldGated_Max)
-  val termsError: Signal[List[String]] = messagesOf(errorsFor(Terms, termsErrorRaw))
+  /** Max loss: own refusals (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
+  private val maxLossRefusals: Signal[List[ValidationError]] =
+    withCrossField(errorsFor(MaxLoss, maxLossErrorRaw), lognormalCrossFieldGated_Max)
+  val maxLossError: Signal[List[String]] = messagesOf(maxLossRefusals)
+
+  private val termsRefusals: Signal[List[ValidationError]] = errorsFor(Terms, termsErrorRaw)
+  val termsError: Signal[List[String]] = messagesOf(termsRefusals)
 
   // ============================================================
   // FormState Implementation
@@ -482,15 +496,15 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
 
   /** The inputs in the order `RiskLeafFormView` renders them. The fields of
     * the mode not shown show nothing, because their checks pass outside it. */
-  override protected def displayed: List[(RiskLeafField, Signal[List[String]])] = List(
-    Name        -> nameError,
-    Probability -> probabilityError,
-    Parent      -> parentError,
-    Percentiles -> percentilesError,
-    Quantiles   -> quantilesError,
-    Terms       -> termsError,
-    MinLoss     -> minLossError,
-    MaxLoss     -> maxLossError
+  override protected def displayed: List[(RiskLeafField, Signal[List[ValidationError]])] = List(
+    Name        -> nameRefusals,
+    Probability -> probabilityRefusals,
+    Parent      -> parentRefusals,
+    Percentiles -> percentilesRefusals,
+    Quantiles   -> quantilesRefusals,
+    Terms       -> termsRefusals,
+    MinLoss     -> minLossRefusals,
+    MaxLoss     -> maxLossRefusals
   )
 
   // ============================================================
@@ -537,8 +551,8 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
       case DistributionMode.Lognormal =>
         Validation
           .validateWith(
-            parseRequired(minLoss, parseLong, ValidationMessages.minLossRequired, ValidationMessages.minLossNotWholeNumber),
-            parseRequired(maxLoss, parseLong, ValidationMessages.maxLossRequired, ValidationMessages.maxLossNotWholeNumber)
+            parseRequired(minLoss, parseLong, ExpectedInput.WholeNumber),
+            parseRequired(maxLoss, parseLong, ExpectedInput.WholeNumber)
           )((min, max) => (min.value, max.value))
           .flatMap { case (min, max) =>
             DistributionShape.Lognormal.fromPrimitives(min, max, subject)
@@ -696,5 +710,6 @@ object RiskLeafFormState:
                FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
                FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
             noTarget
-      case ErrorLocation.Whole     => Set(RiskLeafField.FormLevel)
-      case ErrorLocation.Header(_) => noTarget
+      case ErrorLocation.Whole             => Set(RiskLeafField.FormLevel)
+      case ErrorLocation.Header(_)         => noTarget
+      case ErrorLocation.QueryParameter(_) => noTarget

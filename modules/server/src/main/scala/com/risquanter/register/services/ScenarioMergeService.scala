@@ -5,8 +5,8 @@ import zio.json.*
 import java.time.Instant
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, Revision, SafeName, TreeId, ValidationMessages, ValidationUtil}
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, Revision, SafeName, TreeId, ValidationUtil}
+import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, FieldProblem, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, ValidationFailed, ValidationError}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -202,10 +202,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                         case Some(commit) => ScenarioBranchOps.refineCommitHash(commit.hash)
                         case None =>
                           ZIO.fail(ValidationFailed(List(ValidationError(
-                            location = ErrorLocation.requestField(FieldName.Scenario),
-                            code = ValidationErrorCode.NOT_FOUND,
-                            message = ValidationMessages.scenarioNotFound(name.value)
-                          ))))
+                            ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(name)))))
       at           <- Clock.instant
       result       <- scan(wsId, branch, scenarioHead, at)
       _            <- ZIO.foreachDiscard(result.verdict.refusal)(refusal => ZIO.fail(MergeConflict(name, refusal)))
@@ -563,7 +560,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * the store holds what this code did not write. */
   private def refineListed[A](segment: IrminSegment, what: String)(refine: String => Either[List[ValidationError], A]): IO[AppError, A] =
     ZIO.fromEither(refine(segment.value)).mapError(errs =>
-      RepositoryFailure(s"Listed $what '${segment.value}' does not refine: ${errs.map(_.message).mkString("; ")}"))
+      RepositoryFailure(s"Listed $what '${segment.value}' does not refine: ${errs.map(ValidationError.describe).mkString("; ")}"))
 
 object ScenarioMergeServiceLive:
   val layer: ZLayer[IrminClient & RiskTreeRepository, Nothing, ScenarioMergeService] =

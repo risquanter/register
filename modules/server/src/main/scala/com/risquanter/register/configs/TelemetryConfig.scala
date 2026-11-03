@@ -6,7 +6,7 @@ import zio.Config
 import zio.config.magnolia.DeriveConfig
 
 import com.risquanter.register.domain.data.iron.Url
-import com.risquanter.register.domain.errors.ErrorLocation
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /** Where recorded metrics and traces are sent. This is a separate pipeline from
   * application logging, which always goes to standard output through Logback.
@@ -65,7 +65,7 @@ object TelemetryConfig:
       Url
         .fromString(s, configLocation)
         .left
-        .map(errs => Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
+        .map(errs => Config.Error.InvalidData(message = errs.map(ValidationError.describe).mkString("; ")))
     }
 
   private val exporterConfig: Config[TelemetryExporter] =

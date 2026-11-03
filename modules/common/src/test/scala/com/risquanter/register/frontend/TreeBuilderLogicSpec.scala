@@ -1,8 +1,10 @@
 package com.risquanter.register.frontend
 
 import zio.test.*
+import io.github.iltotore.iron.autoRefine
 
-import com.risquanter.register.domain.data.iron.{SafeName, ValidationMessages}
+import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.errors.FieldProblem
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 object TreeBuilderLogicSpec extends ZIOSpecDefault:
@@ -37,10 +39,10 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
       val res = TreeBuilderLogic.preValidateTopology(List(root("Ops"), root("Ops")), Nil)
       assertTrue(res.isFailure) &&
       assertTrue(
-        res.fold(es => es.exists(_.message == ValidationMessages.duplicateNodeNames("Ops", 2)), _ => false)
+        res.fold(es => es.exists(_.problem == FieldProblem.DuplicateNodeName(n("Ops"), 2)), _ => false)
       ) &&
       assertTrue(
-        res.fold(es => !es.exists(_.message == ValidationMessages.multipleRootsFound), _ => false)
+        res.fold(es => !es.exists(_.problem == FieldProblem.MultipleRoots), _ => false)
       )
     },
     test("rejects duplicate names across portfolios and leaves") {
@@ -80,7 +82,7 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
       assertTrue(res.isFailure) &&
       assertTrue(
         res.fold(
-          es => es.exists(_.message == ValidationMessages.portfoliosWithoutChildren(Seq("Root"))),
+          es => es.exists(_.problem == FieldProblem.PortfolioHasNoChildren(List(n("Root")))),
           _ => false
         )
       )
@@ -101,7 +103,7 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
       assertTrue(res.isFailure) &&
       assertTrue(
         res.fold(
-          es => es.exists(_.message == ValidationMessages.portfoliosWithoutChildren(Seq("Child"))),
+          es => es.exists(_.problem == FieldProblem.PortfolioHasNoChildren(List(n("Child")))),
           _ => false
         )
       )
@@ -115,7 +117,7 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
       assertTrue(res.isFailure) &&
       assertTrue(
         res.fold(
-          es => es.exists(_.message == ValidationMessages.portfoliosWithoutChildren(Seq("P2"))),
+          es => es.exists(_.problem == FieldProblem.PortfolioHasNoChildren(List(n("P2")))),
           _ => false
         )
       )
@@ -158,7 +160,7 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
         val step = TreeBuilderLogic.preValidateTopology(ps, ls :+ root("Leaf2"))
         assertTrue(step.isFailure) &&
         assertTrue(
-          step.fold(es => es.exists(_.message == ValidationMessages.leafNeedsPortfolioParent), _ => false)
+          step.fold(es => es.exists(_.problem == FieldProblem.ParentPortfolioRequired), _ => false)
         )
       },
 
@@ -183,7 +185,7 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
         assertTrue(step.isFailure) &&
         assertTrue(
           step.fold(
-            es => es.exists(_.message == ValidationMessages.duplicateNodeNames("Leaf1", 2)),
+            es => es.exists(_.problem == FieldProblem.DuplicateNodeName(n("Leaf1"), 2)),
             _ => false
           )
         )

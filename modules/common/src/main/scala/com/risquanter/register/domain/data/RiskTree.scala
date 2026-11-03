@@ -1,10 +1,11 @@
 package com.risquanter.register.domain.data
 
-import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, SeedVarId, ValidationMessages}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeName, TreeId, NodeId, SeedVarId}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import zio.prelude.Validation
+import io.github.iltotore.iron.autoRefine
 
 /** Domain model for a risk tree configuration.
   * 
@@ -75,15 +76,6 @@ object RiskTree {
         toRawShape
       )
 
-  // JSON codecs for Iron refined types
-  // TreeId and NodeId codecs are in their companion objects (OpaqueTypes.scala)
-
-  given safeNameEncoder: JsonEncoder[SafeName.SafeName] = 
-    JsonEncoder[String].contramap(_.value)
-  
-  given safeNameDecoder: JsonDecoder[SafeName.SafeName] = 
-    JsonDecoder[String].mapOrFail(s => SafeName.fromString(s).left.map(_.mkString(", ")))
-  
   // TreeIndex is NOT serialized (reconstructed from nodes on load)
   // Custom codec that omits index field and rebuilds it from nodes on deserialization.
   // Decoding routes through fromNodes so every tree invariant (structure, rootId,
@@ -95,7 +87,7 @@ object RiskTree {
       // Decoder: Deserialize via the smart constructor (rebuilds index, re-validates)
       JsonDecoder[RiskTreeRaw].mapOrFail { json =>
         fromNodes(json.id, json.name, json.nodes, json.rootId, Some(json.seedVarHighWater), json.mitigations.getOrElse(Nil)).toEither.left.map(errors =>
-          s"Invalid tree structure: ${errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")}"
+          s"Invalid tree structure: ${errors.map(ValidationError.describe).mkString("; ")}"
         )
       }
     )
@@ -103,14 +95,13 @@ object RiskTree {
 
   /** Upper bound on a tree's node count — a resource limit against oversized
     * trees on merges, store-loads, and programmatic construction. */
-  private val MaxNodes = 10000
+  private val MaxNodes: NonNegativeInt = 10000
 
   private def validateNodeCount(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
     if (nodes.sizeIs <= MaxNodes) Validation.succeed(())
     else Validation.fail(ValidationError(
-      location = ErrorLocation.Whole,
-      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = ValidationMessages.tooManyNodes(nodes.size, MaxNodes)
+      ErrorLocation.Whole,
+      FieldProblem.TooManyNodes(NonNegativeInt.count(nodes.size), MaxNodes)
     ))
 
   /** Create a RiskTree from a flat list of nodes.
@@ -153,11 +144,7 @@ object RiskTree {
           .validateWith(
             Validation
               .fromPredicateWith[ValidationError, TreeIndex](
-                ValidationError(
-                  location = ErrorLocation.requestField(FieldName.RootId),
-                  code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-                  message = ValidationMessages.rootIdNotFound(rootId.value)
-                )
+                ValidationError(ErrorLocation.requestField(FieldName.RootId), FieldProblem.RootIdNotFound(rootId))
               )(index)((idx: TreeIndex) => idx.nodes.contains(rootId)),
             validateMitigations(mitigations)
           ) { (_, _) => () }
@@ -166,7 +153,7 @@ object RiskTree {
   }
 
   /** Persisted-content bound on the mitigation collection. */
-  private val MaxMitigations = 1000
+  private val MaxMitigations: NonNegativeInt = 1000
 
   /** Tree-level mitigation invariants: unique ids and names, and a bound on the
     * collection size. Predicate validity is enforced when each
@@ -182,9 +169,8 @@ object RiskTree {
     val countV =
       if (mitigations.sizeIs <= MaxMitigations) Validation.succeed(())
       else Validation.fail(ValidationError(
-        location = mitigationsLocation,
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = ValidationMessages.tooManyMitigations(mitigations.size, MaxMitigations)
+        mitigationsLocation,
+        FieldProblem.TooManyMitigations(NonNegativeInt.count(mitigations.size), MaxMitigations)
       ))
 
     Validation.validateWith(
@@ -203,9 +189,8 @@ object RiskTree {
     (provided, maxAssigned) match {
       case (Some(hw), Some(mx)) if hw.value < mx.value =>
         Validation.fail(ValidationError(
-          location = ErrorLocation.requestField(FieldName.SeedVarHighWater),
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = ValidationMessages.seedVarHighWaterBelowMax(hw.value, mx.value)
+          ErrorLocation.requestField(FieldName.SeedVarHighWater),
+          FieldProblem.SeedVarHighWaterBelowMax(hw, mx)
         ))
       case (Some(hw), _) => Validation.succeed(hw)
       case (None, Some(mx)) => Validation.succeed(mx)
@@ -213,9 +198,8 @@ object RiskTree {
         // Unreachable for valid trees (every path terminates at a leaf), but
         // total: a leafless node collection has no derivable watermark.
         Validation.fail(ValidationError(
-          location = ErrorLocation.requestField(FieldName.SeedVarHighWater),
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = ValidationMessages.seedVarHighWaterNotDerivable
+          ErrorLocation.requestField(FieldName.SeedVarHighWater),
+          FieldProblem.SeedVarHighWaterNotDerivable
         ))
     }
   }
@@ -238,7 +222,7 @@ object RiskTree {
       case Right(tree) => tree
       case Left(errors) =>
         throw new IllegalArgumentException(
-          s"RiskTree invariant violated: ${errors.map(_.message).mkString("; ")}"
+          s"RiskTree invariant violated: ${errors.map(ValidationError.describe).mkString("; ")}"
         )
     }
   }

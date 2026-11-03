@@ -5,7 +5,7 @@ import zio.test.*
 
 import sttp.tapir.SchemaType.SCoproduct
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, ValidationErrorCode}
 
 /** The submitted shape and its gate: one request case per mode, and `toShape`
   * refining each into the domain shape.
@@ -48,7 +48,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
   ): Boolean =
     val at = ErrorLocation.requestField(field)
     v match
-      case Validation.Failure(_, errs) => errs.exists(e => e.location == at && e.code == code)
+      case Validation.Failure(_, errs) => errs.exists(e => e.location == at && FieldProblem.code(e.problem) == code)
       case Validation.Success(_, _)    => false
 
   private def locationsOf(v: Validation[ValidationError, ?]): List[ErrorLocation] =
@@ -85,7 +85,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
           case Validation.Success(_, shape) =>
             assertTrue(shape.isInstanceOf[DistributionShape.Metalog])
           case Validation.Failure(_, errs)  =>
-            assertTrue(false).label(s"expected a shape, got ${errs.map(_.message).mkString("; ")}")
+            assertTrue(false).label(s"expected a shape, got ${errs.map(ValidationError.describe).mkString("; ")}")
       }
     ),
 
@@ -104,7 +104,7 @@ object DistributionShapeRequestSpec extends ZIOSpecDefault:
           case Validation.Success(_, shape) =>
             assertTrue(shape.isInstanceOf[DistributionShape.Lognormal])
           case Validation.Failure(_, errs)  =>
-            assertTrue(false).label(s"expected a shape, got ${errs.map(_.message).mkString("; ")}")
+            assertTrue(false).label(s"expected a shape, got ${errs.map(ValidationError.describe).mkString("; ")}")
       }
     ),
 

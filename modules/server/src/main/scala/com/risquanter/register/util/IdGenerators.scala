@@ -2,6 +2,7 @@ package com.risquanter.register.util
 
 import com.bilalfazlani.zioUlid.{ULIDGen, ULID}
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId, NodeId}
+import com.risquanter.register.domain.errors.ValidationError
 import zio.{Clock, Random, ZIO, ZLayer}
 
 
@@ -29,7 +30,7 @@ object IdGenerators {
     for {
       ulid <- ULIDGen.nextULID
       safe <- ZIO.fromEither(SafeId.fromString(ulid.toString)).mapError { errs =>
-        new RuntimeException(s"Generated ULID failed SafeId validation: ${errs.map(_.message).mkString("; ")}")
+        new RuntimeException(s"Generated ULID failed SafeId validation: ${errs.map(ValidationError.describe).mkString("; ")}")
       }
     } yield safe
 

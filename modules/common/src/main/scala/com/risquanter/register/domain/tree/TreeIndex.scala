@@ -2,7 +2,7 @@ package com.risquanter.register.domain.tree
 
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 import zio.prelude.Validation
 
 /**
@@ -195,7 +195,7 @@ object TreeIndex {
       case Right(index) => index
       case Left(errors) => 
         throw new IllegalArgumentException(
-          s"TreeIndex invariant violated: ${errors.map(_.message).mkString("; ")}"
+          s"TreeIndex invariant violated: ${errors.map(ValidationError.describe).mkString("; ")}"
         )
     }
   }
@@ -209,21 +209,15 @@ object TreeIndex {
   ): Validation[ValidationError, Unit] =
     nodes.get(childId) match {
       case Some(child) if !child.parentId.contains(parentId) =>
-        Validation.fail(
-          ValidationError(
-            location = ErrorLocation.nodeField(childId, FieldName.ParentId),
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node '${childId.value}' is listed as child of '${parentId.value}' but has parentId=${child.parentId.map(_.value).getOrElse("None")}"
-          )
-        )
+        Validation.fail(ValidationError(
+          ErrorLocation.nodeField(childId, FieldName.ParentId),
+          FieldProblem.ChildParentMismatch(childId, child.parentId)
+        ))
       case None =>
-        Validation.fail(
-          ValidationError(
-            location = ErrorLocation.nodeField(parentId, FieldName.ChildIds),
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Child '${childId.value}' referenced by '${parentId.value}' does not exist in nodes"
-          )
-        )
+        Validation.fail(ValidationError(
+          ErrorLocation.nodeField(parentId, FieldName.ChildIds),
+          FieldProblem.ChildNotFound(childId)
+        ))
       case _ => Validation.succeed(())
     }
 
@@ -234,29 +228,20 @@ object TreeIndex {
   ): Validation[ValidationError, Unit] =
     nodes.get(parentId) match {
       case Some(parent: RiskPortfolio) if !parent.childIds.contains(nodeId) =>
-        Validation.fail(
-          ValidationError(
-            location = ErrorLocation.nodeField(nodeId, FieldName.ParentId),
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't list it as child"
-          )
-        )
+        Validation.fail(ValidationError(
+          ErrorLocation.nodeField(nodeId, FieldName.ParentId),
+          FieldProblem.ParentDoesNotListChild(parentId)
+        ))
       case Some(_: RiskLeaf) =>
-        Validation.fail(
-          ValidationError(
-            location = ErrorLocation.nodeField(nodeId, FieldName.ParentId),
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but that node is a leaf, not a portfolio"
-          )
-        )
+        Validation.fail(ValidationError(
+          ErrorLocation.nodeField(nodeId, FieldName.ParentId),
+          FieldProblem.ParentIdIsLeaf(parentId)
+        ))
       case None =>
-        Validation.fail(
-          ValidationError(
-            location = ErrorLocation.nodeField(nodeId, FieldName.ParentId),
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't exist in nodes"
-          )
-        )
+        Validation.fail(ValidationError(
+          ErrorLocation.nodeField(nodeId, FieldName.ParentId),
+          FieldProblem.ParentIdNotFound(parentId)
+        ))
       case _ => Validation.succeed(())
     }
 

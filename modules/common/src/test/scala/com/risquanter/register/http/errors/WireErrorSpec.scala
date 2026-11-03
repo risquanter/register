@@ -59,8 +59,7 @@ object WireErrorSpec extends ZIOSpecDefault:
   // codec is declared for — there is deliberately no codec for the enum.
   private val fieldFailure = ValidationError(
     ErrorLocation.requestField(FieldName.Name),
-    ValidationErrorCode.REQUIRED_FIELD,
-    "Name is required"
+    FieldProblem.Required
   )
 
   private val requestRejected: WireError.RequestRejected =

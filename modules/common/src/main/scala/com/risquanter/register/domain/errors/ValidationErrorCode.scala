@@ -1,14 +1,11 @@
 package com.risquanter.register.domain.errors
 
-import zio.json.{JsonEncoder, JsonDecoder}
-
-/** Typed error codes for validation failures.
-  * 
-  * These codes are machine-readable and can be used by clients for:
-  * - Error categorization and filtering
-  * - Localization (map code → translated message)
-  * - Analytics and monitoring
-  * - Specific error handling logic
+/** The coarse classification of a refusal, for filtering and metrics.
+  *
+  * Not a wire type: a `ValidationError` carries a `FieldProblem`, which names
+  * the refusal exactly, and `FieldProblem.code` derives one of these from it.
+  * The cases `FieldProblem.code` never produces classify the merge, query,
+  * access and concurrency failures that are not field refusals.
   */
 enum ValidationErrorCode(val code: String, val description: String):
   case REQUIRED_FIELD extends ValidationErrorCode("REQUIRED_FIELD", "Required field is missing or empty")
@@ -53,13 +50,3 @@ enum ValidationErrorCode(val code: String, val description: String):
   case EVALUATION_FAILED extends ValidationErrorCode("EVALUATION_FAILED", "Query evaluation failed unexpectedly")
   case SIMULATION_REQUIRED extends ValidationErrorCode("SIMULATION_REQUIRED", "Simulation must be run before querying")
   case RESERVED_NAME extends ValidationErrorCode("RESERVED_NAME", "Node name collides with a reserved query symbol")
-
-object ValidationErrorCode:
-  given encoder: JsonEncoder[ValidationErrorCode] = 
-    JsonEncoder[String].contramap(_.code)
-  
-  given decoder: JsonDecoder[ValidationErrorCode] = 
-    JsonDecoder[String].mapOrFail { code =>
-      ValidationErrorCode.values.find(_.code == code)
-        .toRight(s"Unknown validation error code: $code")
-    }

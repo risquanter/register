@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.domain.data.{DistributionShape, RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
@@ -138,11 +138,15 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   private val treeNameErrorRaw: Signal[Option[ValidationError]] =
     treeNameLocated.map(_.refine(ValidationUtil.refineName).left.toOption.flatMap(_.headOption))
 
+  /** The tree-name check's sentence. */
+  private val treeNameMessage: Signal[Option[String]] =
+    treeNameErrorRaw.map(_.map(e => ValidationMessages.render(e.problem)))
+
   /** Display-controlled tree-name error (only shows after blur or submit trigger). */
-  val treeNameError: Signal[Option[String]] = withDisplayControl(TreeName, treeNameErrorRaw.map(_.map(_.message)))
+  val treeNameError: Signal[Option[String]] = withDisplayControl(TreeName, treeNameMessage)
 
   /** The raw checks behind `blockingReasons`: tree-name is the only builder-level field. */
-  override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw.map(_.map(_.message)))
+  override def errorSignals: List[Signal[Option[String]]] = List(treeNameMessage)
 
   /** The tree's topology problems, shown once Create has been clicked and
     * recomputed on every change to the tree's nodes. Empty when the tree is
@@ -153,7 +157,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case (false, _, _)                 => Nil
       case (true, portfolios, leaves) =>
         topologyOf(portfolios, leaves) match
-          case Validation.Failure(_, errors) => errors.toList.map(_.message)
+          case Validation.Failure(_, errors) => errors.toList.map(e => ValidationMessages.render(e.problem))
           case Validation.Success(_, _)      => Nil
     }
 

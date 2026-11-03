@@ -9,7 +9,7 @@ import com.raquo.airstream.ownership.ManualOwner
 import app.state.{DistributionMode, ParentSelection, PortfolioField, PortfolioFormState, RiskLeafField, RiskLeafFormState, SubmitRefusals, SummaryEntry}
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, RequestHeaderName, SubmittedCollection, ValidationError, ValidationErrorCode
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, RequestHeaderName, RequestQueryParam, SubmittedCollection, ValidationError
 }
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.http.requests.RiskTreeRequests
@@ -26,9 +26,22 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
   private def draft(field: FieldName): ErrorLocation =
     ErrorLocation.Field(ErrorSubject.DraftNode, field)
 
-  /** A submit refusal at `location`. The code is not what is under test. */
-  private def refusal(location: ErrorLocation, message: String): ValidationError =
-    ValidationError(location, ValidationErrorCode.INVALID_COMBINATION, message)
+  /** A submit refusal at `location`. The problem is not what is under test:
+    * each stands for one refusal and is chosen only so the sentences shown can
+    * be told apart. */
+  private def refusal(location: ErrorLocation, problem: FieldProblem): ValidationError =
+    ValidationError(location, problem)
+
+  private val twoRoots: FieldProblem        = FieldProblem.MultipleRoots
+  private val seedInUse: FieldProblem       = FieldProblem.SeedVarIdImmutable
+  private val rangeRefused: FieldProblem    = FieldProblem.QuantilesNotIncreasing
+  private val nameTaken: FieldProblem       = FieldProblem.StoredNodeListedTwice
+  private val nameReserved: FieldProblem    = FieldProblem.ScenarioNameReserved
+  private val fitRefused: FieldProblem      = FieldProblem.MetalogFitFailed
+  private val termsOutOfRange: FieldProblem = FieldProblem.TermsAboveAnchorCount
+
+  /** The sentence a form shows for a problem. */
+  private def sentence(problem: FieldProblem): String = ValidationMessages.render(problem)
 
   /** Observe a signal's current value under a throwaway owner. */
   private def current[A](signal: Signal[A]): A =
@@ -150,6 +163,13 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
       test("a header refusal has no target") {
         assertTrue(RiskLeafFormState.inputsFor(ErrorLocation.Header(RequestHeaderName.Branch)).isEmpty)
       },
+      test("a query parameter refusal has no target in either form") {
+        val at = ErrorLocation.QueryParameter(RequestQueryParam.At)
+        assertTrue(
+          RiskLeafFormState.inputsFor(at).isEmpty,
+          PortfolioFormState.inputsFor(at).isEmpty
+        )
+      },
       test("an existing node's field routes by field, not by subject") {
         val nodeId = NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get
         assertTrue(
@@ -207,26 +227,26 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.minLossVar.set("1000")
         state.maxLossVar.set("50000")
         state.triggerValidation()
-        state.setSubmitErrors(List(refusal(draft(FieldName.LossRange), "range refused")))
+        state.setSubmitErrors(List(refusal(draft(FieldName.LossRange), rangeRefused)))
         assertTrue(
-          current(state.minLossError) == List("range refused"),
-          current(state.maxLossError) == List("range refused"),
+          current(state.minLossError) == List(sentence(rangeRefused)),
+          current(state.maxLossError) == List(sentence(rangeRefused)),
           current(state.formLevelError).isEmpty
         )
       },
       test("a topology refusal is shown on the form's own line") {
         val state = new RiskLeafFormState
         state.triggerValidation()
-        state.setSubmitErrors(List(refusal(ErrorLocation.Whole, "two roots")))
-        assertTrue(current(state.formLevelError) == List("two roots"))
+        state.setSubmitErrors(List(refusal(ErrorLocation.Whole, twoRoots)))
+        assertTrue(current(state.formLevelError) == List(sentence(twoRoots)))
       },
       test("a refusal with no target is shown on the form's own line") {
         val state = new RiskLeafFormState
         state.triggerValidation()
-        state.setSubmitErrors(List(refusal(draft(FieldName.SeedVarId), "seed in use")))
+        state.setSubmitErrors(List(refusal(draft(FieldName.SeedVarId), seedInUse)))
         assertTrue(
-          current(state.unclaimed).map(_.message) == List("seed in use"),
-          current(state.formLevelError) == List("seed in use")
+          current(state.unclaimed).map(e => sentence(e.problem)) == List(sentence(seedInUse)),
+          current(state.formLevelError) == List(sentence(seedInUse))
         )
       },
       test("every refusal is kept: two naming one input, three on the form's line") {
@@ -234,32 +254,32 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.nameVar.set("Fraud")
         state.triggerValidation()
         state.setSubmitErrors(List(
-          refusal(draft(FieldName.Name), "name taken"),
-          refusal(draft(FieldName.Name), "name reserved"),
-          refusal(ErrorLocation.Whole, "two roots"),
-          refusal(draft(FieldName.DistributionType), "fit refused"),
-          refusal(draft(FieldName.SeedVarId), "seed in use")
+          refusal(draft(FieldName.Name), nameTaken),
+          refusal(draft(FieldName.Name), nameReserved),
+          refusal(ErrorLocation.Whole, twoRoots),
+          refusal(draft(FieldName.DistributionType), fitRefused),
+          refusal(draft(FieldName.SeedVarId), seedInUse)
         ))
         assertTrue(
-          current(state.nameError) == List("name taken", "name reserved"),
-          current(state.formLevelError) == List("two roots", "fit refused", "seed in use")
+          current(state.nameError) == List(sentence(nameTaken), sentence(nameReserved)),
+          current(state.formLevelError) == List(sentence(twoRoots), sentence(fitRefused), sentence(seedInUse))
         )
       },
       test("the form's own check is shown in place of a stored refusal") {
         val state = new RiskLeafFormState
         state.triggerValidation()
-        state.setSubmitErrors(List(refusal(draft(FieldName.Name), "name taken")))
+        state.setSubmitErrors(List(refusal(draft(FieldName.Name), nameTaken)))
         val shown = current(state.nameError)
         // The name is blank, so the form's own check refuses it.
-        assertTrue(shown.size == 1, !shown.contains("name taken"))
+        assertTrue(shown.size == 1, !shown.contains(sentence(nameTaken)))
       },
       test("a stored refusal is not shown until its input is touched or the form submitted") {
         val state = new RiskLeafFormState
         state.nameVar.set("Fraud")
-        state.setSubmitErrors(List(refusal(draft(FieldName.Name), "name taken")))
+        state.setSubmitErrors(List(refusal(draft(FieldName.Name), nameTaken)))
         val before = current(state.nameError)
         state.markTouched(RiskLeafField.Name)
-        assertTrue(before.isEmpty, current(state.nameError) == List("name taken"))
+        assertTrue(before.isEmpty, current(state.nameError) == List(sentence(nameTaken)))
       },
       test("an edit drops the refusals naming that input and keeps the rest") {
         val state = new RiskLeafFormState
@@ -269,15 +289,15 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.maxLossVar.set("50000")
         state.triggerValidation()
         state.setSubmitErrors(List(
-          refusal(draft(FieldName.Name), "name taken"),
-          refusal(draft(FieldName.LossRange), "range refused")
+          refusal(draft(FieldName.Name), nameTaken),
+          refusal(draft(FieldName.LossRange), rangeRefused)
         ))
         state.clearFor(RiskLeafField.Name)
         val afterName = (current(state.nameError), current(state.minLossError), current(state.maxLossError))
         // Editing either bound can satisfy the pair rule, so it drops from both.
         state.clearFor(RiskLeafField.MinLoss)
         assertTrue(
-          afterName == (Nil, List("range refused"), List("range refused")),
+          afterName == (Nil, List(sentence(rangeRefused)), List(sentence(rangeRefused))),
           current(state.minLossError).isEmpty,
           current(state.maxLossError).isEmpty
         )
@@ -289,17 +309,17 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.quantilesVar.set("1000, 5000, 25000")
         state.termsVar.set("3")
         state.triggerValidation()
-        state.setSubmitErrors(List(refusal(draft(FieldName.Terms), "terms out of range")))
+        state.setSubmitErrors(List(refusal(draft(FieldName.Terms), termsOutOfRange)))
         val before = current(state.termsError)
         state.clearFor(RiskLeafField.Terms)
-        assertTrue(before == List("terms out of range"), current(state.termsError).isEmpty)
+        assertTrue(before == List(sentence(termsOutOfRange)), current(state.termsError).isEmpty)
       },
       test("an edit of any input drops the form's own line") {
         val state = new RiskLeafFormState
         state.triggerValidation()
         state.setSubmitErrors(List(
-          refusal(ErrorLocation.Whole, "two roots"),
-          refusal(draft(FieldName.SeedVarId), "seed in use")
+          refusal(ErrorLocation.Whole, twoRoots),
+          refusal(draft(FieldName.SeedVarId), seedInUse)
         ))
         state.clearFor(RiskLeafField.Probability)
         assertTrue(current(state.formLevelError).isEmpty)
@@ -307,10 +327,10 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
       test("the portfolio form shows its topology refusal on its own line and drops it on an edit") {
         val form = new PortfolioFormState
         form.triggerValidation()
-        form.setSubmitErrors(List(refusal(ErrorLocation.Whole, "two roots")))
+        form.setSubmitErrors(List(refusal(ErrorLocation.Whole, twoRoots)))
         val before = current(form.formLevelError)
         form.clearFor(PortfolioField.Parent)
-        assertTrue(before == List("two roots"), current(form.formLevelError).isEmpty)
+        assertTrue(before == List(sentence(twoRoots)), current(form.formLevelError).isEmpty)
       }
     ),
 
@@ -354,22 +374,42 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
 
     suite("the summary list")(
       test("lists a pair refusal once, under the first of its inputs") {
+        val pair    = refusal(draft(FieldName.LossRange), rangeRefused)
         val summary = SubmitRefusals.summaryOf(
-          List(RiskLeafField.MinLoss -> List("min under max"), RiskLeafField.MaxLoss -> List("min under max")),
+          List(RiskLeafField.MinLoss -> List(pair), RiskLeafField.MaxLoss -> List(pair)),
           Nil
         )
-        assertTrue(summary == List(SummaryEntry(Some(RiskLeafField.MinLoss), "min under max")))
+        assertTrue(summary == List(SummaryEntry(Some(RiskLeafField.MinLoss), sentence(rangeRefused))))
+      },
+      test("lists two inputs' refusals both, even when their sentences read the same") {
+        val summary = SubmitRefusals.summaryOf(
+          List(
+            RiskLeafField.Name        -> List(refusal(draft(FieldName.Name), FieldProblem.Required)),
+            RiskLeafField.Probability -> List(refusal(draft(FieldName.Probability), FieldProblem.Required))
+          ),
+          Nil
+        )
+        assertTrue(summary == List(
+          SummaryEntry(Some(RiskLeafField.Name), sentence(FieldProblem.Required)),
+          SummaryEntry(Some(RiskLeafField.Probability), sentence(FieldProblem.Required))
+        ))
       },
       test("keeps the inputs' order and puts the form's own line last") {
         val summary = SubmitRefusals.summaryOf(
-          List(RiskLeafField.Name -> List("name taken"), RiskLeafField.Probability -> List("too high", "not a number")),
-          List("two roots")
+          List(
+            RiskLeafField.Name        -> List(refusal(draft(FieldName.Name), nameTaken)),
+            RiskLeafField.Probability -> List(
+              refusal(draft(FieldName.Probability), fitRefused),
+              refusal(draft(FieldName.Probability), termsOutOfRange)
+            )
+          ),
+          List(refusal(ErrorLocation.Whole, twoRoots))
         )
         assertTrue(summary == List(
-          SummaryEntry(Some(RiskLeafField.Name), "name taken"),
-          SummaryEntry(Some(RiskLeafField.Probability), "too high"),
-          SummaryEntry(Some(RiskLeafField.Probability), "not a number"),
-          SummaryEntry(None, "two roots")
+          SummaryEntry(Some(RiskLeafField.Name), sentence(nameTaken)),
+          SummaryEntry(Some(RiskLeafField.Probability), sentence(fitRefused)),
+          SummaryEntry(Some(RiskLeafField.Probability), sentence(termsOutOfRange)),
+          SummaryEntry(None, sentence(twoRoots))
         ))
       },
       test("a leaf form's summary is empty before a submit") {
@@ -383,23 +423,22 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.maxLossVar.set("50000")
         state.triggerValidation()
         state.setSubmitErrors(List(
-          refusal(draft(FieldName.LossRange), "range refused"),
-          refusal(ErrorLocation.Whole, "two roots")
+          refusal(draft(FieldName.LossRange), rangeRefused),
+          refusal(ErrorLocation.Whole, twoRoots)
         ))
         val expected =
           current(state.nameError).map(SummaryEntry(Some(RiskLeafField.Name), _)) ++
           current(state.probabilityError).map(SummaryEntry(Some(RiskLeafField.Probability), _)) ++
           List(
-            SummaryEntry(Some(RiskLeafField.MinLoss), "range refused"),
-            SummaryEntry(None, "two roots")
+            SummaryEntry(Some(RiskLeafField.MinLoss), sentence(rangeRefused)),
+            SummaryEntry(None, sentence(twoRoots))
           )
         assertTrue(current(state.summary) == expected, current(state.nameError).nonEmpty)
       },
       test("a blocked submit lists its reasons in the order the inputs appear") {
         val state = new RiskLeafFormState
         assertTrue(
-          current(state.blockingReasons).take(3) ==
-            List(ValidationMessages.nameRequired, ValidationMessages.probabilityRequired, ValidationMessages.parentRequired)
+          current(state.blockingReasons).take(3) == List.fill(3)(sentence(FieldProblem.Required))
         )
       }
     ),
@@ -410,7 +449,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         form.nameVar.set("Operations")
         form.parentVar.set(ParentSelection.Unset)
         assertTrue(
-          current(form.blockingReasons) == List(ValidationMessages.parentRequired),
+          current(form.blockingReasons) == List(sentence(FieldProblem.Required)),
           current(form.parentError).isEmpty
         )
       },

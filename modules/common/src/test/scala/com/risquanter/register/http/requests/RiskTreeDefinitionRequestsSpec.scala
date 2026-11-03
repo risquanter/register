@@ -5,8 +5,8 @@ import zio.prelude.Validation
 import com.risquanter.register.testutil.TestHelpers.{lognormalShape, safeId, unsafeGet}
 import com.risquanter.register.http.requests.RiskTreeRequests.*
 import com.risquanter.register.domain.data.{DistributionShape, RiskLeaf, RiskNode, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{NodeId, SafeId}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{NodeId, SafeId, ValidationMessages}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.tree.TreeIndex
 
 object RiskTreeRequestsSpec extends ZIOSpecDefault {
@@ -15,7 +15,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
   private def assertFailsWith(result: Validation[ValidationError, ?])(substrings: String*) =
     result match
       case Validation.Failure(_, errors) =>
-        val messages = errors.map(_.message)
+        val messages = errors.map(e => ValidationMessages.render(e.problem))
         substrings.map(sub => assertTrue(messages.exists(_.contains(sub)))).reduce(_ && _)
       case Validation.Success(_, _) =>
         assertTrue(false).label(s"expected failure containing: ${substrings.mkString(", ")}")
@@ -116,7 +116,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             bounds == Some((1000L, 5000L))
           )
         case Validation.Failure(_, errors) =>
-          assertTrue(false).label(s"resolveCreate should succeed but failed: ${errors.map(_.message).mkString(", ")}")
+          assertTrue(false).label(s"resolveCreate should succeed but failed: ${errors.map(ValidationError.describe).mkString(", ")}")
       }
     },
 
@@ -347,7 +347,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             resolved.providedSeedVarIds.map { case (n, s) => n.value -> s.value } == Map("L1" -> 7L)
           )
         case Validation.Failure(_, errors) =>
-          assertTrue(false).label(errors.map(_.message).mkString("; "))
+          assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
     },
 
     test("resolveCreate rejects an out-of-range provided seedVarId") {
@@ -417,7 +417,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             resolved.providedSeedVarIds.map { case (n, s) => n.value -> s.value } == Map("Leaf2" -> 9L)
           )
         case Validation.Failure(_, errors) =>
-          assertTrue(false).label(errors.map(_.message).mkString("; "))
+          assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
     },
 
     test("resolveUpdate rejects duplicate provided seedVarIds among new leaves") {
@@ -458,7 +458,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             leafNode.exists(_.id.value.toString == childIdStr)
           )
         case Validation.Failure(_, errors) =>
-          assertTrue(false).label(errors.map(_.message).mkString("; "))
+          assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
     },
 
     // ── an update names only the stored tree's nodes ──
@@ -474,7 +474,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       )
       val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
       assertTrue(errors.exists(e =>
-        e.code == ValidationErrorCode.MISSING_REFERENCE &&
+        FieldProblem.code(e.problem) == ValidationErrorCode.MISSING_REFERENCE &&
           e.location == ErrorLocation.Field(ErrorSubject.ExistingNode(nodeIdOf(unknown)), FieldName.Id)
       ))
     },
@@ -500,9 +500,9 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val atChildId = ErrorLocation.Field(ErrorSubject.ExistingNode(nodeIdOf(childIdStr)), FieldName.Id)
       assertTrue(
         errorsOf(resolveUpdate(leafAsPortfolio, stored(NodeKind.Leaf), () => safeId("generated")))
-          .exists(e => e.code == ValidationErrorCode.INVALID_NODE_TYPE && e.location == atChildId),
+          .exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE && e.location == atChildId),
         errorsOf(resolveUpdate(portfolioAsLeaf, stored(NodeKind.Portfolio), () => safeId("generated")))
-          .exists(e => e.code == ValidationErrorCode.INVALID_NODE_TYPE && e.location == atChildId)
+          .exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE && e.location == atChildId)
       )
     },
 
@@ -516,7 +516,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       )
       val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Portfolio), () => safeId("generated")))
       assertTrue(
-        errors.exists(_.code == ValidationErrorCode.INVALID_NODE_TYPE),
+        errors.exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE),
         errors.exists(_.location match
           case ErrorLocation.Field(_, FieldName.Probability) => true
           case _                                            => false)
@@ -533,8 +533,10 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       )
       val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
       assertTrue(
-        errors.count(_.code == ValidationErrorCode.INVALID_FORMAT) == 1,
-        !errors.exists(e => e.code == ValidationErrorCode.MISSING_REFERENCE || e.code == ValidationErrorCode.INVALID_NODE_TYPE)
+        errors.count(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_FORMAT) == 1,
+        !errors.exists(e =>
+          FieldProblem.code(e.problem) == ValidationErrorCode.MISSING_REFERENCE ||
+            FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE)
       )
     },
 
@@ -552,7 +554,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
       val atChildId = ErrorLocation.Field(ErrorSubject.ExistingNode(nodeIdOf(childIdStr)), FieldName.Id)
       assertTrue(
-        errors.count(e => e.code == ValidationErrorCode.DUPLICATE_VALUE && e.location == atChildId) == 1
+        errors.count(e => FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE && e.location == atChildId) == 1
       )
     }
   )

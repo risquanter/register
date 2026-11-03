@@ -7,8 +7,8 @@ import io.getquill.jdbczio.Quill
 
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, RepositoryFailure, ValidationFailed, ValidationError, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.QuillMappings.given
 import com.risquanter.register.util.IdGenerators
 
@@ -78,10 +78,8 @@ final class WorkspaceStorePostgres private (
                ).unit.catchAll {
                  case RepositoryFailure(reason) if reason.contains("seed_entity_id") =>
                    ZIO.fail(ValidationFailed(List(ValidationError(
-                     location = ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
-                     code = ValidationErrorCode.DUPLICATE_VALUE,
-                     message = ValidationMessages.seedEntityIdInUse(entityId.value)
-                   ))))
+                     ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
+                     FieldProblem.SeedEntityIdInUse(entityId)))))
                  case other => ZIO.die(asDefect(other))
                } *> bumpSeedEntitySequence(entityId.value).orDieWith(asDefect)
       _ <- logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created")
@@ -252,7 +250,7 @@ final class WorkspaceStorePostgres private (
       ttl         <- parseInterval(row.ttl)
       idleTimeout <- parseInterval(row.idleTimeout)
       entityId    <- ZIO.fromEither(SeedEntityId.fromLong(row.seedEntityId)).mapError(errs =>
-                       RepositoryFailure(s"Corrupt seed_entity_id ${row.seedEntityId}: ${errs.map(_.message).mkString("; ")}")
+                       RepositoryFailure(s"Corrupt seed_entity_id ${row.seedEntityId}: ${errs.map(ValidationError.describe).mkString("; ")}")
                      )
     yield WorkspaceRecord(
       id = row.id,

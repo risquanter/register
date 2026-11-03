@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, jsonDiscriminator}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron.{MetalogTermCount, PositiveLong, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
 
 /**
  * All inputs needed to reproduce one leaf's simulation: HDR seed hierarchy, distribution
@@ -70,7 +70,7 @@ object DistributionParams {
       Raw.rawCodec.decoder.mapOrFail { raw =>
         ValidationUtil.refineMetalogTermCount(raw.terms, ErrorLocation.requestField(FieldName.Terms))
           .map(t => Metalog(raw.percentiles, raw.quantiles, t))
-          .left.map(_.map(_.message).mkString("; "))
+          .left.map(_.map(ValidationError.describe).mkString("; "))
       }
     )
   }
@@ -85,9 +85,9 @@ object DistributionParams {
         (ValidationUtil.refinePositiveLong(raw.minLoss, ErrorLocation.requestField(FieldName.MinLoss)),
          ValidationUtil.refinePositiveLong(raw.maxLoss, ErrorLocation.requestField(FieldName.MaxLoss))) match {
           case (Right(min), Right(max)) => Right(Lognormal(min, max, raw.confidenceInterval))
-          case (Left(e1), Left(e2))     => Left((e1 ++ e2).map(_.message).mkString("; "))
-          case (Left(e), _)             => Left(e.map(_.message).mkString("; "))
-          case (_, Left(e))             => Left(e.map(_.message).mkString("; "))
+          case (Left(e1), Left(e2))     => Left((e1 ++ e2).map(ValidationError.describe).mkString("; "))
+          case (Left(e), _)             => Left(e.map(ValidationError.describe).mkString("; "))
+          case (_, Left(e))             => Left(e.map(ValidationError.describe).mkString("; "))
         }
       }
     )

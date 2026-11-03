@@ -6,7 +6,7 @@ import zio.json.{DecoderOps, EncoderOps}
 
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, ValidationErrorCode
 }
 
 /** Every construction rule the shape coproduct holds, asserted at the layer that
@@ -30,10 +30,10 @@ object DistributionShapeSpec extends ZIOSpecDefault:
     val at = ErrorLocation.Field(ErrorSubject.Request, field)
     v match
       case Validation.Failure(_, errs) =>
-        val matches = errs.exists(e => e.location == at && e.code == code)
+        val matches = errs.exists(e => e.location == at && FieldProblem.code(e.problem) == code)
         assertTrue(matches).label(
           s"Expected FAILURE with code $code at $at, got: " +
-            errs.map(e => s"${ErrorLocation.describe(e.location)}/${e.code}").mkString(", ")
+            errs.map(e => s"${ErrorLocation.describe(e.location)}/${FieldProblem.code(e.problem)}").mkString(", ")
         )
       case Validation.Success(_, _) =>
         assertTrue(false).label(s"Expected failure at $at with code $code but got Success")
@@ -363,7 +363,7 @@ object DistributionShapeSpec extends ZIOSpecDefault:
       test("a malformed metalog JSON object reports the metalog gate's own complaint, not the lognormal one") {
         val json = """{"distributionType":"Metalog","percentiles":[0.9,0.1],"quantiles":[1000.0,5000.0]}"""
         val message = json.fromJson[DistributionShape].swap.toOption.getOrElse("")
-        assertTrue(message.contains(ValidationMessages.percentilesMustBeStrictlyIncreasing))
+        assertTrue(message.contains(ValidationMessages.render(FieldProblem.PercentilesNotIncreasing)))
       },
 
       test("a metalog JSON object is refused when it carries only the lognormal fields") {

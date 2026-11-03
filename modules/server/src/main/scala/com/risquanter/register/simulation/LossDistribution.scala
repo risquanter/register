@@ -5,8 +5,8 @@ import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.{Loss, MitigationApplicationRecord, NodeProvenance, TrialId}
-import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 
 /** LEC functional interface: the mapping from loss threshold to exceedance probability. */
 trait LECCurve {
@@ -95,9 +95,9 @@ final case class LossDistribution private (
 object LossDistribution {
 
   /** Apply this node's result-stage layer to `source`. An empty layer passes `source` twice
-    * (reference equality, no rebuild). Two failures are converted to
-    * `CONSTRAINT_VIOLATION`: layer overflow (ADR-033 §3), and a layer that leaves no loss
-    * where the node had one, which no mitigation may assert (ADR-034 §6). */
+    * (reference equality, no rebuild). Two failures are converted to refusals:
+    * layer overflow (ADR-033 §3), and a layer that leaves no loss where the node
+    * had one, which no mitigation may assert (ADR-034 §6). */
   def decorate(
     nodeId: NodeId,
     source: TrialOutcomes,
@@ -128,18 +128,10 @@ object LossDistribution {
     results.iterator.flatMap { case (id, d) => d.provenance.map(id -> _) }.toMap
 
   private def layerOverflow(nodeId: NodeId): ValidationError =
-    ValidationError(
-      location = ErrorLocation.nodeField(nodeId, FieldName.MitigatedResult),
-      code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message  = ValidationMessages.aggregatedLossOverflow
-    )
+    ValidationError(ErrorLocation.nodeField(nodeId, FieldName.MitigatedResult), FieldProblem.AggregatedLossOverflow)
 
   private def layerEliminatesRisk(nodeId: NodeId): ValidationError =
-    ValidationError(
-      location = ErrorLocation.nodeField(nodeId, FieldName.MitigatedResult),
-      code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message  = ValidationMessages.mitigationEliminatesRisk
-    )
+    ValidationError(ErrorLocation.nodeField(nodeId, FieldName.MitigatedResult), FieldProblem.MitigationEliminatesRisk)
 
   /** Structural equality over every field; two readings differing only in timestamp are not equal. */
   given Equal[LossDistribution] = Equal.default

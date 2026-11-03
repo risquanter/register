@@ -3,7 +3,6 @@ package com.risquanter.register.repositories.model
 import java.time.Instant
 import zio.json.*
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, SafeName, SeedVarId}
-import com.risquanter.register.domain.data.RiskTree.{safeNameDecoder, safeNameEncoder}
 import com.risquanter.register.http.responses.TreeMetadataFields
 
 /** Metadata persisted for each risk tree under risk-trees/{treeId}/meta. */

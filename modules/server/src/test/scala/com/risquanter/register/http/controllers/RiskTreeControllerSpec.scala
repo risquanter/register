@@ -10,7 +10,7 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPor
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.* // For .assert extension method
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationErrorCode, ValueRange}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.testutil.TestHelpers.{safeId}
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
@@ -156,7 +156,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
           case ValidationFailed(errors) =>
             errors.exists(e =>
               e.location == ErrorLocation.requestField(FieldName.Name) &&
-              e.code == ValidationErrorCode.DUPLICATE_VALUE
+              FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE
             )
           case _ => false
         }.provide(serviceLayer)
@@ -223,23 +223,20 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         )
       },
 
-      test("NonNegativeLong codec refusal messages are descriptive and omit the value") {
+      test("NonNegativeLong codec refusal carries the range problem and omits the value") {
         import sttp.tapir.*
-        import com.risquanter.register.http.codecs.IronTapirCodecs.given
+        import com.risquanter.register.http.codecs.IronTapirCodecs
+        import IronTapirCodecs.given
 
         val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
 
-        val messages = codec.decode("-987654321") match
+        val carried = codec.decode("-987654321") match
           case DecodeResult.InvalidValue(errors) => errors.flatMap(_.customMessage)
           case _                                 => Nil
 
         assertTrue(
-          messages.nonEmpty,
-          messages.exists { m =>
-            val lower = m.toLowerCase
-            lower.contains("non-negative") || lower.contains(">= 0") || lower.contains("greater") || lower.contains("zero")
-          },
-          !messages.exists(_.contains("987654321"))
+          carried.flatMap(IronTapirCodecs.problemIn) == List(FieldProblem.OutOfRange(ValueRange.NonNegative)),
+          !carried.exists(_.contains("987654321"))
         )
       }
     )

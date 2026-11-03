@@ -8,7 +8,7 @@ import java.time.Duration
 
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId, SeedEntityId}
-import com.risquanter.register.domain.errors.{TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{FieldProblem, TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
@@ -260,7 +260,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         _     <- store.create(Some(id))
         exit  <- store.create(Some(id)).exit
       yield assert(exit)(fails(isSubtype[ValidationFailed](
-        hasField("errors", _.errors.map(_.code), contains(ValidationErrorCode.DUPLICATE_VALUE))
+        hasField("errors", _.errors.map(e => FieldProblem.code(e.problem)), contains(ValidationErrorCode.DUPLICATE_VALUE))
       )))
     },
 

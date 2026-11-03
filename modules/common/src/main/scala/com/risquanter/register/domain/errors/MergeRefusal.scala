@@ -3,7 +3,6 @@ package com.risquanter.register.domain.errors
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
-import com.risquanter.register.domain.data.RiskTree.{safeNameEncoder, safeNameDecoder}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId}
 import com.risquanter.register.http.responses.MergeConflictEntry
 

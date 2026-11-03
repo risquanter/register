@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash}
-import com.risquanter.register.domain.errors.{AppError, DataConflict, ErrorLocation, FieldName, ScenarioHeadStale, ValidationFailed, ValidationError, ValidationErrorCode, BranchAlreadyExists, BranchHeadStale}
+import com.risquanter.register.domain.errors.{AppError, DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, ValidationError, BranchAlreadyExists, BranchHeadStale}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminBranch
 
@@ -62,10 +62,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
           case Some(IrminBranch(_, Some(commit))) => refineCommitHash(commit.hash)
           case _ =>
             ZIO.fail(ValidationFailed(List(ValidationError(
-              location = ErrorLocation.requestField(FieldName.Source),
-              code = ValidationErrorCode.NOT_FOUND,
-              message = "Workspace has no content yet — nothing to fork a scenario from"
-            ))))
+              ErrorLocation.requestField(FieldName.Source), FieldProblem.WorkspaceHasNoContent))))
         }
       case ScenarioSource.ForkOf(scenario) =>
         for
@@ -75,10 +72,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                            case Some(commit) => refineCommitHash(commit.hash)
                            case None =>
                              ZIO.fail(ValidationFailed(List(ValidationError(
-                               location = ErrorLocation.requestField(FieldName.Source),
-                               code = ValidationErrorCode.NOT_FOUND,
-                               message = s"Scenario not found: ${scenario.value}"
-                             ))))
+                               ErrorLocation.requestField(FieldName.Source), FieldProblem.ScenarioNotFound(scenario)))))
         yield head
       case ScenarioSource.AtCommit(commit) =>
         // Fork-from-history: the commit must be in this workspace's own
@@ -88,10 +82,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
           case true => ZIO.succeed(commit)
           case false =>
             ZIO.fail(ValidationFailed(List(ValidationError(
-              location = ErrorLocation.requestField(FieldName.Source),
-              code = ValidationErrorCode.NOT_FOUND,
-              message = s"Commit not found: ${commit.value}"
-            ))))
+              ErrorLocation.requestField(FieldName.Source), FieldProblem.CommitNotFound(commit)))))
         }
 
   /** Whether the commit lies in the history this workspace may fork from: the

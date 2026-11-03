@@ -5,7 +5,7 @@ import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Dis
 import com.risquanter.register.domain.data.{
   TrialId, Loss, RiskLeaf, NodeProvenance, DistributionShape, DistributionParams
 }
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationFailed, ValidationError}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.simulation.LognormalHelper
@@ -118,15 +118,14 @@ object Simulator {
     } yield (sampler, provenance)
   }
   
-  /** A refused fit, split by where each part goes. `clientMessage` is the
-    * sentence the caller can act on, and `diagnostic` is the fitting library's
-    * own text, which names a third-party class and carries whatever it threw,
-    * so it is logged and never sent (ADR-035).
+  /** A refused fit, split by where each part goes. `problem` is what the caller
+    * is told, and `diagnostic` is the fitting library's own text, which names a
+    * third-party class and carries whatever it threw, so it is logged and never
+    * sent (ADR-035).
     */
   private final case class FitRefusal(
-    code:          ValidationErrorCode,
-    clientMessage: String,
-    diagnostic:    String
+    problem:    FieldProblem,
+    diagnostic: String
   )
 
   /**
@@ -155,8 +154,8 @@ object Simulator {
     // A fit refusal is about the parameters of one mode, and the remedy differs
     // by mode: an infeasible metalog system is answered by moving an anchor or
     // lowering the term count, and a lognormal by moving a bound. So each arm
-    // carries its own code and its own sentence, and a caller is told which
-    // mode's parameters to look at rather than only that fitting failed.
+    // carries its own problem, and a caller is told which mode's parameters to
+    // look at rather than only that fitting failed.
     val fitted: Either[FitRefusal, Distribution] = params match {
       case DistributionParams.Metalog(percentiles, quantiles, terms) =>
         MetalogDistribution
@@ -170,8 +169,7 @@ object Simulator {
             lower = Some(0.0) // Loss cannot be negative
           )
           .left.map(error => FitRefusal(
-            ValidationErrorCode.INVALID_METALOG_PARAMS,
-            ValidationMessages.metalogFitFailed,
+            FieldProblem.MetalogFitFailed,
             s"Failed to fit Metalog: ${error.message}"
           ))
 
@@ -179,8 +177,7 @@ object Simulator {
         LognormalHelper
           .fromLognormal90CI(minLoss, maxLoss)
           .left.map(error => FitRefusal(
-            ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
-            ValidationMessages.lognormalFitFailed,
+            FieldProblem.LognormalFitFailed,
             s"Failed to create lognormal: ${error.message}"
           ))
     }
@@ -188,19 +185,15 @@ object Simulator {
     ZIO
       .fromEither(fitted.map(distribution => (distribution, params)))
       // The diagnosis is written here because the failure cannot carry it: a
-      // `ValidationFailed` derives its log text from the same messages it sends
-      // to the client, so a reason put there would cross. At ordinary-traffic
-      // level, because a refused fit is a caller's input being correctly
-      // declined rather than an operational signal (ADR-002).
+      // `ValidationFailed` carries only closed cases, which cross to the client,
+      // so a reason put there would cross. At ordinary-traffic level, because a
+      // refused fit is a caller's input being correctly declined rather than an
+      // operational signal (ADR-002).
       .tapError(refusal =>
         ZIO.logInfo(s"Distribution fit refused for leaf ${leaf.id.value}: ${refusal.diagnostic}")
       )
       .mapError(refusal =>
-        ValidationFailed(List(ValidationError(
-          location = at(FieldName.DistributionType),
-          code = refusal.code,
-          message = refusal.clientMessage
-        )))
+        ValidationFailed(List(ValidationError(at(FieldName.DistributionType), refusal.problem)))
       )
   }
 }

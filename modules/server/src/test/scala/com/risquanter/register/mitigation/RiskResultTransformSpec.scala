@@ -7,7 +7,7 @@ import com.risquanter.register.domain.data.{
   MitigationApplicationRecord, MitigationPrecedence, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveInt, PositiveLong, RetentionFactor, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationErrorCode}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage, retentionFactor}
 
@@ -283,7 +283,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         result.toEither match {
           case Left(errors) =>
             assertTrue(
-              errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+              FieldProblem.code(errors.head.problem) == ValidationErrorCode.CONSTRAINT_VIOLATION,
               errors.head.location == ErrorLocation.nodeField(id, FieldName.MitigatedResult)
             )
           case Right(_) => assertTrue(false)

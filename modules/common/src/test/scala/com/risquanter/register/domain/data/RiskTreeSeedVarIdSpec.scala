@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
 
 /** Defense-in-depth layer for seed identity:
@@ -47,9 +47,11 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       val errs = result.toEither.swap.toOption.get
       assertTrue(
         errs.exists(e =>
-          e.code == ValidationErrorCode.DUPLICATE_VALUE &&
           e.location == ErrorLocation.Whole &&
-          e.message == ValidationMessages.seedVarIdInUse(5L, Seq("Cyber Attack", "Flood Risk"))
+          (e.problem match
+            case FieldProblem.SeedVarIdInUse(id, holders) =>
+              id.value == 5L && holders.map(_.value.toString) == List("Cyber Attack", "Flood Risk")
+            case _ => false)
         )
       )
     },
@@ -102,9 +104,11 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val errs = result.toEither.swap.toOption.get
         assertTrue(
           errs.exists(e =>
-            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION &&
             e.location == ErrorLocation.requestField(FieldName.SeedVarHighWater) &&
-            e.message.contains("below the highest assigned seedVarId 5")
+            (e.problem match
+              case FieldProblem.SeedVarHighWaterBelowMax(highWater, maxAssigned) =>
+                highWater.value == 3L && maxAssigned.value == 5L
+              case _ => false)
           )
         )
       },

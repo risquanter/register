@@ -12,7 +12,7 @@ import zio.*
 
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl}
-import com.risquanter.register.domain.errors.ErrorLocation
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /**
  * Starts the repo's docker-compose (authz profile) via local docker compose CLI and
@@ -74,12 +74,12 @@ object SpiceDbCompose:
           url   <- ZIO.fromEither(
                      MeshServiceUrl
                        .fromString(res.baseUrl)
-                       .left.map(errs => new RuntimeException(errs.map(_.message).mkString("; ")))
+                       .left.map(errs => new RuntimeException(errs.map(ValidationError.describe).mkString("; ")))
                    )
           token <- ZIO.fromEither(
                      SpiceDbToken
                        .fromString(res.token, ErrorLocation.Whole)
-                       .left.map(errs => new RuntimeException(errs.map(_.message).mkString("; ")))
+                       .left.map(errs => new RuntimeException(errs.map(ValidationError.describe).mkString("; ")))
                    )
         yield SpiceDbConfig(
           url            = url,

@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
@@ -41,10 +41,7 @@ class RiskTreeServiceLive private (
       case Some(loaded) => ZIO.succeed(loaded)
       case None =>
         ZIO.fail(ValidationFailed(List(ValidationError(
-          location = ErrorLocation.requestField(FieldName.TreeId),
-          code = ValidationErrorCode.NOT_FOUND,
-          message = s"Tree not found: ${treeId.value}"
-        ))))
+          ErrorLocation.requestField(FieldName.TreeId), FieldProblem.TreeNotFound(treeId)))))
     }
 
   /** Fetch tree, its resolved commit, and the node together, or fail with
@@ -53,10 +50,7 @@ class RiskTreeServiceLive private (
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
-        location = ErrorLocation.nodeField(nodeId, FieldName.Id),
-        code = ValidationErrorCode.NOT_FOUND,
-        message = "Node not found in tree"
-      ))))
+        ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotFound))))
     yield (tree, commit, node)
 
   /** Fetch tree and all requested nodes. With `omitAbsent = false` (the
@@ -67,11 +61,8 @@ class RiskTreeServiceLive private (
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
-      _ <- if missing.isEmpty || omitAbsent then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
-        location = ErrorLocation.nodeField(id, FieldName.Id),
-        code = ValidationErrorCode.NOT_FOUND,
-        message = "Node not found in tree"
-      ))))
+      _ <- if missing.isEmpty || omitAbsent then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id =>
+        ValidationError(ErrorLocation.nodeField(id, FieldName.Id), FieldProblem.NodeNotFound))))
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, commit, nodes)
 
@@ -81,18 +72,10 @@ class RiskTreeServiceLive private (
 
       val errors = List(
         Option.when(candidates.exists(_.id == treeId))(
-          ValidationError(
-            location = ErrorLocation.requestField(FieldName.Id),
-            code = ValidationErrorCode.DUPLICATE_VALUE,
-            message = s"Tree ID '${treeId.value}' already exists"
-          )
+          ValidationError(ErrorLocation.requestField(FieldName.Id), FieldProblem.TreeIdAlreadyExists(treeId))
         ),
         Option.when(candidates.exists(_.name == treeName))(
-          ValidationError(
-            location = ErrorLocation.requestField(FieldName.Name),
-            code = ValidationErrorCode.DUPLICATE_VALUE,
-            message = s"Tree name '${treeName.value}' already exists"
-          )
+          ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.TreeNameAlreadyExists(treeName))
         )
       ).flatten
 
@@ -164,11 +147,11 @@ class RiskTreeServiceLive private (
     case ValidationFailed(errors) =>
       // Use first error for primary context (could extend to aggregate all)
       val primaryError = errors.headOption.getOrElse(
-        ValidationError(ErrorLocation.Whole, ValidationErrorCode.INTERNAL_ERROR, "Unknown validation error")
+        ValidationError(ErrorLocation.Whole, FieldProblem.Unspecified)
       )
       ErrorContext(
         errorType = "ValidationFailed",
-        errorCode = primaryError.code.code,
+        errorCode = FieldProblem.code(primaryError.problem).code,
         errorField = Some(ErrorLocation.describe(primaryError.location))
       )
     
@@ -306,7 +289,7 @@ class RiskTreeServiceLive private (
       case Right(choice) => ZIO.succeed(choice)
       case Left(errors)  => ZIO.die(new IllegalStateException(
         s"branch ${branch.toBranchRef} is not a branch of workspace ${wsId.value}: " +
-        errors.map(_.message).mkString("; ")))
+        errors.map(ValidationError.describe).mkString("; ")))
 
   // Config CRUD - only persist, no execution
   override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
@@ -470,10 +453,7 @@ class RiskTreeServiceLive private (
         // Validate inputs and fetch requested tree + nodes
         treeWithNodes <- if (nodeIds.isEmpty) {
           ZIO.fail(ValidationFailed(List(ValidationError(
-            location = ErrorLocation.requestField(FieldName.Nodes),
-            code = ValidationErrorCode.EMPTY_COLLECTION,
-            message = "nodeIds set is empty"
-          ))))
+            ErrorLocation.requestField(FieldName.Nodes), FieldProblem.NodeIdsEmpty))))
         } else {
           lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
         }

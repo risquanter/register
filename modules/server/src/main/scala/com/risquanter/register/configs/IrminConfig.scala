@@ -5,7 +5,7 @@ import zio.config.magnolia.DeriveConfig
 import java.time.Duration
 import com.risquanter.register.domain.data.iron.{BranchRef, Url}
 import com.risquanter.register.domain.data.iron.Url.*
-import com.risquanter.register.domain.errors.ErrorLocation
+import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
 /**
   * Configuration for Irmin GraphQL client.
@@ -51,7 +51,7 @@ object IrminConfig {
       Url
         .fromString(s, configLocation)
         .left
-        .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
+        .map(errs => zio.Config.Error.InvalidData(message = errs.map(ValidationError.describe).mkString("; ")))
     }
 
   private val branchRefConfig: zio.Config[BranchRef] =
@@ -59,7 +59,7 @@ object IrminConfig {
       BranchRef
         .fromString(s, configLocation)
         .left
-        .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
+        .map(errs => zio.Config.Error.InvalidData(message = errs.map(ValidationError.describe).mkString("; ")))
     }
 
   // All durations in this config are timeouts/budgets — zero or negative is a

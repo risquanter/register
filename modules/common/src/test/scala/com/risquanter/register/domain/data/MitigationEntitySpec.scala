@@ -4,7 +4,7 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{
   idStr, lognormalShape, mitigationId, nodeId, residualProbability, retentionFactor, treeId, unsafeGet
 }
@@ -110,12 +110,12 @@ object MitigationEntitySpec extends ZIOSpecDefault {
       test("a pipeline over the step limit is rejected") {
         val result = resultStage(List.fill(11)(ResultTransformSpec.CapLosses(1000000L)))
         assertTrue(result.toEither.swap.toOption.get.exists(e =>
-          e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == specLocation))
+          FieldProblem.code(e.problem) == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == specLocation))
       },
       test("an empty pipeline is rejected") {
         val result = resultStage(Nil)
         assertTrue(result.toEither.swap.toOption.get.exists(e =>
-          e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == specLocation))
+          FieldProblem.code(e.problem) == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == specLocation))
       },
       test("the decoder routes through create, so an over-long pipeline is refused on the wire") {
         val valid  = mk("m-result", resultSpec).toEither.toOption.get

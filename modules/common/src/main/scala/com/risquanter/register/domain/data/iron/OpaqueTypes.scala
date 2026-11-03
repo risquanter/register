@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.Match
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError, ValueFormat}
 import zio.json.{JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
 
 // Base refined type alias used for most short strings:
@@ -77,6 +77,21 @@ type SecureUrlStr = String :| SecureUrlConstraint
 // Non-negative long values (IDs, counts, amounts)
 type NonNegativeLong = Long :| GreaterEqual[0L]
 
+object NonNegativeLong:
+  /** A count — a seed identifier the assigner is about to issue — as a refined
+    * value. A count is never negative, so the refinement holds; the fold states
+    * that rather than asserting it, and answers zero to a value that is not one. */
+  def count(n: Long): NonNegativeLong =
+    n.refineEither[GreaterEqual[0L]].getOrElse(IronConstants.ZeroL)
+
+// JSON codecs for NonNegativeLong, PositiveLong and PositiveDouble. Each crosses
+// the wire as a value a `FieldProblem` case carries, so the derived codec for
+// that enum needs an instance for it. The refinement is re-checked on decode:
+// the bound is the contract, and a decoded value is as trustworthy as a
+// constructed one (ADR-038).
+given JsonEncoder[NonNegativeLong] = JsonEncoder[Long].contramap(identity)
+given JsonDecoder[NonNegativeLong] = JsonDecoder[Long].mapOrFail(_.refineEither[GreaterEqual[0L]])
+
 // Positive integers (must be > 0)
 type PositiveInt = Int :| Greater[0]
 
@@ -88,14 +103,25 @@ type MetalogTermCount = Int :| (GreaterEqual[2] & LessEqual[20])
 // Positive long values (must be > 0) — e.g. lognormal CI bounds, which feed a logarithm
 type PositiveLong = Long :| Greater[0L]
 
+given JsonEncoder[PositiveLong] = JsonEncoder[Long].contramap(identity)
+given JsonDecoder[PositiveLong] = JsonDecoder[Long].mapOrFail(_.refineEither[Greater[0L]])
+
 // Non-negative integers (>= 0)
 type NonNegativeInt = Int :| GreaterEqual[0]
 
-// JSON codecs for NonNegativeInt. It crosses the wire inside
-// `DistributionFieldName`, naming which element of a submitted collection
-// failed, so a derived codec for that enum needs an instance for this type.
-// The refinement is re-checked on decode: the bound is the contract, and a
-// decoded value is as trustworthy as a constructed one (ADR-038).
+object NonNegativeInt:
+  /** A count — a collection's size, a depth, a limit — as a refined value. A
+    * count is never negative, so the refinement holds; the fold states that
+    * rather than asserting it, and answers zero to a value that is not one. */
+  def count(n: Int): NonNegativeInt =
+    n.refineEither[GreaterEqual[0]].getOrElse(IronConstants.Zero)
+
+// JSON codecs for NonNegativeInt. It crosses the wire inside `FieldName`,
+// naming which element of a submitted collection failed, and inside the
+// `FieldProblem` cases that carry a count, so the derived codecs for those enums
+// need an instance for this type. The refinement is re-checked on decode: the
+// bound is the contract, and a decoded value is as trustworthy as a constructed
+// one (ADR-038).
 given JsonEncoder[NonNegativeInt] = JsonEncoder[Int].contramap(identity)
 given JsonDecoder[NonNegativeInt] = JsonDecoder[Int].mapOrFail(_.refineEither[GreaterEqual[0]])
 
@@ -117,7 +143,13 @@ type NonNegativeDouble = Double :| (GreaterEqual[0.0] & LessEqual[1.797693134862
 // Double.MaxValue spelled out, which is what excludes positive infinity —
 // Greater[0.0] alone admits it. Losses feed a logarithm in the distribution
 // fit, so zero is as unusable as a negative figure.
-type PositiveDouble = Double :| (Greater[0.0] & LessEqual[1.7976931348623157e308])
+type PositiveDoubleConstraint = Greater[0.0] & LessEqual[1.7976931348623157e308]
+
+type PositiveDouble = Double :| PositiveDoubleConstraint
+
+given JsonEncoder[PositiveDouble] = JsonEncoder[Double].contramap(identity)
+given JsonDecoder[PositiveDouble] =
+  JsonDecoder[Double].mapOrFail(_.refineEither[PositiveDoubleConstraint])
 
 // A fraction in (0, 1]: strictly above 0 and at most 1. NaN fails the lower
 // constraint by IEEE 754 comparison. Two domain concepts refine to this
@@ -245,7 +277,7 @@ object SeedEntityId:
   // Wire format is a JSON number (ADR-001: primitives on the wire).
   given JsonEncoder[SeedEntityId] = JsonEncoder[Long].contramap(_.value)
   given JsonDecoder[SeedEntityId] = JsonDecoder[Long].mapOrFail(v =>
-    fromLong(v).left.map(_.mkString(", ")))
+    fromLong(v).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // SeedVarId: leaf-level HDR Var axis. Streams derive by even/odd doubling
 // (occurrence = 2k, loss = 2k+1), so the ID must stay below 5*10^7 to keep
@@ -288,20 +320,19 @@ object SeedVarId:
   ): zio.prelude.Validation[ValidationError, Unit] =
     ValidationUtil.requireDistinctBy(
       holders,
-      { case (_, id) => id.value },
-      (idValue, group) =>
+      { case (_, id) => id },
+      (id, group) =>
         ValidationError(
-          location = location,
-          code = ValidationErrorCode.DUPLICATE_VALUE,
-          message = ValidationMessages.seedVarIdInUse(idValue, group.map(_._1.value.toString).sorted)
+          location,
+          FieldProblem.SeedVarIdInUse(id, group.map(_._1).sortBy(_.value).toList)
         )
-    )
+    )(using Ordering.by(_.value))
 
   // JSON codecs (companion object placement ensures implicit scope).
   // Wire format is a JSON number (ADR-001: primitives on the wire).
   given JsonEncoder[SeedVarId] = JsonEncoder[Long].contramap(_.value)
   given JsonDecoder[SeedVarId] = JsonDecoder[Long].mapOrFail(v =>
-    fromLong(v).left.map(_.mkString(", ")))
+    fromLong(v).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // Probability values (must be between 0.0 and 1.0, exclusive)
 // Exclusive bounds are required for numerical stability in metalog-distribution's
@@ -382,11 +413,17 @@ object SafeName:
       _.value,
       (name, group) =>
         ValidationError(
-          location = location,
-          code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
-          message = ValidationMessages.duplicateNodeNames(name.toString, group.size)
+          location,
+          FieldProblem.DuplicateNodeName(SafeName(name), NonNegativeInt.count(group.size))
         )
     )
+
+  // JSON codecs (companion object placement ensures implicit scope). A name
+  // crosses the wire inside a tree and inside the `FieldProblem` cases that
+  // name a node, and is refined again on decode (ADR-038).
+  given JsonEncoder[SafeName] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[SafeName] = JsonDecoder[String].mapOrFail(s =>
+    fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // Opaque type for emails
 object Email:
@@ -416,7 +453,7 @@ object Url:
 
   given JsonEncoder[Url] = JsonEncoder[String].contramap(_.value.toString)
   given JsonDecoder[Url] = JsonDecoder[String].mapOrFail(s =>
-    fromString(s).left.map(_.map(_.message).mkString(", ")))
+    fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
   // Convenience constructor from plain String
   def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.Url)): Either[List[ValidationError], Url] =
@@ -437,7 +474,7 @@ object SecureUrl:
 
   given JsonEncoder[SecureUrl] = JsonEncoder[String].contramap(_.value.toString)
   given JsonDecoder[SecureUrl] = JsonDecoder[String].mapOrFail(s =>
-    fromString(s).left.map(_.map(_.message).mkString(", ")))
+    fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
   def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.Url)): Either[List[ValidationError], SecureUrl] =
     ValidationUtil.refineSecureUrl(s, location)
@@ -520,21 +557,13 @@ object BranchRef:
     sanitized
       .refineEither[BranchRefConstraint]
       .left
-      .map(err =>
-        List(
-          ValidationError(
-            location = location,
-            code = ValidationErrorCode.INVALID_FORMAT,
-            message = s"Branch '$sanitized' is invalid: $err"
-          )
-        )
-      )
+      .map(_ => List(ValidationError(location, FieldProblem.WrongFormat(ValueFormat.BranchName))))
       .map(BranchRef(_))
 
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[BranchRef] = JsonEncoder[String].contramap(_.toBranchRef)
   given JsonDecoder[BranchRef] = JsonDecoder[String].mapOrFail(s =>
-    BranchRef.fromString(s).left.map(_.mkString(", ")))
+    BranchRef.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 /** The branch a scenario's merge is assembled on before it is published to
   * main.
@@ -569,15 +598,10 @@ object MergeStagingRef:
     s"${prefix(wsId)}${name.value}"
       .refineEither[MergeStagingRefConstraint]
       .left
-      .map(err =>
-        List(
-          ValidationError(
-            location = ErrorLocation.requestField(FieldName.Branch),
-            code = ValidationErrorCode.INVALID_FORMAT,
-            message = s"Merge staging branch is invalid: $err"
-          )
-        )
-      )
+      .map(_ => List(ValidationError(
+        ErrorLocation.requestField(FieldName.Branch),
+        FieldProblem.WrongFormat(ValueFormat.StagingBranchName)
+      )))
       .map(MergeStagingRef(_))
 
 /** Which branch a request or view targets — the single internal spelling of
@@ -634,7 +658,7 @@ object BranchChoice:
   }
   given JsonDecoder[BranchChoice] = JsonDecoder[String].mapOrFail {
     case "main" => Right(BranchChoice.Main)
-    case s      => ScenarioName.fromString(s).map(BranchChoice.Scenario(_)).left.map(_.mkString(", "))
+    case s      => ScenarioName.fromString(s).map(BranchChoice.Scenario(_)).left.map(_.map(ValidationError.describe).mkString(", "))
   }
 
 // ScenarioName: user-supplied scenario name. Two
@@ -670,18 +694,14 @@ object ScenarioName:
   def fromString(s: String): Either[List[ValidationError], ScenarioName] =
     ValidationUtil.refineScenarioName(s, ErrorLocation.requestField(FieldName.Name)).flatMap { name =>
       if name.value == "main" then
-        Left(List(ValidationError(
-          location = ErrorLocation.requestField(FieldName.Name),
-          code = ValidationErrorCode.INVALID_FORMAT,
-          message = "'main' is reserved and cannot be used as a scenario name"
-        )))
+        Left(List(ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.ScenarioNameReserved)))
       else Right(name)
     }
 
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[ScenarioName] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[ScenarioName] = JsonDecoder[String].mapOrFail(s =>
-    fromString(s).left.map(_.mkString(", ")))
+    fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // ContentHash: SHA-256 hex digest computed by the JVM.
 // Keys the content-addressed ContentCache: leaf keys hash the LeafSimContent
@@ -697,15 +717,7 @@ object ContentHash:
   def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.ContentHash)): Either[List[ValidationError], ContentHash] =
     s.refineEither[ContentHashConstraint]
       .left
-      .map(err =>
-        List(
-          ValidationError(
-            location = location,
-            code = ValidationErrorCode.INVALID_FORMAT,
-            message = s"Content hash is invalid: $err"
-          )
-        )
-      )
+      .map(_ => List(ValidationError(location, FieldProblem.WrongFormat(ValueFormat.ContentHash))))
       .map(ContentHash(_))
 
   // A mitigation's absolute spec stores the anchor leaf's hash at authoring
@@ -713,7 +725,7 @@ object ContentHash:
   // format is re-checked on decode (ADR-039 §1).
   given JsonEncoder[ContentHash] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[ContentHash] = JsonDecoder[String].mapOrFail(s =>
-    fromString(s).left.map(_.map(_.message).mkString(", ")))
+    fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // CommitHash: an Irmin commit/store hash. Pinned to Irmin's format: every
 // GraphQL Hash scalar (commit head, set result, contents_hash) is a SHA-1
@@ -730,21 +742,13 @@ object CommitHash:
   def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.CommitHash)): Either[List[ValidationError], CommitHash] =
     s.refineEither[CommitHashConstraint]
       .left
-      .map(err =>
-        List(
-          ValidationError(
-            location = location,
-            code = ValidationErrorCode.INVALID_FORMAT,
-            message = s"Commit hash is invalid: $err"
-          )
-        )
-      )
+      .map(_ => List(ValidationError(location, FieldProblem.WrongFormat(ValueFormat.CommitHash))))
       .map(CommitHash(_))
 
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[CommitHash] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[CommitHash] = JsonDecoder[String].mapOrFail(s =>
-    CommitHash.fromString(s).left.map(_.mkString(", ")))
+    CommitHash.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // Revision: the read coordinate for a tree. `Head` names a branch, resolved to
 // its head commit exactly once inside the Irmin repository; `At` pins a
@@ -787,12 +791,12 @@ object TreeId:
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[TreeId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[TreeId] = JsonDecoder[String].mapOrFail(s =>
-    TreeId.fromString(s).left.map(_.mkString(", ")))
+    TreeId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
   // JSON map-key codecs — required for Map[TreeId, V] serialization, as for NodeId
   given JsonFieldEncoder[TreeId] = JsonFieldEncoder.string.contramap(_.value)
   given JsonFieldDecoder[TreeId] = JsonFieldDecoder.string.mapOrFail(s =>
-    TreeId.fromString(s).left.map(_.mkString(", ")))
+    TreeId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // NodeId: Nominal case class wrapper over SafeId for node identity (ADR-018).
 // Compiler-distinct from TreeId and raw SafeId. All validation delegates to SafeId.
@@ -808,12 +812,12 @@ object NodeId:
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[NodeId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[NodeId] = JsonDecoder[String].mapOrFail(s =>
-    NodeId.fromString(s).left.map(_.mkString(", ")))
+    NodeId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
   // JSON map-key codecs — required for Map[NodeId, V] serialization (ADR-001 §3)
   given JsonFieldEncoder[NodeId] = JsonFieldEncoder.string.contramap(_.value)
   given JsonFieldDecoder[NodeId] = JsonFieldDecoder.string.mapOrFail(s =>
-    NodeId.fromString(s).left.map(_.mkString(", ")))
+    NodeId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // MitigationId: Nominal case class wrapper over SafeId for mitigation identity (ADR-018).
 // Compiler-distinct from TreeId/NodeId and raw SafeId. All validation delegates to SafeId.
@@ -829,12 +833,12 @@ object MitigationId:
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[MitigationId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[MitigationId] = JsonDecoder[String].mapOrFail(s =>
-    MitigationId.fromString(s).left.map(_.mkString(", ")))
+    MitigationId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
   // JSON map-key codecs — required for Map[MitigationId, V] serialization (ADR-001 §3)
   given JsonFieldEncoder[MitigationId] = JsonFieldEncoder.string.contramap(_.value)
   given JsonFieldDecoder[MitigationId] = JsonFieldDecoder.string.mapOrFail(s =>
-    MitigationId.fromString(s).left.map(_.mkString(", ")))
+    MitigationId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // WorkspaceKeySecret: 128-bit workspace capability key, base64url encoded (22 chars, no padding).
 // Used as capability URL token for workspace access. Standalone type — NOT a ULID wrapper.
@@ -866,7 +870,7 @@ object WorkspaceKeySecret:
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[WorkspaceKeySecret] = JsonEncoder[String].contramap(_.reveal)
   given JsonDecoder[WorkspaceKeySecret] = JsonDecoder[String].mapOrFail(s =>
-    WorkspaceKeySecret.fromString(s).left.map(_.mkString(", ")))
+    WorkspaceKeySecret.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // WorkspaceKeyHash: lookup digest of a workspace capability key (64-char lowercase hex).
 // Internal-only durable identifier for workspace-key lookup.
@@ -930,7 +934,7 @@ object UserId:
   // JSON codecs — Authenticated only; Anonymous is never serialised to JSON.
   given JsonEncoder[Authenticated] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[Authenticated] = JsonDecoder[String].mapOrFail(s =>
-    fromString(s).left.map(_.mkString(", ")))
+    fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // WorkspaceId: Nominal case class wrapper over SafeId (ULID) for workspace identity.
 // Compiler-distinct from TreeId, NodeId, and raw SafeId.
@@ -972,21 +976,13 @@ object TraceId:
   def fromString(s: String, location: ErrorLocation = ErrorLocation.requestField(FieldName.TraceId)): Either[List[ValidationError], TraceId] =
     s.refineEither[TraceIdConstraint]
       .left
-      .map(err =>
-        List(
-          ValidationError(
-            location = location,
-            code = ValidationErrorCode.INVALID_FORMAT,
-            message = s"Trace id is invalid: $err"
-          )
-        )
-      )
+      .map(_ => List(ValidationError(location, FieldProblem.WrongFormat(ValueFormat.TraceId))))
       .map(TraceId(_))
 
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[TraceId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[TraceId] = JsonDecoder[String].mapOrFail(s =>
-    TraceId.fromString(s).left.map(_.mkString(", ")))
+    TraceId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 /** The trace identifier of work that ran under no span.
   *

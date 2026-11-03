@@ -103,7 +103,7 @@ trait TestHelpers {
     */
   def unsafeGet[A](v: Validation[ValidationError, A], label: String): A =
     v.toEither.fold(
-      errs => throw new AssertionError(s"$label: ${errs.map(_.message).mkString("; ")}"),
+      errs => throw new AssertionError(s"$label: ${errs.map(ValidationError.describe).mkString("; ")}"),
       identity
     )
 

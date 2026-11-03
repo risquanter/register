@@ -2,8 +2,8 @@ package com.risquanter.register.http.requests
 
 import zio.test.*
 
-import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationErrorCode}
 
 /** Seed-identifier uniqueness as the request boundary enforces it.
   *
@@ -17,6 +17,10 @@ object SeedVarIdGuardSpec extends ZIOSpecDefault:
     SafeName.fromString(s).toOption.get
   private def sid(v: Long): SeedVarId.SeedVarId =
     SeedVarId.fromLong(v).toOption.get
+
+  /** The refusal one repeated identifier produces, naming its holders in name order. */
+  private def inUse(v: Long, holders: String*): FieldProblem =
+    FieldProblem.SeedVarIdInUse(sid(v), holders.map(name).toList)
 
   /** The location the request boundary passes: the submitted seed identifiers. */
   private val at: ErrorLocation = ErrorLocation.requestField(FieldName.SeedVarId)
@@ -42,9 +46,9 @@ object SeedVarIdGuardSpec extends ZIOSpecDefault:
       val errs = SeedVarId.requireDistinct(provided, at).toEither.swap.toOption.get
       assertTrue(
         errs.size == 1,
-        errs.head.code == ValidationErrorCode.DUPLICATE_VALUE,
+        FieldProblem.code(errs.head.problem) == ValidationErrorCode.DUPLICATE_VALUE,
         errs.head.location == at,
-        errs.head.message == ValidationMessages.seedVarIdInUse(5L, Seq("Cyber Attack", "Flood Risk"))
+        errs.head.problem == inUse(5L, "Cyber Attack", "Flood Risk")
       )
     },
     test("two independent duplicate groups accumulate two errors") {
@@ -57,10 +61,10 @@ object SeedVarIdGuardSpec extends ZIOSpecDefault:
       val errs = SeedVarId.requireDistinct(provided, at).toEither.swap.toOption.get
       assertTrue(
         errs.size == 2,
-        errs.forall(_.code == ValidationErrorCode.DUPLICATE_VALUE),
-        errs.map(_.message).toSet == Set(
-          ValidationMessages.seedVarIdInUse(5L, Seq("A Risk", "B Risk")),
-          ValidationMessages.seedVarIdInUse(9L, Seq("C Risk", "D Risk"))
+        errs.forall(e => FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE),
+        errs.map(_.problem).toSet == Set(
+          inUse(5L, "A Risk", "B Risk"),
+          inUse(9L, "C Risk", "D Risk")
         )
       )
     },
@@ -73,7 +77,7 @@ object SeedVarIdGuardSpec extends ZIOSpecDefault:
       val errs = SeedVarId.requireDistinct(provided, at).toEither.swap.toOption.get
       assertTrue(
         errs.size == 1,
-        errs.head.message == ValidationMessages.seedVarIdInUse(7L, Seq("Alpha", "Mid", "Zeta"))
+        errs.head.problem == inUse(7L, "Alpha", "Mid", "Zeta")
       )
     }
   )

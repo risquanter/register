@@ -10,8 +10,8 @@ import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, MitigationApplicationRecord}
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
 
@@ -120,10 +120,7 @@ final case class CachedResultResolverLive(
   ): IO[AppError, LossDistribution] =
     ZIO.fromOption(tree.index.nodes.get(nodeId))
       .orElseFail(ValidationFailed(List(ValidationError(
-        location = ErrorLocation.nodeField(nodeId, FieldName.Id),
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = "Node not found in tree index"
-      ))))
+        ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotInIndex))))
       .flatMap(node => distributionOf(tree, hashes, cache, node, seedEntityId, records))
 
   private def distributionOf(
@@ -153,18 +150,12 @@ final case class CachedResultResolverLive(
           childResults <- ZIO.foreachPar(portfolio.childIds.toList) { childId =>
             ZIO.fromOption(tree.index.nodes.get(childId))
               .orElseFail(ValidationFailed(List(ValidationError(
-                location = ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds),
-                code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-                message = s"Child node not found in tree index: ${childId.value}"
-              ))))
+                ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds), FieldProblem.ChildNotFound(childId)))))
               .flatMap(childNode => distributionOf(tree, hashes, cache, childNode, seedEntityId, records))
           }
           _ <- ZIO.when(childResults.isEmpty) {
             ZIO.fail(ValidationFailed(List(ValidationError(
-              location = ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds),
-              code = ValidationErrorCode.EMPTY_COLLECTION,
-              message = ValidationMessages.portfolioHasNoChildren
-            ))))
+              ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds), FieldProblem.PortfolioHasNoChildren(Nil)))))
           }
           // ⊕ m(children), then f_P on top. The layer is applied outside the
           // aggregate claim, so a transformed portfolio keeps its children
@@ -194,10 +185,7 @@ final case class CachedResultResolverLive(
     for {
       key <- ZIO.fromOption(hashes.get(leaf.id))
         .orElseFail(ValidationFailed(List(ValidationError(
-          location = ErrorLocation.nodeField(leaf.id, FieldName.ContentHash),
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = "Leaf not reachable from tree root (no content hash)"
-        ))))
+          ErrorLocation.nodeField(leaf.id, FieldName.ContentHash), FieldProblem.LeafUnreachable))))
       cached <- cache.get(key)
       result <- cached match {
         case Some(content) => ZIO.succeed(content)

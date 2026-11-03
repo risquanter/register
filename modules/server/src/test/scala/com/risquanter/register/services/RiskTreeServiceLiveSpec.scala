@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, Mitiga
 import com.risquanter.register.domain.data.iron.{SafeName, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{
-  AppError, ErrorLocation, FieldName, RepositoryFailure, TreeLoadFailure,
+  AppError, ErrorLocation, FieldName, FieldProblem, RepositoryFailure, TreeLoadFailure,
   ValidationError, ValidationErrorCode, ValidationFailed
 }
 import com.risquanter.register.telemetry.TelemetryLive
@@ -311,7 +311,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           case ValidationFailed(errors) =>
             errors.exists(e =>
               e.location == ErrorLocation.requestField(FieldName.Name) &&
-              e.code == ValidationErrorCode.DUPLICATE_VALUE
+              FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE
             )
           case _ => false
         }
@@ -670,8 +670,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             cause.failureOption.exists {
               case ValidationFailed(errors) =>
                 errors.exists(e =>
-                  e.code == ValidationErrorCode.DUPLICATE_VALUE &&
-                  e.message.contains("used by multiple nodes"))
+                  e.problem match
+                    case FieldProblem.SeedVarIdInUse(_, _) => true
+                    case _                                 => false)
               case _ => false
             }
           case Exit.Success(_) => false
@@ -698,7 +699,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           val refused = exit match
             case Exit.Failure(cause) =>
               cause.failureOption.exists {
-                case ValidationFailed(errors) => errors.exists(_.code == ValidationErrorCode.INVALID_NODE_TYPE)
+                case ValidationFailed(errors) => errors.exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE)
                 case _                        => false
               }
             case Exit.Success(_) => false

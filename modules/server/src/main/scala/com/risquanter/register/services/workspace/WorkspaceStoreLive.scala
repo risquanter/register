@@ -3,8 +3,8 @@ package com.risquanter.register.services.workspace
 import zio.*
 import java.time.Instant
 import com.risquanter.register.domain.data.WorkspaceRecord
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId, ValidationMessages}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, RepositoryFailure, ValidationFailed, ValidationError, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.util.IdGenerators
 
@@ -103,10 +103,7 @@ final class WorkspaceStoreLive private (
       case Some(id) =>
         if state.byHash.values.exists(_.seedEntityId.value == id.value) then
           Left(ValidationFailed(List(ValidationError(
-            location = ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
-            code = ValidationErrorCode.DUPLICATE_VALUE,
-            message = ValidationMessages.seedEntityIdInUse(id.value)
-          ))))
+            ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id)))))
         else
           Right((id, math.max(state.nextSeedEntityId, id.value + 1)))
       case None =>

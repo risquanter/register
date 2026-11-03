@@ -2,9 +2,8 @@ package app.state
 
 import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
-import com.risquanter.register.domain.data.iron.ValidationUtil
+import com.risquanter.register.domain.data.iron.{SafeName, ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
@@ -78,22 +77,24 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
 
   override protected def formLine: PortfolioField = FormLevel
 
-  // Display-controlled errors: the live check, else the stored submit refusals
-  val nameError: Signal[List[String]] = messagesOf(errorsFor(Name, nameErrorRaw))
+  // Display-controlled refusals: the live check, else the stored submit refusals
+  private val nameRefusals: Signal[List[ValidationError]] = errorsFor(Name, nameErrorRaw)
+  val nameError: Signal[List[String]] = messagesOf(nameRefusals)
 
   /** The dropdown shows only submit-time refusals (`Validation.Failure` from
     * `toDraft`, or the builder's topology check), from the stored refusals.
     * Its live check, `parentErrorRaw`, blocks the submit and is not shown
     * here. */
-  val parentError: Signal[List[String]] = messagesOf(errorsFor(Parent, Val(None)))
+  private val parentRefusals: Signal[List[ValidationError]] = errorsFor(Parent, Val(None))
+  val parentError: Signal[List[String]] = messagesOf(parentRefusals)
 
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] =
-    List(nameErrorRaw, parentErrorRaw).map(_.map(_.map(_.message)))
+    List(nameErrorRaw, parentErrorRaw).map(_.map(_.map(e => ValidationMessages.render(e.problem))))
 
   /** The inputs in the order `PortfolioFormView` renders them. */
-  override protected def displayed: List[(PortfolioField, Signal[List[String]])] =
-    List(Name -> nameError, Parent -> parentError)
+  override protected def displayed: List[(PortfolioField, Signal[List[ValidationError]])] =
+    List(Name -> nameRefusals, Parent -> parentRefusals)
 
   /** Build validated inputs for submission. `Unset` fails validation exactly
     * like an empty name would — there is no silent default to fall back to.
@@ -151,5 +152,6 @@ object PortfolioFormState:
                FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
                FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
             noTarget
-      case ErrorLocation.Whole     => Set(PortfolioField.FormLevel)
-      case ErrorLocation.Header(_) => noTarget
+      case ErrorLocation.Whole             => Set(PortfolioField.FormLevel)
+      case ErrorLocation.Header(_)         => noTarget
+      case ErrorLocation.QueryParameter(_) => noTarget

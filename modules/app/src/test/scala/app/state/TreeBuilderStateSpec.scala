@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, R
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId, ValidationMessages}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.testutil.TestHelpers.{unsafeGet, metalogShape, lognormalShape}
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
@@ -281,7 +281,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
               req.leaves.map(_.id).contains(leafUlid)
             )
           case Validation.Failure(_, errors) =>
-            assertTrue(false).label(errors.map(_.message).mkString("; "))
+            assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
       },
 
       test("a node added after load routes to the new bucket while loaded nodes keep identity") {
@@ -310,7 +310,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
               req.newLeaves.exists(_.name == "Fraud Risk")
             )
           case Validation.Failure(_, errors) =>
-            assertTrue(false).label(errors.map(_.message).mkString("; "))
+            assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
       },
 
       test("NodeId survives the value/refine round-trip: emitted id strings are valid SafeIds") {
@@ -335,7 +335,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
               emittedIds.forall(s => NodeId.fromString(s).isRight)
             )
           case Validation.Failure(_, errors) =>
-            assertTrue(false).label(errors.map(_.message).mkString("; "))
+            assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
       }
 
     ),
@@ -365,7 +365,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
               !state.leavesVar.now().exists(_.name.value == "Cyber Risk")
             )
           case Validation.Failure(_, errs) =>
-            assertTrue(false).label(errs.map(_.message).mkString("; "))
+            assertTrue(false).label(errs.map(ValidationError.describe).mkString("; "))
       },
 
       test("preserves NodeId across rename") {
@@ -386,7 +386,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           case Validation.Success(_, _) =>
             assertTrue(state.leavesVar.now().head.id.map(_.value.toString).contains(leafUlid))
           case Validation.Failure(_, errs) =>
-            assertTrue(false).label(errs.map(_.message).mkString("; "))
+            assertTrue(false).label(errs.map(ValidationError.describe).mkString("; "))
       },
 
       test("fails when new name collides with another leaf") {
@@ -427,7 +427,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
               state.leavesVar.now().head.parent == under("RenamedPortfolio")
             )
           case Validation.Failure(_, errs) =>
-            assertTrue(false).label(errs.map(_.message).mkString("; "))
+            assertTrue(false).label(errs.map(ValidationError.describe).mkString("; "))
       },
 
       test("preserves NodeId across rename") {
@@ -448,7 +448,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           case Validation.Success(_, _) =>
             assertTrue(state.portfoliosVar.now().head.id.map(_.value.toString).contains(rootUlid))
           case Validation.Failure(_, errs) =>
-            assertTrue(false).label(errs.map(_.message).mkString("; "))
+            assertTrue(false).label(errs.map(ValidationError.describe).mkString("; "))
       }
 
     ),
@@ -708,7 +708,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       test("after Create on an empty tree, says a root is required") {
         val state = new TreeBuilderState()
         state.triggerValidation()
-        assertTrue(currentOf(state.topologyError) == List(ValidationMessages.exactlyOneRootRequired))
+        assertTrue(currentOf(state.topologyError) == List(ValidationMessages.render(FieldProblem.RootRequired)))
       },
 
       test("follows the tree: a root portfolio replaces the root refusal with the child refusal") {
@@ -717,8 +717,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.addPortfolio(n("Ops"), ParentRef.Root)
         val shown = currentOf(state.topologyError)
         assertTrue(
-          !shown.contains(ValidationMessages.exactlyOneRootRequired),
-          shown == List(ValidationMessages.portfoliosWithoutChildren(List("Ops")))
+          !shown.contains(ValidationMessages.render(FieldProblem.RootRequired)),
+          shown == List(ValidationMessages.render(FieldProblem.PortfolioHasNoChildren(List(n("Ops")))))
         )
       },
 

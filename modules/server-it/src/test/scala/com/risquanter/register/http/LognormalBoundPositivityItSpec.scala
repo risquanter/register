@@ -7,7 +7,7 @@ import sttp.client3.ziojson.*
 
 import zio.json.*
 
-import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.domain.errors.{FieldProblem, ValidationErrorCode}
 import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{
@@ -96,7 +96,7 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
   private def rangeErrorCodes(rawBody: String): Task[List[ValidationErrorCode]] =
     ZIO.fromEither(
       rawBody.fromJson[WireError.RequestRejected]
-        .map(_.errors.map(_.code))
+        .map(_.errors.map(e => FieldProblem.code(e.problem)))
         .left.map(err => s"Failed to decode a validation rejection: $err\nBody was: $rawBody")
     ).mapError(new RuntimeException(_))
 

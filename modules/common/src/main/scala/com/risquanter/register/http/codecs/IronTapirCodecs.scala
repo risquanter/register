@@ -2,8 +2,9 @@ package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
-import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
+import zio.json.{DecoderOps, EncoderOps}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -33,16 +34,16 @@ object IronTapirCodecs {
   private val ClientInputRedaction: String = "[withheld]"
 
   /** Occupies the validator slot, which Tapir requires and a refinement cannot
-    * fill: an Iron constraint is not a `Validator`. The refusal's own sentence
-    * travels in `customMessage` instead. One value serves every codec here,
-    * including those whose raw input is numeric, because the slot's type comes
-    * from the validator rather than from the decoded value.
+    * fill: an Iron constraint is not a `Validator`. The refusal travels in
+    * `customMessage` instead. One value serves every codec here, including
+    * those whose raw input is numeric, because the slot's type comes from the
+    * validator rather than from the decoded value.
     */
   private val NoTapirValidator: Validator.Custom[String] =
     Validator.Custom(_ => ValidationResult.Invalid())
 
   /** A codec cannot name the input it decodes: Tapir reports that from the
-    * endpoint definition, and `refused` keeps only the message. So every
+    * endpoint definition, and `refused` keeps only the problem. So every
     * refinement here reports at the request as a whole. */
   private val codecLocation: ErrorLocation = ErrorLocation.Whole
 
@@ -51,13 +52,27 @@ object IronTapirCodecs {
     * `InvalidValue` rather than `Error` because the two mean different things to
     * the decode-failure handler: `Error` says the input could not be read, and
     * every codec here parses before it refines, so reaching a refinement proves
-    * the input was readable. Each refusal keeps the refinement's message and
-    * none of the submitted value.
+    * the input was readable. Each refusal carries the refinement's problem in
+    * its encoded form — the one slot Tapir offers is text — and none of the
+    * submitted value. `problemIn` reads it back; the two are one prism, and
+    * `problemIn(refused(e).customMessage) == Some(e.problem)` is its law.
     */
   private def refused(errs: List[ValidationError]): DecodeResult.InvalidValue =
     DecodeResult.InvalidValue(
-      errs.map(e => TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(e.message)))
+      errs.map(e => TapirValidationError(NoTapirValidator, ClientInputRedaction, Nil, Some(e.problem.toJson)))
     )
+
+  /** The problem a refusal here carried, read back out of the slot `refused`
+    * wrote it into, or `None` for text that is not one of ours: a validator
+    * declared on an endpoint carries no message, and Tapir's own text is prose.
+    *
+    * {{{
+    * problemIn(FieldProblem.Required.toJson) // Some(Required)
+    * problemIn("length<=30")                 // None
+    * }}}
+    */
+  def problemIn(customMessage: String): Option[FieldProblem] =
+    customMessage.fromJson[FieldProblem].toOption
 
   /** Codec for PositiveInt (Int > 0). */
   given Codec[String, PositiveInt, CodecFormat.TextPlain] =
@@ -289,6 +304,12 @@ object IronTapirCodecs {
   /** Schema for PositiveInt for JSON body derivation. */
   given Schema[PositiveInt] = Schema.schemaForInt.map[PositiveInt](
     i => ValidationUtil.refinePositiveInt(i, codecLocation).toOption
+  )(identity)
+
+  /** Schema for PositiveDouble, which a refusal about a mitigation's severity
+    * floor carries. */
+  given Schema[PositiveDouble] = Schema.schemaForDouble.map[PositiveDouble](
+    d => ValidationUtil.refinePositiveDouble(d, codecLocation).toOption
   )(identity)
 
   /** Schema for MetalogTermCount for JSON body derivation. A provenance record

@@ -1,6 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import zio.test.*
+import zio.json.EncoderOps
 
 import sttp.tapir.{Codec, CodecFormat, DecodeResult}
 
@@ -32,10 +33,10 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
   *
   * Three properties follow, and each is asserted for every codec rather than
   * for one representative. A refusal reports as a refusal. It carries the
-  * refinement's own sentence, so the message a client reads is the one the
-  * domain wrote. And it carries none of the submitted value, because a message
-  * is a disclosure surface whether or not the value came from the same client
-  * (ADR-035).
+  * refinement's own problem, in its encoded form, so what a client is told is
+  * what the domain decided. And it carries none of the submitted value,
+  * because a refusal is a disclosure surface whether or not the value came
+  * from the same client (ADR-035).
   */
 object IronTapirCodecsSpec extends ZIOSpecDefault:
 
@@ -43,7 +44,7 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
 
   /** The location these refinements are called with. A codec supplies its own
     * when it runs; here the refinement is called directly, only to obtain the
-    * sentence it produces, so the location is immaterial and one stands for
+    * problem it produces, so the location is immaterial and one stands for
     * all. */
   private val canaryAt: ErrorLocation = ErrorLocation.requestField(FieldName.Id)
 
@@ -62,7 +63,7 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
     *
     * `expected` is read from the smart constructor rather than written out, so
     * the assertion is that the codec reports what the domain said — not that it
-    * reports one particular sentence this test happens to know.
+    * reports one particular problem this test happens to know.
     */
   private case class Refusal(
     name:     String,
@@ -72,8 +73,10 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
     canary:   String
   )
 
+  /** The problems as the codec carries them: encoded, in the one text slot
+    * Tapir offers. */
   private def messagesOf(errs: List[com.risquanter.register.domain.errors.ValidationError]): List[String] =
-    errs.map(_.message)
+    errs.map(_.problem.toJson)
 
   private def codecFor[T](using c: Codec[String, T, CodecFormat.TextPlain]): String => DecodeResult[Any] =
     raw => c.decode(raw)
@@ -164,7 +167,7 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
     ),
     // The only codec here whose decode branches before it refines: "main" is
     // answered without consulting a refinement, and every other value goes
-    // through ScenarioName, which is therefore the source of its sentence.
+    // through ScenarioName, which is therefore the source of its problem.
     Refusal(
       "BranchChoice",
       codecFor[BranchChoice],
@@ -180,10 +183,10 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
     */
   private val RefiningCodecCount: Int = 12
 
-  /** The messages a decode failure carries, however it carries them.
+  /** The encoded problems a decode failure carries, however it carries them.
     *
     * An `InvalidValue` holds them in each error's `customMessage`. Reading them
-    * through one function lets the assertions below speak about "the messages
+    * through one function lets the assertions below speak about "the problems
     * the failure reports" without naming the shape.
     */
   private def reportedMessages(result: DecodeResult[Any]): List[String] =
@@ -201,7 +204,7 @@ object IronTapirCodecsSpec extends ZIOSpecDefault:
       }*
     ),
 
-    suite("the refusal carries the refinement's own sentence")(
+    suite("the refusal carries the refinement's own problem")(
       refusals.map { r =>
         test(r.name) {
           assertTrue(

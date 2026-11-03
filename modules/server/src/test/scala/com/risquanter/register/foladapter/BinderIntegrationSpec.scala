@@ -145,13 +145,12 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         val payloadName = """foo")"""
         val result = SafeName.fromString(payloadName)
 
-        import com.risquanter.register.domain.errors.ValidationErrorCode
-        import com.risquanter.register.domain.data.iron.ValidationMessages
+        import com.risquanter.register.domain.errors.{Alphabet, FieldProblem, ValidationErrorCode}
 
         assertTrue(
           result.isLeft,
-          result.left.exists(_.exists(_.code == ValidationErrorCode.INVALID_PATTERN)),
-          result.left.exists(_.exists(_.message == ValidationMessages.nameInvalidChars))
+          result.left.exists(_.exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_PATTERN)),
+          result.left.exists(_.exists(_.problem == FieldProblem.InvalidCharacters(Alphabet.NodeName)))
         )
       },
 

@@ -1,18 +1,18 @@
 package com.risquanter.register.domain.data
 
-import io.github.iltotore.iron.refineUnsafe
+import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, jsonDiscriminator}
 import zio.prelude.Validation
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 
 import com.risquanter.register.domain.data.iron.{
-  MetalogTermCount, PositiveDouble, PositiveLong,
-  Probability, ValidationMessages, ValidationUtil
+  MetalogTermCount, NonNegativeInt, PositiveDouble, PositiveLong,
+  Probability, ValidationUtil
 }
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError
 }
 
 /** One quantile anchor: the loss at a stated percentile. The percentile is
@@ -58,8 +58,8 @@ object QuantileAnchors:
     * use more terms than it has anchors, so bounding the anchor count bounds the
     * term count transitively. Below two there is no curve to fit; above twenty
     * the fitter throws past the validation boundary. */
-  private val MinAnchors = 2
-  private val MaxAnchors = 20
+  private val MinAnchors: NonNegativeInt = 2
+  private val MaxAnchors: NonNegativeInt = 20
 
   /** Refuses an anchor count outside [MinAnchors, MaxAnchors], and a sequence
     * that does not strictly increase in percentile or in loss. All three
@@ -79,22 +79,21 @@ object QuantileAnchors:
   ): Validation[ValidationError, QuantileAnchors] =
     val countV = Validation.fromPredicateWith[ValidationError, Vector[QuantileAnchor]](
       ValidationError(
-        location = location,
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message = ValidationMessages.anchorCountOutOfRange(anchors.length, MinAnchors, MaxAnchors)
+        location,
+        FieldProblem.AnchorCountOutOfRange(NonNegativeInt.count(anchors.length), MinAnchors, MaxAnchors)
       )
     )(anchors)(a => a.sizeIs >= MinAnchors && a.sizeIs <= MaxAnchors)
 
     val percentileOrderV = requireStrictlyIncreasing(
       anchors.map(a => a.percentile: Double),
       sibling(location, FieldName.Percentiles),
-      ValidationMessages.percentilesMustBeStrictlyIncreasing
+      FieldProblem.PercentilesNotIncreasing
     )
 
     val lossOrderV = requireStrictlyIncreasing(
       anchors.map(a => a.loss: Double),
       sibling(location, FieldName.Quantiles),
-      ValidationMessages.quantilesMustBeStrictlyIncreasing
+      FieldProblem.QuantilesNotIncreasing
     )
 
     Validation
@@ -126,9 +125,9 @@ object QuantileAnchors:
 
     if percentiles.length != losses.length then
       Validation.fail(ValidationError(
-        location = at(FieldName.PercentileQuantilePairing),
-        code = ValidationErrorCode.INVALID_COMBINATION,
-        message = ValidationMessages.metalogLengthMismatch(percentiles.length, losses.length)
+        at(FieldName.PercentileQuantilePairing),
+        FieldProblem.PercentileQuantileLengthMismatch(
+          NonNegativeInt.count(percentiles.length), NonNegativeInt.count(losses.length))
       ))
     else
       val anchorVs = percentiles.zip(losses).zipWithIndex.map {
@@ -149,12 +148,11 @@ object QuantileAnchors:
   private def requireStrictlyIncreasing(
     values:   Vector[Double],
     location: ErrorLocation,
-    message:  String
+    problem:  FieldProblem
   ): Validation[ValidationError, Unit] =
     Validation
-      .fromPredicateWith[ValidationError, Vector[Double]](
-        ValidationError(location, ValidationErrorCode.INVALID_COMBINATION, message)
-      )(values)(ValidationUtil.isStrictlyIncreasing)
+      .fromPredicateWith[ValidationError, Vector[Double]](ValidationError(location, problem))(values)(
+        ValidationUtil.isStrictlyIncreasing)
       .map(_ => ())
 
   /** The same subject's location for another field, so a refusal about one of
@@ -185,11 +183,7 @@ object LossRange:
   ): Validation[ValidationError, LossRange] =
     Validation
       .fromPredicateWith[ValidationError, (PositiveLong, PositiveLong)](
-        ValidationError(
-          location = location,
-          code = ValidationErrorCode.INVALID_RANGE,
-          message = ValidationMessages.lossRangeNotOrdered(min, max)
-        )
+        ValidationError(location, FieldProblem.LossRangeNotOrdered(min, max))
       )((min, max)) { case (lo, hi) => lo < hi }
       .map(_ => new LossRange(min, max))
 
@@ -273,11 +267,7 @@ object DistributionShape:
     ): Validation[ValidationError, Metalog] =
       terms match
         case Some(t) if t > anchors.size =>
-          Validation.fail(ValidationError(
-            location = location,
-            code = ValidationErrorCode.INVALID_COMBINATION,
-            message = ValidationMessages.termsOutOfRange
-          ))
+          Validation.fail(ValidationError(location, FieldProblem.TermsAboveAnchorCount))
         case _ => Validation.succeed(new Metalog(anchors, terms))
 
     /** The gate from the primitives a boundary carries to the case. Two callers:
@@ -320,7 +310,7 @@ object DistributionShape:
         fromPrimitives(raw.percentiles, raw.quantiles, raw.terms, ErrorSubject.Request)
           .toEither
           .left
-          .map(_.map(_.message).mkString("; "))
+          .map(_.map(ValidationError.describe).mkString("; "))
       }
     )
 
@@ -353,7 +343,7 @@ object DistributionShape:
         fromPrimitives(raw.minLoss, raw.maxLoss, ErrorSubject.Request)
           .toEither
           .left
-          .map(_.map(_.message).mkString("; "))
+          .map(_.map(ValidationError.describe).mkString("; "))
       }
     )
 

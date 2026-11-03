@@ -1,7 +1,7 @@
 package com.risquanter.register.services.helper
 
-import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeName, SeedVarId}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 
 /** Assigns a seedVarId to every leaf of a tree that does not already have one.
   *
@@ -69,7 +69,6 @@ object SeedVarIdAssigner:
 
   private def exhausted(value: Long): ValidationError =
     ValidationError(
-      location = ErrorLocation.requestField(FieldName.SeedVarId),
-      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = ValidationMessages.seedVarIdAssignmentExhausted(value)
+      ErrorLocation.requestField(FieldName.SeedVarId),
+      FieldProblem.SeedVarIdExhausted(NonNegativeLong.count(value))
     )

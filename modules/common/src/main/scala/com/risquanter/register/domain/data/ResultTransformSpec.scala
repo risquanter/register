@@ -4,8 +4,8 @@ import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
-import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationMessages, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationUtil}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 
 /**
  * Reified result-stage transform: pure data describing one atomic operation on
@@ -59,7 +59,7 @@ object ResultTransformSpec {
     * a whole, so the sentence is the only place the field can be named, and
     * each case computed that location in order to say it. */
   private def describeAll(errors: List[ValidationError]): String =
-    errors.map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")
+    errors.map(ValidationError.describe).mkString("; ")
 
   object ApplyDeductible {
     private case class Raw(deductible: Long)
@@ -118,11 +118,7 @@ object ResultTransformSpec {
     ): Validation[ValidationError, InsurancePolicy] =
       if (cap > deductible) Validation.succeed(InsurancePolicy(deductible, cap))
       else
-        Validation.fail(ValidationError(
-          location = ErrorLocation.requestField(FieldName.Cap),
-          code = ValidationErrorCode.INVALID_COMBINATION,
-          message = ValidationMessages.capMustExceedDeductible
-        ))
+        Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.Cap), FieldProblem.CapMustExceedDeductible))
 
     private case class Raw(deductible: Long, cap: Long)
     private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }

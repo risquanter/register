@@ -10,7 +10,8 @@ import sttp.tapir.server.interceptor.DecodeFailureContext
 import sttp.tapir.server.interceptor.decodefailure.{DecodeFailureHandler, DefaultDecodeFailureHandler}
 import sttp.tapir.server.model.ValuedEndpointOutput
 
-import com.risquanter.register.domain.errors.{ErrorLocation, RequestHeaderName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ExpectedInput, FieldProblem, RequestHeaderName, RequestQueryParam, ValidationError}
+import com.risquanter.register.http.codecs.IronTapirCodecs
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.telemetry.ActiveTrace
@@ -57,7 +58,7 @@ object WireDecodeFailureHandler:
           case Some((status, headers)) =>
             val error = toValidationError(ctx.failure, ctx.failingInput)
             logIfChallengeAdvertised(status) *>
-              logRejection(error, status) *>
+              logRejection(error, ctx.failingInput, status) *>
               ActiveTrace.id(using tracing).map { trace =>
                 // This handler runs before any handler does, so it never has a
                 // tree to name and always answers the request-level case.
@@ -73,14 +74,18 @@ object WireDecodeFailureHandler:
     * (ADR-002). There is no `AppError` here to read an origin from, because the
     * request never reached a handler.
     *
+    * The input is named by Tapir's own rendering of it, because the location
+    * names only a declared header or query parameter and the log line should
+    * say which body or path segment was refused as well.
+    *
     * The trace is not passed in: the span interceptor sits outside this handler
     * and applies it as a log annotation, so the line already carries the same
     * trace the response names.
     */
-  private def logRejection(error: ValidationError, status: StatusCode): UIO[Unit] =
+  private def logRejection(error: ValidationError, input: EndpointInput[?], status: StatusCode): UIO[Unit] =
     ZIO.logInfo(
       s"Request rejected before any handler ran, answered $status: " +
-        s"${ErrorLocation.describe(error.location)} ${error.message} (${error.code.code})"
+        s"${input.show} ${ValidationError.describe(error)} (${FieldProblem.code(error.problem).code})"
     )
 
   /** Records a `401` as a configuration defect of this service.
@@ -103,17 +108,15 @@ object WireDecodeFailureHandler:
       .when(status == StatusCode.Unauthorized)
       .unit
 
-  /** One `ValidationError` for the rejected input, naming it and why it was
-    * refused.
+  /** One `ValidationError` for the rejected input: where it is and what it is.
     *
-    * The code comes from the existing set rather than a new one: an input that
-    * is absent is `REQUIRED_FIELD`, a value the codec could not read at all is
-    * `TYPE_MISMATCH`, and a value it read and then refused is `INVALID_FORMAT` —
-    * which is what every Iron refinement produces.
-    *
-    * Only a declared header has a location that names the input. Every other
-    * input reports at the request as a whole, so for those the message opens
-    * with the input's own description and the name travels in the sentence.
+    * An absent input is `Required`. One the codec could not read at all is
+    * `Unreadable`: several values where one was expected, or text the declared
+    * type does not read. A value the codec read and then refused carries the
+    * refinement's own problem, which `IronTapirCodecs.refused` put in the
+    * `customMessage` slot and `problemIn` reads back; a validator declared on
+    * the endpoint itself carries no problem, and reports that a declared
+    * constraint was not met.
     *
     * Visible to the package, so the mapping is testable without driving a
     * request through the whole stack.
@@ -122,69 +125,46 @@ object WireDecodeFailureHandler:
     failure: DecodeResult.Failure,
     input:   EndpointInput[?]
   ): ValidationError =
-    val (code, reason) = failure match
-      case DecodeResult.Missing =>
-        (ValidationErrorCode.REQUIRED_FIELD, "is required")
-      case DecodeResult.Multiple(vs) =>
-        (ValidationErrorCode.TYPE_MISMATCH, s"expects a single value, and ${vs.size} were given")
-      case DecodeResult.Mismatch(expected, _) =>
-        (ValidationErrorCode.TYPE_MISMATCH, s"expects $expected")
-      case DecodeResult.InvalidValue(errors) =>
-        (ValidationErrorCode.INVALID_FORMAT, constraintBroken(errors))
-      case DecodeResult.Error(_, _) =>
-        (ValidationErrorCode.TYPE_MISMATCH, "could not be read")
+    val problem = failure match
+      case DecodeResult.Missing              => FieldProblem.Required
+      case DecodeResult.Multiple(_)          => FieldProblem.Unreadable(ExpectedInput.SingleValue)
+      case DecodeResult.Mismatch(_, _)       => FieldProblem.Unreadable(ExpectedInput.Declared)
+      case DecodeResult.InvalidValue(errors) => constraintBroken(errors)
+      case DecodeResult.Error(_, _)          => FieldProblem.Unreadable(ExpectedInput.Declared)
+    ValidationError(locationOf(input), problem)
 
-    val location = locationOf(input)
-    // The name is said once. A declared header is named by the location, so
-    // repeating it in the sentence would say it twice; everything else reports
-    // at the request as a whole, where the sentence is the only place left.
-    val message = location match
-      case ErrorLocation.Header(_) => reason
-      case _                       => s"${inputName(input)} $reason"
-
-    ValidationError(location, code, message)
-
-  /** What the refused value broke, in the words of whatever refused it.
+  /** What the refused value broke, as the problem whatever refused it reported.
     *
-    * An Iron refinement puts its own sentence in `customMessage`, which is the
-    * branch every refusal from `IronTapirCodecs` takes. A validator declared on
-    * a schema instead carries no message and renders through `show`, which
-    * states the constraint — `length<=30`. Either way the rejected value is not
-    * echoed: it is client-supplied text, and a message is a disclosure surface
-    * whether or not the value came from the same client (ADR-035).
+    * An Iron refinement puts its problem's encoded form in `customMessage`,
+    * which is the branch every refusal from `IronTapirCodecs` takes. A
+    * validator declared on a schema instead carries no message, and the
+    * constraint it states is not one of this application's problems. The first
+    * problem is kept, because one input is answered with one refusal. The
+    * rejected value is not read: it is client-supplied text, and a refusal is a
+    * disclosure surface whether or not the value came from the same client
+    * (ADR-035).
     */
-  private def constraintBroken(errors: List[TapirValidationError[?]]): String =
-    errors.flatMap(e => e.customMessage.orElse(e.validator.show)) match
-      case Nil      => "is not valid"
-      case messages => messages.mkString("; ")
+  private def constraintBroken(errors: List[TapirValidationError[?]]): FieldProblem =
+    errors
+      .flatMap(e => e.customMessage.flatMap(IronTapirCodecs.problemIn))
+      .headOption
+      .getOrElse(FieldProblem.DeclaredConstraintNotMet)
 
   /** Where the rejected input is, as a location the browser can match on.
     *
-    * A header this application declares is the one input with a case of its
-    * own, and it is the case worth having: the branch header and the user
-    * header are the two inputs a client most often gets wrong. Every other
-    * input — a query parameter, a path segment, the body, and a header this
+    * A header or a query parameter this application declares has a case of its
+    * own, drawn from the closed set the endpoint definitions fix. Every other
+    * input — a path segment, the body, and a header or parameter this
     * application does not declare — has no closed set to draw a name from, so
-    * it reports at the request as a whole and `inputName` puts Tapir's
-    * description in the message.
+    * it reports at the request as a whole.
     */
   private def locationOf(input: EndpointInput[?]): ErrorLocation =
-    headerNameOf(input).flatMap(RequestHeaderName.fromWireName) match
-      case Some(header) => ErrorLocation.Header(header)
-      case None         => ErrorLocation.Whole
-
-  /** The name a client would recognise for the input that was rejected.
-    *
-    * A header carries its own name. Anything else is described by Tapir's own
-    * rendering of the input, which names its kind and its name together —
-    * "query parameter q", "body" — and is stable across input shapes this does
-    * not enumerate.
-    */
-  private def inputName(input: EndpointInput[?]): String =
-    headerNameOf(input).getOrElse(input.show)
-
-  private def headerNameOf(input: EndpointInput[?]): Option[String] =
     input match
-      case EndpointIO.Header(name, _, _)        => Some(name)
-      case EndpointIO.FixedHeader(header, _, _) => Some(header.name)
-      case _                                    => None
+      case EndpointIO.Header(name, _, _)        => headerLocation(name)
+      case EndpointIO.FixedHeader(header, _, _) => headerLocation(header.name)
+      case EndpointInput.Query(name, _, _, _)   =>
+        RequestQueryParam.fromWireName(name).fold(ErrorLocation.Whole)(ErrorLocation.QueryParameter(_))
+      case _                                    => ErrorLocation.Whole
+
+  private def headerLocation(name: String): ErrorLocation =
+    RequestHeaderName.fromWireName(name).fold(ErrorLocation.Whole)(ErrorLocation.Header(_))

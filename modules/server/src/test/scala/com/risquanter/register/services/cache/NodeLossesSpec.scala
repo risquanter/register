@@ -7,7 +7,7 @@ import com.risquanter.register.domain.data.{
   NodeProvenance, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem}
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage}
@@ -119,7 +119,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
           catch { case _: IllegalArgumentException => true }
         )
       },
-      test("a combine overflow becomes a CONSTRAINT_VIOLATION") {
+      test("a combine overflow becomes an aggregated-loss overflow refusal") {
         val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue)) }
         val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 1L)) }
 
@@ -127,13 +127,13 @@ object NodeLossesSpec extends ZIOSpecDefault {
         NodeLosses.portfolio(parentId, List(r1, r2)).toEither match {
           case Left(errors) =>
             assertTrue(
-              errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+              errors.head.problem == FieldProblem.AggregatedLossOverflow,
               errors.head.location == ErrorLocation.nodeField(parentId, FieldName.AggregatedLoss)
             )
           case Right(_) => assertTrue(false)
         }
       },
-      test("an empty child list is refused with EMPTY_COLLECTION") {
+      test("an empty child list is refused as a portfolio with no children") {
         // Nothing supplies a trial count. A childless portfolio is already
         // refused by RiskPortfolio.create, the topology check, the JSON decoder
         // and the resolver.
@@ -141,7 +141,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
         NodeLosses.portfolio(parentId, Nil).toEither match {
           case Left(errors) =>
             assertTrue(
-              errors.head.code == ValidationErrorCode.EMPTY_COLLECTION,
+              errors.head.problem == FieldProblem.PortfolioHasNoChildren(Nil),
               errors.head.location == ErrorLocation.nodeField(parentId, FieldName.ChildIds)
             )
           case Right(_) => assertTrue(false)

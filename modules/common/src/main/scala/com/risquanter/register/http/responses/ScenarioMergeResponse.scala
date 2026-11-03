@@ -2,9 +2,8 @@ package com.risquanter.register.http.responses
 
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
-import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder, jsonDiscriminator}
 import com.risquanter.register.domain.data.{Mitigation, RiskNode}
-import com.risquanter.register.domain.data.RiskTree.{safeNameEncoder, safeNameDecoder}
 import com.risquanter.register.domain.data.iron.{CommitHash, MitigationId, NodeId, SafeName, SeedVarId, TreeId}
 import com.risquanter.register.domain.errors.FieldName
 
@@ -65,7 +64,8 @@ final case class TreeLabel(id: TreeId, names: Versions[SafeName.SafeName])
 object TreeLabel:
   /** `Versions` derives over a codec, and `SafeName` provides its encoder and
     * decoder separately. */
-  private given JsonCodec[SafeName.SafeName] = JsonCodec(safeNameEncoder, safeNameDecoder)
+  private given JsonCodec[SafeName.SafeName] =
+    JsonCodec(JsonEncoder[SafeName.SafeName], JsonDecoder[SafeName.SafeName])
   given codec: JsonCodec[TreeLabel] = DeriveJsonCodec.gen[TreeLabel]
   given schema: Schema[TreeLabel] =
     import com.risquanter.register.http.codecs.IronTapirCodecs.given

@@ -2,8 +2,8 @@ package com.risquanter.register.services.cache
 
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.NodeProvenance
-import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 
 /** A node's figures before its own layer of result-stage mitigations.
@@ -67,18 +67,10 @@ private[cache] object PortfolioLosses {
   }
 
   private def aggregateOverflow(nodeId: NodeId): ValidationError =
-    ValidationError(
-      location = ErrorLocation.nodeField(nodeId, FieldName.AggregatedLoss),
-      code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message  = ValidationMessages.aggregatedLossOverflow
-    )
+    ValidationError(ErrorLocation.nodeField(nodeId, FieldName.AggregatedLoss), FieldProblem.AggregatedLossOverflow)
 
   private def emptyPortfolio(nodeId: NodeId): ValidationError =
-    ValidationError(
-      location = ErrorLocation.nodeField(nodeId, FieldName.ChildIds),
-      code     = ValidationErrorCode.EMPTY_COLLECTION,
-      message  = ValidationMessages.portfolioHasNoChildren
-    )
+    ValidationError(ErrorLocation.nodeField(nodeId, FieldName.ChildIds), FieldProblem.PortfolioHasNoChildren(Nil))
 }
 
 private[cache] object NodeLosses {

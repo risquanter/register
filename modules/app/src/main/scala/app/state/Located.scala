@@ -1,6 +1,6 @@
 package app.state
 
-import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
 /** A value together with the location a refusal about it names.
   *
@@ -28,8 +28,8 @@ case class Located[+A](value: A, location: ErrorLocation):
   /** A refusal about this value, at its own location. The location is not a
     * parameter, so a refusal about a located value cannot name a different
     * place than the value came from. */
-  def reject(code: ValidationErrorCode, message: String): ValidationError =
-    ValidationError(location, code, message)
+  def reject(problem: FieldProblem): ValidationError =
+    ValidationError(location, problem)
 
   /** Hand the pair to a refinement that takes a value and a location
     * separately, which is every method in `ValidationUtil`. Both arguments come

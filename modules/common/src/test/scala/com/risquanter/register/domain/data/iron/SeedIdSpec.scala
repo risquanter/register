@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data.iron
 
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValueRange}
 
 object SeedIdSpec extends ZIOSpecDefault:
 
@@ -42,22 +42,20 @@ object SeedIdSpec extends ZIOSpecDefault:
       }
     ),
     suite("refinement errors")(
-      test("refineSeedEntityId reports INVALID_RANGE at the location the caller passed") {
+      test("refineSeedEntityId reports the entity range at the location the caller passed") {
         val at = ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId)
         val errs = ValidationUtil.refineSeedEntityId(0L, at).swap.toOption.get
         assertTrue(
-          errs.head.code == ValidationErrorCode.INVALID_RANGE,
           errs.head.location == at,
-          errs.head.message == ValidationMessages.seedEntityIdOutOfRange
+          errs.head.problem == FieldProblem.OutOfRange(ValueRange.SeedEntityId)
         )
       },
-      test("refineSeedVarId reports INVALID_RANGE at the location the caller passed") {
+      test("refineSeedVarId reports the variable range at the location the caller passed") {
         val at = ErrorLocation.requestField(FieldName.SeedVarId)
         val errs = ValidationUtil.refineSeedVarId(50000000L, at).swap.toOption.get
         assertTrue(
-          errs.head.code == ValidationErrorCode.INVALID_RANGE,
           errs.head.location == at,
-          errs.head.message == ValidationMessages.seedVarIdOutOfRange
+          errs.head.problem == FieldProblem.OutOfRange(ValueRange.SeedVarId)
         )
       }
     ),
@@ -74,11 +72,13 @@ object SeedIdSpec extends ZIOSpecDefault:
       },
       test("SeedEntityId decode failure surfaces the range message") {
         val result = "100000000".fromJson[SeedEntityId.SeedEntityId]
-        assertTrue(result.swap.toOption.get.contains(ValidationMessages.seedEntityIdOutOfRange))
+        assertTrue(result.swap.toOption.get.contains(
+          ValidationMessages.render(FieldProblem.OutOfRange(ValueRange.SeedEntityId))))
       },
       test("SeedVarId decode failure surfaces the range message") {
         val result = "0".fromJson[SeedVarId.SeedVarId]
-        assertTrue(result.swap.toOption.get.contains(ValidationMessages.seedVarIdOutOfRange))
+        assertTrue(result.swap.toOption.get.contains(
+          ValidationMessages.render(FieldProblem.OutOfRange(ValueRange.SeedVarId))))
       }
     )
   )

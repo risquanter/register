@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.{ErrorLocation, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
 
 /** Tree-level collection bounds enforced in `RiskTree.fromNodes`:
@@ -47,7 +47,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val result = RiskTree.fromNodes(treeId("bounds-dup"), name("Bounds Dup"), Seq(root, l1, l2), root.id, seedVarHighWater = None, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
-          e.code == ValidationErrorCode.AMBIGUOUS_REFERENCE && e.location == ErrorLocation.Whole)
+          FieldProblem.code(e.problem) == ValidationErrorCode.AMBIGUOUS_REFERENCE && e.location == ErrorLocation.Whole)
       )
     },
 
@@ -94,7 +94,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val result = RiskTree.fromNodes(treeId("bounds-many"), name("Bounds Many"), allNodes, root.id, seedVarHighWater = None, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
-          e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == ErrorLocation.Whole)
+          FieldProblem.code(e.problem) == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == ErrorLocation.Whole)
       )
     }
   )

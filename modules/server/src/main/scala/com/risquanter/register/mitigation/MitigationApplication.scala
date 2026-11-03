@@ -37,7 +37,7 @@ object ScopeRestriction {
       case Raw("full", None) => Right(FullScope)
       case Raw("nodes", Some(rawIds)) =>
         val (errors, ids) = rawIds.partitionMap(NodeId.fromString)
-        if (errors.nonEmpty) Left(errors.flatten.map(_.message).mkString("; "))
+        if (errors.nonEmpty) Left(errors.flatten.map(ValidationError.describe).mkString("; "))
         else Right(NodesOnly(ids.toSet))
       case other => Left(s"invalid scope restriction kind '${other.kind}'")
     }

@@ -2,9 +2,9 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.prelude.Validation
-import io.github.iltotore.iron.refineUnsafe
-import com.risquanter.register.domain.data.iron.{RetentionFactor, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import io.github.iltotore.iron.{autoRefine, refineUnsafe}
+import com.risquanter.register.domain.data.iron.{RetentionFactor, ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{
   metalogShape, lognormalShape, nodeId, residualProbability, retentionFactor
 }
@@ -174,8 +174,8 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
         val result = run(scaleSeverity(0.0005), lognormalParams(min = 1000L, max = 100000L))
         val errors = result.toEither.swap.toOption.toList.flatMap(_.toChunk.toList)
         assertTrue(
-          errors.exists(_.code == ValidationErrorCode.INVALID_LOGNORMAL_PARAMS),
-          errors.exists(_.message.contains("1.000e-03"))
+          errors.exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_LOGNORMAL_PARAMS),
+          errors.exists(e => ValidationMessages.render(e.problem).contains("1.000e-03"))
         )
       },
       test("metalog: anchor losses scale and percentiles do not") {
@@ -212,8 +212,8 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
       },
       test("minRepresentableFactor is the reciprocal of the lower bound") {
         assertTrue(
-          RiskLeafTransform.minRepresentableFactor(1000L) == 0.001,
-          RiskLeafTransform.minRepresentableFactor(40000L) == 0.000025
+          (RiskLeafTransform.minRepresentableFactor(1000L): Double) == 0.001,
+          (RiskLeafTransform.minRepresentableFactor(40000L): Double) == 0.000025
         )
       }
     ),
