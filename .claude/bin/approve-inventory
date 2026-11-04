@@ -28,11 +28,11 @@
 # Usage:
 #   .claude/bin/approve-inventory            amend, then approve
 #   .claude/bin/approve-inventory amend      add the paths to the inventory
-#   .claude/bin/approve-inventory approve    point the token at the plan
+#   .claude/bin/approve-inventory approve    add the plan to the token
 #   .claude/bin/approve-inventory --dry-run  report what would change
 #
-# The token names one plan. Approving a plan replaces whatever was approved
-# before, and the script prints what it removed.
+# The token holds one plan per line. Approving adds a plan beside the others;
+# a plan is closed by deleting its line from the token.
 #
 # "amend" leaves the pending file in place so "approve" can read it next;
 # "approve" and the no-argument form consume it.
@@ -189,29 +189,47 @@ if [ "$MODE" = "amend" ] || [ "$MODE" = "both" ]; then
 fi
 
 # --- approve -----------------------------------------------------------------
-# The token names one plan. Approving replaces what was there, and every plan
-# dropped is named, so a revoked approval is never silent.
+# The token holds one approved plan per line. Approving adds the plan when it
+# is not already there and leaves the others in place, so plans with disjoint
+# inventories can be worked in parallel. A plan is closed by deleting its line.
+# A path listed in two approved inventories is reported, because the hook
+# authorizes the union and cannot attribute such an edit to either plan.
 if [ "$MODE" = "approve" ] || [ "$MODE" = "both" ]; then
-  DROPPED=""
+  CURRENT=()
   if [ -f "$TOKEN" ]; then
     while IFS= read -r OLD || [ -n "$OLD" ]; do
       OLD="${OLD%%#*}"
       OLD="$(echo "$OLD" | xargs 2>/dev/null || true)"
       [ -n "$OLD" ] || continue
-      [ "$OLD" = "$PLAN" ] && continue
-      DROPPED="$DROPPED
-  no longer approved: $OLD"
+      CURRENT+=("$OLD")
     done < "$TOKEN"
   fi
 
+  PRESENT=0
+  if [ "${#CURRENT[@]}" -gt 0 ]; then
+    for OLD in "${CURRENT[@]}"; do
+      [ "$OLD" = "$PLAN" ] && PRESENT=1 && continue
+      OTHER="${OLD%.md}-INVENTORY.md"
+      [ -f "$OTHER" ] && [ -f "$SIDECAR" ] || continue
+      while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        if already_listed "$OTHER" "$p"; then
+          echo "  shared with $OLD: $p"
+        fi
+      done < <(awk '/^[[:space:]]*- /{sub(/^[[:space:]]*-[[:space:]]+/,""); print $1}' "$SIDECAR" | sed -E 's/^[`("*]+//; s/[`)"*,;:.]+$//')
+    done
+  fi
+
   if [ "$DRY" -eq 1 ]; then
-    echo "would point the token at: $PLAN${DROPPED}"
+    if [ "$PRESENT" -eq 1 ]; then echo "token already approves: $PLAN"; else echo "would add to the token: $PLAN"; fi
   else
     mkdir -p .claude/protocol
-    printf '%s\n' "$PLAN" > "$TOKEN"
-    echo "token now approves: $PLAN${DROPPED}"
+    [ "$PRESENT" -eq 1 ] || printf '%s\n' "$PLAN" >> "$TOKEN"
+    echo "token now approves:"
+    sed 's/^/  /' "$TOKEN"
   fi
 fi
+
 
 # The pending file is the input to both phases, so "amend" leaves it for a
 # following "approve" to read. Only a run that reaches the approve phase

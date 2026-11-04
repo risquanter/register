@@ -563,6 +563,43 @@ Full map of what a bump or dependency change triggers: `docs/dev/VERSION-UPGRADE
 
 ---
 
+## Closing a plan
+
+A plan is closed when every item in it has landed green and its status line
+says so. Closing it has two mechanical parts, and the agent presents both as
+one block after the landing commit block, with the plan's name filled in. The
+user runs it; the agent never touches the token or moves a plan.
+
+**The token line goes first.** The approval token holds one approved plan per
+line, and the gate reads every line on every gated edit. A line naming a plan
+whose file has moved makes the gate fail closed on all of them, so the line is
+deleted before the file is moved.
+
+**The plan and its inventory move together.** Finished plans live in
+`docs/archive/plans/` under a `DONE-` prefix, and the inventory sidecar moves
+with the same prefix so the two stay paired by name. `git mv` keeps the history
+and stages the move.
+
+```bash
+P=PLAN-<NAME>; sed -i "\#^docs/dev/plans/$P.md\$#d" .claude/protocol/approved && git mv docs/dev/plans/$P.md docs/archive/plans/DONE-$P.md && git mv docs/dev/plans/$P-INVENTORY.md docs/archive/plans/DONE-$P-INVENTORY.md && echo "--- token now approves ---" && cat .claude/protocol/approved && echo "--- files still naming the old path ---" && grep -rln "docs/dev/plans/$P" docs CLAUDE.md .claude/skills .claude/rules
+```
+
+The last command lists every document that still names the plan at its old
+path. Those references are repointed at `docs/archive/plans/DONE-$P.md` in the
+same pass, and the agent lists each file it changed. The move and the
+repointed references then land as their own commit, so the landing commit's
+diff stays the code:
+
+```bash
+git add <each repointed file>
+git commit -S -m "plan: PLAN-<NAME> implemented, archived as DONE-PLAN-<NAME>"
+```
+
+A plan with no inventory sidecar, which is one that never reached
+implementation, drops the second `git mv`.
+
+---
+
 ## Container Image Builds
 
 For day-to-day development, `docker compose up` builds application images automatically

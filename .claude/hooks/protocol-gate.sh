@@ -81,11 +81,12 @@
 #   Inventories are tracked by git, so an unauthorized change to one shows up
 #   in git status and in the commit diff.
 #
-# The user approves a plan from their own terminal:
-#   mkdir -p .claude/protocol && echo "docs/dev/PLAN-<name>.md" > .claude/protocol/approved
-# Multiple concurrent plans: one repo-relative plan path per line.
-# Revoke / close out: rm -rf .claude/protocol   (the agent flags plan
-# completion in its landing report so the user knows when).
+# The user approves a plan from their own terminal through
+# .claude/bin/approve-inventory, which appends one repo-relative plan path per
+# line. Closing a plan deletes its line; the register-dev skill's "Closing a
+# plan" block does that and archives the plan (the agent presents the block
+# in its landing report so the user knows when).
+
 set -euo pipefail
 
 # Fail closed. This hook can only BLOCK a call in two ways: print the deny JSON
@@ -323,7 +324,7 @@ case "$ABS" in
 esac
 
 if [ ! -f "$TOKEN" ]; then
-  deny "Blocked (working-protocol G3): no approved plan (token absent). Present the quality-gated plan document and wait. The user approves by running: mkdir -p .claude/protocol && echo \"docs/dev/PLAN-<name>.md\" > .claude/protocol/approved"
+  deny "Blocked (working-protocol G3): no approved plan (token absent). Present the quality-gated plan document and wait. The user approves by running .claude/bin/approve-inventory after pasting the plan path and its file list into .claude/protocol/pending."
 fi
 
 MISSING=""
