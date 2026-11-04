@@ -11,10 +11,10 @@ import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{FieldProblem, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
 object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   // One tree per workspace, so the ceiling is reachable in a test. Every test
   // creates its own workspace, so the low ceiling constrains none of the others.
@@ -31,7 +31,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("create + resolve succeeds") {
       for
         store <- ZIO.service[WorkspaceStore]
-        key   <- store.create()
+        key   <- store.create(None)
         ws    <- store.resolve(key)
       yield assertTrue(ws.keyHash == WorkspaceKeyCrypto.hash(key))
     },
@@ -39,7 +39,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("addTree/listTrees/removeTree roundtrip") {
       for
         store  <- ZIO.service[WorkspaceStore]
-        key    <- store.create()
+        key    <- store.create(None)
         treeId <- IdGenerators.nextTreeId
         _      <- store.addTree(key, treeId)
         listed <- store.listTrees(key)
@@ -51,7 +51,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("rotate preserves the workspace's identity and invalidates old key") {
       for
         store   <- ZIO.service[WorkspaceStore]
-        oldKey  <- store.create()
+        oldKey  <- store.create(None)
         ws1     <- store.resolve(oldKey)
         newKey  <- store.rotate(oldKey)
         viaKey  <- store.resolve(newKey)
@@ -65,7 +65,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("an expired workspace reports expired") {
       for
         store <- ZIO.service[WorkspaceStore]
-        key   <- store.create()
+        key   <- store.create(None)
         _     <- ZIO.sleep(2.seconds)
         byKey <- store.resolve(key).exit
       yield assert(byKey)(fails(isSubtype[WorkspaceExpired](anything)))
@@ -74,7 +74,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("delete reports not-found on the deleted key") {
       for
         store   <- ZIO.service[WorkspaceStore]
-        key     <- store.create()
+        key     <- store.create(None)
         _       <- store.delete(key)
         keyExit <- store.resolve(key).exit
       yield assert(keyExit)(fails(isSubtype[WorkspaceNotFound](anything)))
@@ -83,7 +83,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("the tree ceiling refuses a new tree and allows re-association") {
       for
         store  <- ZIO.service[WorkspaceStore]
-        key    <- store.create()
+        key    <- store.create(None)
         first  <- IdGenerators.nextTreeId
         second <- IdGenerators.nextTreeId
         _      <- store.addTree(key, first)
@@ -98,7 +98,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       // Eight callers, one slot, one winner.
       for
         store    <- ZIO.service[WorkspaceStore]
-        key      <- store.create()
+        key      <- store.create(None)
         trees    <- ZIO.foreach(1 to 8)(_ => IdGenerators.nextTreeId)
         outcomes <- ZIO.foreachPar(trees.toList)(t => store.addTree(key, t).either)
         listed   <- store.listTrees(key)
@@ -112,7 +112,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("evictExpired returns expired workspace records") {
       for
         store   <- ZIO.service[WorkspaceStore]
-        key     <- store.create()
+        key     <- store.create(None)
         ws      <- store.resolve(key)
         _       <- ZIO.sleep(2.seconds)
         evicted <- store.evictExpired
@@ -126,8 +126,8 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     test("sequence assigns distinct, strictly increasing seedEntityIds") {
       for
         store <- ZIO.service[WorkspaceStore]
-        k1    <- store.create()
-        k2    <- store.create()
+        k1    <- store.create(None)
+        k2    <- store.create(None)
         e1    <- store.resolve(k1).map(_.seedEntityId.value)
         e2    <- store.resolve(k2).map(_.seedEntityId.value)
       yield assertTrue(e2 > e1)
@@ -158,7 +158,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         store <- ZIO.service[WorkspaceStore]
         id    <- ZIO.fromEither(SeedEntityId.fromLong(900100L)).orDieWith(e => new AssertionError(e.toString))
         _     <- store.create(Some(id))
-        key   <- store.create()
+        key   <- store.create(None)
         ws    <- store.resolve(key)
       yield assertTrue(ws.seedEntityId.value > 900100L)
     }

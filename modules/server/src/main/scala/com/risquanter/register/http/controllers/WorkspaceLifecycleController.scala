@@ -4,7 +4,7 @@ import zio.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Checked, Permission, UserContextExtractor }
+import com.risquanter.register.auth.{AuthorizationService, BootstrapProvisioner, Checked, LifecycleMarker, Permission, UserContextExtractor}
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, RequestHeaderName, ValidationError, ValidationFailed}
 import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, Revision}
@@ -19,7 +19,7 @@ import com.risquanter.register.http.errors.TreeScope
   * Owns workspace bootstrap, key rotation, workspace deletion, and workspace-level
   * tree listing/creation routes.
   *
-  * Authorization layers (all three wired; the SpiceDB backend is a NoOp stub):
+  * Authorization layers:
   *  - Layer 0 (capability-only): [[WorkspaceStore.resolve]] (or `create`/`rotate`)
   *    validates the workspace key. `bootstrapWorkspace` is intentionally unauthenticated
   *    (it creates the credential). `evictExpired` is an internal maintenance route.
@@ -28,8 +28,9 @@ import com.risquanter.register.http.errors.TreeScope
   *    `register.auth.mode=identity`. The extracted [[UserId]] is passed to `authzService.check`.
   *  - Layer 2 (fine-grained): [[AuthorizationService.check]] enforces per-operation
   *    permissions (`ViewWorkspace`, `DesignWrite`, `AdminWorkspace`) on the resolved
-  *    workspace resource. Currently wired with [[AuthorizationServiceNoOp]]
-  *    (always-permit stub), so no per-operation permission is denied today.
+  *    workspace resource. `register.auth.mode=fine-grained` wires the SpiceDB
+  *    adapter; the two other modes wire [[AuthorizationServiceNoOp]], which
+  *    permits every check.
   *
   * @see ADR-024 — Application as Pure PEP
   */
@@ -51,7 +52,7 @@ class WorkspaceLifecycleController private (
     case (maybeUserId, seedEntityId, req) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        given Checked[Permission.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
+        given Checked[LifecycleMarker.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
         // exempt: pre-resource-creation — no resource exists yet to check
         key    <- workspaceStore.create(seedEntityId)
         ws     <- workspaceStore.resolve(key)  // exempt: Layer 0 capability gate
@@ -142,9 +143,9 @@ class WorkspaceLifecycleController private (
       // exempt: system maintenance — no user context (ADR-030 §2; same token
       // WorkspaceReaper uses for the identical TTL-driven cascade — this
       // endpoint is the admin-triggered, on-demand equivalent of that sweep)
-      given Checked[Permission.SystemMaintenance.type] <- bootstrapProvisioner.systemMaintenanceToken()
+      given Checked[LifecycleMarker.SystemMaintenance.type] <- bootstrapProvisioner.systemMaintenanceToken()
       evicted <- workspaceStore.evictExpired
-      _       <- ZIO.withParallelism(8) {
+      _       <- ZIO.withParallelism(CascadeDelete.Parallelism) {
                    ZIO.foreachParDiscard(evicted)(ws =>
                      CascadeDelete.workspace(ws.id, ws.trees, riskTreeService, scenarioService))
                  }

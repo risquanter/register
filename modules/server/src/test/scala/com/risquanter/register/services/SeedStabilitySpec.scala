@@ -11,7 +11,7 @@ import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testutil.TestHelpers.safeId
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
 /** Seed-identity reproducibility at the **figure** level. Where
   * `RiskTreeServiceLiveSpec` proves that recreation yields the same *seed
@@ -25,7 +25,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
   * the byte-identical payload these tests pin.
   */
 object SeedStabilitySpec extends ZIOSpecDefault {
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private type Env = RiskTreeService & CachedResultResolver
 

@@ -5,6 +5,7 @@ import java.time.{Duration, Instant, OffsetDateTime, ZoneOffset}
 import io.getquill.*
 import io.getquill.jdbczio.Quill
 
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
@@ -82,7 +83,7 @@ final class WorkspaceStorePostgres private (
                      FieldProblem.SeedEntityIdInUse(entityId)))))
                  case other => ZIO.die(asDefect(other))
                } *> bumpSeedEntitySequence(entityId.value).orDieWith(asDefect)
-      _ <- logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created")
+      _ <- logSecurity(WorkspaceStore.SecurityEvent.Created, WorkspaceStore.WorkspaceIdKey -> id.value)("Workspace created")
     yield key
 
   /** Advance the assignment sequence past a provided value (never backwards). */
@@ -106,7 +107,7 @@ final class WorkspaceStorePostgres private (
     * workspace. The refusal travels as a `Left` so the transaction commits,
     * keeping the typed error out of `db`'s mapping to `RepositoryFailure`.
     */
-  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit] =
     for
       ws     <- resolveInternal(key)
       now    <- Clock.instant
@@ -134,7 +135,7 @@ final class WorkspaceStorePostgres private (
         run(query[WorkspaceTreeRow].insertValue(lift(WorkspaceTreeRow(wsId, treeId, toOffsetDateTime(now)))))
           .as(Right(()): Either[AppError, Unit])
 
-  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(
@@ -146,13 +147,13 @@ final class WorkspaceStorePostgres private (
             ).unit
     yield ()
 
-  override def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]] =
+  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
   /** Refuse a creation that would exceed the tree ceiling, before the tree is
     * written.
     */
-  override def checkTreeCapacity(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit] =
     resolveInternal(key).flatMap(ws =>
       ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
     )
@@ -185,19 +186,19 @@ final class WorkspaceStorePostgres private (
       _       <- ZIO.foreachDiscard(doomedIds)(id =>
                    db(run(query[WorkspaceRow].filter(_.id == lift(id)).delete)).unit
                  )
-      _       <- logSecurity("workspace.eviction", "evicted_count" -> doomed.size.toString)(
+      _       <- logSecurity(WorkspaceStore.SecurityEvent.Eviction, WorkspaceStore.EvictedCountKey -> doomed.size.toString)(
                    s"Evicted ${doomed.size} expired workspace(s)"
                  )
     yield doomed
 
-  override def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(run(query[WorkspaceRow].filter(_.id == lift(ws.id)).delete)).unit
-      _  <- logSecurity("workspace.deleted", "workspace_id" -> ws.id.value)("Workspace deleted")
+      _  <- logSecurity(WorkspaceStore.SecurityEvent.Deleted, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace deleted")
     yield ()
 
-  override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
+  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, WorkspaceKeySecret] =
     for
       ws     <- resolveInternal(key)
       newKey <- WorkspaceKeyCrypto.generate
@@ -213,7 +214,7 @@ final class WorkspaceStorePostgres private (
                       )
                   )
                 ).unit
-      _      <- logSecurity("workspace.rotated", "workspace_id" -> ws.id.value)("Workspace key rotated")
+      _      <- logSecurity(WorkspaceStore.SecurityEvent.Rotated, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace key rotated")
     yield newKey
 
   private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
@@ -274,11 +275,9 @@ final class WorkspaceStorePostgres private (
     */
   private def asDefect(e: AppError): Throwable = RuntimeException(e.logMessage)
 
-  /** Structured security event log with arbitrary key-value annotations. Event
-    * and field names match the in-memory store's.
-    */
-  private def logSecurity(eventType: String, fields: (String, String)*)(msg: String): UIO[Unit] =
-    val allAnnotations = ("event_type" -> eventType) +: fields
+  /** Structured security event log with arbitrary key-value annotations. */
+  private def logSecurity(event: WorkspaceStore.SecurityEvent, fields: (String, String)*)(msg: String): UIO[Unit] =
+    val allAnnotations = (WorkspaceStore.EventTypeKey -> event.eventType) +: fields
     allAnnotations.foldRight(ZIO.logInfo(msg): UIO[Unit]) { case ((k, v), effect) =>
       ZIO.logAnnotate(k, v)(effect)
     }
@@ -319,14 +318,20 @@ object WorkspaceStorePostgres:
     private val DayOnlyIntervalPattern =
       raw"(-?\d+) day[s]?".r
 
+    /** Fixed by the calendar: a Postgres interval has no leap seconds. */
+    private val SecondsPerDay: Long    = 86400L
+    private val SecondsPerHour: Long   = 3600L
+    private val SecondsPerMinute: Long = 60L
+    private val NanosPerSecond: Long   = 1_000_000_000L
+
     def renderInterval(duration: Duration): String =
       val totalSeconds = duration.getSeconds
-      val days = Math.floorDiv(totalSeconds, 86400)
-      val remAfterDays = Math.floorMod(totalSeconds, 86400)
-      val hours = Math.floorDiv(remAfterDays, 3600)
-      val remAfterHours = Math.floorMod(remAfterDays, 3600)
-      val minutes = Math.floorDiv(remAfterHours, 60)
-      val seconds = Math.floorMod(remAfterHours, 60).toDouble + duration.getNano.toDouble / 1_000_000_000d
+      val days = Math.floorDiv(totalSeconds, SecondsPerDay)
+      val remAfterDays = Math.floorMod(totalSeconds, SecondsPerDay)
+      val hours = Math.floorDiv(remAfterDays, SecondsPerHour)
+      val remAfterHours = Math.floorMod(remAfterDays, SecondsPerHour)
+      val minutes = Math.floorDiv(remAfterHours, SecondsPerMinute)
+      val seconds = Math.floorMod(remAfterHours, SecondsPerMinute).toDouble + duration.getNano.toDouble / NanosPerSecond.toDouble
       f"$days%d days $hours%d hours $minutes%d minutes $seconds%.9f seconds"
 
     def parseInterval(value: String): Either[String, Duration] =
@@ -347,9 +352,8 @@ object WorkspaceStorePostgres:
           // (regex-constrained input, kept for sound coverage).
           try
             val secondsPart = BigDecimal(seconds)
-            val nanosPerSecond = BigDecimal(1000000000L)
             val wholeSeconds = secondsPart.setScale(0, BigDecimal.RoundingMode.DOWN).toLongExact
-            val nanos = ((secondsPart - BigDecimal(wholeSeconds)) * nanosPerSecond)
+            val nanos = ((secondsPart - BigDecimal(wholeSeconds)) * BigDecimal(NanosPerSecond))
               .setScale(0, BigDecimal.RoundingMode.HALF_UP)
               .toLongExact
             Right(

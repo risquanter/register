@@ -9,7 +9,7 @@ import sttp.monad.MonadError
 import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
 
-import com.risquanter.register.auth.{AuthorizationServiceNoOp, Checked, Permission, UserContextExtractor}
+import com.risquanter.register.auth.{Authority, AuthorizationServiceNoOp, Checked, UserContextExtractor}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.RiskLeaf
@@ -195,9 +195,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         fields = List(FieldName.Probability)
       )
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, MergePreviewStatus] =
           ZIO.succeed(MergePreviewStatus.Conflicts(List(conflict)))
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(mergeService = Some(stub))
@@ -218,9 +218,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
           List(SafeName.fromString("Alpha").toOption.get)
       )
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, MergePreviewStatus] =
           ZIO.succeed(MergePreviewStatus.DuplicateNames(dupMap))
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(mergeService = Some(stub))
@@ -235,9 +235,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("merge-preview clean wire mapping: duplicateNames absent/None when the preview is clean") {
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, MergePreviewStatus] =
           ZIO.succeed(MergePreviewStatus.Clean())
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): IO[AppError, CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(mergeService = Some(stub))

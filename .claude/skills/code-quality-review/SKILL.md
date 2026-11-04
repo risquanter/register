@@ -310,7 +310,7 @@ request body (e.g. a node-ID list with no max-size constraint) as
 report a match against one as pre-existing, not as a new finding.
 
 **API5:2023 Broken Function Level Authorization.** Every new service method
-that reads or mutates privileged data must require `using Checked[Permission]`
+that reads or mutates privileged data must require `using Checked[Authority]`
 in its signature (ADR-024) — a method that can be called without that proof
 type is a function-level authorization gap. **MUST-FIX.**
 
@@ -349,7 +349,7 @@ one — a by-identifier lookup with no capability check, guarded only by a
 scaladoc warning and with no production caller. It was deleted rather than
 guarded, and that is the preferred resolution: a method nothing calls is removed,
 not documented. Any method that bypasses the normal key-resolution path must
-carry `using Checked[Permission]` so the authorization is in its signature.
+carry `using Checked[Authority]` so the authorization is in its signature.
 **MUST-FIX** on a new unscoped lookup that names a resource without proving the
 caller may read it, and on any method kept alive by a warning comment instead of
 a type.

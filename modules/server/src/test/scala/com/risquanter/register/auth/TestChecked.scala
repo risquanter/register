@@ -1,6 +1,6 @@
 package com.risquanter.register.auth
 
-/** Test-scope only. Produces a Checked[Permission] for service-level tests that
+/** Test-scope only. Produces a Checked[Authority] for service-level tests that
   * operate below the authorization layer (testing persistence/domain behavior,
   * not authorization behavior).
   *
@@ -10,13 +10,13 @@ package com.risquanter.register.auth
   * Usage in test suites that call protected service methods directly:
   * {{{
   *   import com.risquanter.register.auth.TestChecked
-  *   given Checked[Permission] = TestChecked.value
+  *   given Checked[Authority] = TestChecked.value
   * }}}
   *
   * @see ADR-030 — Authorization Enforcement at the Orchestration Boundary
   */
 object TestChecked:
-  /** Satisfies any `using Checked[Permission]` parameter.
-    * Checked[Permission.Bootstrap.type] <: Checked[Permission] via covariance.
+  /** Satisfies any `using Checked[Authority]` parameter.
+    * Checked[LifecycleMarker.Bootstrap.type] <: Checked[Authority] via covariance.
     */
-  val value: Checked[Permission] = Checked[Permission.Bootstrap.type]()
+  val value: Checked[Authority] = Checked[LifecycleMarker.Bootstrap.type]()

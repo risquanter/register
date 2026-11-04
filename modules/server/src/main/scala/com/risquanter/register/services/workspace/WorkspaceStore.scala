@@ -1,6 +1,7 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, WorkspaceKeySecret, TreeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, TreeNotInWorkspace, ValidationError, ValidationFailed}
@@ -31,7 +32,7 @@ trait WorkspaceStore:
     *
     * Logs a creation event.
     */
-  def create(seedEntityId: Option[SeedEntityId.SeedEntityId] = None): IO[AppError, WorkspaceKeySecret]
+  def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret]
 
   /** Associate a tree with a workspace. Fails if the workspace is expired or not
     * found, or already holds the configured maximum number of trees.
@@ -39,13 +40,13 @@ trait WorkspaceStore:
     *
     * Implementations resolve, check and write atomically.
     */
-  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit]
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op. */
-  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
+  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit]
 
   /** List all tree IDs in a workspace. Fails if expired or not found. */
-  def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]]
+  def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]]
 
   /** Resolve a workspace. Fails with WorkspaceExpired or WorkspaceNotFound.
     * Implements dual timeout: absolute (createdAt + ttl) AND idle (lastAccessedAt + idleTimeout).
@@ -64,7 +65,7 @@ trait WorkspaceStore:
     * `resolveTreeWorkspace`, and skipped by the reaper's cascade. A caller that
     * creates a tree checks here first.
     */
-  def checkTreeCapacity(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
+  def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit]
 
   /** Resolve a workspace, verify tree membership, and return the workspace.
     *
@@ -106,24 +107,41 @@ trait WorkspaceStore:
   /** Hard delete. Removes workspace from the store. Tree cascade-deletion is
     * orchestrated by the controller. Logs a deletion event.
     */
-  def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
+  def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit]
 
   /** Atomic rotation. Generates new key, transfers all tree associations,
     * instantly invalidates old key. No grace period — old key is immediately
     * dead, new key is immediately live.
     * Returns new key. Logs a rotation event.
     */
-  def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret]
+  def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, WorkspaceKeySecret]
 
 object WorkspaceStore:
+  /** The security events every store implementation logs, carried under the
+    * `event_type` annotation. The spellings are a contract with the log
+    * pipeline, so they are declared rather than derived from the case names.
+    */
+  enum SecurityEvent(val eventType: String):
+    case Created  extends SecurityEvent("workspace.created")
+    case Deleted  extends SecurityEvent("workspace.deleted")
+    case Rotated  extends SecurityEvent("workspace.rotated")
+    case Eviction extends SecurityEvent("workspace.eviction")
+
+  /** Annotation keys of a security log line. Spellings are a contract with the
+    * log pipeline.
+    */
+  val EventTypeKey: String    = "event_type"
+  val WorkspaceIdKey: String  = "workspace_id"
+  val EvictedCountKey: String = "evicted_count"
+
   // Accessor methods for ZIO service pattern
-  def create(seedEntityId: Option[SeedEntityId.SeedEntityId] = None): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
+  def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
     ZIO.serviceWithZIO[WorkspaceStore](_.create(seedEntityId))
 
   def resolve(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolve(key))
 
-  def checkTreeCapacity(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
+  def checkTreeCapacity(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.checkTreeCapacity(key))
 
   /** The refusal a workspace already holding `limit` trees produces. A value
@@ -150,13 +168,13 @@ object WorkspaceStore:
   def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolveTreeWorkspace(key, treeId))
 
-  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.addTree(key, treeId))
 
-  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
+  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.removeTree(key, treeId))
 
-  def listTrees(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, List[TreeId]] =
+  def listTrees(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, List[TreeId]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.listTrees(key))
 
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Boolean] =
@@ -168,8 +186,8 @@ object WorkspaceStore:
   def evictExpired: ZIO[WorkspaceStore, AppError, List[WorkspaceRecord]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)
 
-  def delete(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
+  def delete(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.delete(key))
 
-  def rotate(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
+  def rotate(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
     ZIO.serviceWithZIO[WorkspaceStore](_.rotate(key))

@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.json.*
 import java.time.Instant
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, Revision, SafeName, TreeId, ValidationUtil}
 import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, FieldProblem, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, TreeLoadProblem, ValidationFailed, ValidationError}
@@ -162,7 +162,7 @@ trait ScenarioMergeService:
     * than a failure.
     */
   def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, MergePreviewStatus]
+    (using Checked[Authority]): IO[AppError, MergePreviewStatus]
 
   /** Merge the scenario into main via Irmin's native three-way merge.
     *
@@ -172,12 +172,12 @@ trait ScenarioMergeService:
     * @see ValidationFailed NOT_FOUND — the scenario does not exist
     */
   def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, CommitHash]
+    (using Checked[Authority]): IO[AppError, CommitHash]
 
 final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepository) extends ScenarioMergeService:
 
   override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+    (using Checked[Authority]): IO[AppError, MergePreviewStatus] =
     for
       branch    <- ScenarioBranchOps.scenarioBranch(wsId, name)
       maybeHead <- irmin.getBranch(branch).map(_.flatMap(_.head))
@@ -194,7 +194,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     yield result
 
   override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, CommitHash] =
+    (using Checked[Authority]): IO[AppError, CommitHash] =
     for
       branch       <- ScenarioBranchOps.scenarioBranch(wsId, name)
       maybeHead    <- irmin.getBranch(branch).map(_.flatMap(_.head))
@@ -480,7 +480,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   private def comparePaths(wsId: WorkspaceId, mainHead: CommitHash, scenarioHead: CommitHash, base: CommitHash): IO[AppError, List[PathComparison]] =
     for
       paths       <- candidatePaths(wsId, mainHead, scenarioHead)
-      comparisons <- ZIO.withParallelism(8) {
+      comparisons <- ZIO.withParallelism(ScenarioMergeServiceLive.FetchParallelism) {
                        ZIO.foreachPar(paths.toList.sortBy(WorkspaceStoragePaths.of(wsId, _).value)) { path =>
                          val abs = WorkspaceStoragePaths.of(wsId, path)
                          irmin.getAtCommit(mainHead, abs)
@@ -563,5 +563,10 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       RepositoryFailure(s"Listed $what '${segment.value}' does not refine: ${errs.map(ValidationError.describe).mkString("; ")}"))
 
 object ScenarioMergeServiceLive:
+  /** How many candidate paths the conflict scan fetches from Irmin at once.
+    * Chosen here, not measured.
+    */
+  val FetchParallelism: Int = 8
+
   val layer: ZLayer[IrminClient & RiskTreeRepository, Nothing, ScenarioMergeService] =
     ZLayer.fromFunction(new ScenarioMergeServiceLive(_, _))

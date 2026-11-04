@@ -13,10 +13,10 @@ import com.risquanter.register.domain.data.iron.{NonNegativeLong, TreeId, Worksp
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationErrorCode, ValueRange}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.testutil.TestHelpers.{safeId}
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
 object RiskTreeControllerSpec extends ZIOSpecDefault {
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   // Service accessor pattern. The error type is `AppError` rather than
   // `Throwable` because that is what the service declares; a helper widened to

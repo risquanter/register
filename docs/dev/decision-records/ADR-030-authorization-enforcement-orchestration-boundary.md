@@ -44,7 +44,7 @@ val deleteWorkspace: ServerEndpoint[Any, Task] = deleteWorkspaceEndpoint.serverL
       given Checked[Permission] <-
                  authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       //    ↑ specific permission value passed to SpiceDB for runtime decision
-      //      binding uses base Checked[Permission] — satisfies all using Checked[Permission] params
+      //      binding uses Checked[Permission] — satisfies all using Checked[Authority] params
       ids    <- workspaceStore.listTrees(key)               // Checked[Permission] in scope ✓
       _      <- riskTreeService.cascadeDeleteTrees(ws.id, ids)
       _      <- workspaceStore.delete(key)
@@ -79,7 +79,7 @@ val bootstrapWorkspace = bootstrapWorkspaceEndpoint.serverLogic { case (xff, req
     _   <- rateLimiter.checkCreate(ip)
     key <- workspaceStore.create()       // exempt: pre-resource-creation
     ws  <- workspaceStore.resolve(key)   // exempt: Layer 0 capability gate
-    given Checked[Permission.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
+    given Checked[LifecycleMarker.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
     //    ↑ bootstrap lifecycle token — see Decision 5
     tree <- riskTreeService.create(ws.id, req)    // Checked[Permission] in scope ✓
     _    <- workspaceStore.addTree(key, tree.id)  // Checked[Permission] in scope ✓
@@ -87,37 +87,48 @@ val bootstrapWorkspace = bootstrapWorkspaceEndpoint.serverLogic { case (xff, req
 }
 ```
 
-### 3. `Checked[P]` Proof Token — Base Permission Type
+### 3. `Checked[P]` Proof Token — Base `Authority` Type
 
 `authz.check()` returns `IO[AuthError, Checked[P]]`. Service methods that require authorization
-declare `(using Checked[Permission])`. A call site lacking a `given Checked[Permission]` in
+declare `(using Checked[Authority])`. A call site lacking a `given Checked[Authority]` in
 scope is a **compile error** — the check cannot be silently omitted.
 
-The `using` parameter carries the **base `Permission` type**, not a specific permission
-subtype. The specific permission (`Permission.ViewWorkspace`, `Permission.DesignWrite`, etc.)
-is passed to `check()` itself — that is what SpiceDB evaluates. Encoding specific permission
-requirements in service method signatures would duplicate the SpiceDB schema's permission
-hierarchy in Scala, creating a second source of truth for policy (violates ADR-024).
+`Authority` is the sealed parent of what a proof may witness. It has two cases: `Permission`,
+the enum of SpiceDB permissions that `check()` evaluates, and `LifecycleMarker`, the enum of
+the two tokens issued without consulting SpiceDB (Decision 5). `check()` is bounded by
+`Permission`, so a marker cannot be sent to SpiceDB; `Checked` is bounded by `Authority`, so a
+marker's proof satisfies the same service signatures a permission's does.
 
-Via covariance (`+P`), any `Checked[P]` where `P <: Permission` satisfies
-`using Checked[Permission]`:
+The `using` parameter carries the **base `Authority` type**, not a specific permission. The
+specific permission (`Permission.ViewWorkspace`, `Permission.DesignWrite`, etc.) is passed to
+`check()` itself — that is what SpiceDB evaluates. Encoding specific permission requirements in
+service method signatures would duplicate the SpiceDB schema's permission hierarchy in Scala,
+creating a second source of truth for policy (violates ADR-024).
+
+Via covariance (`+P`), any `Checked[P]` where `P <: Authority` satisfies
+`using Checked[Authority]`:
 
 ```scala
-opaque type Checked[+P <: Permission] = Unit
+sealed trait Authority
+enum Permission(val zedName: String) extends Authority: ...
+enum LifecycleMarker extends Authority:
+  case Bootstrap, SystemMaintenance
+
+opaque type Checked[+P <: Authority] = Unit
 
 object Checked:
-  private[auth] def apply[P <: Permission](): Checked[P] = ()
+  private[auth] def apply[P <: Authority](): Checked[P] = ()
   // Only constructible inside the auth package — authz.check() is the sole production source
 
-// Service method — base type; any prior check satisfies it
-def listTrees(key: WorkspaceKeySecret)(using Checked[Permission]): IO[AppError, List[TreeId]]
+// Service method — base type; any prior check or lifecycle token satisfies it
+def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]]
 
-// Handler — specific permission value passed to SpiceDB; binds as base Checked[Permission]
+// Handler — specific permission value passed to SpiceDB; binds as Checked[Permission]
 // Note: Scala 3 type inference widens to Checked[Permission] when binding given from check();
 // the specific permission is in the check() argument, not the binding type.
 given Checked[Permission] <-
     authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
-ids <- workspaceStore.listTrees(key)   // Checked[Permission] in scope ✓
+ids <- workspaceStore.listTrees(key)   // Checked[Authority] in scope ✓
 ```
 
 ### 4. Erasure Is Correct — Services Are Not Authorization Decision Points
@@ -133,35 +144,37 @@ inspectable information.
 
 ```scala
 // ❌ Service inspects proof — re-implements policy, violates PEP boundary
-def listTrees(key: WorkspaceKeySecret)(using proof: Checked[Permission]) =
+def listTrees(key: WorkspaceKeySecret)(using proof: Checked[Authority]) =
   if proof.asInstanceOf[SomeType] == ... then ...   // impossible and wrong
 
 // ✅ Service ignores proof content — SpiceDB already decided; proof proves wiring only
-def listTrees(key: WorkspaceKeySecret)(using Checked[Permission]) =
+def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]) =
   repository.fetchTreeIds(key)
 ```
 
 ### 5. Bootstrap Lifecycle Token
 
 `bootstrapWorkspace` creates a new resource — no prior resource exists to check against.
-`BootstrapProvisioner.bootstrapToken()` returns `UIO[Checked[Permission.Bootstrap.type]]`,
-declaring bootstrap mode without consulting SpiceDB.
+`BootstrapProvisioner.bootstrapToken()` returns `UIO[Checked[LifecycleMarker.Bootstrap.type]]`,
+declaring bootstrap mode without consulting SpiceDB. `systemMaintenanceToken()` does the same
+for the background reaper, where no user is present.
 
-`Permission.Bootstrap` is a lifecycle marker, not a SpiceDB permission. It exists in the
-`Permission` enum solely to produce a `Checked[Permission]` proof that satisfies the service
-method `using` requirement at bootstrap call sites. It is never passed to
-`AuthorizationServiceSpiceDB.check()`.
+`LifecycleMarker.Bootstrap` is a lifecycle marker, not a SpiceDB permission. It is a case of
+`LifecycleMarker`, which extends `Authority` beside `Permission`, so its proof satisfies the
+service method `using Checked[Authority]` requirement at bootstrap call sites. It cannot be
+passed to `check()`, whose bound is `Permission`: the call does not compile.
 
 ```scala
-case Bootstrap extends Permission("__bootstrap__")  // lifecycle marker only; never sent to SpiceDB
+enum LifecycleMarker extends Authority:
+  case Bootstrap, SystemMaintenance   // never sent to SpiceDB: check() takes a Permission
 
 // BootstrapProvisionerNoOp and BootstrapProvisionerSpiceDB both:
-def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]] =
-  ZIO.succeed(Checked[Permission.Bootstrap.type]())
+def bootstrapToken(): UIO[Checked[LifecycleMarker.Bootstrap.type]] =
+  ZIO.succeed(Checked[LifecycleMarker.Bootstrap.type]())
 
 // Handler binds the proof before create/addTree:
-given Checked[Permission.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
-tree <- riskTreeService.create(ws.id, req)    // Checked[Bootstrap.type] <: Checked[Permission] ✓
+given Checked[LifecycleMarker.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
+tree <- riskTreeService.create(ws.id, req)    // Checked[Bootstrap.type] <: Checked[Authority] ✓
 _    <- workspaceStore.addTree(key, tree.id)  // same given in scope ✓
 ```
 
@@ -249,7 +262,7 @@ def listTrees(key: WorkspaceKeySecret)
 
 // GOOD: base type — policy lives in SpiceDB schema only
 def listTrees(key: WorkspaceKeySecret)
-    (using Checked[Permission]): IO[AppError, List[TreeId]]
+    (using Checked[Authority]): IO[AppError, List[TreeId]]
 ```
 
 ### ❌ Discarding the Proof
@@ -270,7 +283,7 @@ _ <- riskTreeService.update(ws.id, treeId, req)   // Checked[Permission] satisfi
 ```scala
 // BAD: test infrastructure in production — proof without check(); defeats the invariant
 import com.risquanter.register.auth.TestChecked
-given Checked[Permission] = TestChecked.value   // test-scope only — never in src/main
+given Checked[Authority] = TestChecked.value   // test-scope only — never in src/main
 
 // GOOD: proof comes from authz.check() or bootstrapToken() only
 given Checked[Permission] <-
@@ -283,9 +296,9 @@ given Checked[Permission] <-
 
 | Pattern | Location |
 |---|---|
-| `Checked[P]` opaque type + `Permission.Bootstrap` | `auth/AuthorizationService.scala` |
-| `bootstrapToken()` method | `auth/BootstrapProvisioner.scala` |
-| `(using Checked[Permission])` on protected methods | `WorkspaceStore`, `RiskTreeService` trait signatures and impls |
+| `Authority`, `Permission`, `LifecycleMarker`, `Checked[P]` opaque type | `auth/AuthorizationService.scala` |
+| `bootstrapToken()` and `systemMaintenanceToken()` methods | `auth/BootstrapProvisioner.scala` |
+| `(using Checked[Authority])` on protected methods | `WorkspaceStore`, `RiskTreeService` trait signatures and impls |
 | `given Checked[P] <-` bindings | All workspace-scoped controller `serverLogic` for-comprehensions |
 | `TestChecked` (test scope, `src/test` only) | `src/test/scala/.../auth/TestChecked.scala` |
 | `// exempt:` annotations | `bootstrapWorkspace`, `evictExpired`, `distributionPreview` call sites |

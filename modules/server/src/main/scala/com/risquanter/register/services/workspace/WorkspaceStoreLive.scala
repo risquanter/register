@@ -2,6 +2,7 @@ package com.risquanter.register.services.workspace
 
 import zio.*
 import java.time.Instant
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, RepositoryFailure, ValidationFailed, ValidationError, WorkspaceExpired, WorkspaceNotFound}
@@ -25,8 +26,8 @@ final class WorkspaceStoreLive private (
   // ── Logging helper (eliminates nested ZIO.logAnnotate repetition) ─────
 
   /** Structured security event log with arbitrary key-value annotations. */
-  private def logSecurity(eventType: String, fields: (String, String)*)(msg: String): UIO[Unit] =
-    val allAnnotations = ("event_type" -> eventType) +: fields
+  private def logSecurity(event: WorkspaceStore.SecurityEvent, fields: (String, String)*)(msg: String): UIO[Unit] =
+    val allAnnotations = (WorkspaceStore.EventTypeKey -> event.eventType) +: fields
     allAnnotations.foldRight(ZIO.logInfo(msg): UIO[Unit]) { case ((k, v), effect) =>
       ZIO.logAnnotate(k, v)(effect)
     }
@@ -89,7 +90,7 @@ final class WorkspaceStoreLive private (
             ))
       }
       workspace <- ZIO.fromEither(result)
-      _ <- logSecurity("workspace.created", "workspace_id" -> workspace.id.value)("Workspace created")
+      _ <- logSecurity(WorkspaceStore.SecurityEvent.Created, WorkspaceStore.WorkspaceIdKey -> workspace.id.value)("Workspace created")
     yield key
 
   /** Pure: resolve the new workspace's seedEntityId against current state.
@@ -119,7 +120,7 @@ final class WorkspaceStoreLive private (
     * calls cannot all pass a ceiling only one of them may pass. Re-associating
     * a tree the workspace already holds stays allowed at the ceiling.
     */
-  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit] =
     for
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
@@ -141,7 +142,7 @@ final class WorkspaceStoreLive private (
     * the tree ceiling in one `Ref.modify`; a removal has no ceiling to enforce,
     * so it needs no single atomic step.
     */
-  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit] =
     for
       _       <- resolveInternal(key)
       keyHash  = WorkspaceKeyCrypto.hash(key)
@@ -151,13 +152,13 @@ final class WorkspaceStoreLive private (
     yield ()
 
   /** List all tree IDs in a workspace. */
-  override def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]] =
+  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
   /** Refuse a creation that would exceed the tree ceiling, before the tree is
     * written.
     */
-  override def checkTreeCapacity(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit] =
     resolveInternal(key).flatMap(ws =>
       ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
     )
@@ -195,7 +196,7 @@ final class WorkspaceStoreLive private (
         val (expired, aliveByHash) = map.byHash.partition((_, ws) => ws.isExpired(now))
         (expired.values.toList, map.copy(byHash = aliveByHash))
       }
-      _ <- logSecurity("workspace.eviction", "evicted_count" -> evicted.size.toString)(
+      _ <- logSecurity(WorkspaceStore.SecurityEvent.Eviction, WorkspaceStore.EvictedCountKey -> evicted.size.toString)(
              s"Workspace reaper: evicted ${evicted.size} expired workspaces"
            ).when(evicted.nonEmpty)
     yield evicted
@@ -206,18 +207,18 @@ final class WorkspaceStoreLive private (
     * delete is idempotent: a concurrent delete in between removes a key that is
     * already gone, a no-op on Map.
     */
-  override def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
+  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit] =
     for
       ws      <- resolveInternal(key)
       keyHash  = WorkspaceKeyCrypto.hash(key)
       _ <- ref.update(state => state.copy(byHash = state.byHash - keyHash))
-      _ <- logSecurity("workspace.deleted", "workspace_id" -> ws.id.value)("Workspace deleted")
+      _ <- logSecurity(WorkspaceStore.SecurityEvent.Deleted, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace deleted")
     yield ()
 
   /** Atomic rotation via one Ref.modify — no window where neither key works.
     * Validates through `validateWorkspace`. Logs a rotation event.
     */
-  override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
+  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, WorkspaceKeySecret] =
     for
       newKey <- WorkspaceKeyCrypto.generate
       now    <- Clock.instant
@@ -234,7 +235,7 @@ final class WorkspaceStoreLive private (
       }
       newK  <- ZIO.fromEither(result)
       ws    <- resolve(newK)
-      _     <- logSecurity("workspace.rotated", "workspace_id" -> ws.id.value)("Workspace key rotated")
+      _     <- logSecurity(WorkspaceStore.SecurityEvent.Rotated, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace key rotated")
     yield newK
 
   // ── Internal ──────────────────────────────────────────────────────────

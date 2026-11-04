@@ -10,7 +10,7 @@ import sttp.monad.MonadError
 import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
 
-import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisionerNoOp, Checked, Permission, TestChecked, UserContextExtractor}
+import com.risquanter.register.auth.{Authority, AuthorizationServiceNoOp, BootstrapProvisionerNoOp, Checked, TestChecked, UserContextExtractor}
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, TreeId}
 import com.risquanter.register.domain.errors.RepositoryFailure
@@ -21,21 +21,19 @@ import com.risquanter.register.util.IdGenerators
 
 /** HTTP-layer tests for [[WorkspaceLifecycleController]]'s cascade-delete behaviour
   * on `deleteWorkspace` (`DELETE /w/{key}`) and `evictExpired`
-  * (`DELETE /admin/workspaces/expired`) — both fixed 2026-07-21 to cascade
-  * scenario branches; `evictExpired` gained tree cascade too, which it never had
-  * (it previously only evicted the workspace *record*, leaving every tree and
-  * scenario branch orphaned).
+  * (`DELETE /admin/workspaces/expired`): both cascade every tree and every
+  * scenario branch of the workspaces they remove.
   *
   * `WorkspaceStoreSpec`/`WorkspaceStorePostgresSpec` cover the underlying
   * `WorkspaceStore.evictExpired`/`delete` primitives; this spec covers the
-  * controller-level orchestration layered on top (the part that was missing).
+  * controller-level orchestration layered on top.
   */
 object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
 
   private given MonadError[Task] = new RIOMonadError[Any]
-  // store.addTree() below requires Checked[Permission] in scope.
+  // store.addTree() below requires Checked[Authority] in scope.
   // TestChecked provides the proof for this direct stub invocation (never in src/main).
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   /** Short TTL so `evictExpired`'s test can force real expiry via `TestClock`. */
   private val shortTtlConfig = WorkspaceConfig(
@@ -86,7 +84,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
                             )
-        key             <- store.create()
+        key             <- store.create(None)
         treeId          <- IdGenerators.nextTreeId
         _               <- store.addTree(key, treeId)
         backend         <- buildBackend(store, treeSvc, scenarioSvc)
@@ -113,7 +111,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
                             )
-        key             <- store.create()
+        key             <- store.create(None)
         treeId          <- IdGenerators.nextTreeId
         _               <- store.addTree(key, treeId)
         _               <- TestClock.adjust(4.minutes)

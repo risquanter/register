@@ -75,11 +75,11 @@ final class BootstrapProvisionerSpiceDB private (
     val body = SpiceDbWriteRequest(
       updates = List(
         SpiceDbRelationshipUpdate(
-          operation = "OPERATION_TOUCH",
+          operation = BootstrapProvisionerSpiceDB.TouchOperation,
           relationship = SpiceDbRelationship(
-            resource = SpiceDbObjectRef("workspace", workspaceId.value),
-            relation = "owner_user",
-            subject  = SpiceDbSubjectRef(`object` = SpiceDbObjectRef("user", userId.value))
+            resource = SpiceDbObjectRef(ResourceType.Workspace.zedType, workspaceId.value),
+            relation = BootstrapProvisionerSpiceDB.OwnerRelation,
+            subject  = SpiceDbSubjectRef(`object` = SpiceDbObjectRef(BootstrapProvisionerSpiceDB.UserSubjectType, userId.value))
           )
         )
       )
@@ -119,18 +119,33 @@ final class BootstrapProvisionerSpiceDB private (
       case Left(_)                         => "error"
     ZIO.logInfo(
       s"authz.recordOwnership user=${userId.value} workspace=${workspaceId.value} " +
-      s"relation=owner_user result=$resultStr"
+      s"relation=${BootstrapProvisionerSpiceDB.OwnerRelation} result=$resultStr"
     )
 
-  override def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]] =
-    ZIO.succeed(Checked[Permission.Bootstrap.type]())
+  override def bootstrapToken(): UIO[Checked[LifecycleMarker.Bootstrap.type]] =
+    ZIO.succeed(Checked[LifecycleMarker.Bootstrap.type]())
 
-  override def systemMaintenanceToken(): UIO[Checked[Permission.SystemMaintenance.type]] =
-    ZIO.succeed(Checked[Permission.SystemMaintenance.type]())
+  override def systemMaintenanceToken(): UIO[Checked[LifecycleMarker.SystemMaintenance.type]] =
+    ZIO.succeed(Checked[LifecycleMarker.SystemMaintenance.type]())
 
 // ─── Companion object ────────────────────────────────────────────────────────
 
 object BootstrapProvisionerSpiceDB:
+
+  /** The SpiceDB WriteRelationships operation that upserts a relationship, so a
+    * retried write is idempotent. Spelling fixed by the SpiceDB v1 API.
+    */
+  private val TouchOperation: String = "OPERATION_TOUCH"
+
+  /** The relation the creator holds on a workspace. Spelling fixed by the Zed
+    * schema in `infra/spicedb/schema.zed`.
+    */
+  private val OwnerRelation: String = "owner_user"
+
+  /** The Zed `definition` a user subject belongs to. Spelling fixed by the Zed
+    * schema; `AuthorizationServiceSpiceDB.userSubject` writes the same value.
+    */
+  private val UserSubjectType: String = "user"
 
   /** Layer with injectable SttpBackend — use SttpBackendStub in unit tests. */
   val layer: ZLayer[SpiceDbConfig & SttpBackend[Task, Any], Nothing, BootstrapProvisioner] =

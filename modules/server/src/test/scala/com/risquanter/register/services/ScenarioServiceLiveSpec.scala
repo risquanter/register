@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
 import com.risquanter.register.domain.errors.{DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, IrminError}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
@@ -18,7 +18,7 @@ import com.risquanter.register.testutil.TestHelpers.safeId
   */
 object ScenarioServiceLiveSpec extends ZIOSpecDefault:
 
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private def ws(label: String): WorkspaceId = WorkspaceId(safeId(label))
   private def name(s: String): ScenarioName.ScenarioName = ScenarioName.fromString(s).toOption.get

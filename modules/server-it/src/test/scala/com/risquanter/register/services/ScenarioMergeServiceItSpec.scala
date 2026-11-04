@@ -6,7 +6,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import io.github.iltotore.iron.autoRefine
 
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, Mitigation,
   MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
@@ -44,7 +44,7 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId as t
   */
 object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
 
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private val testLayer: ZLayer[Any, Throwable, IrminClient & RiskTreeRepository & ScenarioMergeService] =
     ZLayer.make[IrminClient & RiskTreeRepository & ScenarioMergeService](

@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import java.time.Instant
 import io.github.iltotore.iron.*
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, ScenarioName, StoreBranch, WorkspaceId}
 import com.risquanter.register.domain.errors.{AppError, IrminError}
 import com.risquanter.register.http.responses.{HistoryOperation, TreeWriteKind}
@@ -16,7 +16,7 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
   * it asks Irmin for, and timestamp normalization. */
 object TreeHistoryServiceSpec extends ZIOSpecDefault:
 
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private val ws       = WorkspaceId(safeId("history-ws"))
   private val tree     = treeId("history-tree")

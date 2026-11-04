@@ -10,12 +10,12 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{FieldProblem, TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.util.IdGenerators
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
 object WorkspaceStoreSpec extends ZIOSpecDefault:
   // Service-level test: operates below the authorization layer.
-  // TestChecked provides the Checked[Permission] proof required by protected store methods.
-  private given Checked[Permission] = TestChecked.value
+  // TestChecked provides the Checked[Authority] proof required by protected store methods.
+  private given Checked[Authority] = TestChecked.value
 
   private val testConfig = TestConfigs.workspace.copy(
     ttl = Duration.ofHours(24),
@@ -47,7 +47,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("create + resolve succeeds") {
       for
         store <- mkStore
-        key   <- store.create()
+        key   <- store.create(None)
         ws    <- store.resolve(key)
       yield assertTrue(ws.keyHash == WorkspaceKeyCrypto.hash(key))
     },
@@ -55,7 +55,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("resolve updates lastAccessedAt (A10)") {
       for
         store <- mkStore
-        key   <- store.create()
+        key   <- store.create(None)
         ws1   <- store.resolve(key)
         _     <- TestClock.adjust(zio.Duration.fromSeconds(30))
         ws2   <- store.resolve(key)
@@ -65,7 +65,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("dual timeout: idle timeout expires workspace even if absolute TTL not reached (A11)") {
       for
         store <- mkStore
-        key   <- store.create()
+        key   <- store.create(None)
         _     <- TestClock.adjust(2.minutes)
         exit  <- store.resolve(key).exit
       yield assert(exit)(fails(isSubtype[WorkspaceExpired](anything)))
@@ -74,7 +74,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("addTree/listTrees/belongsTo operate within workspace") {
       for
         store  <- mkStore
-        key    <- store.create()
+        key    <- store.create(None)
         treeId <- IdGenerators.nextTreeId
         _      <- store.addTree(key, treeId)
         list   <- store.listTrees(key)
@@ -87,7 +87,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("addTree succeeds while the workspace is below its tree ceiling") {
       for
         store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 2))
-        key   <- store.create()
+        key   <- store.create(None)
         _     <- store.addTree(key, treeA)
         _     <- store.addTree(key, treeB)
         list  <- store.listTrees(key)
@@ -97,7 +97,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("addTree refuses a new tree once the ceiling is reached") {
       for
         store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
-        key   <- store.create()
+        key   <- store.create(None)
         _     <- store.addTree(key, treeA)
         exit  <- store.addTree(key, treeB).exit
         list  <- store.listTrees(key)
@@ -108,7 +108,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("re-associating a tree the workspace already holds succeeds at the ceiling") {
       for
         store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
-        key   <- store.create()
+        key   <- store.create(None)
         _     <- store.addTree(key, treeA)
         res   <- store.addTree(key, treeA).either
         list  <- store.listTrees(key)
@@ -119,7 +119,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       // Eight callers, one slot, one winner.
       for
         store     <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
-        key       <- store.create()
+        key       <- store.create(None)
         outcomes  <- ZIO.foreachPar(manyTrees)(t => store.addTree(key, t).either)
         list      <- store.listTrees(key)
       yield assertTrue(
@@ -132,7 +132,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("checkTreeCapacity refuses before a tree is created, and allows below the ceiling") {
       for
         store <- WorkspaceStoreLive.make(testConfig.copy(maxTreesPerWorkspace = 1))
-        key   <- store.create()
+        key   <- store.create(None)
         below <- store.checkTreeCapacity(key).either
         _     <- store.addTree(key, treeA)
         atMax <- store.checkTreeCapacity(key).exit
@@ -143,7 +143,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("resolveTreeWorkspace returns workspace for member tree") {
       for
         store  <- mkStore
-        key    <- store.create()
+        key    <- store.create(None)
         treeId <- IdGenerators.nextTreeId
         _      <- store.addTree(key, treeId)
         ws     <- store.resolveTreeWorkspace(key, treeId)
@@ -153,7 +153,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("resolveTreeWorkspace fails when tree is not in workspace") {
       for
         store  <- mkStore
-        key    <- store.create()
+        key    <- store.create(None)
         treeId <- IdGenerators.nextTreeId
         exit   <- store.resolveTreeWorkspace(key, treeId).exit
       yield assert(exit)(fails(isSubtype[TreeNotInWorkspace](anything)))
@@ -162,7 +162,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("removeTree disassociates tree from workspace") {
       for
         store  <- mkStore
-        key    <- store.create()
+        key    <- store.create(None)
         ids    <- IdGenerators.batch(2).map(_.map(TreeId(_)))
         t1      = ids(0)
         t2      = ids(1)
@@ -178,7 +178,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("removeTree is idempotent — removing non-member is a no-op") {
       for
         store  <- mkStore
-        key    <- store.create()
+        key    <- store.create(None)
         treeId <- IdGenerators.nextTreeId
         // Remove a tree that was never added — should succeed silently
         _      <- store.removeTree(key, treeId)
@@ -189,7 +189,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("rotate instantly invalidates old key and keeps tree associations") {
       for
         store   <- mkStore
-        oldKey  <- store.create()
+        oldKey  <- store.create(None)
         treeId  <- IdGenerators.nextTreeId
         _       <- store.addTree(oldKey, treeId)
         newKey  <- store.rotate(oldKey)
@@ -202,7 +202,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("rotate preserves the workspace's identity and moves the key hash") {
       for
         store   <- mkStore
-        oldKey  <- store.create()
+        oldKey  <- store.create(None)
         ws1     <- store.resolve(oldKey)
         newKey  <- store.rotate(oldKey)
         viaKey  <- store.resolve(newKey)
@@ -215,7 +215,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("delete removes workspace") {
       for
         store <- mkStore
-        key   <- store.create()
+        key   <- store.create(None)
         _     <- store.delete(key)
         exit  <- store.resolve(key).exit
       yield assert(exit)(fails(isSubtype[WorkspaceNotFound](anything)))
@@ -225,7 +225,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       val shortConfig = testConfig.copy(ttl = Duration.ofMinutes(1), idleTimeout = Duration.ofMinutes(1))
       for
         store   <- WorkspaceStoreLive.make(shortConfig)
-        key     <- store.create()
+        key     <- store.create(None)
         ws      <- store.resolve(key)
         _       <- TestClock.adjust(2.minutes)
         evicted <- store.evictExpired
@@ -237,9 +237,9 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     test("fresh store assigns seedEntityIds 1, 2, 3 in creation order") {
       for
         store <- mkStore
-        k1    <- store.create()
-        k2    <- store.create()
-        k3    <- store.create()
+        k1    <- store.create(None)
+        k2    <- store.create(None)
+        k3    <- store.create(None)
         ids   <- ZIO.foreach(List(k1, k2, k3))(store.resolve(_).map(_.seedEntityId.value))
       yield assertTrue(ids == List(1L, 2L, 3L))
     },
@@ -269,7 +269,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         store <- mkStore
         id    <- ZIO.fromEither(SeedEntityId.fromLong(10L)).orDieWith(e => new AssertionError(e.toString))
         _     <- store.create(Some(id))
-        key   <- store.create()
+        key   <- store.create(None)
         ws    <- store.resolve(key)
       yield assertTrue(ws.seedEntityId.value == 11L)
     }

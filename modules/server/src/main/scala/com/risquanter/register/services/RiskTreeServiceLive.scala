@@ -16,7 +16,8 @@ import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.services.helper.SeedVarIdAssigner
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
+
 /**
  * Live implementation of RiskTreeService with telemetry instrumentation.
  * 
@@ -32,7 +33,7 @@ class RiskTreeServiceLive private (
   operationsCounter: Counter[Long]
 ) extends RiskTreeService {
   
-  import RiskTreeServiceLive.ErrorContext
+  import RiskTreeServiceLive.{ErrorContext, Operation}
   
   /** Fetch tree by id, with the commit it resolved to, or fail with
     * ValidationFailed. */
@@ -97,35 +98,35 @@ class RiskTreeServiceLive private (
     }
   
   /** Record operation metric with optional error context
-    * 
+    *
     * Base attributes (operation, success) are always included.
     * Error attributes (error_type, error_code, error_field) added when error occurs.
-    * 
-    * @param operation Operation name (create, update, delete, getAll, getById, computeLEC)
+    *
+    * @param operation The operation the counter labels
     * @param success Whether operation succeeded
     * @param errorInfo Optional error context for failed operations
     */
   private def recordOperation(
-    operation: String, 
+    operation: Operation,
     success: Boolean,
     errorInfo: Option[ErrorContext]
   ): UIO[Unit] = {
     val attrs = errorInfo match {
       case None =>
         Attributes(
-          Attribute.string("operation", operation),
+          Attribute.string("operation", operation.label),
           Attribute.boolean("success", success)
         )
       case Some(ErrorContext(errorType, errorCode, None)) =>
         Attributes(
-          Attribute.string("operation", operation),
+          Attribute.string("operation", operation.label),
           Attribute.boolean("success", success),
           Attribute.string("error_type", errorType),
           Attribute.string("error_code", errorCode)
         )
       case Some(ErrorContext(errorType, errorCode, Some(errorField))) =>
         Attributes(
-          Attribute.string("operation", operation),
+          Attribute.string("operation", operation.label),
           Attribute.boolean("success", success),
           Attribute.string("error_type", errorType),
           Attribute.string("error_code", errorCode),
@@ -134,48 +135,47 @@ class RiskTreeServiceLive private (
     }
     operationsCounter.add(1, attrs)
   }
-  
+
   /** Structured error context for metrics, from the failure that occurred.
     *
-    * Maps each failure to a metric-friendly triple:
-    * - ValidationFailed → error_type, error_code (from the first entry), error_field
-    * - RepositoryFailure → error_type, REPOSITORY_ERROR code
-    * - SimulationFailure → error_type, SIMULATION_ERROR code
-    * - any other → error_type (case name), UNKNOWN_ERROR code
+    * `error_type` is the failure's case name in every arm. The code and the
+    * field come from the first validation entry for a `ValidationFailed`, and
+    * are fixed per case otherwise.
     */
-  private def extractErrorContext(error: AppError): ErrorContext = error match {
-    case ValidationFailed(errors) =>
-      // Use first error for primary context (could extend to aggregate all)
-      val primaryError = errors.headOption.getOrElse(
-        ValidationError(ErrorLocation.Whole, FieldProblem.Unspecified)
-      )
-      ErrorContext(
-        errorType = "ValidationFailed",
-        errorCode = FieldProblem.code(primaryError.problem).code,
-        errorField = Some(ErrorLocation.describe(primaryError.location))
-      )
-    
-    case RepositoryFailure(_) =>
-      ErrorContext(
-        errorType = "RepositoryFailure",
-        errorCode = "REPOSITORY_ERROR",
-        errorField = None
-      )
-    
-    case SimulationFailure(_, _) =>
-      ErrorContext(
-        errorType = "SimulationFailure",
-        errorCode = "SIMULATION_ERROR",
-        errorField = Some("simulation")
-      )
-    
-    case _ =>
-      ErrorContext(
-        errorType = error.getClass.getSimpleName,
-        errorCode = "UNKNOWN_ERROR",
-        errorField = None
-      )
-  }
+  private def extractErrorContext(error: AppError): ErrorContext =
+    val errorType = error.getClass.getSimpleName
+    error match {
+      case ValidationFailed(errors) =>
+        val primaryError = errors.headOption.getOrElse(
+          ValidationError(ErrorLocation.Whole, FieldProblem.Unspecified)
+        )
+        ErrorContext(
+          errorType = errorType,
+          errorCode = FieldProblem.code(primaryError.problem).code,
+          errorField = Some(ErrorLocation.describe(primaryError.location))
+        )
+
+      case RepositoryFailure(_) =>
+        ErrorContext(
+          errorType = errorType,
+          errorCode = RiskTreeServiceLive.ErrorCodes.Repository,
+          errorField = None
+        )
+
+      case SimulationFailure(_, _) =>
+        ErrorContext(
+          errorType = errorType,
+          errorCode = RiskTreeServiceLive.ErrorCodes.Simulation,
+          errorField = Some(RiskTreeServiceLive.ErrorCodes.SimulationField)
+        )
+
+      case _ =>
+        ErrorContext(
+          errorType = errorType,
+          errorCode = RiskTreeServiceLive.ErrorCodes.Unknown,
+          errorField = None
+        )
+    }
 
   /** Wrap a traced LEC query operation with span + metrics + error logging.
     *
@@ -184,15 +184,15 @@ class RiskTreeServiceLive private (
     *  2. `.tapBoth(recordOperation, recordOperation)`
     *
     * The body receives the `Tracing` instance for `setAttribute` calls.
-    * Span names, metric labels, and log context are derived from `name`.
+    * Span names, metric labels, and log context are derived from `operation`.
     *
-    * @param name Operation name — used as span name, metric label, and log context
+    * @param operation The operation — its label is the span name and the metric label
     * @param body Effect to execute within the span (may call `tracing.setAttribute`)
     */
-  private def traced[A](name: String)(body: IO[AppError,A]): IO[AppError,A] =
-    tracing.span(name, SpanKind.INTERNAL)(body).tapBoth(
-      error => recordOperation(name, success = false, Some(extractErrorContext(error))),
-      _ => recordOperation(name, success = true, None)
+  private def traced[A](operation: Operation)(body: IO[AppError,A]): IO[AppError,A] =
+    tracing.span(operation.label, SpanKind.INTERNAL)(body).tapBoth(
+      error => recordOperation(operation, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(operation, success = true, None)
     )
   
   /** Allocate a fixed pool of SafeIds for request resolution.
@@ -292,7 +292,7 @@ class RiskTreeServiceLive private (
         errors.map(ValidationError.describe).mkString("; ")))
 
   // Config CRUD - only persist, no execution
-  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
+  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] = {
     val operation = for {
       // Identifier generation failing is a broken invariant, as in `allocateIds`.
       treeId <- IdGenerators.nextTreeId.orDie
@@ -317,12 +317,12 @@ class RiskTreeServiceLive private (
     } yield persisted
 
     operation.tapBoth(
-      error => recordOperation("create", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("create", success = true, None)
+      error => recordOperation(Operation.Create, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(Operation.Create, success = true, None)
     )
   }
 
-  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
+  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] = {
     val operation = for {
       (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
@@ -368,20 +368,20 @@ class RiskTreeServiceLive private (
     } yield updated
     
     operation.tapBoth(
-      error => recordOperation("update", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("update", success = true, None)
+      error => recordOperation(Operation.Update, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(Operation.Update, success = true, None)
     )
   }
   
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] =
     repo.delete(wsId, id, branch)
       .tap(tree => clientBranch(wsId, branch).flatMap(invalidationHandler.handleTreeDeletion(tree, _)))
       .tapBoth(
-      error => recordOperation("delete", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("delete", success = true, None)
+      error => recordOperation(Operation.Delete, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(Operation.Delete, success = true, None)
     )
 
-  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,RiskTree] = {
+  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] = {
     val operation = for {
       // The head state feeds the change notification and nothing else, so a
       // failure to read it must not stop the revert. A stored tree that breaks
@@ -406,23 +406,23 @@ class RiskTreeServiceLive private (
     } yield reverted
 
     operation.tapBoth(
-      error => recordOperation("revert", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("revert", success = true, None)
+      error => recordOperation(Operation.Revert, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(Operation.Revert, success = true, None)
     )
   }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError,Option[(RiskTree, CommitHash)]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[AppError,Option[(RiskTree, CommitHash)]] =
     repo.getById(wsId, id, rev).tapBoth(
-      error => recordOperation("getById", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("getById", success = true, None)
+      error => recordOperation(Operation.GetById, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(Operation.GetById, success = true, None)
     )
-  
+
   // ========================================
-  // New LEC Query APIs (ADR-015)
+  // LEC Query APIs (ADR-015)
   // ========================================
-  
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Permission]): IO[AppError,Double] =
-    traced("probOfExceedance") {
+
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError,Double] =
+    traced(Operation.ProbOfExceedance) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_id", nodeId.value)
@@ -442,8 +442,8 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Permission]): IO[AppError,Map[NodeId, LECNodeCurve]] =
-    traced("getLECCurvesMulti") {
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[AppError,Map[NodeId, LECNodeCurve]] =
+    traced(Operation.GetLECCurvesMulti) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
@@ -501,7 +501,31 @@ object RiskTreeServiceLive {
     errorCode: String,
     errorField: Option[String]
   )
-  
+
+  /** The operations the counter and the spans label. The labels are a contract
+    * with the metrics dashboards, so they are declared rather than derived from
+    * the case names.
+    */
+  private enum Operation(val label: String):
+    case Create            extends Operation("create")
+    case Update            extends Operation("update")
+    case Delete            extends Operation("delete")
+    case Revert            extends Operation("revert")
+    case GetById           extends Operation("getById")
+    case ProbOfExceedance  extends Operation("probOfExceedance")
+    case GetLECCurvesMulti extends Operation("getLECCurvesMulti")
+
+  /** The `error_code` values this service emits for failures that carry no
+    * validation code of their own, and the `error_field` a simulation failure
+    * names. Contracts with the metrics dashboards.
+    */
+  private object ErrorCodes {
+    val Repository: String      = "REPOSITORY_ERROR"
+    val Simulation: String      = "SIMULATION_ERROR"
+    val Unknown: String         = "UNKNOWN_ERROR"
+    val SimulationField: String = "simulation"
+  }
+
   /** Metric names and descriptions - centralized for consistency */
   private object MetricNames {
     val operationsCounter = "risk_tree.operations"

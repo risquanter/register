@@ -29,11 +29,11 @@ final class BootstrapProvisionerStub private (
     if shouldFail then ZIO.fail(AuthServiceUnavailable("SpiceDB unavailable (stub)", None))
     else callsRef.update(_ :+ (userId, workspaceId))
 
-  def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]] =
-    ZIO.succeed(Checked[Permission.Bootstrap.type]())
+  def bootstrapToken(): UIO[Checked[LifecycleMarker.Bootstrap.type]] =
+    ZIO.succeed(Checked[LifecycleMarker.Bootstrap.type]())
 
-  def systemMaintenanceToken(): UIO[Checked[Permission.SystemMaintenance.type]] =
-    ZIO.succeed(Checked[Permission.SystemMaintenance.type]())
+  def systemMaintenanceToken(): UIO[Checked[LifecycleMarker.SystemMaintenance.type]] =
+    ZIO.succeed(Checked[LifecycleMarker.SystemMaintenance.type]())
 
 object BootstrapProvisionerStub:
 

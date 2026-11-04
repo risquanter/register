@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, WorkspaceId}
 import com.risquanter.register.domain.errors.ScenarioHeadStale
 import com.risquanter.register.testutil.TestHelpers.safeId
@@ -16,7 +16,7 @@ import com.risquanter.register.testutil.TestHelpers.safeId
   */
 object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
 
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private val wsId: WorkspaceId = WorkspaceId(safeId("cascade-retry-ws"))
   private def name(s: String): ScenarioName.ScenarioName = ScenarioName.fromString(s).toOption.get

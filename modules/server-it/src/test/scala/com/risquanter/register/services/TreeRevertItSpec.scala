@@ -10,7 +10,7 @@ import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.IrminCompose
@@ -25,7 +25,7 @@ import io.github.iltotore.iron.*
   */
 object TreeRevertItSpec extends ZIOSpecDefault:
 
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private val wsId = WorkspaceId(safeId("revert-it-ws"))
 

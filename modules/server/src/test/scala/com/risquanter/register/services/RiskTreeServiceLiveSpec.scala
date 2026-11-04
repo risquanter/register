@@ -18,13 +18,13 @@ import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.{
   safeId, nodeId, treeId, mitigationId, unsafeGet, lognormalShape, retentionFactor
 }
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
 
 object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   // Service-level test: operates below the authorization layer.
-  // TestChecked provides the Checked[Permission] proof required by protected service methods.
-  private given Checked[Permission] = TestChecked.value
+  // TestChecked provides the Checked[Authority] proof required by protected service methods.
+  private given Checked[Authority] = TestChecked.value
 
   // Concise service accessor pattern. The error type is `AppError` because that
   // is what the service declares; widening it to `Throwable` here would hide

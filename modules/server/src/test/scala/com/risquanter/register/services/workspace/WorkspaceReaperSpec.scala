@@ -11,12 +11,12 @@ import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, Scen
 import com.risquanter.register.domain.data.iron.{TreeId, ScenarioName, CommitHash}
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.util.IdGenerators
-import com.risquanter.register.auth.{BootstrapProvisionerNoOp, Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, BootstrapProvisionerNoOp, Checked, TestChecked}
 
 object WorkspaceReaperSpec extends ZIOSpecDefault:
-  // Service-level test: store.addTree() below requires Checked[Permission] in scope.
+  // Service-level test: store.addTree() below requires Checked[Authority] in scope.
   // TestChecked provides the proof for this direct stub invocation (never in src/main).
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   // ── Test helpers ────────────────────────────────────────────────────
   // Tree/Scenario service test doubles are shared with WorkspaceLifecycleControllerCascadeSpec
@@ -140,7 +140,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                        ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
                      )
-          key   <- store.create()
+          key   <- store.create(None)
           // yield so the reaper fiber can run until it blocks on ZIO.sleep
           _     <- ZIO.yieldNow
           _     <- TestClock.adjust(4.minutes)
@@ -163,7 +163,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                deletedRef.update(_ :+ id) *>
                                deleted.succeed(()).unit *>
                                ZIO.fail(RepositoryFailure(s"RiskTree ${id.toSafeId} not found")))
-          key              <- store.create()
+          key              <- store.create(None)
           treeId           <- IdGenerators.nextTreeId
           _                <- store.addTree(key, treeId)
           _                <- WorkspaceReaper.layer.build
@@ -197,11 +197,11 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                  allDeleted.succeed(()).when(updated.size >= 3).unit
                                } *> ZIO.fail(RepositoryFailure(s"RiskTree ${id.toSafeId} not found")))
           // Workspace 1 with 2 trees
-          key1             <- store.create()
+          key1             <- store.create(None)
           ids1             <- IdGenerators.batch(2).map(_.map(TreeId(_)))
           _                <- ZIO.foreachDiscard(ids1)(store.addTree(key1, _))
           // Workspace 2 with 1 tree
-          key2             <- store.create()
+          key2             <- store.create(None)
           id2              <- IdGenerators.nextTreeId
           _                <- store.addTree(key2, id2)
           _                <- WorkspaceReaper.layer.build
@@ -231,7 +231,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           store  <- WorkspaceStoreLive.make(reaperTestConfig)
-          key    <- store.create()
+          key    <- store.create(None)
           treeId <- IdGenerators.nextTreeId
           _      <- store.addTree(key, treeId)
           _      <- WorkspaceReaper.layer.build
@@ -263,7 +263,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                             onDelete = (_, name, _) =>
                               deletedRef.update(_ :+ name) *> deleted.succeed(()).unit
                           )
-          key          <- store.create()
+          key          <- store.create(None)
           _            <- WorkspaceReaper.layer.build
                             .provide(
                               ZLayer.succeed(reaperTestConfig),

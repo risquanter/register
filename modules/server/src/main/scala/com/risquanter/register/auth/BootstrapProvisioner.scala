@@ -17,8 +17,7 @@ import com.risquanter.register.domain.errors.AuthError
   * [[AuthorizationService]] remains a pure PEP: `check()` and `listAccessible()` only.
   * This trait owns the single lifecycle write; all other tuple management is ops-only.
   *
-  * @see ADR-024 §1 — resource lifecycle write clarification
-  * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md §D — BootstrapProvisioner design
+  * @see ADR-024 §4 — resource lifecycle writes are not policy administration
   */
 trait BootstrapProvisioner:
 
@@ -40,27 +39,28 @@ trait BootstrapProvisioner:
   /** Produce a compile-time proof for resource-creation operations.
     *
     * Called at the start of bootstrapWorkspace, before riskTreeService.create()
-    * and workspaceStore.addTree(). No SpiceDB call is made — Bootstrap is a
-    * lifecycle marker only.
+    * and workspaceStore.addTree(). No SpiceDB call is made — the marker is not
+    * a `Permission`, so `check()` cannot take it.
     *
     * @see ADR-030 §5 — Bootstrap Lifecycle Token
     */
-  def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]]
+  def bootstrapToken(): UIO[Checked[LifecycleMarker.Bootstrap.type]]
 
   /** Produce a compile-time proof for background system maintenance operations.
     *
     * Called by WorkspaceReaper before cascadeDeleteTrees and delete.
-    * No SpiceDB call is made — SystemMaintenance is a lifecycle marker only.
+    * No SpiceDB call is made — the marker is not a `Permission`, so `check()`
+    * cannot take it.
     *
     * @see ADR-030 §1 — Orchestration Boundary (background orchestrators)
     */
-  def systemMaintenanceToken(): UIO[Checked[Permission.SystemMaintenance.type]]
+  def systemMaintenanceToken(): UIO[Checked[LifecycleMarker.SystemMaintenance.type]]
 
 object BootstrapProvisioner:
   val noOp: BootstrapProvisioner = new BootstrapProvisioner:
     def recordOwnership(userId: UserId.Authenticated, workspaceId: WorkspaceId): IO[AuthError, Unit] =
       ZIO.unit
-    def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]] =
-      ZIO.succeed(Checked[Permission.Bootstrap.type]())
-    def systemMaintenanceToken(): UIO[Checked[Permission.SystemMaintenance.type]] =
-      ZIO.succeed(Checked[Permission.SystemMaintenance.type]())
+    def bootstrapToken(): UIO[Checked[LifecycleMarker.Bootstrap.type]] =
+      ZIO.succeed(Checked[LifecycleMarker.Bootstrap.type]())
+    def systemMaintenanceToken(): UIO[Checked[LifecycleMarker.SystemMaintenance.type]] =
+      ZIO.succeed(Checked[LifecycleMarker.SystemMaintenance.type]())

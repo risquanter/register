@@ -7,7 +7,7 @@ import zio.json.*
 
 import java.time.Instant
 import io.github.iltotore.iron.*
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
@@ -31,7 +31,7 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, unsafeGet, lognorma
   */
 object ScenarioMergeServiceSpec extends ZIOSpecDefault:
 
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private def ws(label: String): WorkspaceId = WorkspaceId(safeId(label))
   private def name(s: String): ScenarioName.ScenarioName = ScenarioName.fromString(s).toOption.get

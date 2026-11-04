@@ -5,7 +5,7 @@ import zio.test.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
 
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, LECPoint, TrialId, Loss}
@@ -39,7 +39,7 @@ import com.risquanter.register.testutil.TestHelpers.safeId
   *      identical figures regardless of creation order, asserted directly.
   */
 object SeedReproducibilityItSpec extends ZIOSpecDefault:
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private val RootKey = "<root>"
   private val wsId: WorkspaceId = WorkspaceId(safeId("seed-repro-it-ws"))

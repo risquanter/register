@@ -1,7 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported, ScenarioHeadStale}
 
@@ -58,12 +58,12 @@ trait ScenarioService:
     *      changing mid-fork.
     */
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Permission]): IO[AppError, BranchRef]
+    (using Checked[Authority]): IO[AppError, BranchRef]
 
   /** List a workspace's scenarios, where ownership is a branch-name prefix
     * filter. Never includes `main` — main is not a scenario.
     */
-  def list(wsId: WorkspaceId)(using Checked[Permission]): IO[AppError, List[ScenarioSummary]]
+  def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError, List[ScenarioSummary]]
 
   /** Delete a scenario via compare-and-set. Only removes the branch
     * pointer — commits remain reachable by hash, so forks survive.
@@ -75,18 +75,18 @@ trait ScenarioService:
     * @see BranchHeadStale translated to `ScenarioHeadStale` — concurrent modification
     */
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Permission]): IO[AppError, Unit]
+    (using Checked[Authority]): IO[AppError, Unit]
 
 object ScenarioService:
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Permission]): ZIO[ScenarioService, AppError, BranchRef] =
+    (using Checked[Authority]): ZIO[ScenarioService, AppError, BranchRef] =
     ZIO.serviceWithZIO[ScenarioService](_.create(wsId, name, source))
 
-  def list(wsId: WorkspaceId)(using Checked[Permission]): ZIO[ScenarioService, AppError, List[ScenarioSummary]] =
+  def list(wsId: WorkspaceId)(using Checked[Authority]): ZIO[ScenarioService, AppError, List[ScenarioSummary]] =
     ZIO.serviceWithZIO[ScenarioService](_.list(wsId))
 
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Permission]): ZIO[ScenarioService, AppError, Unit] =
+    (using Checked[Authority]): ZIO[ScenarioService, AppError, Unit] =
     ZIO.serviceWithZIO[ScenarioService](_.delete(wsId, name, expectedHead))
 
   /** Best-effort cascade deletion — lists a workspace's scenarios, then deletes
@@ -114,7 +114,7 @@ object ScenarioService:
     * cascade-delete semantic, mirroring `RiskTreeService.cascadeDeleteTrees`.
     */
   extension (self: ScenarioService)
-    def cascadeDeleteScenarios(wsId: WorkspaceId)(using Checked[Permission]): UIO[Unit] =
+    def cascadeDeleteScenarios(wsId: WorkspaceId)(using Checked[Authority]): UIO[Unit] =
       def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[AppError, Unit] =
         self.delete(wsId, s.name, s.head).catchSome { case _: ScenarioHeadStale =>
           self.list(wsId).flatMap { fresh =>
@@ -128,7 +128,7 @@ object ScenarioService:
           case _: ScenariosNotSupported => ZIO.unit
           case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.logMessage}")
         }
-        .flatMap(scenarios => ZIO.withParallelism(8) {
+        .flatMap(scenarios => ZIO.withParallelism(CascadeDelete.Parallelism) {
           ZIO.foreachParDiscard(scenarios)(s =>
             deleteWithFreshHeadRetry(s)
               .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.logMessage}"))

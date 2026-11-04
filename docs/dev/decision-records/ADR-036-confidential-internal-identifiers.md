@@ -34,7 +34,7 @@ storage paths and authorization, never a credential.
 
 ```scala
 // GOOD: capability in, internal id derived server-side, never on the wire
-def listTrees(key: WorkspaceKeySecret)(using Checked[Permission]): IO[AppError, List[TreeId]] =
+def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]] =
   workspaceStore.resolve(key).flatMap(ws => repo.listTrees(ws.id))
 ```
 
@@ -181,7 +181,7 @@ generator and **are** returned to clients, so correlated values are already on
 the wire. Confinement of `WorkspaceId` therefore buys design discipline, not
 secrecy. The control that would actually stop a cross-tenant lookup is the one
 above: no by-identifier entry point exists. Should one ever be needed, it takes
-`using Checked[Permission]` so the authorization is in its signature.
+`using Checked[Authority]` so the authorization is in its signature.
 
 A node id has no such power, and the reason is structural rather than a
 convention anyone has to remember. Every lookup of a client-supplied node id

@@ -2,10 +2,10 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.AppError
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
 
 /** Service layer for RiskTree business logic.
   * 
@@ -34,7 +34,7 @@ trait RiskTreeService {
     *   `branch` belongs to `wsId` — see `ActiveBranch.resolve`; this method trusts it.
     * @return Persisted risk tree metadata (no LEC data)
     */
-  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, RiskTree]
+  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError, RiskTree]
 
   /** Update risk tree definition - modifies tree structure only
     * @param wsId Workspace that owns the tree
@@ -44,7 +44,7 @@ trait RiskTreeService {
     *   `branch` belongs to `wsId` — see `ActiveBranch.resolve`; this method trusts it.
     * @return Updated risk tree metadata
     */
-  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, RiskTree]
+  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError, RiskTree]
 
   /** Delete risk tree configuration
     * @param wsId Workspace that owns the tree
@@ -52,7 +52,7 @@ trait RiskTreeService {
     * @param branch Target branch.
     * @return Deleted risk tree metadata
     */
-  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, RiskTree]
+  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[AppError, RiskTree]
 
   /** Revert a tree to `toCommit` as one forward commit. Reads the
     * tree state at `toCommit` and writes it forward with a `:revert` message;
@@ -63,7 +63,7 @@ trait RiskTreeService {
     * @param branch Target branch the revert commit lands on.
     * @return The reverted (now current) risk tree metadata
     */
-  def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, RiskTree]
+  def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[AppError, RiskTree]
 
   /** Retrieve single risk tree configuration by ID (no LEC data), together with
     * the concrete commit it was read at.
@@ -81,7 +81,7 @@ trait RiskTreeService {
     * @param rev Read coordinate — branch head or a pinned commit.
     * @return The tree and the commit it resolved to, or `None` when absent
     */
-  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Option[(RiskTree, CommitHash)]]
+  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[AppError, Option[(RiskTree, CommitHash)]]
   
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
@@ -97,7 +97,7 @@ trait RiskTreeService {
     * @param rev Read coordinate — branch head or a pinned commit.
     * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Permission]): IO[AppError, Double]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError, Double]
 
   /** Get LEC curves for multiple nodes with shared tick domain.
     *
@@ -115,7 +115,7 @@ trait RiskTreeService {
     *                   an earlier commit).
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
-  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false)(using Checked[Permission]): IO[AppError, Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false)(using Checked[Authority]): IO[AppError, Map[NodeId, LECNodeCurve]]
 }
 
 object RiskTreeService:
@@ -133,8 +133,8 @@ object RiskTreeService:
     * for scenario branches.
     */
   extension (self: RiskTreeService)
-    def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId])(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): UIO[Unit] =
-      ZIO.withParallelism(8) {
+    def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId])(using Checked[Authority]): UIO[Unit] =
+      ZIO.withParallelism(CascadeDelete.Parallelism) {
         ZIO.foreachParDiscard(ids)(id =>
           // Workspace teardown removes the workspace-level (main) tree set.
           self.delete(wsId, id, BranchRef.Main)

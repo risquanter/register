@@ -4,13 +4,19 @@ import zio.IO
 import com.risquanter.register.domain.data.iron.{UserId, SafeId, TreeId, WorkspaceId}
 import com.risquanter.register.domain.errors.AuthError
 
+/** What a proof may witness: a SpiceDB permission that `check()` evaluated, or
+  * a lifecycle marker standing in where no resource or no user exists to check.
+  * `Checked` is bounded by this type; `check()` is bounded by `Permission`, so
+  * a marker cannot be sent to SpiceDB (ADR-030).
+  */
+sealed trait Authority
+
 /** Permission names — values match SpiceDB Zed schema `permission` names exactly.
   * A schema rename that doesn't update this enum fails CI at all check() call sites.
   *
-  * @see infra/spicedb/schema.zed (planned)
-  * @see AUTHORIZATION-PLAN.md — Task L2.2: Authorization Service
+  * @see infra/spicedb/schema.zed
   */
-enum Permission(val zedName: String):
+enum Permission(val zedName: String) extends Authority:
   case DesignWrite         extends Permission("design_write")
   case AnalyzeRun          extends Permission("analyze_run")
   case ViewWorkspace       extends Permission("view_workspace")
@@ -19,20 +25,20 @@ enum Permission(val zedName: String):
   case ViewOrg             extends Permission("view_org")
   case ViewTeam            extends Permission("view_team")
   case ManageTeam          extends Permission("manage_team")
-  /** Lifecycle marker for resource creation. Never sent to SpiceDB.
-    * Produced only by BootstrapProvisioner.bootstrapToken().
-    * @see ADR-030 §5
-    */
-  case Bootstrap           extends Permission("__bootstrap__")
-  /** Lifecycle marker for background system maintenance. Never sent to SpiceDB.
-    * Produced only by BootstrapProvisioner.systemMaintenanceToken().
-    * @see ADR-030 §1
-    */
-  case SystemMaintenance   extends Permission("__system__")
+
+/** A proof produced without consulting SpiceDB.
+  *
+  * `Bootstrap` covers workspace creation, where no resource exists yet to check.
+  * `SystemMaintenance` covers the background reaper, where no user is present.
+  * Produced only by `BootstrapProvisioner.bootstrapToken()` and
+  * `BootstrapProvisioner.systemMaintenanceToken()` (ADR-030).
+  */
+enum LifecycleMarker extends Authority:
+  case Bootstrap, SystemMaintenance
 
 /** Resource type identifiers — values match SpiceDB Zed schema `definition` names exactly.
   *
-  * @see infra/spicedb/schema.zed (planned)
+  * @see infra/spicedb/schema.zed
   */
 enum ResourceType(val zedType: String):
   case Organization extends ResourceType("organization")
@@ -59,24 +65,25 @@ object ResourceRef:
   */
 type ResourceId = SafeId.SafeId
 
-/** Compile-time proof that AuthorizationService.check() was called and succeeded.
+/** Compile-time proof that AuthorizationService.check() was called and succeeded,
+  * or that a lifecycle token was issued.
   *
   * Opaque — no public constructor. Only constructible inside the auth package via
   * AuthorizationService.check() or BootstrapProvisioner.bootstrapToken() /
   * systemMaintenanceToken(). Erased to Unit at runtime; carries no runtime value.
   *
-  * Uses the base Permission type in service method `using` parameters — not a
-  * specific subtype — to avoid duplicating SpiceDB policy in Scala types (ADR-024).
-  * Any Checked[P] where P <: Permission satisfies using Checked[Permission] via
+  * Service method `using` parameters take the base `Authority` — not a specific
+  * case — to avoid duplicating SpiceDB policy in Scala types (ADR-024). Any
+  * `Checked[P]` where `P <: Authority` satisfies `using Checked[Authority]` via
   * covariance.
   *
   * @see ADR-030 — Authorization Enforcement at the Orchestration Boundary
   */
-opaque type Checked[+P <: Permission] = Unit
+opaque type Checked[+P <: Authority] = Unit
 
 object Checked:
   /** Package-private — only auth-package code may produce proofs. */
-  private[auth] def apply[P <: Permission](): Checked[P] = ()
+  private[auth] def apply[P <: Authority](): Checked[P] = ()
 
 /** Authorization service — pure Policy Enforcement Point (PEP).
   *
@@ -85,7 +92,6 @@ object Checked:
   * is handled via the CI/CD provisioning job.
   *
   * @see ADR-024: Externalized Authorization / PEP Pattern
-  * @see AUTHORIZATION-PLAN.md — Task L2.2: Authorization Service
   */
 trait AuthorizationService:
 

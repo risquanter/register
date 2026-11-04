@@ -4,7 +4,7 @@ import zio.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.Greater
 import java.time.{DateTimeException, Instant}
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt, CommitHash}
 import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, IrminError, ValidationError}
 import com.risquanter.register.http.responses.TreeHistoryEntry
@@ -18,12 +18,12 @@ import com.risquanter.register.infra.irmin.model.IrminCommit
   */
 trait TreeHistoryService:
   def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-    (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]]
+    (using Checked[Authority]): IO[AppError, List[TreeHistoryEntry]]
 
 final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryService:
 
   override def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-    (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]] =
+    (using Checked[Authority]): IO[AppError, List[TreeHistoryEntry]] =
     // History is read from the tree's meta contents: every write (create,
     // update, revert, and a merge's final write) rewrites meta with a fresh
     // updatedAt, so its last_modified log is the tree's full commit history.
@@ -58,7 +58,7 @@ object TreeHistoryService:
     * anyway. A read with no data, not an error, unlike scenario operations. */
   val empty: TreeHistoryService = new TreeHistoryService:
     def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-      (using Checked[Permission]): IO[AppError, List[TreeHistoryEntry]] =
+      (using Checked[Authority]): IO[AppError, List[TreeHistoryEntry]] =
       ZIO.succeed(Nil)
 
 object TreeHistoryServiceLive:

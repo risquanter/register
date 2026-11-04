@@ -11,7 +11,7 @@ import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testutil.TestHelpers.safeId
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
 /** Pins an aggregate against its leaves' current parameters when one update
   * both moves a leaf and changes it.
@@ -31,7 +31,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
   * leaf would produce.
   */
 object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private type Env = RiskTreeService & CachedResultResolver
 

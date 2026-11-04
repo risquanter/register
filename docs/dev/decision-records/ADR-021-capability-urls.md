@@ -30,7 +30,7 @@ A dedicated `WorkspaceKeySecret` type — a 128-bit `SecureRandom` value, base64
 A `WorkspaceStore` maps `WorkspaceKeySecret → Workspace` (containing tree list, creation time, TTL) with automatic expiry:
 
 ```scala
-// Protected methods additionally require `using Checked[Permission]` (ADR-030);
+// Protected methods additionally require `using Checked[Authority]` (ADR-030);
 // `resolve` is the Layer 0 capability gate and is the one call that precedes it.
 trait WorkspaceStore:
   def create(seedEntityId: Option[SeedEntityId]): IO[AppError, WorkspaceKeySecret]

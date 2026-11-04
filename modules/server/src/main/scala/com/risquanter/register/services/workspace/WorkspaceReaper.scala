@@ -1,7 +1,7 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
-import com.risquanter.register.auth.{BootstrapProvisioner, Checked, Permission}
+import com.risquanter.register.auth.{BootstrapProvisioner, Checked, LifecycleMarker}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
 
@@ -93,8 +93,8 @@ object WorkspaceReaper:
       for
         evicted <- store.evictExpired
         // exempt: system maintenance — no user context; WorkspaceReaper is a background orchestrator
-        given Checked[Permission.SystemMaintenance.type] <- provisioner.systemMaintenanceToken()
-        _       <- ZIO.withParallelism(8) {
+        given Checked[LifecycleMarker.SystemMaintenance.type] <- provisioner.systemMaintenanceToken()
+        _       <- ZIO.withParallelism(CascadeDelete.Parallelism) {
                      ZIO.foreachParDiscard(evicted)(ws =>
                        CascadeDelete.workspace(ws.id, ws.trees, treeService, scenarioService))
                    }

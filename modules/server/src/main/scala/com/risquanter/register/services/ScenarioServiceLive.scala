@@ -1,7 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.{AppError, DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, ValidationError, BranchAlreadyExists, BranchHeadStale}
 import com.risquanter.register.infra.irmin.IrminClient
@@ -17,13 +17,13 @@ import com.risquanter.register.infra.irmin.model.IrminBranch
   * Compare-and-set errors from `IrminClient` are translated into domain errors
   * here rather than left to reach the wire as raw `IrminError`s, so a
   * `BranchAlreadyExists` or `BranchHeadStale` arriving at the projection means
-  * this translation was skipped. Reuses `DataConflict`/`VersionConflict` rather
-  * than introducing new types.
+  * this translation was skipped. A name collision becomes `DataConflict` and a
+  * moved head becomes `ScenarioHeadStale`.
   */
 final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
   override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Permission]): IO[AppError, BranchRef] =
+    (using Checked[Authority]): IO[AppError, BranchRef] =
     for
       branch     <- scenarioBranch(wsId, name)
       sourceHead <- resolveSourceHead(wsId, source)
@@ -32,7 +32,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                     }
     yield branch
 
-  override def list(wsId: WorkspaceId)(using Checked[Permission]): IO[AppError, List[ScenarioSummary]] =
+  override def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError, List[ScenarioSummary]] =
     for
       all       <- irmin.branches
       names      = all.flatMap(scenarioNameOf(wsId, _))
@@ -40,7 +40,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     yield summaries
 
   override def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Permission]): IO[AppError, Unit] =
+    (using Checked[Authority]): IO[AppError, Unit] =
     for
       branch <- scenarioBranch(wsId, name)
       _      <- irmin.deleteBranch(branch, expectedHead).catchSome { case BranchHeadStale(_, expected) =>

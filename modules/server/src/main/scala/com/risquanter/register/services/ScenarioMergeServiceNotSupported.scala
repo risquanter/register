@@ -1,7 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, CommitHash}
 import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported}
 import com.risquanter.register.http.responses.MergePreviewStatus
@@ -14,11 +14,11 @@ object ScenarioMergeServiceNotSupported extends ScenarioMergeService:
   private val reason = "Scenarios require the Irmin backend (repository.type=irmin)"
 
   override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, MergePreviewStatus] =
+    (using Checked[Authority]): IO[AppError, MergePreviewStatus] =
     ZIO.fail(ScenariosNotSupported(reason))
 
   override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Permission]): IO[AppError, CommitHash] =
+    (using Checked[Authority]): IO[AppError, CommitHash] =
     ZIO.fail(ScenariosNotSupported(reason))
 
   val layer: ULayer[ScenarioMergeService] = ZLayer.succeed(ScenarioMergeServiceNotSupported)
