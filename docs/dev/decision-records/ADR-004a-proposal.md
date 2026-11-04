@@ -87,7 +87,7 @@ Per-tree fan-out (`SSEHub` ZIO Hub) behind a Tapir stream endpoint
 ```
 GET /w/{key}/events/tree/{treeId}        text/event-stream, workspace-scoped
 
-cache_invalidated   nodes whose figures changed — re-fetch   (live publisher)
+figures_changed     nodes whose figures changed — re-fetch   (live publisher)
 node_changed        tree structure modified                  (defined)
 lec_updated         recomputed quantiles push                (defined, unpublished)
 connection_status   connect / heartbeat lifecycle
@@ -122,7 +122,7 @@ id, which today means one per workspace (ADR-014 §4)
 Browser edit → REST mutation (X-Branch)
   → ZIO writes ONE Irmin commit (set_tree)
   → InvalidationHandler diffs old vs new tree in-request
-  → SSE cache_invalidated {nodeIds, treeId, branch}
+  → SSE figures_changed {nodeIds, treeId, branch}
   → Browser re-fetches affected figures over HTTP
       (ContentCache hit = replay, miss = re-simulate)
   → chart updates

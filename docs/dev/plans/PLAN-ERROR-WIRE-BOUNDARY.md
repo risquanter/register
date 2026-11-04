@@ -2,8 +2,8 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-61`, is ruled. `EWB-D-1` to
-`EWB-D-43` and `EWB-D-61` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
+**Status.** Every decision, `EWB-D-1` to `EWB-D-63`, is ruled. `EWB-D-1` to
+`EWB-D-43` and `EWB-D-61` to `EWB-D-63` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
 and §16.7, `EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in
 §17, and `EWB-D-54` and `EWB-D-59` in §18. Approval
 is in place: the token names this document and the file inventory exists beside
@@ -2692,6 +2692,18 @@ exercised on a small surface before the largest one:
    JSON string rather than an object, so the `data:` line stops being
    double-encoded. Files: `SSEEvent.scala`, `SSEController.scala`,
    `InvalidationHandler.scala`, `SSEHubSpec.scala`.
+
+   *Implemented 2026-11-04.* `SSEEvent` is an enum with
+   `@jsonDiscriminator(SSEEvent.TagField)` and a declared `@jsonHint` per case,
+   the four names held once in `SSEEvent.Names` and returned by
+   `SSEEvent.eventName` for the `event:` line (`EWB-D-62`). `CacheInvalidated`
+   is `FiguresChanged` (`EWB-D-63`). `NodeChangeType` and `ConnectionState`
+   derive their codecs and encode as their case names. `nodeId` is a `NodeId`
+   on the two unpublished cases, and `ConnectionStatus.message` lost its
+   default. `SSEHub`'s two log lines read `eventName`. `SSEEventSpec`, new,
+   pins the round trip, the line-equals-tag law, the object payload and the
+   four published names. `LECUpdated.quantiles` keeps `Map[String, Double]`
+   until step 5 types the quantile keys for `SimulationResponse`.
 
 2. **The changed-node report, and the merge conflict entry.**
    `ChangedNodesResponse.status` is four values held as `String`; it becomes a
@@ -5860,6 +5872,54 @@ log line loses the name on the wire. Reusing `Field(Request, FieldName.X)` with
 six new `FieldName` cases would make every form's exhaustive mapping grow by six
 arms for inputs no form has, and would describe a parameter as a field of the
 body, which it is not.
+
+### EWB-D-62 — where a server-sent event's name travels — RULED 2026-11-04
+
+**Ruled 2026-11-04: Option A. An event's name is written on the SSE `event:`
+line and as the payload's tag field, from one declared spelling.** Phase 6 step 1
+writes it.
+
+**Goal.** A server-sent event is an `event:` line, a `data:` line and a blank
+line. Today `SSEEvent.eventType` supplies the `event:` line and a trait-level
+encoder writes the payload as a JSON string, so the `data:` line is
+double-encoded. ADR-038 §2 makes the event an enum with a derived discriminated
+codec, whose tag field names the case inside the payload. The method that fed
+the `event:` line goes with the trait, so the line needs a source or goes too.
+ADR-004a §3 publishes the four event names, so the spellings are declared
+constants under ADR-037 §2 whichever way is ruled. Nothing reads the stream yet:
+no browser code, test or script matches on an event.
+
+**Option A — the `event:` line and the tag field, from one spelling** (ruled).
+The companion holds the four names once. Each case's `@jsonHint` names its
+constant and `SSEEvent.eventName` returns the same constant for the `event:`
+line. A listener registered for a name is woken for exactly those records,
+which is the protocol's own multiplexing, and a reader with only the payload
+still knows its kind. A law test pins that the name on the line equals the tag
+in the payload. Cost: a four-arm match beside the four hints, and the name
+written twice per record.
+
+**Option B — the tag field only.** No `event:` line. One spelling with nothing
+to keep aligned. Cost: the endpoint's published description, which shows the
+`event:` line, is rewritten, and a browser must decode every heartbeat to learn
+it is one, because per-event listeners cannot be used.
+
+**Why A.** The protocol's event routing is kept for the price of one match.
+
+### EWB-D-63 — the stale-figures event is named for what it reports — RULED 2026-11-04
+
+**Ruled 2026-11-04: `SSEEvent.CacheInvalidated` becomes `FiguresChanged`, wire
+name `figures_changed`.** Phase 6 step 1 writes it, and ADR-004a §3's table row
+and flow line are amended to the new name.
+
+**Goal.** The event tells a browser which nodes' figures changed after a save,
+the edited nodes and every ancestor whose aggregate changed with them. No cache
+is invalidated: the result cache is content-addressed and has no invalidation
+(ADR-014), so the name described a mechanism that no longer exists. "Figures"
+is the glossary's word for a node's computed values. The handler that publishes
+it keeps its name, `InvalidationHandler`, by the same ruling.
+
+**Why now.** Nothing reads the stream yet, so the published wire name changes
+at no cost. After a browser reader exists it would cost a coordinated change.
 
 ---
 

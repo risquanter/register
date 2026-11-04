@@ -265,3 +265,7 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/util/IdGenerators.scala
 - modules/server/src/main/scala/com/risquanter/register/infra/persistence/QuillMappings.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/support/TestSafeUrls.scala
+- modules/server/src/main/scala/com/risquanter/register/services/sse/SSEHub.scala
+- modules/server/src/test/scala/com/risquanter/register/services/sse/SSEHubSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/sse/SSEEventSpec.scala
+- modules/server/src/main/scala/com/risquanter/register/http/sse/SSEEndpoints.scala
