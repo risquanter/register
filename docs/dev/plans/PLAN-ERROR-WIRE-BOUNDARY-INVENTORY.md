@@ -269,3 +269,5 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/test/scala/com/risquanter/register/services/sse/SSEHubSpec.scala
 - modules/server/src/test/scala/com/risquanter/register/http/sse/SSEEventSpec.scala
 - modules/server/src/main/scala/com/risquanter/register/http/sse/SSEEndpoints.scala
+- modules/common/src/test/scala/com/risquanter/register/http/responses/ChangedNodesResponseSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/DistributionPreviewServiceSpec.scala

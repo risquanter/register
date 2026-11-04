@@ -2,8 +2,8 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-63`, is ruled. `EWB-D-1` to
-`EWB-D-43` and `EWB-D-61` to `EWB-D-63` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
+**Status.** Every decision, `EWB-D-1` to `EWB-D-64`, is ruled. `EWB-D-1` to
+`EWB-D-43` and `EWB-D-61` to `EWB-D-64` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
 and §16.7, `EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in
 §17, and `EWB-D-54` and `EWB-D-59` in §18. Approval
 is in place: the token names this document and the file inventory exists beside
@@ -2712,22 +2712,27 @@ exercised on a small surface before the largest one:
    case for ADR-038's second clause on a cross-compiled response, and the
    browser already holds the type.
 
-   `MergeConflictEntry(path: String, treeId: Option[String], nodeId: Option[String])`
-   joins this step (`EWB-D-24`): `treeId` and `nodeId` become `Option[TreeId]`
-   and `Option[NodeId]`, the same ADR-038 §3 case on the same kind of wire type,
-   and leaving one raw pair behind is the half-migration that rule warns
-   against. The same step turns around the one import that runs the wrong way:
-   `MergeRefusal`, a domain error, imports `MergeConflictEntry` from
-   `http/responses`, so a domain type depends on a response shape. Under
-   ADR-038 §2 a refusal is an operation outcome and declares its own payload, so
-   the entry is declared in `MergeRefusal`'s own file and
-   `ScenarioMergeResponse` reads it from there — which reverses the dependency
-   without duplicating the shape. Files: `ChangedNodesResponse.scala`,
-   `WorkspaceTreeEndpoints.scala`, `ChangedNodesService.scala`,
-   `WorkspaceTreeController.scala`, `ChangedNodesState.scala`,
-   `ChangedNodesStateSpec.scala`, `MergeRefusal.scala`,
-   `ScenarioMergeResponse.scala`, `ScenarioMergeService.scala`,
-   `MergeMessages.scala`, `ScenarioMergeState.scala`.
+   `MergeConflictEntry` was once this step's second item (`EWB-D-24`). §17.3
+   retyped it as a discriminated enum with refined identifiers and placed it in
+   `ScenarioMergeResponse.scala`, and `MergeRefusal.Conflicts` reads it from
+   there, so nothing of it remains for this step. Files:
+   `ChangedNodesResponse.scala`, `ChangedNodesService.scala`,
+   `WorkspaceTreeController.scala`, `ChangedNodesServiceSpec.scala`,
+   `ChangedNodesState.scala`, `ChangedNodesStateSpec.scala`.
+
+   *Implemented 2026-11-04.* `ChangedNodesStatus` is a discriminated enum with
+   `Ok(entries)`, `MissingOnA()`, `MissingOnB()` and `MissingOnBoth()`, tag key
+   `kind`, declared schema, and `ChangedNodesResponse(status:
+   ChangedNodesStatus)` wraps it as `MergePreviewResponse` wraps its outcome.
+   `NodeChangeStatus` moved from the server to `common` with a derived codec
+   and a `differs` predicate, and `NodeChangeEntry` carries a `NodeId` and that
+   enum. The server's `ChangedNodesResult`, `NodeChange` and its own
+   `NodeChangeStatus` were isomorphic copies and are deleted; the service
+   returns the wire outcome and the controller wraps it. The browser's
+   derivation matches `Ok` and filters on `differs`; its test for a malformed
+   node id is removed with the behaviour, since a decoded `NodeId` cannot be
+   malformed. `ChangedNodesResponseSpec`, new, pins the round trip, the tag key
+   and `differs`.
 
 3. **The history operation.** `HistoryOperation`'s hand-written string codec
    carries a `case _ => Other` arm, so an unrecognized wire value becomes a
@@ -2736,6 +2741,14 @@ exercised on a small surface before the largest one:
    the two larger items. Files: `TreeHistoryResponse.scala`,
    `TreeHistoryService.scala`, `TreeHistoryServiceSpec.scala`,
    `TreeHistoryStateSpec.scala`.
+
+   *Superseded by §17 (`EWB-D-53`), implemented 2026-11-02.* `HistoryOperation`
+   is a discriminated enum with a derived codec and tag key `kind`, and its
+   hand-written encoder and decoder are deleted. `Other()` remains as a declared
+   case for a commit message the server did not write, which the server decides
+   when it parses the message; the decoder has no wildcard, so an unrecognised
+   wire value is refused. Nothing of this step remains, and tree history is
+   otherwise `PLAN-BRANCH-HISTORY.md`'s.
 
 4. **The distribution preview.** Four defects in one type: `Schema.any` erases
    the generated schema for the whole response, an `Array` field makes equality
@@ -2746,6 +2759,19 @@ exercised on a small surface before the largest one:
    to `http/responses/`), `DistributionPreviewEndpoints.scala`,
    `DistributionPreviewService.scala`, `DistributionPreviewServiceSpec.scala`,
    `DistributionChartState.scala`, `DistributionSpecBuilder.scala`.
+
+   *Implemented 2026-11-04.* Reading the file whole found a fifth defect: the
+   mode and its two `Option[Int]` siblings, `resolvedTerms` and `anchorCount`,
+   were a case whose payload lived in fields that may or may not be populated,
+   the shape ADR-038 §2 names. They are one coproduct, `PreviewFit`, tagged
+   under `DistributionShape.TagField` with the case names `Metalog` and
+   `Lognormal`, and `EWB-D-64` rules that the anchor count leaves the wire. A
+   point's `cdf` is a `Probability`, typed once at the grid. Two files joined
+   the list: `OpaqueTypes.scala`, where `MetalogTermCount` and `Probability`
+   gain the JSON codecs the derived codecs need and two comments naming the
+   old response are corrected, and `DistributionShape.scala`, whose
+   `termsToFit` comment now names the grid as the other justified
+   `refineUnsafe` site.
 
 5. **The simulation response and the untyped bodies.** `SimulationResponse.name`
    is a `String` where `SafeName` exists, and its `quantiles` map holds a fixed
@@ -4770,7 +4796,9 @@ cases would make unrepresentable. Correcting it changes the request wire shape,
 so it is governed by ADR-017 and ADR-038 and needs its own decision. The two
 response fields `resolvedTerms` and `anchorCount` on
 `DistributionPreviewResponse.scala:32-33` are the same question on the outgoing
-side.
+side. Phase 6 step 4 later brought the response side into this plan's scope:
+the pair is the `PreviewFit` coproduct, and `EWB-D-64` rules the anchor count
+off the wire.
 
 **Where this rule stops: `providedSeedVarIds` stays a `Map`.**
 `ResolvedCreate` and `ResolvedUpdate` both carry
@@ -5920,6 +5948,40 @@ it keeps its name, `InvalidationHandler`, by the same ruling.
 
 **Why now.** Nothing reads the stream yet, so the published wire name changes
 at no cost. After a browser reader exists it would cost a coordinated change.
+
+### EWB-D-64 — whether the server echoes the anchor count — RULED 2026-11-04
+
+**Ruled 2026-11-04: Option A. The distribution preview response stops echoing
+the anchor count.** Phase 6 step 4 writes it.
+
+**Goal.** The browser's chart caption reads "Exact fit with N terms" or
+"Smoothed with N terms (M anchor points)". N is the term count the server
+resolves when the author named none, so it belongs on the wire, and the
+`PreviewFit.Metalog` case carries it as a `MetalogTermCount`. M is the number
+of anchors the author typed. The response echoed it as `anchorCount:
+Option[Int]`, and typing it under ADR-038 §3 is where the question came from:
+no refined anchor-count type exists, `QuantileAnchors` bounds the count to
+`[2, 20]` only through its constructor, and the resolved parameters the
+service receives are already unzipped doubles.
+
+**Option A — the response stops echoing it** (ruled). The fit carries only
+what the server computed. The browser already combines the loaded preview
+with the draft shape it built the request from, so the caption takes M from
+the draft's anchors. Cost: the caption signal combines two signals instead of
+reading one field, and it reads `None` when the draft is no longer the metalog
+the loaded preview was fitted from.
+
+**Option B — a new `AnchorCount` refinement.** `Int :| (GreaterEqual[2] &
+LessEqual[20])` beside `MetalogTermCount`, `QuantileAnchors.size` returning it
+with the same justified `refineUnsafe` as `termsToFit`, and the service
+reading it from the shape. To stay total the service would match on the shape
+rather than on the resolved parameters, so `DistributionShape.resolve` would
+split into one resolver per case. Cost: a new type for one field, four more
+files, and a split of the one function that keeps the preview's resolution
+identical to the simulator's.
+
+**Why A.** B adds a type and a split to carry a number the browser already
+holds.
 
 ---
 
