@@ -20,14 +20,14 @@ import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
   * Endpoint: GET /w/{key}/events/tree/{treeId}
   * Returns: Server-Sent Events stream (text/event-stream)
   *
-  * A15: Workspace-scoped — requires valid workspace key and tree ownership.
+  * Workspace-scoped: requires a valid workspace key and tree ownership.
   */
 trait SSEEndpoints extends BaseEndpoint {
 
   /**
     * SSE stream endpoint for tree updates (workspace-scoped).
     *
-    * A15: Validates workspace key and tree ownership before subscribing.
+    * Validates workspace key and tree ownership before subscribing.
     *
     * Clients connect to receive real-time notifications about:
     * - LEC curve updates
@@ -49,10 +49,11 @@ trait SSEEndpoints extends BaseEndpoint {
           |Event types:
           |- `lec_updated`: LEC curve recomputed for a node
           |- `node_changed`: Tree structure modified
-          |- `cache_invalidated`: These nodes' figures changed — re-fetch
+          |- `figures_changed`: These nodes' figures changed — re-fetch
           |- `connection_status`: Heartbeat and lifecycle events
           |
-          |Each event is formatted as:
+          |Each event is formatted as below, and the payload's `event` field
+          |carries the same name as the `event:` line:
           |```
           |event: <event_type>
           |data: <json_payload>

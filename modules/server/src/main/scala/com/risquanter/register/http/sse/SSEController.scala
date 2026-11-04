@@ -21,18 +21,18 @@ import com.risquanter.register.http.errors.TreeScope
   * Per ADR-004a-proposal: "Controllers wire endpoints to services"
   * This controller connects the Tapir streaming endpoint to the SSEHub service.
   *
-  * A15: Workspace-scoped — validates workspace key and tree ownership
-  * before subscribing via `WorkspaceStore.resolveTree`.
+  * Workspace-scoped: validates workspace key and tree ownership before
+  * subscribing via `WorkspaceStore.resolveTree`.
   *
   * Pattern: SSE Request → Tapir Endpoint → Controller → WorkspaceStore → SSEHub → ZStream → Client
   *
   * Note: Uses ServerEndpoint[Any, Task] for BaseController compatibility.
   * ZioHttpInterpreter handles ZioStreams capabilities at runtime.
   *
-  * SSE Format:
+  * SSE Format, the `event:` line and the payload's tag carrying one name:
   * ```
-  * event: lec_updated
-  * data: {"nodeId":"cyber","treeId":1,"quantiles":{...}}
+  * event: figures_changed
+  * data: {"event":"figures_changed","nodeIds":["cyber"],"treeId":"01H…","branch":null}
   *
   * ```
   */
@@ -50,7 +50,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
   /**
     * Tree events SSE stream (workspace-scoped).
     *
-    * A15: Validates workspace key and tree ownership before subscribing.
+    * Validates workspace key and tree ownership before subscribing.
     * Subscribes to SSEHub for the requested tree and streams events
     * to the client. Includes periodic heartbeat to keep connection alive.
     */
@@ -81,7 +81,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
     * ```
     */
   private def formatAsSSE(event: SSEEvent): String =
-    s"event: ${event.eventType}\ndata: ${event.toJson}\n\n"
+    s"event: ${SSEEvent.eventName(event)}\ndata: ${event.toJson}\n\n"
 
   /**
     * Initial connection event.
@@ -107,7 +107,7 @@ object SSEController {
 
   /**
     * Create SSEController with SSEHub + WorkspaceStore dependencies.
-    * A15: WorkspaceStore needed for workspace ownership validation.
+    * WorkspaceStore is needed for workspace ownership validation.
     */
   val layer: ZLayer[SSEHub & WorkspaceStore & AuthorizationService & UserContextExtractor & Tracing, Nothing, SSEController] =
     ZLayer.fromZIO {

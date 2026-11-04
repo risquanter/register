@@ -142,7 +142,7 @@ final class SSEHubLive(
       _     <- hubs.get(treeId) match {
                  case Some(hub) if count > 0 =>
                    hub.publish(event) *> 
-                   ZIO.logDebug(s"SSE published ${event.eventType} to tree $treeId ($count subscribers)")
+                   ZIO.logDebug(s"SSE published ${SSEEvent.eventName(event)} to tree $treeId ($count subscribers)")
                  case _ =>
                    ZIO.logDebug(s"SSE publish to tree $treeId: no subscribers")
                }
@@ -160,7 +160,7 @@ final class SSEHubLive(
                  if subs.getOrElse(treeId, 0) > 0 then hub.publish(event)
                  else ZIO.unit
                }
-      _     <- ZIO.logInfo(s"SSE broadcast ${event.eventType} to all trees ($total total subscribers)")
+      _     <- ZIO.logInfo(s"SSE broadcast ${SSEEvent.eventName(event)} to all trees ($total total subscribers)")
     yield total
 
   /**

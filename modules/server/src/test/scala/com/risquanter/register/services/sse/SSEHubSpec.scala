@@ -63,7 +63,7 @@ object SSEHubSpec extends ZIOSpecDefault {
       for
         hub    <- ZIO.service[SSEHub]
         stream <- hub.subscribe(tid("tree-1"))
-        event   = SSEEvent.LECUpdated("node-1", tid("tree-1"), Map("p50" -> 1000.0))
+        event   = SSEEvent.LECUpdated(nodeId("node-1"), tid("tree-1"), Map("p50" -> 1000.0))
         // Use Queue to collect results
         queue  <- Queue.unbounded[SSEEvent]
         // Start consuming in background
@@ -84,7 +84,7 @@ object SSEHubSpec extends ZIOSpecDefault {
         hub      <- ZIO.service[SSEHub]
         stream1  <- hub.subscribe(tid("tree-2"))
         stream2  <- hub.subscribe(tid("tree-2"))
-        event     = SSEEvent.NodeChanged("node-2", tid("tree-2"), NodeChangeType.Updated)
+        event     = SSEEvent.NodeChanged(nodeId("node-2"), tid("tree-2"), NodeChangeType.Updated)
         queue1   <- Queue.unbounded[SSEEvent]
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
@@ -122,8 +122,8 @@ object SSEHubSpec extends ZIOSpecDefault {
         hub      <- ZIO.service[SSEHub]
         stream1  <- hub.subscribe(tid("tree-10"))
         stream2  <- hub.subscribe(tid("tree-20"))
-        event1    = SSEEvent.LECUpdated("node-10", tid("tree-10"), Map.empty)
-        event2    = SSEEvent.LECUpdated("node-20", tid("tree-20"), Map.empty)
+        event1    = SSEEvent.LECUpdated(nodeId("node-10"), tid("tree-10"), Map.empty)
+        event2    = SSEEvent.LECUpdated(nodeId("node-20"), tid("tree-20"), Map.empty)
         queue1   <- Queue.unbounded[SSEEvent]
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork

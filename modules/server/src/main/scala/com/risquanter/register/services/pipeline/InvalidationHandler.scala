@@ -27,8 +27,8 @@ final case class InvalidationResult(
   * which nodes to re-fetch — the changed node plus every ancestor up to the
   * root, whose aggregates changed with it.
   *
-  * The published event is named `SSEEvent.CacheInvalidated`. For a browser the
-  * meaning is "these nodes' figures are stale, re-fetch them".
+  * The published event is `SSEEvent.FiguresChanged`. For a browser the
+  * meaning is "these nodes' figures changed, fetch them again".
   *
   * Triggered by RiskTreeServiceLive mutations (update, delete).
   */
@@ -61,7 +61,7 @@ trait InvalidationHandler {
   def handleMutation(oldTree: RiskTree, newTree: RiskTree, branch: BranchChoice): UIO[InvalidationResult]
 
   /**
-    * Handle tree deletion by publishing a CacheInvalidated event with all
+    * Handle tree deletion by publishing a FiguresChanged event with all
     * node IDs. Browsers that receive this event will re-fetch and get
     * NOT_FOUND, signaling the tree is gone.
     *
@@ -117,14 +117,14 @@ final case class InvalidationHandlerLive(
 ) extends InvalidationHandler {
 
   /**
-    * Publish a CacheInvalidated SSE event and return the InvalidationResult.
+    * Publish a FiguresChanged SSE event and return the InvalidationResult.
     * Shared by both handler methods to ensure consistent event shape and logging.
     */
   private def publishInvalidation(treeId: TreeId, nodeIds: List[NodeId], branch: BranchChoice, context: String): UIO[InvalidationResult] =
     if nodeIds.isEmpty then
       ZIO.succeed(InvalidationResult(invalidatedNodes = Nil, subscribersNotified = 0))
     else
-      val event = SSEEvent.CacheInvalidated(nodeIds = nodeIds, treeId = treeId, branch = branch)
+      val event = SSEEvent.FiguresChanged(nodeIds = nodeIds, treeId = treeId, branch = branch)
       for
         subscriberCount <- hub.publish(treeId, event)
         _               <- ZIO.logInfo(s"$context: treeId=$treeId, branch=$branch, nodes=${nodeIds.size}, subscribers=$subscriberCount")
