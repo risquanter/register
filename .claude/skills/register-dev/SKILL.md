@@ -363,6 +363,9 @@ So the unit and integration tiers never need a rebuild after a cleanup. Only the
 BATS suites and the manual Docker stack do, and only when the version has moved
 since those images were last built — check with
 `docker images --filter reference='local/*'` against `APP_VERSION` in `.env`.
+When a rebuild is due, build the two images one at a time before running a
+suite; the reason and the commands are under "Build the application images
+before suites A and C" in the BATS section below.
 
 ---
 
@@ -633,6 +636,47 @@ run_bats() {
 run_bats tests/bats/suite-c-in-memory.bats   # Suite C — in-memory, quickest; run after any code change
 run_bats tests/bats/suite-a-full-prod.bats   # Suite A — E2E with Irmin persistence
 run_bats tests/bats/suite-b-irmin-prod.bats  # Suite B — standalone Irmin image
+```
+
+### Build the application images before suites A and C, one at a time
+
+Suites A and C run `docker compose up`, and when no image exists at the current
+`APP_VERSION` tag compose builds the server image and the frontend image **at
+the same time**. On this machine that has frozen the whole system, and the
+mechanism is memory, not CPU:
+
+- The server build runs sbt and then GraalVM native-image. Each is a JVM whose
+  default maximum heap is a quarter of the machine, 8.4 GB on a 31 GB host. The
+  measured peak of the native-image step is 11 GB of resident memory.
+- The frontend build runs another sbt for the Scala.js link, with the same
+  8.4 GB default. The repository's `.sbtopts`, which caps sbt at 2 GB on the
+  host, is not copied into either image.
+- Metals in VS Code may hold up to 8 GB, and a stale scala-cli compile daemon
+  was found holding 7.4 GB after a day and a half.
+- BuildKit on this daemon ignores a build memory cap: a probe build run with
+  `--memory 512m` still saw `memory.max=max` and all 32 CPUs. No host-side flag
+  bounds a build, so the only levers are fewer builds at once and more swap.
+
+So build the two images yourself, one after the other, before the suites. The
+suites then build nothing. Run nothing else that compiles while the builds run,
+including sbt in another terminal and the integration tier. The native-image
+step still uses every core; what is given up is only the overlap of the two
+builds.
+
+```bash
+docker compose build --progress=plain register-server 2>&1 | tee /tmp/register-server-build.log | grep -E "Peak RSS|error|Error"
+docker compose --profile frontend build frontend
+```
+
+`--progress=plain` is what makes native-image's `Peak RSS` summary line visible;
+it is the measurement the figures above come from. Swap on the development VM
+is 10 GB (a 2 GB partition and an 8 GB `/swapfile`), which lets idle JVM pages
+be parked while a build runs; it does not make two concurrent builds safe.
+
+An idle JVM holding memory is found with:
+
+```bash
+ps -eo pid,etime,rss,args --sort=-rss | grep -E "java" | head
 ```
 
 Why each flag (the runner drives the **host's** Docker daemon from inside a
