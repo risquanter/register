@@ -1,15 +1,16 @@
 package app.state
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import scala.scalajs.js
 
 import app.chart.DistributionSpecBuilder
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{MetalogTermCount, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.DistributionPreviewEndpoints
-import com.risquanter.register.http.requests.{DistributionShapeRequest, DistributionPreviewResponse}
+import com.risquanter.register.http.requests.DistributionShapeRequest
+import com.risquanter.register.http.responses.{DistributionPreviewResponse, PreviewFit}
 
 /** PDF/CDF view toggle for the distribution preview chart. */
 enum DistributionViewMode:
@@ -72,19 +73,39 @@ final class DistributionChartState(
   /** Reset the preview to Idle (e.g. when the form is unmounted). */
   def reset(): Unit = previewVar.set(LoadState.Idle)
 
-  /** Coherence echo caption for the chart panel.
-    *
-    * - `Some("Exact fit with N terms")` when `resolvedTerms == anchorCount`
-    * - `Some("Smoothed with N terms (M anchor points)")` when `resolvedTerms < anchorCount`
-    * - `None` for lognormal mode or when no preview is loaded.
-    */
+  /** Coherence echo caption for the chart panel: the term count the server
+    * fitted against the anchor count the author stated in the draft. `None` for
+    * a lognormal fit, when no preview is loaded, or when the draft is not the
+    * metalog the loaded preview was fitted from. */
   val coherenceCaptionSignal: Signal[Option[String]] =
-    previewVar.signal.map {
-      case LoadState.Loaded(resp) =>
-        (resp.resolvedTerms, resp.anchorCount) match
-          case (Some(t), Some(n)) =>
-            if t == n then Some(s"Exact fit with $t terms")
-            else Some(s"Smoothed with $t terms ($n anchor points)")
-          case _ => None
+    previewVar.signal
+      .combineWith(draftSignal)
+      .map(DistributionChartState.coherenceCaption)
+
+object DistributionChartState:
+
+  private def exactFit(terms: MetalogTermCount): String = s"Exact fit with $terms terms"
+
+  private def smoothed(terms: MetalogTermCount, anchors: Int): String =
+    s"Smoothed with $terms terms ($anchors anchor points)"
+
+  /** The caption pairs a loaded metalog fit with the draft it was requested for.
+    * The term count comes from the fit, because the server resolves it when the
+    * author named none; the anchor count comes from the draft, which is where
+    * the author stated the anchors.
+    *
+    * {{{
+    * coherenceCaption(Loaded(fit = Metalog(3)), Some(Metalog(three anchors)))
+    * // Some("Exact fit with 3 terms")
+    * }}}
+    */
+  def coherenceCaption(
+    preview: LoadState[DistributionPreviewResponse],
+    draft:   Option[DistributionShape]
+  ): Option[String] =
+    (preview, draft) match
+      case (LoadState.Loaded(DistributionPreviewResponse(PreviewFit.Metalog(terms), _)),
+            Some(DistributionShape.Metalog(anchors, _))) =>
+        if terms == anchors.size then Some(exactFit(terms))
+        else Some(smoothed(terms, anchors.size))
       case _ => None
-    }

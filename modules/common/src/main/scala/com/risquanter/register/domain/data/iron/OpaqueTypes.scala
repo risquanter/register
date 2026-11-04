@@ -98,7 +98,19 @@ type PositiveInt = Int :| Greater[0]
 // The metalog fit's term count. Both bounds are the fitter's own precondition:
 // Metalog.validateInputs throws IllegalArgumentException outside [2, MAX_TERMS],
 // and MAX_TERMS is 20. A fit with fewer than two terms has no curve to describe.
-type MetalogTermCount = Int :| (GreaterEqual[2] & LessEqual[20])
+// The constraint is named so the decoder below refines against the same bounds
+// the type is declared with rather than restating them.
+type MetalogTermCountConstraint = GreaterEqual[2] & LessEqual[20]
+
+type MetalogTermCount = Int :| MetalogTermCountConstraint
+
+// The term count crosses the wire inside the distribution preview's fit, so the
+// derived codec of that response needs an instance here. The bounds are
+// re-checked on decode: a decoded count is as trustworthy as a constructed one
+// (ADR-038).
+given JsonEncoder[MetalogTermCount] = JsonEncoder[Int].contramap(identity)
+given JsonDecoder[MetalogTermCount] =
+  JsonDecoder[Int].mapOrFail(_.refineEither[MetalogTermCountConstraint])
 
 // Positive long values (must be > 0) — e.g. lognormal CI bounds, which feed a logarithm
 type PositiveLong = Long :| Greater[0L]
@@ -221,9 +233,9 @@ object IronConstants:
   val ZeroL: NonNegativeLong = 0L
   val OneL: NonNegativeLong = 1L
 
-  // The mode as a label in a response body, not as a serialised tag — a
-  // shape's tag is derived from its case name. Both spellings are the case
-  // name, and DistributionPreviewServiceSpec pins each arm's value.
+  // The mode as a display label, which the browser's tree preview and node rows
+  // show beside a leaf. Not a serialised tag: a shape's tag is derived from its
+  // case name, and both spellings here are those case names.
   // Compile-time safe: Iron validates the literals against the Match constraint.
   val Metalog:   DistributionType = "Metalog"
   val Lognormal: DistributionType = "Lognormal"
@@ -337,8 +349,21 @@ object SeedVarId:
 // Probability values (must be between 0.0 and 1.0, exclusive)
 // Exclusive bounds are required for numerical stability in metalog-distribution's
 // inverse CDF calculations where 0.0 and 1.0 would cause division by zero or infinity.
-// NOTE: Used for Metalog percentiles which require exclusive (0,1) bounds.
-type Probability = Double :| (Greater[0.0] & Less[1.0])
+// Used for metalog anchor percentiles and for the probability grid a preview
+// curve is sampled at, both of which need the open interval. The constraint is
+// named so the decoder below refines against the same bounds the type is
+// declared with rather than restating them.
+type ProbabilityConstraint = Greater[0.0] & Less[1.0]
+
+type Probability = Double :| ProbabilityConstraint
+
+// A probability crosses the wire as a preview point's `cdf`, so the derived
+// codec of that point needs an instance here. The open interval is re-checked
+// on decode: a decoded probability is as trustworthy as a constructed one
+// (ADR-038).
+given JsonEncoder[Probability] = JsonEncoder[Double].contramap(identity)
+given JsonDecoder[Probability] =
+  JsonDecoder[Double].mapOrFail(_.refineEither[ProbabilityConstraint])
 
 // Occurrence probability for a risk leaf event (can be 0 = never, or 1 = always).
 // Semantically distinct from Probability: the closed [0,1] interval is correct here
@@ -353,11 +378,9 @@ type DistributionTypeConstraint = Match["^(Metalog|Lognormal)$"]
 // Distribution type string (must be "Metalog" or "Lognormal")
 type DistributionType = String :| DistributionTypeConstraint
 
-// JSON codecs for DistributionType. It crosses the wire as the mode field of
-// `DistributionPreviewResponse`, so a derived codec for that response needs an
-// instance for this type. The refinement is re-checked on decode: the two modes
-// are the contract, and a decoded value is as trustworthy as a constructed one
-// (ADR-038).
+// JSON codecs for DistributionType. The refinement is re-checked on decode: the
+// two modes are the contract, and a decoded value is as trustworthy as a
+// constructed one (ADR-038).
 given JsonEncoder[DistributionType] = JsonEncoder[String].contramap(identity)
 given JsonDecoder[DistributionType] =
   JsonDecoder[String].mapOrFail(_.refineEither[DistributionTypeConstraint])

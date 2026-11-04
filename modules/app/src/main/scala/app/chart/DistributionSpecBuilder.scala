@@ -5,7 +5,7 @@ import scala.scalajs.js
 import app.state.DistributionViewMode
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.http.requests.{DistributionPreviewPoint, DistributionPreviewResponse}
+import com.risquanter.register.http.responses.{DistributionPreviewPoint, DistributionPreviewResponse}
 
 /** Client-side Vega-Lite v6 specification builder for distribution preview charts.
   *

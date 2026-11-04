@@ -1,9 +1,13 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.json.*
+import zio.json.ast.{Json, JsonCursor}
 import zio.test.*
+import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.DistributionShape
+import com.risquanter.register.http.responses.PreviewFit
 import com.risquanter.register.testutil.TestHelpers.{metalogShape, lognormalShape}
 
 object DistributionPreviewServiceSpec extends ZIOSpecDefault:
@@ -26,6 +30,13 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
 
   private def preview(shape: DistributionShape) =
     ZIO.serviceWithZIO[DistributionPreviewService](_.preview(shape))
+
+  /** The value under the shape's tag key in the fit's JSON, which is what a
+    * reader uses to tell the two fits apart. */
+  private def tagOf(fit: PreviewFit): Option[String] =
+    fit.toJson.fromJson[Json].toOption
+      .flatMap(_.get(JsonCursor.field(DistributionShape.TagField)).toOption)
+      .collect { case Json.Str(value) => value }
 
   // ── spec ───────────────────────────────────────────────────────────────────
 
@@ -62,21 +73,27 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
         yield assertTrue(resp.points.forall(_.x >= 0.0))
       },
 
-      test("response metadata reflects resolved terms and anchor count") {
-        // 3 anchors, no explicit terms → one term per anchor, so resolvedTerms = 3
-        // The label is compared against a literal rather than against the named
-        // constant, so a change to the constant fails here instead of passing.
+      test("the fit carries the resolved term count: one term per anchor when none is stated") {
         for resp <- preview(metalog(None))
-        yield assertTrue(
-          resp.distributionType == "Metalog" &&
-          resp.resolvedTerms    == Some(3) &&
-          resp.anchorCount      == Some(3)
-        )
+        yield assertTrue(resp.fit == PreviewFit.Metalog(3))
       },
 
       test("respects explicit terms override") {
         for resp <- preview(metalog(Some(2)))
-        yield assertTrue(resp.resolvedTerms == Some(2))
+        yield assertTrue(resp.fit == PreviewFit.Metalog(2))
+      },
+
+      test("the fit is tagged under the shape's key with the mode's case name") {
+        // Compared against literals rather than the constants, so a change to
+        // either spelling fails here instead of passing.
+        for
+          metalogResp   <- preview(metalog(None))
+          lognormalResp <- preview(lognormal)
+        yield assertTrue(
+          DistributionShape.TagField == "distributionType",
+          tagOf(metalogResp.fit)     == Some("Metalog"),
+          tagOf(lognormalResp.fit)   == Some("Lognormal")
+        )
       }
     ),
 
@@ -105,13 +122,9 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
           assertTrue(monotone)
       },
 
-      test("response metadata has no resolvedTerms or anchorCount") {
+      test("the fit is the lognormal case, which carries nothing") {
         for resp <- preview(lognormal)
-        yield assertTrue(
-          resp.distributionType == "Lognormal" &&
-          resp.resolvedTerms    == None         &&
-          resp.anchorCount      == None
-        )
+        yield assertTrue(resp.fit == PreviewFit.Lognormal())
       }
     )
   ).provideLayer(serviceLayer)

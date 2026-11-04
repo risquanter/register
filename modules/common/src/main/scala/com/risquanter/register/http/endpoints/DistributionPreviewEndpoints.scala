@@ -3,8 +3,8 @@ package com.risquanter.register.http.endpoints
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 
-import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.http.requests.{DistributionShapeRequest, DistributionPreviewResponse}
+import com.risquanter.register.http.requests.DistributionShapeRequest
+import com.risquanter.register.http.responses.DistributionPreviewResponse
 
 /** Distribution preview endpoint.
   *
