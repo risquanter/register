@@ -4,7 +4,7 @@ import zio.test.*
 
 import app.core.LocalProblem
 import com.risquanter.register.domain.data.iron.NodeId
-import com.risquanter.register.http.responses.{ChangedNodesResponse, NodeChangeEntry}
+import com.risquanter.register.http.responses.{ChangedNodesResponse, ChangedNodesStatus, NodeChangeEntry, NodeChangeStatus}
 
 /** Pure tests for `ChangedNodesState.deriveChangedNodeIds` (the Analyze
   * overlay ✎ change markers) — no Laminar Var/Signal harness needed, since
@@ -25,29 +25,24 @@ object ChangedNodesStateSpec extends ZIOSpecDefault:
       )
     },
 
-    test("status \"ok\": only non-identical entries are reported as changed") {
-      val resp = ChangedNodesResponse(
-        status = "ok",
-        entries = List(
-          NodeChangeEntry(leaf1.value, "identical"),
-          NodeChangeEntry(leaf2.value, "changed")
-        )
+    test("Ok: only entries whose status differs are reported as changed") {
+      val resp = ChangedNodesResponse(ChangedNodesStatus.Ok(List(
+        NodeChangeEntry(leaf1, NodeChangeStatus.Identical),
+        NodeChangeEntry(leaf2, NodeChangeStatus.Changed)
+      )))
+      assertTrue(ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(resp)) == Set(leaf2))
+    },
+
+    test("Ok with all identical → empty") {
+      val resp = ChangedNodesResponse(ChangedNodesStatus.Ok(List(NodeChangeEntry(leaf1, NodeChangeStatus.Identical))))
+      assertTrue(ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(resp)) == Set.empty)
+    },
+
+    test("a tree missing on a side → empty") {
+      assertTrue(
+        ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(ChangedNodesResponse(ChangedNodesStatus.MissingOnA()))) == Set.empty,
+        ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(ChangedNodesResponse(ChangedNodesStatus.MissingOnB()))) == Set.empty,
+        ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(ChangedNodesResponse(ChangedNodesStatus.MissingOnBoth()))) == Set.empty
       )
-      assertTrue(ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(resp)) == Set(leaf2))
-    },
-
-    test("status \"ok\" with all identical → empty") {
-      val resp = ChangedNodesResponse("ok", List(NodeChangeEntry(leaf1.value, "identical")))
-      assertTrue(ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(resp)) == Set.empty)
-    },
-
-    test("non-\"ok\" status (tree missing on a side) → empty regardless of entries") {
-      val resp = ChangedNodesResponse("missing-on-a", List(NodeChangeEntry(leaf1.value, "changed")))
-      assertTrue(ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(resp)) == Set.empty)
-    },
-
-    test("an entry with an unparseable nodeId is silently dropped, not a crash") {
-      val resp = ChangedNodesResponse("ok", List(NodeChangeEntry("not-a-valid-ulid", "changed"), NodeChangeEntry(leaf2.value, "changed")))
-      assertTrue(ChangedNodesState.deriveChangedNodeIds(LoadState.Loaded(resp)) == Set(leaf2))
     }
   )

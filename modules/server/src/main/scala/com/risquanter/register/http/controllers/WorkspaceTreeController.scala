@@ -8,8 +8,8 @@ import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, 
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.domain.data.iron.{BranchRef, Revision, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed}
-import com.risquanter.register.http.responses.{SimulationResponse, ChangedNodesResponse, NodeChangeEntry, TreeHistoryResponse}
-import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, ChangedNodesResult, TreeHistoryService}
+import com.risquanter.register.http.responses.{SimulationResponse, ChangedNodesResponse, TreeHistoryResponse}
+import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, TreeHistoryService}
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.http.errors.TreeScope
 
@@ -76,13 +76,7 @@ class WorkspaceTreeController private (
         revA     = aAt.fold[Revision](Revision.Head(branchA))(Revision.At(_))
         revB     = bAt.fold[Revision](Revision.Head(branchB))(Revision.At(_))
         result  <- changedNodesService.changedNodes(ws.id, treeId, revA, revB)
-      yield result match
-        case ChangedNodesResult.Changes(entries) =>
-          ChangedNodesResponse("ok", entries.map(c => NodeChangeEntry(c.nodeId.value, c.status.toWire)))
-        case ChangedNodesResult.MissingOnA    => ChangedNodesResponse("missing-on-a", Nil)
-        case ChangedNodesResult.MissingOnB    => ChangedNodesResponse("missing-on-b", Nil)
-        case ChangedNodesResult.MissingOnBoth => ChangedNodesResponse("missing-on-both", Nil)
-      ).wireEither(TreeScope.InTree(treeId))
+      yield ChangedNodesResponse(result)).wireEither(TreeScope.InTree(treeId))
   }
 
   val getTreeHistory: ServerEndpoint[Any, Task] = getTreeHistoryEndpoint.serverLogic {

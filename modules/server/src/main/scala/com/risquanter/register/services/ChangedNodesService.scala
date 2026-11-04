@@ -1,40 +1,11 @@
 package com.risquanter.register.services
 
 import zio.*
-import com.risquanter.register.auth.{Checked, Permission}
+import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, NodeId, ContentHash, Revision}
 import com.risquanter.register.domain.errors.AppError
+import com.risquanter.register.http.responses.{ChangedNodesStatus, NodeChangeEntry, NodeChangeStatus}
 import com.risquanter.register.services.cache.ContentHashIndex
-
-/** Per-node content-hash comparison result between two revisions. */
-enum NodeChangeStatus:
-  case Identical, Changed, Added, Removed
-
-  /** Wire form for `NodeChangeEntry.status` — colocated with the case list so a
-    * new case and its wire string are added in the same place (mirrors
-    * `DistributionMode.toApiString`).
-    */
-  def toWire: String = this match
-    case NodeChangeStatus.Identical => "identical"
-    case NodeChangeStatus.Changed   => "changed"
-    case NodeChangeStatus.Added     => "added"
-    case NodeChangeStatus.Removed   => "removed"
-
-/** One node's change outcome. */
-final case class NodeChange(nodeId: NodeId, status: NodeChangeStatus)
-
-/** Outcome of a `ChangedNodesService.changedNodes` call. A plain multi-case
-  * enum, not `Either`/`Option` — a tree missing on one or both sides is a
-  * distinct, non-error outcome, not a failure to collapse into a generic empty
-  * value. Mirrors the existing `TreeLoadDecision` convention (a plain enum for
-  * "one of several non-error outcomes") rather than introducing `Either`'s
-  * success/failure connotation for something that isn't a failure.
-  */
-enum ChangedNodesResult:
-  case Changes(entries: List[NodeChange])
-  case MissingOnA
-  case MissingOnB
-  case MissingOnBoth
 
 /** Content-hash changed-nodes comparison of a tree between two revisions —
   * no value-level comparison, only whether each node's content hash matches.
@@ -62,19 +33,19 @@ trait ChangedNodesService:
     * symmetric — neither side is a baseline; each is a branch head or a
     * pinned commit.
     *
-    * @return `ChangedNodesResult.MissingOnA`/`MissingOnB`/`MissingOnBoth` if
-    *         the tree does not exist on one or both sides — e.g. it was deleted
-    *         from a scenario branch while surviving on `main`. Not an error
-    *         condition — mirrors the `Option` in `RiskTreeService.getById`'s
-    *         return, just distinguishing which side is missing instead of
-    *         collapsing both to one empty value.
+    * @return the wire outcome `ChangedNodesStatus`: `MissingOnA`, `MissingOnB`
+    *         or `MissingOnBoth` if the tree does not exist on one or both sides,
+    *         e.g. it was deleted from a scenario branch while surviving on
+    *         `main`. Not an error condition — mirrors the `Option` in
+    *         `RiskTreeService.getById`'s return, distinguishing which side is
+    *         missing instead of collapsing both to one empty value.
     */
   def changedNodes(
     wsId:   WorkspaceId,
     treeId: TreeId,
     a:      Revision,
     b:      Revision
-  )(using Checked[Permission]): IO[AppError, ChangedNodesResult]
+  )(using Checked[Authority]): IO[AppError, ChangedNodesStatus]
 
 final case class ChangedNodesServiceLive(riskTreeService: RiskTreeService) extends ChangedNodesService:
 
@@ -83,17 +54,17 @@ final case class ChangedNodesServiceLive(riskTreeService: RiskTreeService) exten
     treeId: TreeId,
     a:      Revision,
     b:      Revision
-  )(using Checked[Permission]): IO[AppError, ChangedNodesResult] =
+  )(using Checked[Authority]): IO[AppError, ChangedNodesStatus] =
     // The two sides' trees are independent fetches (no shared state) — zipPar
     // avoids paying getById's Irmin round-trip cost twice, sequentially.
     riskTreeService.getById(wsId, treeId, a)
       .zipPar(riskTreeService.getById(wsId, treeId, b))
       .map {
         case (Some((treeA, _)), Some((treeB, _))) =>
-          ChangedNodesResult.Changes(changedHashes(ContentHashIndex.build(treeA), ContentHashIndex.build(treeB)))
-        case (None, Some(_)) => ChangedNodesResult.MissingOnA
-        case (Some(_), None) => ChangedNodesResult.MissingOnB
-        case (None, None)    => ChangedNodesResult.MissingOnBoth
+          ChangedNodesStatus.Ok(changedHashes(ContentHashIndex.build(treeA), ContentHashIndex.build(treeB)))
+        case (None, Some(_)) => ChangedNodesStatus.MissingOnA()
+        case (Some(_), None) => ChangedNodesStatus.MissingOnB()
+        case (None, None)    => ChangedNodesStatus.MissingOnBoth()
       }
 
   /** Keys present only in `hashesA` are `Removed`, only in `hashesB` are
@@ -102,11 +73,11 @@ final case class ChangedNodesServiceLive(riskTreeService: RiskTreeService) exten
     * Sorted by `NodeId.value` so the response has a stable order across
     * identical requests (a `Set`'s iteration order is not guaranteed).
     */
-  private def changedHashes(hashesA: Map[NodeId, ContentHash], hashesB: Map[NodeId, ContentHash]): List[NodeChange] =
-    val onlyA = (hashesA.keySet -- hashesB.keySet).map(NodeChange(_, NodeChangeStatus.Removed))
-    val onlyB = (hashesB.keySet -- hashesA.keySet).map(NodeChange(_, NodeChangeStatus.Added))
+  private def changedHashes(hashesA: Map[NodeId, ContentHash], hashesB: Map[NodeId, ContentHash]): List[NodeChangeEntry] =
+    val onlyA = (hashesA.keySet -- hashesB.keySet).map(NodeChangeEntry(_, NodeChangeStatus.Removed))
+    val onlyB = (hashesB.keySet -- hashesA.keySet).map(NodeChangeEntry(_, NodeChangeStatus.Added))
     val both  = (hashesA.keySet & hashesB.keySet).map { id =>
-      NodeChange(id, if hashesA(id) == hashesB(id) then NodeChangeStatus.Identical else NodeChangeStatus.Changed)
+      NodeChangeEntry(id, if hashesA(id) == hashesB(id) then NodeChangeStatus.Identical else NodeChangeStatus.Changed)
     }
     (onlyA ++ onlyB ++ both).toList.sortBy(_.nodeId.value)
 

@@ -4,9 +4,10 @@ import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.auth.{Checked, Permission, TestChecked}
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, Revision}
+import com.risquanter.register.http.responses.{ChangedNodesStatus, NodeChangeEntry, NodeChangeStatus}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /** Pure service-level tests for `ChangedNodesService` — the content-hash
@@ -15,7 +16,7 @@ import com.risquanter.register.testutil.TestHelpers.*
   */
 object ChangedNodesServiceSpec extends ZIOSpecDefault:
 
-  private given Checked[Permission] = TestChecked.value
+  private given Checked[Authority] = TestChecked.value
 
   private val wsId: WorkspaceId = WorkspaceId(safeId("diff-workspace"))
   private val treeIdF: TreeId = treeId("diff-tree")
@@ -70,11 +71,11 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
         case Revision.At(_)   => None)
     )
 
-  /** Unwraps the happy-path `Changes` case; fails loudly (not silently) if a
+  /** Unwraps the happy-path `Ok` case; fails loudly (not silently) if a
     * test that expects entries got a missing-tree outcome instead. */
-  private def entriesOf(result: ChangedNodesResult): List[NodeChange] = result match
-    case ChangedNodesResult.Changes(entries) => entries
-    case other => throw new AssertionError(s"Expected ChangedNodesResult.Changes, got $other")
+  private def entriesOf(result: ChangedNodesStatus): List[NodeChangeEntry] = result match
+    case ChangedNodesStatus.Ok(entries) => entries
+    case other => throw new AssertionError(s"Expected ChangedNodesStatus.Ok, got $other")
 
   private def headA = Revision.Head(branchA)
   private def headB = Revision.Head(branchB)
@@ -165,7 +166,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
       })
       for
         result <- service.changedNodes(wsId, treeIdF, headA, headB)
-      yield assertTrue(result == ChangedNodesResult.MissingOnB)
+      yield assertTrue(result == ChangedNodesStatus.MissingOnB())
     },
 
     test("tree missing on branchA only → MissingOnA") {
@@ -176,7 +177,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
       })
       for
         result <- service.changedNodes(wsId, treeIdF, headA, headB)
-      yield assertTrue(result == ChangedNodesResult.MissingOnA)
+      yield assertTrue(result == ChangedNodesStatus.MissingOnA())
     },
 
     test("tree missing on both sides → MissingOnBoth") {
@@ -185,7 +186,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
       })
       for
         result <- service.changedNodes(wsId, treeIdF, headA, headB)
-      yield assertTrue(result == ChangedNodesResult.MissingOnBoth)
+      yield assertTrue(result == ChangedNodesStatus.MissingOnBoth())
     },
 
     test("entries are returned in a stable order (sorted by NodeId), not raw Set iteration order") {

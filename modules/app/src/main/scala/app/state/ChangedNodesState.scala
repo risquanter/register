@@ -6,7 +6,7 @@ import app.core.ZJS.*
 import app.core.*
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
-import com.risquanter.register.http.responses.ChangedNodesResponse
+import com.risquanter.register.http.responses.{ChangedNodesResponse, ChangedNodesStatus}
 
 /** Reactive state for the content-hash changed-nodes comparison between the
   * tab's active branch and the compared branch — feeds the ✎ markers on the
@@ -74,6 +74,6 @@ object ChangedNodesState:
   /** Pure derivation extracted from `changedNodeIds` so it's testable without
     * a Laminar `Var`/`Signal` harness. */
   def deriveChangedNodeIds(result: LoadState[ChangedNodesResponse]): Set[NodeId] = result match
-    case LoadState.Loaded(resp) if resp.status == "ok" =>
-      resp.entries.filter(_.status != "identical").flatMap(e => NodeId.fromString(e.nodeId).toOption).toSet
+    case LoadState.Loaded(ChangedNodesResponse(ChangedNodesStatus.Ok(entries))) =>
+      entries.filter(_.status.differs).map(_.nodeId).toSet
     case _ => Set.empty
