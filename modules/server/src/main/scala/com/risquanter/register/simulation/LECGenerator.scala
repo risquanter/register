@@ -18,28 +18,28 @@ object LECGenerator {
     */
   def unconditionalQuantile(result: LossDistribution, p: OccurrenceProbability): Loss =
     val outcomes = result.outcomeCount
-    if outcomes.isEmpty then 0L
-    else
-      val implicitZeros = result.nTrials.toLong - outcomes.values.sum.toLong
-      val target = result.nTrials.toDouble * p
-      if implicitZeros >= target then 0L
-      else
-        outcomes.iterator
-          .scanLeft((0L, implicitZeros)) { case ((_, cum), (loss, count)) =>
-            (loss, cum + count)
-          }
-          .drop(1)
-          .find(_._2 >= target)
-          .map(_._1)
-          .getOrElse(outcomes.lastKey)
+    outcomes.lastOption match
+      case None => 0L
+      case Some((largestLoss, _)) =>
+        val implicitZeros = result.nTrials.toLong - outcomes.values.sum.toLong
+        val target = result.nTrials.toDouble * p
+        if implicitZeros >= target then 0L
+        else
+          outcomes.iterator
+            .scanLeft((0L, implicitZeros)) { case ((_, cum), (loss, count)) =>
+              (loss, cum + count)
+            }
+            .drop(1)
+            .find(_._2 >= target)
+            .map(_._1)
+            .getOrElse(largestLoss)
 
   /** The unconditional VaR at every `QuantileLevel`, which is where the tail-only
     * choice of levels is stated. Empty when no trial recorded an outcome.
     */
   def calculateQuantiles(result: LossDistribution): Map[QuantileLevel, Double] =
-    if result.outcomeCount.isEmpty then Map.empty
-    else QuantileLevel.values.map(level =>
-      level -> unconditionalQuantile(result, level.probability).toDouble).toMap
+    QuantileLevel.values.toList.flatMap(level =>
+      findQuantileLoss(result, level.probability).map(loss => level -> loss.toDouble)).toMap
 
   /** Average Annual Loss: the mean loss across all trials, zero-loss trials
     * included. A percentile answers how bad it can get; this answers what to
@@ -78,14 +78,15 @@ object LECGenerator {
     require(minLoss >= 0, "minLoss must be >= 0")
     require(maxLoss >= minLoss, "maxLoss must be >= minLoss")
 
-    if (minLoss == maxLoss) return Vector(minLoss)
+    if (minLoss == maxLoss) Vector(minLoss)
+    else {
+      // Add 10% buffer to max for better visualization
+      val maxTick = if (maxLoss < Long.MaxValue / 11) (maxLoss * 11) / 10 else maxLoss
+      val minTick = minLoss.max(1L)  // Use actual min, but avoid 0 for log-scale compatibility
 
-    // Add 10% buffer to max for better visualization
-    val maxTick = if (maxLoss < Long.MaxValue / 11) (maxLoss * 11) / 10 else maxLoss
-    val minTick = minLoss.max(1L)  // Use actual min, but avoid 0 for log-scale compatibility
-
-    if (nEntries == 1) Vector(minTick)
-    else (minTick to maxTick by math.max(1L, (maxTick - minTick) / (nEntries - 1))).toVector
+      if (nEntries == 1) Vector(minTick)
+      else (minTick to maxTick by math.max(1L, (maxTick - minTick) / (nEntries - 1))).toVector
+    }
   }
 
   /** The thresholds a curve is sampled at. Tick 0 is always included so every
@@ -135,29 +136,27 @@ object LECGenerator {
     results: Map[K, LossDistribution],
     nEntries: PositiveInt,
     tailCutoff: OccurrenceProbability
-  ): Map[K, Vector[(Long, OccurrenceProbability)]] = {
-    if (results.isEmpty) return Map.empty
-    
-    val nonEmpty = results.filter(_._2.outcomeCount.nonEmpty)
-    if (nonEmpty.isEmpty) return results.map((k, _) => k -> Vector.empty)
-    
-    // Compute combined loss range, clipping max to p99.5 to avoid
-    // extreme outliers stretching the x-axis beyond the informative range.
-    // clippedMaxLoss guarantees each per-result value is >= that result's
-    // own minLoss, so combinedMax >= combinedMin always holds.
-    val combinedMin = nonEmpty.values.map(_.minLoss).min
-    val combinedMax = nonEmpty.values.map(clippedMaxLoss).max
-    
-    val sharedTicks = curveTicks(combinedMin, combinedMax, nEntries)
+  ): Map[K, Vector[(Long, OccurrenceProbability)]] =
+    results.values.filter(_.outcomeCount.nonEmpty).toList match
+      // Covers an empty `results` too: mapping it answers an empty map.
+      case Nil => results.map((k, _) => k -> Vector.empty)
+      case withOutcomes =>
+        // Compute combined loss range, clipping max to p99.5 to avoid
+        // extreme outliers stretching the x-axis beyond the informative range.
+        // clippedMaxLoss guarantees each per-result value is >= that result's
+        // own minLoss, so combinedMax >= combinedMin always holds.
+        val combinedMin = withOutcomes.map(_.minLoss).min
+        val combinedMax = withOutcomes.map(clippedMaxLoss).max
 
-    // Evaluate all curves at every tick
-    val evaluated: Map[K, Vector[(Long, OccurrenceProbability)]] = results.map { case (nodeId, result) =>
-      if (result.outcomeCount.isEmpty) nodeId -> Vector.empty
-      else nodeId -> curveAt(result, sharedTicks)
-    }
+        val sharedTicks = curveTicks(combinedMin, combinedMax, nEntries)
 
-    trimTail(evaluated, sharedTicks, tailCutoff)
-  }
+        // Evaluate all curves at every tick
+        val evaluated: Map[K, Vector[(Long, OccurrenceProbability)]] = results.map {
+          case (nodeId, result) if result.outcomeCount.isEmpty => nodeId -> Vector.empty
+          case (nodeId, result)                                => nodeId -> curveAt(result, sharedTicks)
+        }
+
+        trimTail(evaluated, sharedTicks, tailCutoff)
 
   /** Drop trailing ticks where every curve is below `tailCutoff`, keeping one
     * beyond the last meaningful point for visual continuity.
@@ -166,18 +165,17 @@ object LECGenerator {
     evaluated: Map[K, Vector[(Long, OccurrenceProbability)]],
     sharedTicks: Vector[Long],
     tailCutoff: OccurrenceProbability
-  ): Map[K, Vector[(Long, OccurrenceProbability)]] = {
-    val nonEmptyCurves = evaluated.values.filter(_.nonEmpty).toVector
-    if (nonEmptyCurves.isEmpty) return evaluated
+  ): Map[K, Vector[(Long, OccurrenceProbability)]] =
+    evaluated.values.filter(_.nonEmpty).toList match
+      case Nil => evaluated
+      case curves =>
+        val lastMeaningfulIdx = sharedTicks.indices.reverse.find { i =>
+          curves.exists(curve => curve(i)._2 >= tailCutoff)
+        }.getOrElse(sharedTicks.size - 1)
 
-    val lastMeaningfulIdx = sharedTicks.indices.reverse.find { i =>
-      nonEmptyCurves.exists(curve => curve(i)._2 >= tailCutoff)
-    }.getOrElse(sharedTicks.size - 1)
+        val trimIdx = math.min(lastMeaningfulIdx + 1, sharedTicks.size - 1)
 
-    val trimIdx = math.min(lastMeaningfulIdx + 1, sharedTicks.size - 1)
-
-    evaluated.map { case (k, pts) =>
-      k -> pts.take(trimIdx + 1)
-    }
-  }
+        evaluated.map { case (k, pts) =>
+          k -> pts.take(trimIdx + 1)
+        }
 }

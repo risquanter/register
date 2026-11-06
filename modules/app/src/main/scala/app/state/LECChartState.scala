@@ -229,7 +229,9 @@ final class LECChartState(
     * broad events (any click in the tree), and Var.set emits even when the
     * value is unchanged. */
   def clearPreview(): Unit =
-    if previewOverride.now().isDefined then previewOverride.set(None)
+    previewOverride.now() match
+      case Some(_) => previewOverride.set(None)
+      case None    => ()
 
   /** Replace the user selection wholesale (mirror-baseline sync). Writes
     * directly, like `reset()`, so the whole set changes in one transaction

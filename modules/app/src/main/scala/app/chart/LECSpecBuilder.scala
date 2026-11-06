@@ -73,15 +73,15 @@ object PinnedAxes:
   def fromCurves(curves: Iterable[LECNodeCurve]): Option[PinnedAxes] =
     val withData = curves.filter(_.curve.nonEmpty)
     val points = withData.flatMap(_.curve)
-    if points.isEmpty then None
-    else
+    Option.when(points.nonEmpty) {
       val annotationValues = withData.flatMap(nc => nc.quantiles.values ++ Seq(nc.averageAnnualLoss))
       val lossMax = (points.map(_.loss.toDouble) ++ annotationValues).max
       val probabilityMax = math.min(
         1.0,
         withData.flatMap(_.curve.headOption).map(_.exceedanceProbability).maxOption.getOrElse(1.0) * 1.1
       )
-      Some(PinnedAxes(lossMax, probabilityMax))
+      PinnedAxes(lossMax, probabilityMax)
+    }
 
 object LECSpecBuilder:
 
@@ -137,10 +137,12 @@ object LECSpecBuilder:
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
-    val allPoints = series.flatMap(_.curve.curve)
-    if series.isEmpty || allPoints.isEmpty then
-      VegaSpecShared.emptyMessageSpec(width, height, responsive, "No data available")
-    else buildSpec(series, width, height, pinned, responsive, zoomable)
+    series.flatMap(_.curve.curve) match
+      case Vector() => VegaSpecShared.emptyMessageSpec(width, height, responsive, NoDataMessage)
+      case _        => buildSpec(series, width, height, pinned, responsive, zoomable)
+
+  /** Shown in place of a chart when no series has any points. */
+  private val NoDataMessage = "No data available"
 
   // ── Private builders ──────────────────────────────────────────
 

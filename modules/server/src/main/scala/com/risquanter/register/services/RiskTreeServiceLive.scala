@@ -79,7 +79,9 @@ class RiskTreeServiceLive private (
         )
       ).flatten
 
-      if errors.nonEmpty then ZIO.fail(ValidationFailed(errors)) else ZIO.unit
+      errors match
+        case Nil => ZIO.unit
+        case _   => ZIO.fail(ValidationFailed(errors))
     }
 
   // Trees at the head of the branch being written; uniqueness (tree ID and
@@ -90,10 +92,9 @@ class RiskTreeServiceLive private (
         case ((es, ts), Left(err))  => (err :: es, ts)
         case ((es, ts), Right(t))   => (es, t :: ts)
       }
-      if errs.nonEmpty then
-        ZIO.fail(RepositoryFailure(errs.reverse.map(_.logMessage).mkString("; ")))
-      else
-        ZIO.succeed(trees.reverse)
+      errs match
+        case Nil => ZIO.succeed(trees.reverse)
+        case _   => ZIO.fail(RepositoryFailure(errs.reverse.map(_.logMessage).mkString("; ")))
     }
   
   /** Record operation metric with optional error context
@@ -450,13 +451,9 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
 
         // Validate inputs and fetch requested tree + nodes
-        treeWithNodes <- if (nodeIds.isEmpty) {
-          ZIO.fail(ValidationFailed(List(ValidationError(
-            ErrorLocation.requestField(FieldName.Nodes), FieldProblem.NodeIdsEmpty))))
-        } else {
-          lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
-        }
-        (tree, _, nodesMap) = treeWithNodes
+        _ <- ZIO.when(nodeIds.isEmpty)(ZIO.fail(ValidationFailed(List(ValidationError(
+               ErrorLocation.requestField(FieldName.Nodes), FieldProblem.NodeIdsEmpty)))))
+        (tree, _, nodesMap) <- lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
         // With omitAbsent, nodesMap holds only the ids present at this revision;
         // resolve and log against that present set (empty input still failed above).
         presentIds = nodesMap.keySet
