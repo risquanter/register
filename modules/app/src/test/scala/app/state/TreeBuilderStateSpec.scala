@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, R
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId, ValidationMessages}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
+import com.risquanter.register.http.responses.TreeSummaryResponse
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.testutil.TestHelpers.{unsafeGet, metalogShape, lognormalShape}
 
@@ -764,9 +765,9 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("a draft write samples the submit state set before it, so a reset after a success is seen as the success") {
         val state = new TreeBuilderState()
-        val submitState: Var[SubmitState] = Var(SubmitState.Idle)
+        val submitState: Var[SubmitState[TreeSummaryResponse]] = Var(SubmitState.Idle)
         given owner: ManualOwner = new ManualOwner
-        var sampled: List[SubmitState] = Nil
+        var sampled: List[SubmitState[TreeSummaryResponse]] = Nil
         state.draftEdits.sample(submitState.signal).foreach(s => sampled = sampled :+ s)
         submitState.set(SubmitState.Failed(LocalProblem.NoActiveWorkspace))
         state.treeNameVar.set("Enterprise")

@@ -230,7 +230,7 @@ object ZJS:
 
   extension [A](zio: ZIO[BackendClient, RequestFailure, A])
 
-    /** Fork the ZIO and drive a `Var[SubmitState]` through its lifecycle.
+    /** Fork the ZIO and drive a `Var[SubmitState[A]]` through its lifecycle.
       *
       * Sets Submitting → Success (via onSuccess callback) on success,
       * Submitting → Failed(failure) on error. Mirrors `loadInto` but for
@@ -241,7 +241,7 @@ object ZJS:
       * notified as for every fork, and the banner takes only a failure that
       * reveals a condition of the session (`GlobalError.from`).
       */
-    def submitInto(target: Var[SubmitState])(onSuccess: A => Unit): Unit =
+    def submitInto(target: Var[SubmitState[A]])(onSuccess: A => Unit): Unit =
       target.set(SubmitState.Submitting)
       forkProvided(
         zio

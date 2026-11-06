@@ -10,8 +10,7 @@ import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.responses.MergePreviewResponse
 
 /** Merge-request lifecycle for the merge modal. A separate enum from
-  * `ScenarioSubmitState` (same rationale as that type's own doc): the
-  * success payload differs and neither type is worth generalizing over.
+  * `SubmitState`, because a finished merge is `Merged` and carries no response.
   */
 enum MergeSubmitState:
   case Idle

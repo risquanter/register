@@ -3,10 +3,10 @@ package app.components
 import com.raquo.laminar.api.L.*
 
 import app.core.LocalProblem
-import app.state.{ScenarioState, ScenarioSubmitState, LoadState}
+import app.state.{ScenarioState, SubmitState, LoadState}
 import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
-import com.risquanter.register.http.responses.ScenarioSummaryResponse
+import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse}
 
 /** Branch indicator + scenario management surfaces. Independent pieces:
   *
@@ -135,12 +135,12 @@ object BranchBar:
     // None = create form closed. Some(forkOf) = open, forking from `forkOf`
     // (None = main, Some(name) = duplicating an existing scenario).
     val createTrigger: Var[Option[Option[ScenarioName.ScenarioName]]] = Var(None)
-    val createState: Var[ScenarioSubmitState] = Var(ScenarioSubmitState.Idle)
+    val createState: Var[SubmitState[ScenarioResponse]] = Var(SubmitState.Idle)
     val createNameInput: Var[String] = Var("")
 
     def closeCreate(): Unit =
       createTrigger.set(None)
-      createState.set(ScenarioSubmitState.Idle)
+      createState.set(SubmitState.Idle)
       createNameInput.set("")
 
     def closeAll(): Unit =
@@ -177,7 +177,7 @@ object BranchBar:
     listState: LoadState[List[ScenarioSummaryResponse]],
     current: BranchChoice,
     createTrigger: Var[Option[Option[ScenarioName.ScenarioName]]],
-    createState: Var[ScenarioSubmitState],
+    createState: Var[SubmitState[ScenarioResponse]],
     createNameInput: Var[String],
     closeCreate: () => Unit,
     closeAll: () => Unit,
@@ -267,13 +267,13 @@ object BranchBar:
   private def renderCreateForm(
     scenarioState: ScenarioState,
     forkOf: Option[ScenarioName.ScenarioName],
-    createState: Var[ScenarioSubmitState],
+    createState: Var[SubmitState[ScenarioResponse]],
     nameInput: Var[String],
     onDone: () => Unit
   ): HtmlElement =
     def submit(): Unit =
       ScenarioName.fromString(nameInput.now()) match
-        case Left(errors) => createState.set(ScenarioSubmitState.Failed(LocalProblem.FormInvalid(errors)))
+        case Left(errors) => createState.set(SubmitState.Failed(LocalProblem.FormInvalid(errors)))
         case Right(name)  => scenarioState.create(name, forkOf, createState)
 
     div(
@@ -284,7 +284,7 @@ object BranchBar:
         inputId = BranchBar.CreateNameInputId,
         valueVar = nameInput,
         errorSignal = createState.signal.map {
-          case ScenarioSubmitState.Failed(failure) => ErrorMessages.viewFailedLines(failure)
+          case SubmitState.Failed(failure) => ErrorMessages.viewFailedLines(failure)
           case _                                   => Nil
         },
         filter = s => s.matches("^[a-zA-Z0-9 _-]*$"),
@@ -296,5 +296,5 @@ object BranchBar:
         button(tpe := "button", "Cancel", onClick --> { _ => onDone() })
       ),
       // Close the form automatically once creation succeeds.
-      createState.signal.changes.collect { case ScenarioSubmitState.Success(_) => () } --> { _ => onDone() }
+      createState.signal.changes.collect { case SubmitState.Success(_) => () } --> { _ => onDone() }
     )

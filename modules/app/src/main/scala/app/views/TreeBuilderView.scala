@@ -15,14 +15,14 @@ import com.risquanter.register.http.responses.TreeSummaryResponse
  * using TreeBuilderState.
  *
  * Submission uses the `submitInto` ZJS extension (see `ZJS.scala`),
- * which drives a `Var[SubmitState]` through its lifecycle:
+ * which drives a `Var[SubmitState[TreeSummaryResponse]]` through its lifecycle:
  * Submitting → Success (via callback) or Failed, carrying why it failed.
  * The sentence for a failure is composed here, where it is rendered.
  */
 object TreeBuilderView extends WorkspaceLifecycleEndpoints
   with WorkspaceTreeEndpoints:
   def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState, chartState: DistributionChartState, scenarioState: ScenarioState, debugUi: Signal[Boolean]): HtmlElement =
-    val submitState: Var[SubmitState] = Var(SubmitState.Idle)
+    val submitState: Var[SubmitState[TreeSummaryResponse]] = Var(SubmitState.Idle)
 
     // A successful Create has nothing left to keep editing — matches
     // "+ New Tree"'s own reset (DesignView.onNewTree): blank builder, ready

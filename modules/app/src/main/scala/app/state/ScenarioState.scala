@@ -8,7 +8,7 @@ import app.core.ZJS.*
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
-import com.risquanter.register.http.responses.ScenarioSummaryResponse
+import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse}
 
 /** Per-view active-branch selection, used by `BranchBar`. Design and Analyze
   * each construct their own instance —
@@ -81,24 +81,24 @@ final class ScenarioState(
   def create(
     name: ScenarioName.ScenarioName,
     forkOf: Option[ScenarioName.ScenarioName],
-    submitState: Var[ScenarioSubmitState]
+    submitState: Var[SubmitState[ScenarioResponse]]
   ): Unit =
     keySignal.now() match
       case None =>
-        submitState.set(ScenarioSubmitState.Failed(LocalProblem.NoActiveWorkspace))
+        submitState.set(SubmitState.Failed(LocalProblem.NoActiveWorkspace))
       case Some(key) =>
-        submitState.set(ScenarioSubmitState.Submitting)
+        submitState.set(SubmitState.Submitting)
         // forkOf None = fork from main's head; Some(n) = fork from scenario n's
         // head. Forking from a commit (ScenarioSourceDto.Commit) is not offered here.
         val source = forkOf.fold[ScenarioSourceDto](ScenarioSourceDto.Branch(BranchChoice.Main))(n =>
           ScenarioSourceDto.Branch(BranchChoice.Scenario(n)))
         createScenarioEndpoint((userIdAccessor(), key, CreateScenarioRequest(name, source)))
           .tap(response => ZIO.succeed {
-            submitState.set(ScenarioSubmitState.Success(response))
+            submitState.set(SubmitState.Success(response))
             listState.refresh()
             switchTo(BranchChoice.Scenario(response.name))
           })
-          .tapError(f => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(f))))
+          .tapError(f => ZIO.succeed(submitState.set(SubmitState.Failed(f))))
           .runJs
 
   /** Delete a scenario via its compare-and-set precondition. Fetches the
