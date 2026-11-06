@@ -2,8 +2,8 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-64`, is ruled. `EWB-D-1` to
-`EWB-D-43` and `EWB-D-61` to `EWB-D-64` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
+**Status.** Every decision, `EWB-D-1` to `EWB-D-68`, is ruled. `EWB-D-1` to
+`EWB-D-43` and `EWB-D-61` to `EWB-D-68` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
 and §16.7, `EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in
 §17, and `EWB-D-54` and `EWB-D-59` in §18. Approval
 is in place: the token names this document and the file inventory exists beside
@@ -11,7 +11,7 @@ it. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase 3a's
 continuation, and `EWB-D-27`'s projection change landed with them. §17 and §18
 are implemented as of 2026-11-02. §17.12, the review findings accepted after
 that, is implemented as of 2026-11-03. Phases 3b, 4 and 5 are implemented as
-of 2026-11-03. What remains is Phases 6 and 7.
+of 2026-11-03. Phase 6 is implemented as of 2026-11-06. What remains is Phase 7.
 Tree history is out of this plan's scope from 2026-11-02 and belongs to
 `PLAN-BRANCH-HISTORY.md` (`BH-D-1`).
 
@@ -2297,6 +2297,12 @@ with no compile error. It is the same code smell as
 `RepositoryFailure.isWorkspaceSentinel`, which §8 deletes, and ADR-010 names it
 as "String Matching on Errors".
 
+*Superseded by `EWB-D-66`, implemented 2026-11-06.* An absent tree is no longer
+a successful request. It answers `404` with a `NotFoundKind`, so `Absent` is
+deleted from `LoadState` and the empty `Option` it read is gone. The views match
+`LoadState.TreeAbsent`, an extractor over `Failed` that accepts the two tree
+kinds, so the condition is still matched by case and not by message text.
+
 ---
 
 ## 8. What is deleted
@@ -2792,14 +2798,34 @@ exercised on a small surface before the largest one:
    `TreeViewState.scala`, `WorkspaceState.scala`, `TreeBuilderView.scala`,
    `TreeListView.scala`.
 
+   *Implemented 2026-11-06*, under `EWB-D-65` to `EWB-D-68` and with the shape
+   the step 5 echo approved. `SimulationResponse` is replaced by
+   `TreeSummaryResponse(id: TreeId, name: SafeName)`, projected by
+   `RiskTree.toSummary`, and the list answers `TreeListResponse(trees)`. The
+   structure read answers a `RiskTree`, and an absent tree answers `404` with
+   `NotFoundKind` on all six reads (`EWB-D-66`). Tree create and workspace
+   bootstrap answer `201` with a relative `Location` (`EWB-D-68`). The CORS
+   policy exposes `Location`, the finding of the security review that passed
+   Option B. Delete answers `204`. Probability of exceedance answers
+   `OccurrenceProbability`, lec-multi answers `LECCurvesResponse`, a curve's
+   quantile keys are `QuantileLevel`, the reap count is
+   `EvictExpiredResponse(evicted: NonNegativeInt)`, and both probes answer
+   `ProbeResponse`. History's `n` is a `PositiveInt` query parameter with a
+   named default. The browser's `LoadState.Absent` and `loadOptionStatePipeline`
+   are deleted, and `LoadState.TreeAbsent` matches the two tree kinds. ADR-021
+   §4 and ADR-022's context were amended for the bootstrap `Location`.
+
 One thing to settle inside step 5 rather than in advance: `/health` is declared
 twice, in `RiskTreeEndpoints` and again in `SystemEndpoints`, with the same path
 and the same response type. Whether one of the two is unreferenced is decided by
 reading the route lists when the step opens those files, and an unreferenced
 declaration is deleted rather than typed.
 
-Every step ends with the whole suite green, and the phase takes one PATCH bump at
-its end, as the other phases do.
+Every step ends with the whole suite green, and the phase takes one bump at its
+end. The bump is MINOR, not the PATCH the other phases took, because this phase
+changes the external API: status codes, response bodies and the not-found body
+all change. The project's versioning rule makes an external API change MINOR
+while the version is below 1.0.0. Ruled 2026-11-06: Phase 6 lands as `0.13.0`.
 
 **Phase 7 — the storage trust boundary.** ADR-039 states that a value entering
 process memory from outside is refined at the border, and that an ingress
@@ -5982,6 +6008,134 @@ identical to the simulator's.
 
 **Why A.** B adds a type and a split to carry a number the browser already
 holds.
+
+### EWB-D-65 — the tree summary's two LEC fields — RULED 2026-11-05
+
+**Ruled 2026-11-05: Option A. The two fields, `withLEC` and `RiskLEC` are
+removed.** With them gone the type carries a tree's identity alone, so it is
+renamed `TreeSummaryResponse`, the name the endpoint description ("Get tree
+summary") and the family member `ScenarioSummaryResponse` already use. Phase 6
+step 5 writes both.
+
+**Goal.** `SimulationResponse` carries `quantiles: Map[String, Double]` and
+`exceedanceCurve: Option[String]` beside `id` and `name`. Every production
+construction goes through `fromRiskTree`, which writes `Map.empty` and `None`.
+The constructor that fills them, `withLEC`, has no caller, and the sibling type
+`RiskLEC` has no producer and no reader. The Analyze view's figures come from
+lec-multi's `LECNodeCurve`, which carries the same tail quantiles per node.
+
+**Option A — remove them** (recommended). The response is the tree's
+identifier and name, and `withLEC` and `RiskLEC` go. Cost: two keys nobody
+reads leave the wire.
+
+**Option B — populate them.** Create, update and list resolve the root through
+the cache and fill both fields. Cost: every list and every create simulates a
+root, and the browser gains a second source of figures it already fetches per
+node.
+
+### EWB-D-66 — an absent tree: a `404`, or a named outcome — RULED 2026-11-05
+
+**Goal.** A tree the workspace holds can be absent at the branch or commit a
+read names. `GET /risk-trees/{treeId}` and `GET /risk-trees/{treeId}/structure`
+answer that case `200` with an empty `Option`, and the browser maps
+`Right(None)` to `LoadState.Absent` at `ZJS.scala:243`. ADR-038 §2 makes an
+outcome with alternatives a discriminated enum, so the empty `Option` does not
+stand.
+
+**Option A — `404`** (recommended). The browser already receives a not-found
+answer as `RequestFailure.Wire(WireError.NotFound(_))`, which `WorkspaceState`
+matches today, and maps it to `LoadState.Absent`.
+
+**Option B — a named outcome.** `200` with `Found(tree)` or `Absent()`, the
+shape `ChangedNodesStatus` uses for a tree missing on one side.
+
+**Option C — `404` with a body naming which absence.** `WireError` keeps one
+case per status, and its scaladoc says that where several outcomes share a
+status "they share a case and an inner enumeration discriminates". So the
+form is `WireError.NotFound` gaining an inner kind: no such resource, or a
+tree this workspace holds that is absent at the branch or commit named. The
+second kind is reached only after `resolveTreeWorkspace` has accepted the
+tree, so it never answers for another workspace's tree and is no existence
+oracle across workspaces.
+
+**Ruled 2026-11-05: Option C, under the condition that it follows the
+existing server and browser conventions and introduces no drift.** The
+condition met a finding, which is escalated rather than resolved:
+
+- The same absence already has an answer on four other tree reads.
+  `RiskTreeServiceLive.getTreeOrFail` (`RiskTreeServiceLive.scala:40`) and
+  `QueryServiceLive.scala:80-85` fail a tree the workspace holds but the
+  revision lacks with `ValidationFailed(TreeNotFound(treeId))`, which answers
+  `422` as `ValidationRejected`. `getTreeOrFail` serves `lookupNodeInTree`
+  (line 52, reached by `probOfExceedance` at line 433), `lookupNodesInTree`
+  (line 63, reached by lec-multi), and the update at line 327.
+- Option C as ruled answers the same absence `404` on the summary and
+  structure reads. Applied to those two reads alone, one absence would get two
+  statuses.
+- The store cannot tell a commit it does not hold from a held commit that
+  lacks the tree. `IrminClientLive.getAtCommit` reads both as `None`
+  (`IrminClientLive.scala:198`). So a commit-pinned kind discloses nothing
+  about which commits exist.
+
+**The finding, ruled 2026-11-05: the `404` kind answers on every read that
+reaches this absence.** The six reads are the summary, the structure,
+lec-multi, probability of exceedance, the update and the query. A new
+`DomainError` leaf, `TreeAbsentAtRevision(wsId, treeId, rev)`, replaces the
+`ValidationFailed(TreeNotFound(treeId))` failure at `getTreeOrFail` and at
+`QueryServiceLive.scala:85`, and the two controller reads raise it in place
+of their empty `Option`. `FieldProblem.TreeNotFound` then has no producer and
+is deleted with its sentence. The alternative, answering the two new reads
+`422` to match the four existing ones, was rejected: RFC 9110 §15.5.21
+defines `422` for a request whose "syntax … is correct, but it was unable to
+process the contained instructions", which a body-less `GET` naming an absent
+resource is not.
+
+### EWB-D-68 — whether the workspace bootstrap answers `201` with a `Location` — RULED 2026-11-05
+
+**Goal.** A create answers `201` and names the new resource in `Location`
+(RFC 9110 §15.3.2). For a tree create, the relative reference
+`risk-trees/{treeId}` resolves against the target URI `/w/{key}/risk-trees`
+to the new tree's URI, so the header names it without writing the workspace
+key. The bootstrap creates a workspace, whose URI is the capability URL
+`/w/{key}`, so any `Location` there writes the key into a response header.
+
+**Option A — keep `200` for the bootstrap.** The key stays in the one body
+that already carries it. Cost: the bootstrap does not use the create status.
+
+**Option B — `201` with `Location: w/{key}`** (recommended after review). The
+relative reference resolves against the target `/workspaces` to `/w/{key}`,
+the URI `DELETE /w/{key}` already names. The earlier cost stated here was
+wrong. ADR-022's context bullet reads "must never appear in logs, serialised
+responses, or error messages", but the same ADR's comparison table lists where
+the key appears as "URL paths, JSON responses, error types, frontend
+`Var`/`Signal`". The key sits in the path of every `/w/{key}/…` request, and
+the frontend's nginx writes each request line to its access log
+(`access_log /dev/stdout` with the default format, `Dockerfile.frontend-prod`
+line 162). That default format records no response header. So a `Location`
+copy of the key reaches no log the request line does not already reach.
+ADR-021 §4's hardening list (HTTPS, `Referrer-Policy: no-referrer`,
+`Cache-Control: no-store`) does not mention response headers. The
+interceptor already applies the last two to `/workspaces`.
+
+**Option C — `201` without `Location`.** Cost: RFC 9110 then identifies the
+created resource as the target URI, `/workspaces`, which is wrong.
+
+**Ruled 2026-11-05: Option B, conditional on a security review of Option B
+alone passing.** The review passed. Its one finding was that the browser could
+not read `Location` across origins, because the CORS policy exposed only
+`Content-Type`. The policy now exposes `Location` as well. ADR-021 §4 gains a
+`Location` bullet, and ADR-022's context bullet now says a bearer credential
+crosses to its holder only in the answers that mint it.
+
+### EWB-D-67 — what a tree write answers — RULED 2026-11-05
+
+**Ruled 2026-11-05: Option A. Create, update and revert keep answering the
+tree summary, not the `RiskTree`.** The browser fetches the structure after a
+save through the same path it uses after a branch or pin change, so the write
+answer stays two fields whatever the tree's size. Option B, answering the
+whole tree, would have removed that request at the cost of write answers as
+large as the tree, up to 10 000 nodes, and two sources of the loaded tree in
+the browser.
 
 ---
 
