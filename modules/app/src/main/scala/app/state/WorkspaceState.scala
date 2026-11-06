@@ -10,7 +10,7 @@ import com.risquanter.register.http.responses.{LocationRoute, TreeSummaryRespons
 
 import app.core.ZJS.*
 import app.core.{BackendClient, RequestFailure}
-import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.http.errors.{NotFoundKind, WireError}
 
 /** Central workspace lifecycle state — deferred bootstrap pattern.
   *
@@ -93,12 +93,13 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
         listWorkspaceTreesEndpoint((currentUserId, key, BranchChoice.Main))
           .tap(listed => zio.ZIO.succeed(onTreesLoaded(listed.trees)))
           // Only an answer that actually means the workspace is gone discards
-          // the key. A dropped connection or a server fault leaves it in place
-          // and the startup listing simply fails, because throwing the key away
-          // on any failure loses a workspace that was still valid.
+          // the key: an expiry, or the not-found kind a key that no longer
+          // resolves answers. A dropped connection or a server fault leaves it
+          // in place and the startup listing simply fails, because throwing the
+          // key away on any failure loses a workspace that was still valid.
           .tapError {
             case RequestFailure.Wire(
-                   WireError.WorkspaceExpired(_, _, _, _) | WireError.NotFound(_, _)
+                   WireError.WorkspaceExpired(_, _, _, _) | WireError.NotFound(NotFoundKind.Unknown(), _)
                  ) =>
               zio.ZIO.succeed {
                 workspaceKey.set(None)
