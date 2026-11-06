@@ -11,7 +11,8 @@ import com.risquanter.register.domain.data.iron.ValidationUtil
 //
 // Follows ADR-022 R1–R8 credential class design:
 //   R1: final class — no compiler-generated unapply, copy, or product serialisation
-//   R2: private constructor — construction via companion fromString only
+//   R2: private val — the raw value is reachable only through reveal, and the
+//       private constructor leaves the companion's fromString as the only way in
 //   R3: toString redacted — prevents accidental log leakage
 //   R4: reveal method — explicit opt-in extraction at call sites
 //   R5: Iron-validated raw type (ExternalTokenStr) — PrintableAscii + MaxLength[2048]
