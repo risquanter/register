@@ -53,6 +53,8 @@ Update sends the **complete** node set in one request. Whole-graph invariants ar
 validated together, then the tree is rebuilt and re-validated; an accepted update is
 always a fully valid tree. This is the design intent, not a limitation.
 
+A request whose resulting tree equals the stored tree in content writes nothing and succeeds.
+
 ```scala
 def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]
 // validateTopologyUpdate: unique names ∧ single root ∧ parents resolve ∧ no cycles ∧ no empty portfolio

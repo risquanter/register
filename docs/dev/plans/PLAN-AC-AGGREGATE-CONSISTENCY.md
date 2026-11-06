@@ -3,7 +3,7 @@
 Written 2026-11-01. **Status: design phase.** This plan records the gap, the
 facts it rests on, and the decisions a design has to settle. It carries no
 signatures and authorizes no source edit. The implementation sections are
-written once the decisions in §5 are ruled.
+written once the decisions in §6 are ruled.
 
 ## 1. Goal
 
@@ -82,18 +82,20 @@ concurrency or CQRS.
 | No two trees on a branch share a name | the workspace's trees on one branch | no (fact 2) |
 | A workspace holds at most `REGISTER_WORKSPACE_MAX_TREES` trees | the workspace | yes, by a row lock in Postgres (fact 4) |
 
-## 5. Decisions the design must settle
+## 5. The tree's version check
 
-1. **`AC-D-1` — what version a tree save is checked against.**
-   - *The version the server loaded in the same request.* It closes the race
-     between two requests. It does not catch a user saving over an edit made in
-     another tab after their own load.
-   - *A version the browser sends back with `If-Match`.* It closes both. It
-     changes the update endpoint's request, and the browser has to hold the
-     version it loaded.
-   - The two compose: the browser's version is checked, and the server's load is
-     the same version.
-2. **`AC-D-2` — how the tree-name rule is guarded.**
+A tree save is checked against the version the browser read. A tree's version is
+the last commit that changed its path. A read answers it in `ETag`, and the save
+sends it back in `If-Match`. The check covers both a save racing another request
+and a user saving over an edit made in another tab after their own load, because
+the version enters the cycle when the browser reads. A save to another tree does
+not change this tree's version, so it refuses nothing. A request whose resulting
+tree equals the stored tree in content writes nothing and succeeds, before this
+check runs. `PLAN-TREE-WRITE-CONCURRENCY.md` carries the signatures and the work.
+
+## 6. Decisions the design must settle
+
+1. **`AC-D-1` — how the tree-name rule is guarded.**
    - *A workspace aggregate.* The workspace owns the set of its tree names per
      branch. A create, rename or delete changes that aggregate and saves it under
      optimistic concurrency. Fact 4 is the precedent for its membership part.
@@ -103,19 +105,22 @@ concurrency or CQRS.
      share no transaction (fact 5).
    - *Checked after the fact.* A duplicate is detected and reported, not
      prevented.
-3. **`AC-D-3` — where a workspace aggregate's state lives and how its save is
-   guarded**, if `AC-D-2` chooses it.
+2. **`AC-D-2` — where a workspace aggregate's state lives and how its save is
+   guarded**, if `AC-D-1` chooses it.
    - *In Postgres*, beside `workspace_trees`, under the same row lock as
      `addTree`. The tree itself is still written to Irmin, so the two writes need
      an order and a recovery for the second failing (fact 5).
    - *In Irmin*, as one value per workspace and branch, guarded with
      `test_and_set` (fact 7). The aggregate and the trees are then in one store,
      but on main every workspace's guard sits on the same branch (fact 6).
-4. **`AC-D-4` — how fine a guard on main is.** A head check on main serialises
-   every workspace (fact 6). A per-path check with `test_and_set` would not, if
-   it can guard what a save writes (fact 7, unverified). Moving each workspace's
-   main to its own branch would change ADR-004a's layout.
-5. **`AC-D-5` — whether CQRS is adopted, and for what.** It is orthogonal to the
+3. **`AC-D-3` — how fine the publish guard on main is.** §5's check compares one
+   tree's version, so it does not serialise anything. The publish that follows
+   it still moves main's head under a compare-and-set, so two saves landing in
+   the same moment can refuse each other across workspaces (fact 6). A per-path
+   check with `test_and_set` would not, if it can guard what a save writes (fact
+   7, unverified). Moving each workspace's main to its own branch would change
+   ADR-004a's layout.
+4. **`AC-D-4` — whether CQRS is adopted, and for what.** It is orthogonal to the
    gap: it guarantees nothing by itself. What it would contribute is a small
    workspace aggregate, holding identifiers and names only, with the tree list
    and the history read from projections. The code already has read paths of
@@ -125,7 +130,7 @@ concurrency or CQRS.
 
 No decision is ruled yet.
 
-## 6. Records that bear on the design
+## 7. Records that bear on the design
 
 ADR-004a (storage layout, single writer, one commit per user action), ADR-007
 (branches), ADR-017 (whole-tree submission and identity), ADR-021 (the
@@ -135,12 +140,12 @@ save as a typed failure), ADR-032 (which hash identifies a version), ADR-036
 ADR-014 (the cache as a read model). Each is reviewed in full when the design is
 written.
 
-## 7. Terminology impact
+## 8. Terminology impact
 
 To be stated with the design. `aggregate` would be a new glossary entry if the
 workspace aggregate is adopted.
 
-## 8. Verification
+## 9. Verification
 
 Written with the design. It must include a concurrency test per guarded rule:
 two writes racing on one tree, and two creates racing on one name, each ending

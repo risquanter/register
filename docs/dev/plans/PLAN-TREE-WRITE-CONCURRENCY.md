@@ -88,8 +88,9 @@ overwritten. Duration: as long as a browser tab stays open, so minutes to hours.
 purely server-internal check — compare the head at write time against the head
 the service read at the start of the same request — closes W1 only. In the W2
 scenario both values are C1 and the check passes, so the edit is still lost. A
-client-supplied expected version closes both: the client sends the commit it
-read, and the server refuses to write if the branch has moved since.
+client-supplied expected version closes both: the client sends the tree's version
+as it read it, and the server refuses to write if the tree has changed since. A
+tree's **version** is the last commit that changed its path (TWC-D-2).
 
 **Derivation:** optimistic concurrency control works by carrying a version token
 across the full read-modify-write cycle and validating it at the write. The
@@ -244,12 +245,24 @@ Ruled 2026-11-02: the save uses a test-and-set approach. The user's words: "both
 have it as their respective tasks with a 'test and set approach'", said of the
 lost update and the seed work before they were merged into this plan.
 
-The save forks a staging branch at the expected head, writes the tree there with
-one `set_tree`, and publishes with `test_and_set_branch(target, test =
-expectedHead, set = newCommit)`. The compare-and-set fails when the target moved,
-and nothing was written to it. This closes W1 and W2 together. The pattern is the
-merge's publish (`ScenarioMergeService`, `IrminClient.scala:155-169`), so the
-branch lifecycle it needs has been built once already.
+**Amended 2026-11-06: the client's value is the tree's version, not the branch
+head.** `BranchRef.Main` is one branch for every workspace, and each workspace's
+trees sit under their own path. So a save to any other tree moves the head. A
+check against the head would answer `409` when nobody touched the tree being
+saved. A tree's version is the last commit that changed its path, read with the
+existing `IrminClient` history query over Irmin's `last_modified`. The first save
+changes that version too, so a repeat with the old value is still stale.
+
+The save reads the branch head H and the tree's version V. It refuses with
+`VersionConflict` when V differs from the client's value. It then forks a staging
+branch at H, writes the tree there with one `set_tree`, and publishes with
+`test_and_set_branch(target, test = H, set = newCommit)`. The compare-and-set
+fails when the target moved, and nothing was written to it. The version check
+closes W2 and the compare-and-set closes W1. A publish that fails because another
+tree's save landed during this request also answers `409`, which is a false
+refusal limited to the length of one request. The pattern is the merge's publish
+(`ScenarioMergeService`, `IrminClient.scala:155-169`), so the branch lifecycle it
+needs has been built once already.
 
 The options that were weighed: check-then-act (resolve the head, compare, then
 `set_tree` unconditionally), which leaves W1 open because Irmin's own retry
@@ -264,6 +277,10 @@ tree someone else just edited) and `revert`, whose scaladoc in
 writes it forward with a `:revert` message; no precondition", an explicit prior
 ruling. `create` writes a path that does not exist yet, and a concurrent write to
 another path survives Irmin's retry (§1.5), so `create` needs no precondition.
+
+Under either option the server reads the tree before it compares a version. A
+repeated delete therefore finds the tree absent and answers `404`, as
+`PLAN-ERROR-WIRE-BOUNDARY.md` EWB-D-66 rules, and never `409`.
 
 **Option A — `update` only.** `revert` keeps its ruling; `delete` stays
 last-writer-wins.
@@ -308,17 +325,20 @@ diff-and-merge of appendix Option B, which is a later elevation.
 
 ### TWC-D-5 — How the client learns the commit it read — RULED: an `ETag` response header
 
-Ruled with TWC-D-1. `getWorkspaceTreeStructureEndpoint` declares
-`.out(header[Option[CommitHash]]("ETag"))`, absent when the body is `None`. The
-PUT answers with the same header carrying the new head, so the browser can save
-again without a reload. `IronTapirCodecs`' `Codec[String, CommitHash,
+Ruled with TWC-D-1. **Amended 2026-11-06: the header carries the tree's version
+(TWC-D-2).** `getWorkspaceTreeStructureEndpoint` declares
+`.out(header[Option[CommitHash]]("ETag"))`. A read of the branch head answers the
+tree's version. A read pinned with `at` answers no `ETag`, because a save builds
+on the head and never on a pinned read. The PUT answers with the same header
+carrying the commit it wrote, which is the tree's new version, so the browser can
+save again without a reload. `IronTapirCodecs`' `Codec[String, CommitHash,
 CodecFormat.TextPlain]` strips quotes on decode and adds them on encode, and the
 same codec serves a header.
 
 This is the first output header in the codebase, so it is declared as a
 convention: §3.1 names the two endpoints, and `WorkspaceTreeEndpoints` carries a
-scaladoc stating that a tree read answers with its head in `ETag` and a tree
-write expects it back in `If-Match`.
+scaladoc stating that a tree read answers with the tree's version in `ETag` and a
+tree write expects it back in `If-Match`.
 
 The option that was weighed: widening the structure response body to carry the
 commit. It puts transport metadata inside a domain payload, which ADR-038
@@ -352,8 +372,9 @@ convention rule warns against.
 ### TWC-D-7 — Whether the scenario path moves onto `ETag` — OPEN
 
 `ScenarioSummaryResponse.head` carries a commit out in a response body, and the
-delete echoes it in `If-Match`. After TWC-D-5 the tree path carries the commit
-out in a header. Two conventions for one round trip then exist.
+delete echoes it in `If-Match`. A scenario is a branch, so its head is its
+version. After TWC-D-5 the tree path carries its version out in a header. Two
+conventions for one round trip then exist.
 
 **Option A — move it in this plan.** `listScenarios` is a list, so one `ETag`
 cannot carry one head per scenario; the move would need a per-scenario read, or
@@ -361,8 +382,8 @@ the `head` field stays. The scenario list has no per-scenario read today.
 - Con: a new endpoint or a changed list shape, outside this plan's findings.
 
 **Option B — leave it, and record the difference.** A list response carries each
-entry's head in the body because a header cannot; a single-resource read carries
-its head in `ETag`. Both are stated in ADR-038's amendment (§5).
+entry's version in the body because a header cannot; a single-resource read
+carries its version in `ETag`. Both are stated in ADR-038's amendment (§5).
 - Pro: no scope growth; the rule is one sentence and explains both.
 - What you would see: nothing changes on the scenario path.
 
@@ -608,12 +629,55 @@ reading every other workspace's trees before each release to spare a shared
 entity id, was weighed and not taken: it buys a rare cache hit with a scan on
 every workspace deletion.
 
+### TWC-D-18 — A resend of a `PUT` succeeds and writes nothing — RULED
+
+Ruled 2026-11-06. HTTP (RFC 9110 §9.2.2) names `PUT` and `DELETE` idempotent: many
+identical requests have the intended effect of one. A request states the tree it
+wants, so applying it to a tree already in that state changes nothing.
+
+`RiskTreeServiceLive.update` compares the submitted tree with the stored one
+before the version check. A node sent with an identifier is matched by that
+identifier. A node in `newLeaves` or `newPortfolios` is matched by kind and name
+against a stored node the request does not list. Content is the name, the kind,
+the parent's name, and a leaf's likelihood and loss distribution, plus a seed
+where the request provides one. Identifiers and `updatedAt` are not content.
+
+1. Equal: answer success with the stored tree and its version, and write nothing,
+   whatever `If-Match` says. No seed is reserved and no commit is added.
+2. Different, and the version is current: write.
+3. Different, and the version is stale: `VersionConflict`, answering `409`.
+
+The name match exists only inside this comparison. A request that differs from
+the stored tree keeps ADR-017 §4 unchanged: a node in `newLeaves` is created with
+a new identifier and a new seed, and a stored node the request omits is deleted.
+ADR-017 §3 states the rule: "A request whose resulting tree equals the stored tree
+in content writes nothing and succeeds."
+
+A run on 2026-11-06 of today's code showed what this replaces: a repeated `PUT`
+with a new leaf was accepted, and that leaf came back with a new identifier and
+the next seed.
+
+### TWC-D-19 — A resend of a create succeeds and writes nothing — RULED
+
+Ruled 2026-11-06, for behaviour consistent with TWC-D-18. A `POST` create with a
+name the branch already holds answers that stored tree when the content is equal,
+and is refused with `TreeNameAlreadyExists` when it differs. A create never
+changes an existing tree. Changing one is what `PUT` is for.
+
+The comparison runs inside `ensureUniqueTree`, on its one read of the branch, in
+the case where the name is taken (§3.2). A resend reserves no seed. The test at
+`RiskTreeServiceLiveSpec.scala:765`, which expects an identical second create to
+be refused, changes with this decision.
+
+`POST /workspaces` is outside this rule. Its request names no workspace, so a
+resend creates a second workspace.
+
 ---
 
 ## 3. Signatures
 
-Draft, written against TWC-D-1, TWC-D-2, TWC-D-5, TWC-D-8, TWC-D-9 and TWC-D-10
-as ruled, and against the recommendations for the rest: TWC-D-3 A, TWC-D-4 A,
+Draft, written against TWC-D-1, TWC-D-2, TWC-D-5, TWC-D-8, TWC-D-9, TWC-D-10,
+TWC-D-18 and TWC-D-19 as ruled, and against the recommendations for the rest: TWC-D-3 A, TWC-D-4 A,
 TWC-D-6 A, TWC-D-7 B, TWC-D-11 A, TWC-D-12 B, TWC-D-13 A, TWC-D-14 A, TWC-D-15 A,
 TWC-D-16 A. §3 is rewritten after the rulings and presented as the Signature
 Echo, one step of §9 at a time.
@@ -625,17 +689,17 @@ Echo, one step of §9 at a time.
 val getWorkspaceTreeStructureEndpoint =
   authedBaseEndpoint
     …
-    .out(jsonBody[Option[RiskTree]])
-    .out(header[Option[CommitHash]]("ETag"))        // NEW — the head the body was read at
+    .out(jsonBody[RiskTree])
+    .out(header[Option[CommitHash]]("ETag"))        // NEW — the tree's version; absent on a read pinned with `at`
 
 val updateWorkspaceTreeEndpoint =
   authedBaseEndpoint
     …
     .in(jsonBody[RiskTreeUpdateRequest])
     .in(branchHeader)
-    .in(header[CommitHash]("If-Match"))              // NEW — the head the client read
-    .out(jsonBody[SimulationResponse])
-    .out(header[CommitHash]("ETag"))                 // NEW — the head after the write
+    .in(header[CommitHash]("If-Match"))              // NEW — the tree's version the client read
+    .out(jsonBody[TreeSummaryResponse])
+    .out(header[CommitHash]("ETag"))                 // NEW — the tree's version after the request
 ```
 
 `header` is Tapir's `sttp.tapir.header`. Family: Tapir endpoint declarations in
@@ -692,11 +756,11 @@ which ADR-036 §2 describes.
 
 ```scala
 // modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala
-/** Replaces the tree, writing only if `branch`'s head is still
-  * `expectedHead`. Returns the tree and the head after the write. Fails with
-  * `VersionConflict(id, expectedHead, actual)` when the head moved, and
-  * nothing was written to `branch`. */
-def update(wsId: WorkspaceId, id: TreeId, tree: RiskTree, branch: BranchRef, expectedHead: CommitHash): IO[AppError, (RiskTree, CommitHash)]
+/** Replaces the tree, writing only if its version is still `expectedVersion`.
+  * Returns the tree and the commit written, which is its new version. Fails with
+  * `VersionConflict(id, expectedVersion, actual)` when the tree changed or the
+  * branch moved during the write, and nothing was written to `branch`. */
+def update(wsId: WorkspaceId, id: TreeId, tree: RiskTree, branch: BranchRef, expectedVersion: CommitHash): IO[AppError, (RiskTree, CommitHash)]
 ```
 
 `op: RiskTree => RiskTree` becomes `tree: RiskTree`: the one caller passes a
@@ -705,38 +769,80 @@ This is a signature-level change and is settled in the echo, not here.
 
 The steps inside `RiskTreeRepositoryIrmin.update`:
 
-1. `createBranchAt(staging, expectedHead)`. `BranchAlreadyExists` is unreachable,
-   because the name carries a fresh ULID.
-2. `setTree(basePath, entries, message, staging)` → the new commit.
-3. `moveBranchTo(branch, expectedHead, newCommit)`. `BranchHeadStale` becomes
-   `VersionConflict(id, expectedHead, actual)`, where `actual` is read from the
-   branch after the failure.
-4. `deleteBranch(staging, newCommit)`, run on every exit through `ensuring`, so
+1. Read the branch head H and the tree's version V, the first entry of the history
+   query at the tree's path. V different from `expectedVersion` fails with
+   `VersionConflict(id, expectedVersion, V)`.
+2. `createBranchAt(staging, H)`. `BranchAlreadyExists` is unreachable, because the
+   name carries a fresh ULID.
+3. `setTree(basePath, entries, message, staging)` → the new commit.
+4. `moveBranchTo(branch, H, newCommit)`. `BranchHeadStale` becomes
+   `VersionConflict(id, expectedVersion, actual)`, where `actual` is the tree's
+   version read after the failure.
+5. `deleteBranch(staging, newCommit)`, run on every exit through `ensuring`, so
    a failed save leaves no branch behind. Commits stay reachable by hash, as the
    merge's staging cleanup already accepts.
 
 ```scala
 // modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala
-def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef, expectedHead: CommitHash)(using Checked[Permission]): IO[AppError, (RiskTree, CommitHash)]
+def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef, expectedVersion: CommitHash)(using Checked[Permission]): IO[AppError, (RiskTree, CommitHash)]
 ```
 
 `RiskTreeServiceLive.update` reads the tree at `Revision.Head(branch)` as today
-and compares that read's commit with `expectedHead` before building the tree, so
-a stale client is refused before any work, and the repository's compare-and-set
-refuses the in-request race the early check cannot see. In §9 step 1 the
-controller passes the head it read in the same request; in step 3 it passes the
-`If-Match` value.
+and resolves the request. It then applies TWC-D-18's comparison, which needs the
+resolved names and shapes, so identifiers allocated for new nodes go unused on a
+resend. Only when the trees differ does it compare the tree's version with
+`expectedVersion`, so a stale client is refused before seeds are reserved, and the
+repository's compare-and-set refuses the in-request race the early check cannot
+see. In §9 step 1 the controller passes the version it read in the same request;
+in step 3 it passes the `If-Match` value.
+
+`ensureUniqueTree` keeps its one read and gains the resend case of TWC-D-19. Its
+name no longer fits and is settled in the echo. `excludeId` stays, because a `PUT`
+keeps its own name and must not clash with itself:
+
+```scala
+// modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala
+private enum TreeNameCheck:
+  case NameFree
+  case AlreadyStored(tree: RiskTree)
+
+private def ensureUniqueTree(
+  wsId: WorkspaceId,
+  treeId: TreeId,
+  treeName: SafeName.SafeName,
+  branch: BranchRef,
+  excludeId: Option[TreeId],
+  isResend: RiskTree => Boolean
+): IO[AppError, TreeNameCheck] =
+  collectAllTrees(wsId, branch).flatMap { trees =>
+    val candidates = trees.filterNot(t => excludeId.contains(t.id))
+    val idError    = Option.when(candidates.exists(_.id == treeId))(treeIdTaken(treeId))
+    (idError, candidates.find(_.name == treeName)) match
+      case (None, None)                             => ZIO.succeed(TreeNameCheck.NameFree)
+      case (None, Some(stored)) if isResend(stored) => ZIO.succeed(TreeNameCheck.AlreadyStored(stored))
+      case (None, Some(_))                          => ZIO.fail(ValidationFailed(List(treeNameTaken(treeName))))
+      case (Some(e), None)                          => ZIO.fail(ValidationFailed(List(e)))
+      case (Some(e), Some(_))                       => ZIO.fail(ValidationFailed(List(e, treeNameTaken(treeName))))
+  }
+```
+
+`create` passes a comparison over its resolved request. `update` passes
+`_ => false`, because TWC-D-18 has already answered a resend and another tree
+holding the name is a refusal. Family: private helpers of `RiskTreeServiceLive`,
+existing member `ensureUniqueTree`. `TreeNameCheck` is a private closed set with
+no existing type denoting the same outcomes. The comparison's name and home are
+settled in the echo, against the content relations of ADR-032.
 
 ### 3.3 The controller and the browser
 
 `WorkspaceTreeController.getTreeStructure` returns the pair `getById` already
 yields instead of dropping the commit. `updateTree` takes the header and returns
-`(SimulationResponse, CommitHash)`.
+`(TreeSummaryResponse, CommitHash)`.
 
-`TreeViewState.scala:196` binds the pair and keeps the head beside the tree.
-`TreeBuilderState.loadFromTree(tree: RiskTree)` gains the head it was loaded at,
-and `TreeBuilderView.scala:105` sends it. After a successful save the browser
-replaces the held head with the `ETag` the PUT answered.
+`TreeViewState.scala:196` binds the pair and keeps the version beside the tree.
+`TreeBuilderState.loadFromTree(tree: RiskTree)` gains the version it was loaded
+at, and `TreeBuilderView.scala:105` sends it. After a successful save the browser
+replaces the held version with the `ETag` the PUT answered.
 
 ### 3.4 The workspace counter
 
@@ -912,7 +1018,7 @@ merge queries and `ScenarioMergeService`'s compare-and-set publish.
 | ADR-032 | The token, the hashed projection | Compliant: the token is a storage-side commit identifier, never a domain content hash. `seedVarId` stays in the projection; the seed entity id stays out of it and stays a cache scope |
 | ADR-035 | 409 body | Compliant: `WireError.Conflict` carries a closed `ConflictKind` and no free text |
 | ADR-030 | Controllers | Compliant: `Checked[Permission]` propagation unchanged |
-| ADR-038 | Response shapes | **Amended**: a single-resource read may carry its head in an `ETag` response header, and a list response carries each entry's head in its body (TWC-D-7 B). The record does not mention headers today. The get-tree response gains `seedEntityId` through `RiskTree`'s derived codec, a refined type and no raw primitive |
+| ADR-038 | Response shapes | **Amended**: a single-resource read may carry its version in an `ETag` response header, and a list response carries each entry's version in its body (TWC-D-7 B). The record does not mention headers today. The get-tree response gains `seedEntityId` through `RiskTree`'s derived codec, a refined type and no raw primitive |
 | ADR-039 | `If-Match` and stored values on the way in | Compliant: the token is refined by the codec; the counter value read from Irmin is refined to `SeedVarId` on arrival, and a value that fails refinement is a refused peer content failure, not an unreachable store |
 | ADR-011, ADR-037 | Every edited file | Compliant: `MaxAttempts` is a named constant in the companion of its owner |
 
@@ -920,11 +1026,17 @@ merge queries and `ScenarioMergeService`'s compare-and-set publish.
 
 ## 6. Verification plan
 
-1. **Unit — `RiskTreeServiceLiveSpec`.** An update whose expected head matches
-   succeeds and returns the new head. An update whose expected head is an older
-   commit fails with `VersionConflict` and leaves the stored tree untouched. A
-   create without a seed entity id stores the workspace's. A create with one
-   stores it. An update never changes it.
+1. **Unit — `RiskTreeServiceLiveSpec`.** An update whose expected version matches
+   succeeds and returns the new version. An update whose expected version is an
+   older commit fails with `VersionConflict` and leaves the stored tree untouched.
+   A save to another tree leaves this tree's version unchanged, and this tree's
+   save still succeeds. A repeated update with a new leaf succeeds, writes no
+   commit, and keeps that leaf's identifier and seed, whatever `If-Match` says. A
+   repeated create succeeds and writes nothing. A create with a taken name and
+   different content is refused. An update that adds, drops and re-adds a name in
+   one request gives the re-added node a new identifier and seed. A create without
+   a seed entity id stores the workspace's. A create with one stores it. An update
+   never changes it.
 2. **Unit — `WireErrorSpec`.** `VersionConflict` projects to
    `WireError.Conflict(ConflictKind.StaleVersion(), …)`; the row exists.
 3. **Unit — Tapir output header.** The structure endpoint's output type is
@@ -946,8 +1058,9 @@ merge queries and `ScenarioMergeService`'s compare-and-set publish.
    step 2 the two new leaves carry distinct seeds and the counter stands at or
    above both.
 8. **Integration — `HttpApiIntegrationSpec`.** A structure read answers an
-   `ETag`; a PUT without `If-Match` answers 400; a PUT with a stale `If-Match`
-   answers 409.
+   `ETag`, and a read pinned with `at` answers none; a PUT without `If-Match`
+   answers 400; a changed PUT with a stale `If-Match` answers 409; a repeated PUT
+   answers success with the same `ETag` and adds no history entry.
 9. **Integration — `SeedReproducibilityItSpec`.** A tree built over several
    saves, read back, and created in a second existing workspace with its seeds
    and seed entity id provided gives the same figures.
@@ -989,10 +1102,11 @@ The plan ships whole. Its work lands in three steps, each green before the next
 starts.
 
 1. **The compare-and-set save, server side.** `SaveStagingRef`, the `setTree`
-   overload, `RiskTreeRepository.update` with `expectedHead`,
-   `RiskTreeServiceLive.update` comparing the head it read. The controller
-   passes the head it reads in the same request, so this step closes W1 on its
-   own and changes no endpoint. `TreeWriteConcurrencyItSpec` lands here. This
+   overload, `RiskTreeRepository.update` with `expectedVersion`,
+   `RiskTreeServiceLive.update` with TWC-D-18's comparison and the version check,
+   and `ensureUniqueTree` with TWC-D-19's resend case. The controller passes the
+   version it reads in the same request, so this step closes W1 on its own and
+   changes no endpoint. A resend already succeeds without a write at this step. `TreeWriteConcurrencyItSpec` lands here. This
    step amends ADR-004a, ADR-007 and ADR-036 for server-only branches once.
 2. **The seeds.** `SeedCounterRef`, the counter, the per-tree seed entity id, the
    `meta` format change, the cache key, the merge preview's seed check. Its save
@@ -1018,6 +1132,9 @@ true.
 
 - `PLAN-RISKTRANSFORM.md` §7.6.1 R1 is the lost-update finding; it refers to
   this plan's "Decision 2", which is TWC-D-2.
+- `PLAN-AC-AGGREGATE-CONSISTENCY.md` §5 states the tree's version check as settled
+  and leaves the publish guard on main open as its AC-D-3. This plan's false
+  refusal in TWC-D-2 is what that decision would remove.
 - `PLAN-ERROR-WIRE-BOUNDARY.md` §17.2 names the merge field `SeedVarHighWater`.
   Under TWC-D-12 B that field is removed, and §17.2 is swept in step 2. The
   complex review's finding 1 is closed by TWC-D-8 for server-assigned seeds and
