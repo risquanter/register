@@ -5,6 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.test.TestClock
 import java.time.Duration
+import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId, SeedEntityId}

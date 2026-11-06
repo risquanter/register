@@ -247,11 +247,15 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_MAX_CONCURRENT_SIMULATIONS` | `4` | Intended cap on how many risk nodes resolve at once. Not read by the server yet — setting it changes nothing today. Connecting it is planned — PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS), `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md`, which also renames this variable |
 | `REGISTER_SEED3` | `0` | HDR histogram seed 3 (0 = random, ADR-003) |
 | `REGISTER_SEED4` | `0` | HDR histogram seed 4 (0 = random, ADR-003) |
+| `REGISTER_CURVE_TICK_COUNT` | `100` | How many thresholds a loss exceedance curve is sampled at. Chosen by this project: enough for a smooth line on a chart |
+| `REGISTER_CURVE_TAIL_CUTOFF` | `0.005` | Trailing curve ticks below this exceedance probability are not drawn. 0.5% is the Solvency II 1-in-200 year return period |
 | `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated). `localhost:18080` (nginx) is intentionally absent — in that mode the browser only talks to nginx; API calls are proxied server-side so the browser never issues a cross-origin request to port 8090. |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace time-to-live |
-| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `24h` | Workspace idle expiry |
+| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
 | `REGISTER_WORKSPACE_REAPER_INTERVAL` | `5m` | How often the reaper runs |
 | `REGISTER_WORKSPACE_MAX_TREES` | `10` | Max risk trees per workspace. A create beyond it is refused with a 400 before the tree is written |
+| `REGISTER_CASCADE_DELETE_PARALLELISM` | `8` | How many deletes one workspace cascade runs at once. Chosen by this project, not measured |
+| `REGISTER_CONFLICT_SCAN_FETCH_PARALLELISM` | `8` | How many candidate paths a merge's conflict scan fetches from Irmin at once. Chosen by this project, not measured |
 | `OTEL_SERVICE_NAME` | `risk-register` | OpenTelemetry service name |
 | `REGISTER_TELEMETRY_EXPORTER` | `otlp` | Where metrics and traces go. `otlp` sends them to the collector; `console` prints them on the server's own output. Unrelated to `LOG_LEVEL`, which governs application logs |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP endpoint, used when the exporter is `otlp` |

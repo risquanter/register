@@ -24,7 +24,57 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
   private val spiceDbConfig =
     deriveConfig[SpiceDbConfig].nested("register", "spicedb")
 
+  private val simulationConfig =
+    deriveConfig[SimulationConfig].nested("register", "simulation")
+
+  private val workspaceConfig =
+    deriveConfig[WorkspaceConfig].nested("register", "workspace")
+
+  private def simulationEntries(tickCount: String, tailCutoff: String): Seq[(String, String)] = Seq(
+    "register.simulation.defaultNTrials" -> "10000",
+    "register.simulation.defaultTrialParallelism" -> "8",
+    "register.simulation.maxConcurrentSimulations" -> "4",
+    "register.simulation.defaultSeed3" -> "0",
+    "register.simulation.defaultSeed4" -> "0",
+    "register.simulation.curveTickCount" -> tickCount,
+    "register.simulation.curveTailCutoff" -> tailCutoff
+  )
+
+  private def workspaceEntries(parallelism: String): Seq[(String, String)] = Seq(
+    "register.workspace.ttl" -> "72h",
+    "register.workspace.idleTimeout" -> "1h",
+    "register.workspace.reaperInterval" -> "5m",
+    "register.workspace.maxTreesPerWorkspace" -> "10",
+    "register.workspace.cascadeDeleteParallelism" -> parallelism
+  )
+
   def spec = suite("ValidatedConfig")(
+    test("loads the curve settings as refined values") {
+      withConfig(simulationEntries("100", "0.005")*) {
+        ZIO.config(simulationConfig).map(config =>
+          assertTrue(config.curveTickCount == 100, config.curveTailCutoff == 0.005))
+      }
+    },
+    test("rejects a non-positive curve tick count") {
+      withConfig(simulationEntries("0", "0.005")*) {
+        ZIO.config(simulationConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
+    test("rejects a curve tail cutoff above 1") {
+      withConfig(simulationEntries("100", "1.5")*) {
+        ZIO.config(simulationConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
+    test("loads the cascade delete parallelism as a refined value") {
+      withConfig(workspaceEntries("8")*) {
+        ZIO.config(workspaceConfig).map(config => assertTrue(config.cascadeDeleteParallelism == 8))
+      }
+    },
+    test("rejects a non-positive cascade delete parallelism") {
+      withConfig(workspaceEntries("0")*) {
+        ZIO.config(workspaceConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
     test("loads TelemetryConfig with validated Url endpoint") {
       withConfig(
         "register.telemetry.serviceName" -> "risk-register",
@@ -55,7 +105,8 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
         "register.irmin.branch" -> "main",
         "register.irmin.timeout" -> "30s",
         "register.irmin.healthCheckAttemptTimeout" -> "5s",
-        "register.irmin.healthCheckBudget" -> "45s"
+        "register.irmin.healthCheckBudget" -> "45s",
+        "register.irmin.conflictScanFetchParallelism" -> "8"
       ) {
         ZIO.config(irminConfig).map(config =>
           assertTrue(
@@ -73,7 +124,8 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
         "register.irmin.branch" -> "feature/x",
         "register.irmin.timeout" -> "30s",
         "register.irmin.healthCheckAttemptTimeout" -> "5s",
-        "register.irmin.healthCheckBudget" -> "45s"
+        "register.irmin.healthCheckBudget" -> "45s",
+        "register.irmin.conflictScanFetchParallelism" -> "8"
       ) {
         ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
       }
@@ -84,7 +136,20 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
         "register.irmin.branch" -> "main",
         "register.irmin.timeout" -> "30s",
         "register.irmin.healthCheckAttemptTimeout" -> "5s",
-        "register.irmin.healthCheckBudget" -> "0s"
+        "register.irmin.healthCheckBudget" -> "0s",
+        "register.irmin.conflictScanFetchParallelism" -> "8"
+      ) {
+        ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
+    test("rejects a non-positive conflict scan fetch parallelism") {
+      withConfig(
+        "register.irmin.url" -> "http://localhost:9080",
+        "register.irmin.branch" -> "main",
+        "register.irmin.timeout" -> "30s",
+        "register.irmin.healthCheckAttemptTimeout" -> "5s",
+        "register.irmin.healthCheckBudget" -> "45s",
+        "register.irmin.conflictScanFetchParallelism" -> "0"
       ) {
         ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
       }
@@ -95,7 +160,8 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
         "register.irmin.branch" -> "main",
         "register.irmin.timeout" -> "-5s",
         "register.irmin.healthCheckAttemptTimeout" -> "5s",
-        "register.irmin.healthCheckBudget" -> "45s"
+        "register.irmin.healthCheckBudget" -> "45s",
+        "register.irmin.conflictScanFetchParallelism" -> "8"
       ) {
         ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
       }

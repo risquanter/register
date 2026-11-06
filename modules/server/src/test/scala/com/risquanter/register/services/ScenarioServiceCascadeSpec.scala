@@ -4,6 +4,7 @@ import zio.*
 import zio.test.*
 
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
+import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, WorkspaceId}
 import com.risquanter.register.domain.errors.ScenarioHeadStale
 import com.risquanter.register.testutil.TestHelpers.safeId
@@ -45,7 +46,7 @@ object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
                          else
                            deleted.update(_ :+ head).unit
                      )
-        _         <- svc.cascadeDeleteScenarios(wsId)
+        _         <- svc.cascadeDeleteScenarios(wsId, TestConfigs.cascadeDeleteParallelism)
         result    <- deleted.get
         calls     <- listCalls.get
       yield assertTrue(
@@ -66,7 +67,7 @@ object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
                        onDelete = (_, _, _) =>
                          ZIO.fail(ScenarioHeadStale(scenarioName, staleHead, None))
                      )
-        exit      <- svc.cascadeDeleteScenarios(wsId).exit
+        exit      <- svc.cascadeDeleteScenarios(wsId, TestConfigs.cascadeDeleteParallelism).exit
       yield assertTrue(exit.isSuccess) // best-effort: never fails, even when the retry finds nothing left
     }
   )

@@ -7,7 +7,7 @@ import scala.sys.process.*
 
 import zio.*
 
-import com.risquanter.register.configs.IrminConfig
+import com.risquanter.register.configs.{IrminConfig, TestConfigs}
 import com.risquanter.register.domain.data.iron.Url
 import com.risquanter.register.domain.errors.ValidationError
 
@@ -31,7 +31,7 @@ object IrminCompose:
         ZIO.fromEither(Url.fromString(res.irminUrl).left.map(errs => new RuntimeException(errs.map(ValidationError.describe).mkString("; "))))
           // Short budget: the container was started by this harness moments ago, so a
           // broken irmin should fail the suite fast, not after the 45s production default.
-          .map(url => IrminConfig(url = url, healthCheckBudget = Duration.ofSeconds(10)))
+          .map(url => IrminConfig(url = url, healthCheckBudget = Duration.ofSeconds(10), conflictScanFetchParallelism = TestConfigs.conflictScanFetchParallelism))
       }
     )
 

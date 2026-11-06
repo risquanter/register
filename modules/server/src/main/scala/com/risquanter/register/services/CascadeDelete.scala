@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId}
+import com.risquanter.register.domain.data.iron.{PositiveInt, WorkspaceId, TreeId}
 
 /** Single source of truth for "delete everything belonging to a workspace" —
   * every tree, plus every scenario branch. Called by
@@ -12,18 +12,13 @@ import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId}
   * touch disjoint resources, so they run concurrently.
   */
 object CascadeDelete:
-  /** How many deletes one cascade runs at once: per workspace in the reaper
-    * and the eviction route, per tree and per scenario inside each cascade.
-    * Chosen here, not measured.
-    */
-  val Parallelism: Int = 8
-
   def workspace(
     wsId: WorkspaceId,
     treeIds: Iterable[TreeId],
     riskTreeService: RiskTreeService,
-    scenarioService: ScenarioService
+    scenarioService: ScenarioService,
+    parallelism: PositiveInt
   )(using Checked[Authority]): UIO[Unit] =
-    riskTreeService.cascadeDeleteTrees(wsId, treeIds)
-      .zipPar(scenarioService.cascadeDeleteScenarios(wsId))
+    riskTreeService.cascadeDeleteTrees(wsId, treeIds, parallelism)
+      .zipPar(scenarioService.cascadeDeleteScenarios(wsId, parallelism))
       .unit

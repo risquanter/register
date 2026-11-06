@@ -289,3 +289,14 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/common/src/main/scala/com/risquanter/register/http/errors/NotFoundKind.scala
 - modules/common/src/test/scala/com/risquanter/register/http/responses/WorkspaceResponseSpec.scala
 - modules/app/src/test/scala/app/views/ErrorMessagesSpec.scala
+- modules/server/src/main/scala/com/risquanter/register/services/CascadeDelete.scala
+- modules/server/src/test/scala/com/risquanter/register/configs/TestConfigs.scala
+- modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceReaperSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerCascadeSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/support/DemoSpecSupport.scala
+- modules/common/src/test/scala/com/risquanter/register/testutil/ConfigTestLoader.scala
+- modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioResponse.scala
+- modules/common/src/main/scala/com/risquanter/register/http/endpoints/ScenarioEndpoints.scala
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala
+- modules/server/src/main/scala/com/risquanter/register/foladapter/QueryResponseBuilder.scala

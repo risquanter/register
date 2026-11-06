@@ -55,7 +55,7 @@ object WorkspaceReaper:
         treeService     <- ZIO.service[RiskTreeService]
         scenarioService <- ZIO.service[ScenarioService]
         provisioner     <- ZIO.service[BootstrapProvisioner]
-        _           <- reapLoop(store, treeService, scenarioService, provisioner, config.reaperInterval)
+        _           <- reapLoop(store, treeService, scenarioService, provisioner, config)
                          .forkScoped
                          .when(!isNoOp(config))
         _           <- ZIO.logInfo(
@@ -87,16 +87,16 @@ object WorkspaceReaper:
     treeService: RiskTreeService,
     scenarioService: ScenarioService,
     provisioner: BootstrapProvisioner,
-    interval: java.time.Duration
+    config: WorkspaceConfig
   ): UIO[Nothing] =
     val cycle =
       for
         evicted <- store.evictExpired
         // exempt: system maintenance — no user context; WorkspaceReaper is a background orchestrator
         given Checked[LifecycleMarker.SystemMaintenance.type] <- provisioner.systemMaintenanceToken()
-        _       <- ZIO.withParallelism(CascadeDelete.Parallelism) {
+        _       <- ZIO.withParallelism(config.cascadeDeleteParallelism) {
                      ZIO.foreachParDiscard(evicted)(ws =>
-                       CascadeDelete.workspace(ws.id, ws.trees, treeService, scenarioService))
+                       CascadeDelete.workspace(ws.id, ws.trees, treeService, scenarioService, config.cascadeDeleteParallelism))
                    }
       yield ()
     // A failed cycle costs one interval, so it is logged and the loop carries
@@ -104,4 +104,4 @@ object WorkspaceReaper:
     val survivingCycle = cycle.catchAll(error =>
       ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: ${error.logMessage}")
     )
-    (ZIO.sleep(zio.Duration.fromJava(interval)) *> survivingCycle).forever
+    (ZIO.sleep(zio.Duration.fromJava(config.reaperInterval)) *> survivingCycle).forever

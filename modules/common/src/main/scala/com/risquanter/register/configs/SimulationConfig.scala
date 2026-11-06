@@ -25,13 +25,18 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
   *   and renames it.
   * @param defaultSeed3 Global seed 3 for HDR random number generation (reproducibility)
   * @param defaultSeed4 Global seed 4 for HDR random number generation (reproducibility)
+  * @param curveTickCount How many thresholds a loss exceedance curve is sampled at
+  * @param curveTailCutoff The exceedance probability below which a curve's trailing
+  *   ticks are dropped from what is drawn
   */
 final case class SimulationConfig(
   defaultNTrials: PositiveInt,
   defaultTrialParallelism: PositiveInt,
   maxConcurrentSimulations: PositiveInt,
   defaultSeed3: Long,
-  defaultSeed4: Long
+  defaultSeed4: Long,
+  curveTickCount: PositiveInt,
+  curveTailCutoff: OccurrenceProbability
 )
 
 object SimulationConfig {
@@ -43,6 +48,12 @@ object SimulationConfig {
       ValidationUtil.refinePositiveInt(value, ErrorLocation.Whole).left.map(errorsToString)
     }
 
+  private val occurrenceProbabilityConfig: Config[OccurrenceProbability] =
+    deriveConfig[Double].mapOrFail { value =>
+      ValidationUtil.refineOccurrenceProbability(value, ErrorLocation.Whole).left.map(errorsToString)
+    }
+
   given DeriveConfig[PositiveInt] = DeriveConfig(positiveIntConfig)
+  given DeriveConfig[OccurrenceProbability] = DeriveConfig(occurrenceProbabilityConfig)
   given DeriveConfig[SimulationConfig] = DeriveConfig.derived
 }

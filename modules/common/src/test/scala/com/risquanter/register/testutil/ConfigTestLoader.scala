@@ -40,7 +40,9 @@ object ConfigTestLoader {
       defaultTrialParallelism = c.getInt("defaultTrialParallelism").refineUnsafe,
       maxConcurrentSimulations = c.getInt("maxConcurrentSimulations").refineUnsafe,
       defaultSeed3 = c.getLong("defaultSeed3"),
-      defaultSeed4 = c.getLong("defaultSeed4")
+      defaultSeed4 = c.getLong("defaultSeed4"),
+      curveTickCount = c.getInt("curveTickCount").refineUnsafe,
+      curveTailCutoff = c.getDouble("curveTailCutoff").refineUnsafe
     )
   }
 

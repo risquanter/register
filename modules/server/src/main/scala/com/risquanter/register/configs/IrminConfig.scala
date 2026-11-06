@@ -1,9 +1,9 @@
 package com.risquanter.register.configs
 
 import zio.*
-import zio.config.magnolia.DeriveConfig
+import zio.config.magnolia.{DeriveConfig, deriveConfig}
 import java.time.Duration
-import com.risquanter.register.domain.data.iron.{BranchRef, Url}
+import com.risquanter.register.domain.data.iron.{BranchRef, PositiveInt, Url, ValidationUtil}
 import com.risquanter.register.domain.data.iron.Url.*
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 
@@ -21,13 +21,16 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
   * @param healthCheckBudget Total elapsed budget for the startup readiness gate;
   *                          the process fails closed once exceeded. Size above the
   *                          platform's policy-reconciliation window (ADR-031)
+  * @param conflictScanFetchParallelism How many candidate paths a merge's conflict
+  *                                     scan fetches at once
   */
 final case class IrminConfig(
   url: Url.Url,
   branch: BranchRef = BranchRef.Main,
   timeout: Duration = Duration.ofSeconds(30),
   healthCheckAttemptTimeout: Duration = Duration.ofSeconds(5),
-  healthCheckBudget: Duration = Duration.ofSeconds(45)
+  healthCheckBudget: Duration = Duration.ofSeconds(45),
+  conflictScanFetchParallelism: PositiveInt
 ) {
   /** Full GraphQL endpoint URL */
   def graphqlUrl: String = s"${url.value}/graphql"
@@ -73,6 +76,13 @@ object IrminConfig {
       )
     }
 
+  private val positiveIntConfig: zio.Config[PositiveInt] =
+    deriveConfig[Int].mapOrFail { value =>
+      ValidationUtil.refinePositiveInt(value, configLocation).left.map(errs =>
+        zio.Config.Error.InvalidData(message = errs.map(ValidationError.describe).mkString("; ")))
+    }
+
+  given DeriveConfig[PositiveInt] = DeriveConfig(positiveIntConfig)
   given DeriveConfig[Url.Url] = DeriveConfig(urlConfig)
   given DeriveConfig[BranchRef] = DeriveConfig(branchRefConfig)
   given DeriveConfig[Duration] = DeriveConfig(positiveDurationConfig)

@@ -7,7 +7,7 @@ import sttp.client3.testing.SttpBackendStub
 import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
 
-import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, TelemetryExporter, WorkspaceConfig}
+import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, TelemetryExporter, TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.Url
 import com.risquanter.register.domain.errors.ValidationError
 import com.risquanter.register.http.HttpApi
@@ -33,7 +33,9 @@ object StubHttpTestHarness {
     defaultTrialParallelism = 2.refineUnsafe,
     maxConcurrentSimulations = 2.refineUnsafe,
     defaultSeed3 = 0L,
-    defaultSeed4 = 0L
+    defaultSeed4 = 0L,
+    curveTickCount = TestConfigs.simulation.curveTickCount,
+    curveTailCutoff = TestConfigs.simulation.curveTailCutoff
   )
 
   private val defaultTelemetryConfig = TelemetryConfig(
@@ -56,7 +58,7 @@ object StubHttpTestHarness {
       ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController](
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
-        ZLayer.succeed(WorkspaceConfig()),
+        ZLayer.succeed(WorkspaceConfig(cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism)),
         TelemetryLive.configured,
         repoLayer,
         ContentCacheRegistry.layer,
@@ -107,7 +109,7 @@ object StubHttpTestHarness {
       case Some(urlStr) =>
         for
           url <- ZIO.fromEither(Url.fromString(urlStr).left.map(errs => new RuntimeException(errs.map(ValidationError.describe).mkString("; "))))
-          cfg  = IrminConfig(url = url)
+          cfg  = IrminConfig(url = url, conflictScanFetchParallelism = TestConfigs.conflictScanFetchParallelism)
           backend <- backendFor(ZLayer.succeed(cfg) >>> IrminClientLive.layer >>> RiskTreeRepositoryIrmin.layer, simConfig)
         yield Some(backend)
 }

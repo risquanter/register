@@ -3,9 +3,9 @@ package com.risquanter.register.domain.data
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonFieldDecoder, JsonFieldEncoder}
 import sttp.tapir.Schema
 import io.github.iltotore.iron.autoRefine
-import com.risquanter.register.domain.data.iron.{NodeId, OccurrenceProbability, Probability, SafeName}
+import com.risquanter.register.domain.data.iron.{NodeId, OccurrenceProbability, SafeName}
 import com.risquanter.register.domain.data.iron.given
-import com.risquanter.register.http.codecs.IronTapirCodecs
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** One point on a loss exceedance curve: a loss, and the share of trials whose
   * loss was at or above it. */
@@ -16,9 +16,7 @@ final case class LECPoint(
 
 object LECPoint {
   given codec: JsonCodec[LECPoint] = DeriveJsonCodec.gen[LECPoint]
-  given schema: Schema[LECPoint] =
-    import IronTapirCodecs.given
-    Schema.derived[LECPoint]
+  given schema: Schema[LECPoint] = Schema.derived[LECPoint]
 }
 
 /** One node's curve: its identity, the sampled points, the tail quantiles and
@@ -42,7 +40,7 @@ object LECNodeCurve {
     * carries that information instead. The level is the share of trials whose
     * loss falls at or below the reported figure.
     */
-  enum QuantileLevel(val probability: Probability):
+  enum QuantileLevel(val probability: OccurrenceProbability):
     case P90  extends QuantileLevel(0.90)
     case P95  extends QuantileLevel(0.95)
     case P99  extends QuantileLevel(0.99)
@@ -64,7 +62,5 @@ object LECNodeCurve {
   }
 
   given codec: JsonCodec[LECNodeCurve] = DeriveJsonCodec.gen[LECNodeCurve]
-  given schema: Schema[LECNodeCurve] =
-    import IronTapirCodecs.given
-    Schema.derived[LECNodeCurve]
+  given schema: Schema[LECNodeCurve] = Schema.derived[LECNodeCurve]
 }

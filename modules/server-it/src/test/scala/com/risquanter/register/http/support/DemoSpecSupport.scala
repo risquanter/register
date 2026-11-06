@@ -20,7 +20,9 @@ object DemoSpecSupport:
     defaultTrialParallelism  = 8.refineUnsafe,
     maxConcurrentSimulations = 4.refineUnsafe,
     defaultSeed3             = 0L,
-    defaultSeed4             = 0L
+    defaultSeed4             = 0L,
+    curveTickCount           = 100.refineUnsafe,
+    curveTailCutoff          = 0.005.refineUnsafe
   )
 
   val harnessLayer: ZLayer[Scope, Throwable, SttpClientFixture.Client] =

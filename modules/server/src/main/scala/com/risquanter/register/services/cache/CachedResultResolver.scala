@@ -32,9 +32,6 @@ import com.risquanter.register.domain.errors.AppError
   * == Usage Pattern ==
   * {{{
   * // Query APIs become simple compositions:
-  * def getLECCurve(tree: RiskTree, nodeId: NodeId) =
-  *   resolver.ensureCached(tree, nodeId).map(LECGenerator.generateCurvePoints(_))
-  *
   * def probOfExceedance(tree: RiskTree, nodeId: NodeId, threshold: Loss) =
   *   resolver.ensureCached(tree, nodeId).map(_.probOfExceedance(threshold))
   * }}}

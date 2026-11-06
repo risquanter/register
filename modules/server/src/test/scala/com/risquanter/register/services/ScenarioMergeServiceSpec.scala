@@ -8,6 +8,7 @@ import zio.json.*
 import java.time.Instant
 import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
+import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
@@ -32,6 +33,9 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, unsafeGet, lognorma
 object ScenarioMergeServiceSpec extends ZIOSpecDefault:
 
   private given Checked[Authority] = TestChecked.value
+
+  private def mergeService(irmin: IrminClient, repo: RiskTreeRepository): ScenarioMergeServiceLive =
+    ScenarioMergeServiceLive(irmin, repo, TestConfigs.conflictScanFetchParallelism)
 
   private def ws(label: String): WorkspaceId = WorkspaceId(safeId(label))
   private def name(s: String): ScenarioName.ScenarioName = ScenarioName.fromString(s).toOption.get
@@ -240,7 +244,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     for
       resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
       revs   <- Ref.make(List.empty[Revision])
-    yield ScenarioMergeServiceLive(
+    yield mergeService(
       FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
         mergeResult, resets, ZIO.unit, branchOps = None, stagingSets = None),
       FakeRepo(List(Right(validTree)), revs)
@@ -290,7 +294,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, shared,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
@@ -318,7 +322,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, metas,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
                         FakeRepo(List(Right(validTree)), revs)
@@ -341,7 +345,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, atBase,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
                         FakeRepo(List(Right(validTree)), revs)
@@ -366,7 +370,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, atBase,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
@@ -394,7 +398,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), onMain, onScen, atBase,
                           ZIO.die(new IllegalStateException("a preview must not merge")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
@@ -427,7 +431,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), onMain, onScen, atBase,
                           ZIO.die(new IllegalStateException("a preview must not merge")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
@@ -449,7 +453,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
             sets   <- Ref.make(List.empty[(IrminPath, String, CommitMessage)])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), onMain, onScen, atBase,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit,
                           branchOps = None, stagingSets = Some(sets)),
@@ -485,7 +489,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, meta,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
@@ -513,7 +517,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, atBase,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
@@ -529,7 +533,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
                         FakeRepo(List(Right(validTree)), revs)
@@ -552,7 +556,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
                         FakeRepo(List(Left(TreeLoadFailure(treeIdOf("guard-tree"), TreeLoadProblem.Failed(RepositoryFailure("duplicate seedVarId 7"))))), revs)
@@ -577,7 +581,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
                         FakeRepo(List(Left(TreeLoadFailure(
@@ -600,7 +604,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets,
                           ZIO.fail(BranchHeadStale(BranchRef.Main, hash('a'))), branchOps = None, stagingSets = None),
@@ -621,7 +625,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets,
                           ZIO.fail(BranchHeadStale(BranchRef.Main, hash('a'))), branchOps = None, stagingSets = None,
@@ -643,7 +647,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit,
                           createResult = ZIO.fail(BranchAlreadyExists(BranchRef.Main)), branchOps = None, stagingSets = None),
@@ -664,7 +668,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
               resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
               revs   <- Ref.make(List.empty[Revision])
               ops    <- Ref.make(List.empty[String])
-              svc     = ScenarioMergeServiceLive(
+              svc     = mergeService(
                           FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                             ZIO.succeed(commit(hash('c'))), resets, ZIO.unit,
                             branchOps = Some(ops), stagingSets = None),
@@ -695,7 +699,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
             ops    <- Ref.make(List.empty[String])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), scenarioHead, hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit,
                           branchOps = Some(ops), stagingSets = None),
@@ -711,7 +715,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
-            svc     = ScenarioMergeServiceLive(
+            svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, mainHeadPresent = false, branchOps = None, stagingSets = None),
                         FakeRepo(List(Right(validTree)), revs)

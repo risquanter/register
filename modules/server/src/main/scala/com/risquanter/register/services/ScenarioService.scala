@@ -2,8 +2,9 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt}
 import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported, ScenarioHeadStale}
+import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
 /** What a new scenario forks from. A create always
   * forks from exactly one source — main, or another scenario's current head —
@@ -28,7 +29,11 @@ enum ScenarioSource:
   * it back to `delete`, preserving optimistic concurrency across the whole
   * list -> look -> delete interaction, not just the instant of the delete call.
   */
-final case class ScenarioSummary(name: ScenarioName.ScenarioName, head: CommitHash)
+final case class ScenarioSummary(name: ScenarioName.ScenarioName, head: CommitHash):
+  /** This scenario as the list endpoint answers it. The projection is owned
+    * here, by the source (ADR-038 §5).
+    */
+  def toWire: ScenarioSummaryResponse = ScenarioSummaryResponse(name, head)
 
 /** Scenario lifecycle on top of Irmin branches.
   *
@@ -114,7 +119,7 @@ object ScenarioService:
     * cascade-delete semantic, mirroring `RiskTreeService.cascadeDeleteTrees`.
     */
   extension (self: ScenarioService)
-    def cascadeDeleteScenarios(wsId: WorkspaceId)(using Checked[Authority]): UIO[Unit] =
+    def cascadeDeleteScenarios(wsId: WorkspaceId, parallelism: PositiveInt)(using Checked[Authority]): UIO[Unit] =
       def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[AppError, Unit] =
         self.delete(wsId, s.name, s.head).catchSome { case _: ScenarioHeadStale =>
           self.list(wsId).flatMap { fresh =>
@@ -128,7 +133,7 @@ object ScenarioService:
           case _: ScenariosNotSupported => ZIO.unit
           case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.logMessage}")
         }
-        .flatMap(scenarios => ZIO.withParallelism(CascadeDelete.Parallelism) {
+        .flatMap(scenarios => ZIO.withParallelism(parallelism) {
           ZIO.foreachParDiscard(scenarios)(s =>
             deleteWithFreshHeadRetry(s)
               .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.logMessage}"))

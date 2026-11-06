@@ -39,7 +39,9 @@ object HttpTestHarness:
     defaultTrialParallelism = 2.refineUnsafe,
     maxConcurrentSimulations = 2.refineUnsafe,
     defaultSeed3 = 0L,
-    defaultSeed4 = 0L
+    defaultSeed4 = 0L,
+    curveTickCount = TestConfigs.simulation.curveTickCount,
+    curveTailCutoff = TestConfigs.simulation.curveTailCutoff
   )
 
   private val defaultTelemetryConfig = TelemetryConfig(
@@ -53,7 +55,7 @@ object HttpTestHarness:
 
   private val defaultCorsConfig = CorsConfig(allowedOrigins = List("*"))
 
-  private val defaultWorkspaceConfig = WorkspaceConfig()
+  private val defaultWorkspaceConfig = WorkspaceConfig(cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism)
 
   final case class HarnessConfig(
     simulation: SimulationConfig = defaultSimulationConfig,

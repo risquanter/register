@@ -39,7 +39,8 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
   private val shortTtlConfig = WorkspaceConfig(
     ttl = Duration.ofMinutes(2),
     idleTimeout = Duration.ofMinutes(2),
-    reaperInterval = Duration.ofMinutes(1)
+    reaperInterval = Duration.ofMinutes(1),
+    cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism
   )
 
   private def buildBackend(

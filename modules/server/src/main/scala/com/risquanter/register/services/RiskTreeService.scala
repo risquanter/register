@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, OccurrenceProbability, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, OccurrenceProbability, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.auth.{Authority, Checked}
 
@@ -133,8 +133,8 @@ object RiskTreeService:
     * for scenario branches.
     */
   extension (self: RiskTreeService)
-    def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId])(using Checked[Authority]): UIO[Unit] =
-      ZIO.withParallelism(CascadeDelete.Parallelism) {
+    def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId], parallelism: PositiveInt)(using Checked[Authority]): UIO[Unit] =
+      ZIO.withParallelism(parallelism) {
         ZIO.foreachParDiscard(ids)(id =>
           // Workspace teardown removes the workspace-level (main) tree set.
           self.delete(wsId, id, BranchRef.Main)

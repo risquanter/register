@@ -37,7 +37,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
   private val reaperTestConfig = WorkspaceConfig(
     ttl = Duration.ofMinutes(2),
     idleTimeout = Duration.ofMinutes(2),
-    reaperInterval = Duration.ofMinutes(1)
+    reaperInterval = Duration.ofMinutes(1),
+    cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism
   )
 
   override def spec = suite("WorkspaceReaper")(
@@ -49,7 +50,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       val config = WorkspaceConfig(
         ttl = Duration.ZERO,
         idleTimeout = Duration.ZERO,
-        reaperInterval = Duration.ofMinutes(5)
+        reaperInterval = Duration.ofMinutes(5),
+        cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism
       )
       assertTrue(WorkspaceReaper.isNoOp(config))
     },
@@ -58,7 +60,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       val config = WorkspaceConfig(
         ttl = Duration.ofHours(-1),
         idleTimeout = Duration.ofHours(-1),
-        reaperInterval = Duration.ofMinutes(5)
+        reaperInterval = Duration.ofMinutes(5),
+        cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism
       )
       assertTrue(WorkspaceReaper.isNoOp(config))
     },
@@ -67,7 +70,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       val config = WorkspaceConfig(
         ttl = Duration.ZERO,
         idleTimeout = Duration.ofMinutes(30),
-        reaperInterval = Duration.ofMinutes(5)
+        reaperInterval = Duration.ofMinutes(5),
+        cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism
       )
       assertTrue(!WorkspaceReaper.isNoOp(config))
     },
@@ -76,7 +80,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       val config = WorkspaceConfig(
         ttl = Duration.ofHours(72),
         idleTimeout = Duration.ZERO,
-        reaperInterval = Duration.ofMinutes(5)
+        reaperInterval = Duration.ofMinutes(5),
+        cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism
       )
       assertTrue(!WorkspaceReaper.isNoOp(config))
     },
@@ -108,7 +113,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       val config = WorkspaceConfig(
         ttl = Duration.ZERO,
         idleTimeout = Duration.ZERO,
-        reaperInterval = Duration.ofMinutes(5)
+        reaperInterval = Duration.ofMinutes(5),
+        cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism
       )
       ZIO.scoped(
         WorkspaceReaper.layer.build

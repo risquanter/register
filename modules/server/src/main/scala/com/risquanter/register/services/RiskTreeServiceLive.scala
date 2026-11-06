@@ -17,6 +17,7 @@ import com.risquanter.register.services.helper.SeedVarIdAssigner
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked}
+import com.risquanter.register.configs.SimulationConfig
 
 /**
  * Live implementation of RiskTreeService with telemetry instrumentation.
@@ -28,6 +29,7 @@ class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   resolver: CachedResultResolver,
   invalidationHandler: InvalidationHandler,
+  simulationConfig: SimulationConfig,
   tracing: Tracing,
   // Pre-created metric instruments (cached at construction time)
   operationsCounter: Counter[Long]
@@ -466,7 +468,7 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("results_resolved", results.size.toLong)
         
         // Generate curves with shared tick domain (ADR-014 render-time strategy)
-        curvesData = LECGenerator.generateCurvePointsMulti(results)
+        curvesData = LECGenerator.generateCurvePointsMulti(results, simulationConfig.curveTickCount, simulationConfig.curveTailCutoff)
         
         // One curve per node present at this revision. The point set is keyed
         // by the results, which are keyed by `presentIds`, so every node here
@@ -537,11 +539,12 @@ object RiskTreeServiceLive {
     val operationsDesc = "Number of risk tree operations"
   }
   
-  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & InvalidationHandler & Tracing & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & InvalidationHandler & SimulationConfig & Tracing & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       resolver <- ZIO.service[CachedResultResolver]
       invalidationHandler <- ZIO.service[InvalidationHandler]
+      simulationConfig <- ZIO.service[SimulationConfig]
       tracing <- ZIO.service[Tracing]
       meter <- ZIO.service[Meter]
       
@@ -551,6 +554,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.operationsUnit),
         Some(MetricNames.operationsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, resolver, invalidationHandler, tracing, opsCounter)
+    } yield new RiskTreeServiceLive(repo, resolver, invalidationHandler, simulationConfig, tracing, opsCounter)
   }
 }
