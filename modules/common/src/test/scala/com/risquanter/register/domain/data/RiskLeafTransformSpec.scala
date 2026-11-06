@@ -21,7 +21,7 @@ import com.risquanter.register.testutil.TestHelpers.{
 object RiskLeafTransformSpec extends ZIOSpecDefault {
 
   private val subject: ErrorSubject = ErrorSubject.Request
-  private val at: ErrorLocation     = ErrorLocation.Field(subject, FieldName.OverrideParams)
+  private val at: ErrorLocation     = ErrorLocation.Field(subject, FieldName.Probability)
 
   /** The stamp and anchor an absolute replacement carries. Their values are
     * irrelevant to the arrow — it reads only the replacement — but the type

@@ -138,18 +138,18 @@ object PortfolioFormState:
           case FieldName.Name       => Set(PortfolioField.Name)
           case FieldName.ParentName => Set(PortfolioField.Parent)
           case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
-               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater | FieldName.Limit |
+               FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater |
                FieldName.Probability | FieldName.SeedVarId | FieldName.SeedEntityId |
                FieldName.DistributionType | FieldName.Terms | FieldName.MinLoss | FieldName.MaxLoss |
                FieldName.Spec | FieldName.Percentiles | FieldName.Quantiles |
                FieldName.PercentileAt(_) | FieldName.QuantileAt(_) | FieldName.ChildAt(_) |
                FieldName.LossRange | FieldName.PercentileQuantilePairing |
-               FieldName.Mitigations | FieldName.Precedence | FieldName.Cap | FieldName.Factor | FieldName.OverrideParams |
+               FieldName.Mitigations | FieldName.Precedence | FieldName.Cap | FieldName.Factor |
                FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
-               FieldName.Branch | FieldName.Scenario | FieldName.TreeId | FieldName.At |
+               FieldName.Branch | FieldName.Scenario | FieldName.At |
                FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
                FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
-               FieldName.Email | FieldName.Url | FieldName.Token | FieldName.TraceId |
+               FieldName.Email | FieldName.Url | FieldName.TraceId |
                FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
             noTarget
       case ErrorLocation.Whole             => Set(PortfolioField.FormLevel)

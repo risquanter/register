@@ -14,6 +14,9 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldPro
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.testutil.TestHelpers.{safeId}
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
+import com.risquanter.register.http.codecs.IronTapirCodecs
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
+import sttp.tapir.{Codec, CodecFormat, DecodeResult}
 
 object RiskTreeControllerSpec extends ZIOSpecDefault {
   private given Checked[Authority] = TestChecked.value
@@ -94,14 +97,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   )
 
   override def spec = suite("RiskTreeController")(
-    suite("Health endpoint")(
-      test("returns healthy status") {
-        // Manual test confirms: GET /health returns {"status": "healthy", "service": "risk-register"}
-        // This test documents the endpoint exists and compiles
-        assertTrue(true)
-      }
-    ),
-
     suite("Hierarchical tree creation with discriminators")(
       test("POST with RiskPortfolio discriminator creates tree") {
         val request = validRequest.copy(
@@ -181,8 +176,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     suite("Path parameter validation (Tapir codec)")(
       test("NonNegativeLong codec accepts valid positive IDs") {
         // Test the codec directly
-        import sttp.tapir.*
-        import com.risquanter.register.http.codecs.IronTapirCodecs.given
         
         val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
         
@@ -195,8 +188,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       },
       
       test("NonNegativeLong codec rejects non-numeric strings") {
-        import sttp.tapir.*
-        import com.risquanter.register.http.codecs.IronTapirCodecs.given
         
         val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
         
@@ -209,8 +200,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       },
       
       test("NonNegativeLong codec refuses negative IDs as read-then-refused") {
-        import sttp.tapir.*
-        import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
         val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
 
@@ -224,9 +213,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       },
 
       test("NonNegativeLong codec refusal carries the range problem and omits the value") {
-        import sttp.tapir.*
-        import com.risquanter.register.http.codecs.IronTapirCodecs
-        import IronTapirCodecs.given
 
         val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
 

@@ -5,6 +5,7 @@ import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.iron.{ScenarioName, TreeId}
 import com.risquanter.register.domain.errors.MergeRefusal
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** What the request conflicts with.
   *
@@ -59,6 +60,5 @@ object ConflictKind:
     * object, and names the key that decides between them. */
   given schema: Schema[ConflictKind] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[ConflictKind]

@@ -4,7 +4,7 @@ import zio.*
 import zio.json.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, TreeLoadFailure, TreeLoadProblem, IrminError, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, TreeLoadProblem, IrminError, ValidationError}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -73,7 +73,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
     loadTreeAt(wsId, id, toCommit).flatMap {
       case None =>
-        ZIO.fail(RepositoryFailure(s"RiskTree $id not found at commit ${toCommit.value} in workspace ${wsId.value}"))
+        ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.At(toCommit)))
       case Some(existing) =>
         for
           now         <- Clock.instant
@@ -238,7 +238,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def getTreeWithMeta(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError,TreeWithMeta] =
     loadTree(wsId, id, branch).flatMap {
       case Some(value) => ZIO.succeed(value)
-      case None        => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
+      case None        => ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
     }
 
   private def ensureRootPresent(rootId: NodeId, nodes: Seq[RiskNode]): IO[AppError,Unit] =

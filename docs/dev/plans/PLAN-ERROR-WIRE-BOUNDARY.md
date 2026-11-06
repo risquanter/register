@@ -6092,6 +6092,14 @@ defines `422` for a request whose "syntax … is correct, but it was unable to
 process the contained instructions", which a body-less `GET` naming an absent
 resource is not.
 
+**Extended 2026-11-06: delete and revert answer the same.** Both repositories
+failed a delete or an update of a tree the branch lacks, and a revert to a commit
+that lacks the tree, with `RepositoryFailure`, which answers `500` and logs a
+caller's mistake as a fault. A second delete of one tree from a scenario reached
+it, while the same second delete on `main` answered `404`, because the first had
+removed the tree from the workspace. All of these now raise
+`TreeAbsentAtRevision`, so one absence has one answer.
+
 ### EWB-D-68 — whether the workspace bootstrap answers `201` with a `Location` — RULED 2026-11-05
 
 **Goal.** A create answers `201` and names the new resource in `Location`

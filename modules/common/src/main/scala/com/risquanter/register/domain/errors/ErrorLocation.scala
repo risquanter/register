@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.iron.{
   CommitHash, MitigationId, NodeId, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong,
   SafeName, ScenarioName, SeedEntityId, SeedVarId, TreeId, given
 }
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** The key naming which case a value is, read by every decoder in this file and
   * published in every schema. Stated once so the two cannot disagree. */
@@ -78,7 +79,6 @@ object ErrorSubject:
 
   given schema: Schema[ErrorSubject] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = discriminated
     Schema.derived[ErrorSubject]
 
@@ -118,10 +118,6 @@ enum FieldName:
   case Id, Name, ParentId, ParentName, ChildIds, RootId, Nodes, Trees
   case SeedVarHighWater
 
-  /** How many entries a listing may return — the `n` parameter of the tree
-    * history endpoint. */
-  case Limit
-
   // Values a node declares
   case Probability, SeedVarId, SeedEntityId
 
@@ -145,14 +141,14 @@ enum FieldName:
   case PercentileQuantilePairing
 
   // Mitigations and the transform parameters a mitigation spec carries
-  case Mitigations, Precedence, Cap, Factor, OverrideParams, TargetingSource
+  case Mitigations, Precedence, Cap, Factor, TargetingSource
   case Deductible, Threshold
 
   // References to a revision or a branch
-  case Branch, Scenario, TreeId, At, Source, ToCommit, CommitHash, ContentHash
+  case Branch, Scenario, At, Source, ToCommit, CommitHash, ContentHash
 
   // Credentials, identity and configuration
-  case WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, Token, TraceId
+  case WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, TraceId
 
   // Computed values, which no request carries
   case AggregatedLoss, MitigatedResult
@@ -167,7 +163,6 @@ object FieldName:
 
   given schema: Schema[FieldName] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = discriminated
     Schema.derived[FieldName]
 
@@ -542,7 +537,6 @@ object FieldProblem:
 
   given schema: Schema[FieldProblem] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = discriminated
     Schema.derived[FieldProblem]
 

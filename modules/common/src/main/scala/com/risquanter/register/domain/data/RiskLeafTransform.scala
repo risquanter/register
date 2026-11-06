@@ -9,6 +9,7 @@ import com.risquanter.register.domain.data.iron.{
   OccurrenceProbability, PositiveDouble, PositiveDoubleConstraint, PositiveLong, ResidualProbability, RetentionFactor
 }
 import com.risquanter.register.domain.data.iron.given
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError
 }
@@ -39,7 +40,6 @@ object RelativeLikelihood {
   // from which fields are present.
   given schema: Schema[RelativeLikelihood] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.OpField)
     Schema.derived[RelativeLikelihood]
 }
@@ -71,7 +71,6 @@ object RelativeSeverity {
   // `RelativeLikelihood`'s.
   given schema: Schema[RelativeSeverity] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.OpField)
     Schema.derived[RelativeSeverity]
 }
@@ -111,7 +110,6 @@ object AbsoluteReplacement {
   // `DistributionShape`'s own schema through it.
   given schema: Schema[AbsoluteReplacement] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.ReplacesField)
     Schema.derived[AbsoluteReplacement]
 }

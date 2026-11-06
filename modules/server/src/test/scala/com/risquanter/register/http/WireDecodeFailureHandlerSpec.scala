@@ -16,7 +16,7 @@ import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{ScenarioName, TelemetryPlaceholders, ValidationMessages}
 import com.risquanter.register.domain.errors.{ErrorLocation, ExpectedInput, FieldProblem, RequestHeaderName, RequestQueryParam, ValidationErrorCode}
-import com.risquanter.register.http.codecs.IronTapirCodecs
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError
 import com.risquanter.register.telemetry.TelemetryLive
@@ -51,7 +51,6 @@ object WireDecodeFailureHandlerSpec extends ZIOSpecDefault with BaseEndpoint:
     * first and refines second, which is the shape all twelve share.
     */
   private def refusalOf(raw: String): Option[com.risquanter.register.domain.errors.ValidationError] =
-    import IronTapirCodecs.given
     summon[Codec[String, ScenarioName.ScenarioName, CodecFormat.TextPlain]].decode(raw) match
       case failure: DecodeResult.Failure => Some(WireDecodeFailureHandler.toValidationError(failure, branchInput))
       case _                             => None

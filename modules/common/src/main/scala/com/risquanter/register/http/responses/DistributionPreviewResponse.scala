@@ -7,6 +7,7 @@ import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.DistributionShape
 import com.risquanter.register.domain.data.iron.{MetalogTermCount, Probability}
 import com.risquanter.register.domain.data.iron.given
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** One sample point on a distribution preview curve. `x` is the loss at the
   * point and `pdf` the density there, both as the fitter computed them; `cdf`
@@ -18,7 +19,6 @@ final case class DistributionPreviewPoint(x: Double, pdf: Double, cdf: Probabili
 object DistributionPreviewPoint:
   given codec: JsonCodec[DistributionPreviewPoint] = DeriveJsonCodec.gen[DistributionPreviewPoint]
   given schema: Schema[DistributionPreviewPoint] =
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     Schema.derived[DistributionPreviewPoint]
 
 /** How the previewed curve was fitted, as a closed set (ADR-038 §2). A metalog
@@ -40,7 +40,6 @@ object PreviewFit:
     * between them. */
   given schema: Schema[PreviewFit] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(DistributionShape.TagField)
     Schema.derived[PreviewFit]
 

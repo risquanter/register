@@ -4,6 +4,7 @@ import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** One node's content-hash comparison between two revisions (ADR-032: the
   * domain content relation, so a renamed or moved node is `Identical`). */
@@ -25,7 +26,6 @@ object NodeChangeEntry:
   given codec: JsonCodec[NodeChangeEntry] = DeriveJsonCodec.gen[NodeChangeEntry]
   given schema: Schema[NodeChangeEntry] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     Schema.derived[NodeChangeEntry]
 
 /** The outcome of a changed-nodes comparison, as a closed set (ADR-038 §2). A

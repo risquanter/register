@@ -6,11 +6,11 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
+import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
 import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
-import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice}
+import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice, CommitHash}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
 
@@ -308,6 +308,54 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         yield assertTrue(
           answers.forall(_.code == StatusCode.NotFound),
           answers.forall(_.body.fromJson[WireError.NotFound].map(_.absence) == Right(absence))
+        )
+      },
+      /** Deleting a tree from a scenario removes it from that branch alone, so a
+        * second delete finds nothing there. That is the absence a read answers,
+        * and a revert to a commit lacking the tree answers likewise.
+        */
+      test("a delete or revert of a tree absent at the named revision answers the 404 a read does") {
+        val scenarioName = "fork-then-delete"
+        val scenario     = BranchChoice.Scenario(ScenarioName.fromString(scenarioName).toOption.get)
+        val missing      = CommitHash.fromString("a" * 40).toOption.get
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(sampleRequest())
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+          treeUri    = uri"${client.baseUrl}/w/$key/risk-trees/${bootstrap.tree.id.value}"
+
+          scenarioResp <- basicRequest
+            .post(uri"${client.baseUrl}/w/$key/scenarios")
+            .body(CreateScenarioRequest(
+              name = ScenarioName.fromString(scenarioName).toOption.get,
+              source = ScenarioSourceDto.Branch(BranchChoice.Main)
+            ))
+            .response(asJson[ScenarioResponse])
+            .send(client.backend)
+          _ <- ZIO.fromEither(scenarioResp.body)
+
+          onScenario = basicRequest.header("X-Branch", scenarioName).response(asStringAlways)
+          first   <- onScenario.delete(treeUri).send(client.backend)
+          second  <- onScenario.delete(treeUri).send(client.backend)
+          revert  <- basicRequest.header("X-Branch", "main").response(asStringAlways)
+            .post(uri"$treeUri/revert").body(RevertTreeRequest(missing))
+            .send(client.backend)
+          onMain  <- basicRequest.header("X-Branch", "main").response(asStringAlways)
+            .get(treeUri).send(client.backend)
+        yield assertTrue(
+          first.code == StatusCode.NoContent,
+          second.code == StatusCode.NotFound,
+          second.body.fromJson[WireError.NotFound].map(_.absence) == Right(NotFoundKind.TreeNotOnBranch(scenario)),
+          revert.code == StatusCode.NotFound,
+          revert.body.fromJson[WireError.NotFound].map(_.absence) == Right(NotFoundKind.TreeNotAtCommit()),
+          // The tree stays on main, and a delete there is what removes it from the workspace.
+          onMain.code == StatusCode.Ok
         )
       },
       /** The history read's limit defaults when absent and is refused at the

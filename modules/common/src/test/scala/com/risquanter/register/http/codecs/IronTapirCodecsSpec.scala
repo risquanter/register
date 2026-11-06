@@ -21,6 +21,7 @@ import com.risquanter.register.domain.data.iron.{
   WorkspaceKeySecret
 }
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** The contract every Iron codec in this file keeps at the HTTP boundary.
   *
@@ -39,8 +40,6 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
   * from the same client (ADR-035).
   */
 object IronTapirCodecsSpec extends ZIOSpecDefault:
-
-  import IronTapirCodecs.given
 
   /** The location these refinements are called with. A codec supplies its own
     * when it runs; here the refinement is called directly, only to obtain the

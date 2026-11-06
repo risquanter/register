@@ -6,6 +6,7 @@ import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, NodeId, SeedVarId}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Recursive ADT representing a risk hierarchy tree.
   *
@@ -37,7 +38,6 @@ sealed trait RiskNode {
 
 object RiskNode {
   import sttp.tapir.generic.auto.*
-  import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
   // Recursive JSON codec - handles nested structures
   given codec: JsonCodec[RiskNode] = DeriveJsonCodec.gen[RiskNode]

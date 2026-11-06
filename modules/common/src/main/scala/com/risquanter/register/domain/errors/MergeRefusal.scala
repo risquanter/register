@@ -4,6 +4,7 @@ import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.responses.MergeConflictEntry
 
 /** Why a merge was refused, as a closed set rather than a composed sentence.
@@ -59,7 +60,6 @@ object MergeRefusal:
     * every holder. */
   given schema: Schema[MergeRefusal] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[MergeRefusal]
 

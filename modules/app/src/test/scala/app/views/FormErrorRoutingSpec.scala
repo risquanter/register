@@ -55,18 +55,18 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
     * indexed cases. */
   private val everyField: List[FieldName] = List(
     FieldName.Id, FieldName.Name, FieldName.ParentId, FieldName.ParentName, FieldName.ChildIds,
-    FieldName.RootId, FieldName.Nodes, FieldName.Trees, FieldName.SeedVarHighWater, FieldName.Limit,
+    FieldName.RootId, FieldName.Nodes, FieldName.Trees, FieldName.SeedVarHighWater,
     FieldName.Probability, FieldName.SeedVarId, FieldName.SeedEntityId,
     FieldName.DistributionType, FieldName.Terms, FieldName.MinLoss, FieldName.MaxLoss, FieldName.Spec,
     FieldName.Percentiles, FieldName.Quantiles,
     FieldName.percentileAt(0), FieldName.quantileAt(0), FieldName.childAt(0),
     FieldName.LossRange, FieldName.PercentileQuantilePairing,
-    FieldName.Mitigations, FieldName.Cap, FieldName.Factor, FieldName.OverrideParams, FieldName.TargetingSource,
+    FieldName.Mitigations, FieldName.Cap, FieldName.Factor,FieldName.TargetingSource,
     FieldName.Deductible, FieldName.Threshold,
-    FieldName.Branch, FieldName.Scenario, FieldName.TreeId, FieldName.At, FieldName.Source,
+    FieldName.Branch, FieldName.Scenario, FieldName.At, FieldName.Source,
     FieldName.ToCommit, FieldName.CommitHash, FieldName.ContentHash,
     FieldName.WorkspaceKey, FieldName.WorkspaceKeyHash, FieldName.UserId, FieldName.Email, FieldName.Url,
-    FieldName.Token, FieldName.TraceId,
+    FieldName.TraceId,
     FieldName.AggregatedLoss, FieldName.MitigatedResult, FieldName.Unknown
   )
 

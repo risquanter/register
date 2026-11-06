@@ -1,6 +1,9 @@
 package com.risquanter.register.infra.irmin.model
 
 import _root_.zio.json.*
+import com.risquanter.register.infra.irmin.model.GetValueResponse.given
+import com.risquanter.register.infra.irmin.model.ListTreeResponse.given
+import com.risquanter.register.infra.irmin.model.SetValueResponse.given
 
 /**
   * GraphQL response wrapper types for Irmin queries.
@@ -149,7 +152,6 @@ final case class SetTreeData(
 )
 
 object SetTreeResponse:
-  import SetValueResponse.given  // Reuse CommitData and InfoData codecs
   given JsonCodec[SetTreeData] = DeriveJsonCodec.gen[SetTreeData]
   given JsonCodec[SetTreeResponse] = DeriveJsonCodec.gen[SetTreeResponse]
 
@@ -166,7 +168,6 @@ final case class RemoveValueData(
 )
 
 object RemoveValueResponse:
-  import SetValueResponse.given  // Reuse CommitData and InfoData codecs
   given JsonCodec[RemoveValueData] = DeriveJsonCodec.gen[RemoveValueData]
   given JsonCodec[RemoveValueResponse] = DeriveJsonCodec.gen[RemoveValueResponse]
 
@@ -183,7 +184,6 @@ final case class MergeCommitData(
 )
 
 object MergeCommitResponse:
-  import SetValueResponse.given
   given JsonCodec[MergeCommitData] = DeriveJsonCodec.gen[MergeCommitData]
   given JsonCodec[MergeCommitResponse] = DeriveJsonCodec.gen[MergeCommitResponse]
 
@@ -200,7 +200,6 @@ final case class RevertData(
 )
 
 object RevertResponse:
-  import SetValueResponse.given
   given JsonCodec[RevertData] = DeriveJsonCodec.gen[RevertData]
   given JsonCodec[RevertResponse] = DeriveJsonCodec.gen[RevertResponse]
 
@@ -239,7 +238,6 @@ final case class CommitTreeData(
 )
 
 object CommitTreeGetResponse:
-  import GetValueResponse.given  // Reuse TreeData codec
   given JsonCodec[CommitTreeData] = DeriveJsonCodec.gen[CommitTreeData]
   given JsonCodec[CommitTreeGetData] = DeriveJsonCodec.gen[CommitTreeGetData]
   given JsonCodec[CommitTreeGetResponse] = DeriveJsonCodec.gen[CommitTreeGetResponse]
@@ -262,7 +260,6 @@ final case class CommitListTreeData(
 )
 
 object CommitTreeListResponse:
-  import ListTreeResponse.given  // Reuse ListTreeTreeData / ListTreeGetTree / TreeNode codecs
   given JsonCodec[CommitListTreeData] = DeriveJsonCodec.gen[CommitListTreeData]
   given JsonCodec[CommitTreeListData] = DeriveJsonCodec.gen[CommitTreeListData]
   given JsonCodec[CommitTreeListResponse] = DeriveJsonCodec.gen[CommitTreeListResponse]
@@ -280,7 +277,6 @@ final case class CommitQueryData(
 )
 
 object CommitQueryResponse:
-  import SetValueResponse.given
   given JsonCodec[CommitQueryData] = DeriveJsonCodec.gen[CommitQueryData]
   given JsonCodec[CommitQueryResponse] = DeriveJsonCodec.gen[CommitQueryResponse]
 
@@ -302,7 +298,6 @@ final case class HistoryBranchData(
 )
 
 object HistoryResponse:
-  import SetValueResponse.given
   given JsonCodec[HistoryBranchData] = DeriveJsonCodec.gen[HistoryBranchData]
   given JsonCodec[HistoryData] = DeriveJsonCodec.gen[HistoryData]
   given JsonCodec[HistoryResponse] = DeriveJsonCodec.gen[HistoryResponse]
@@ -325,7 +320,6 @@ final case class LcaBranchData(
 )
 
 object LcaResponse:
-  import SetValueResponse.given
   given JsonCodec[LcaBranchData] = DeriveJsonCodec.gen[LcaBranchData]
   given JsonCodec[LcaData] = DeriveJsonCodec.gen[LcaData]
   given JsonCodec[LcaResponse] = DeriveJsonCodec.gen[LcaResponse]

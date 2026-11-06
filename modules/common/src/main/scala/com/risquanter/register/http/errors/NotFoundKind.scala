@@ -4,6 +4,7 @@ import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.iron.BranchChoice
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Which absence a `404` reports.
   *
@@ -41,6 +42,5 @@ object NotFoundKind:
     * object, and names the key that decides between them. */
   given schema: Schema[NotFoundKind] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[NotFoundKind]

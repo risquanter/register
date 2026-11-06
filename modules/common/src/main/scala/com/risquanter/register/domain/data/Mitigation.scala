@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.iron.{
   SafeName, ValidationUtil
 }
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** What a mitigation applies to; resolves server-side to the scoped node set. */
 sealed trait MitigationTarget
@@ -214,7 +215,6 @@ object MitigationSpec {
   // decoder reads.
   given schema: Schema[MitigationSpec] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(StageField)
     Schema.derived[MitigationSpec]
 }
@@ -306,7 +306,6 @@ object Mitigation {
   // widening implicit scope across the file.
   given schema: Schema[Mitigation] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     Schema.derived[Mitigation]
 }
 
@@ -326,6 +325,5 @@ object MitigationApplicationRecord {
   // Derived against a body-scoped import, for the same reason as `Mitigation`'s.
   given schema: Schema[MitigationApplicationRecord] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     Schema.derived[MitigationApplicationRecord]
 }

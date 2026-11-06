@@ -6,6 +6,7 @@ import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /**
  * Reified result-stage transform: pure data describing one atomic operation on
@@ -155,7 +156,6 @@ object ResultTransformSpec {
   // the key the decoder reads.
   given schema: Schema[ResultTransformSpec] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(OpField)
     Schema.derived[ResultTransformSpec]
 }

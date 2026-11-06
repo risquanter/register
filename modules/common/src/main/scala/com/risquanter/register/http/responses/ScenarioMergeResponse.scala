@@ -6,6 +6,7 @@ import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder, jsonDiscr
 import com.risquanter.register.domain.data.{Mitigation, RiskNode}
 import com.risquanter.register.domain.data.iron.{CommitHash, MitigationId, NodeId, SafeName, SeedVarId, TreeId}
 import com.risquanter.register.domain.errors.FieldName
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** The fields of a tree's `meta` value that a merge compares. The save time is
   * not among them: every save rewrites it, so two branches that both saved a
@@ -19,7 +20,6 @@ final case class TreeMetadataFields(
 object TreeMetadataFields:
   given codec: JsonCodec[TreeMetadataFields] = DeriveJsonCodec.gen[TreeMetadataFields]
   given schema: Schema[TreeMetadataFields] =
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     Schema.derived[TreeMetadataFields]
 
 /** One node, one mitigation or one tree's `meta` fields at the three points a
@@ -68,7 +68,6 @@ object TreeLabel:
     JsonCodec(JsonEncoder[SafeName.SafeName], JsonDecoder[SafeName.SafeName])
   given codec: JsonCodec[TreeLabel] = DeriveJsonCodec.gen[TreeLabel]
   given schema: Schema[TreeLabel] =
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     Schema.derived[TreeLabel]
 
 /** The Irmin contents at one path, which both branches changed since the fork
@@ -108,7 +107,6 @@ object MergeConflictEntry:
   given codec: JsonCodec[MergeConflictEntry] = DeriveJsonCodec.gen[MergeConflictEntry]
   given schema: Schema[MergeConflictEntry] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[MergeConflictEntry]
 
@@ -150,7 +148,6 @@ object MergePreviewStatus:
     * object, and names the key that decides between them. */
   given schema: Schema[MergePreviewStatus] =
     import sttp.tapir.generic.auto.*
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[MergePreviewStatus]
 

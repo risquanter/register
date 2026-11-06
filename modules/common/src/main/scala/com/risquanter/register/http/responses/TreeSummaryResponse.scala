@@ -4,7 +4,7 @@ import sttp.tapir.{Codec, CodecFormat, DecodeResult, Schema}
 import zio.json.{DeriveJsonCodec, JsonCodec}
 
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId}
-import com.risquanter.register.http.codecs.IronTapirCodecs
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** A tree's identity as the tree endpoints answer it: what a list, a write
   * acknowledgement and a bootstrap need to name the tree and address it. The
@@ -15,9 +15,7 @@ final case class TreeSummaryResponse(id: TreeId, name: SafeName.SafeName)
 
 object TreeSummaryResponse:
   given codec: JsonCodec[TreeSummaryResponse] = DeriveJsonCodec.gen[TreeSummaryResponse]
-  given schema: Schema[TreeSummaryResponse] =
-    import IronTapirCodecs.given
-    Schema.derived[TreeSummaryResponse]
+  given schema: Schema[TreeSummaryResponse] = Schema.derived[TreeSummaryResponse]
 
 /** The trees a workspace holds on one branch. */
 final case class TreeListResponse(trees: List[TreeSummaryResponse])
@@ -59,7 +57,6 @@ final case class TreeLocation(treeId: TreeId)
 
 object TreeLocation:
   private val treeIdCodec: Codec[String, TreeId, CodecFormat.TextPlain] =
-    import IronTapirCodecs.given
     summon[Codec[String, TreeId, CodecFormat.TextPlain]]
 
   given codec: Codec[String, TreeLocation, CodecFormat.TextPlain] =

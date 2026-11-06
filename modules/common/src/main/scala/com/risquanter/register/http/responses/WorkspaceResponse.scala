@@ -5,7 +5,7 @@ import sttp.tapir.{Codec, CodecFormat, Schema}
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, SeedEntityId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.given
-import com.risquanter.register.http.codecs.IronTapirCodecs
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** The bootstrap's answer: the new workspace's key, its first tree, and the
   * figures a client needs to reproduce it. One of the two answers that carry
@@ -33,7 +33,6 @@ final case class WorkspaceLocation(key: WorkspaceKeySecret)
 
 object WorkspaceLocation:
   private val keyCodec: Codec[String, WorkspaceKeySecret, CodecFormat.TextPlain] =
-    import IronTapirCodecs.given
     summon[Codec[String, WorkspaceKeySecret, CodecFormat.TextPlain]]
 
   /** Both directions go through the key's own codec, so this adds no site that
@@ -56,6 +55,4 @@ final case class EvictExpiredResponse(evicted: NonNegativeInt)
 
 object EvictExpiredResponse:
   given codec: JsonCodec[EvictExpiredResponse] = DeriveJsonCodec.gen[EvictExpiredResponse]
-  given schema: Schema[EvictExpiredResponse] =
-    import IronTapirCodecs.given
-    Schema.derived[EvictExpiredResponse]
+  given schema: Schema[EvictExpiredResponse] = Schema.derived[EvictExpiredResponse]

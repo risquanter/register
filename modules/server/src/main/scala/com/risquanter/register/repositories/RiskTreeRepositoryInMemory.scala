@@ -4,7 +4,7 @@ import zio.*
 import zio.json.EncoderOps
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, RepositoryFailure, TreeLoadFailure, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, ValidationFailed, ValidationError}
 
 /** In-memory implementation of RiskTreeRepository for testing and development.
   *
@@ -64,7 +64,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       ZIO.suspendSucceed {
         val key = (wsId, id)
         db.get(key) match
-          case None           => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
+          case None           => ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
           case Some(riskTree) =>
             val updated = op(riskTree)
             ZIO.succeed {
@@ -81,7 +81,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       ZIO.suspendSucceed {
         val key = (wsId, id)
         db.get(key) match
-          case None           => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
+          case None           => ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
           case Some(riskTree) =>
             ZIO.succeed {
               db -= key

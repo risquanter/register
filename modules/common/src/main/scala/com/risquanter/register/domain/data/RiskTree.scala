@@ -3,6 +3,7 @@ package com.risquanter.register.domain.data
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeName, TreeId, NodeId, SeedVarId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.responses.TreeSummaryResponse
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import zio.prelude.Validation
@@ -53,7 +54,6 @@ final case class RiskTree private (
 object RiskTree {
   import sttp.tapir.Schema
   import sttp.tapir.generic.auto.*
-  import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
   /** Wire form: the tree's serialised fields, omitting the index, which is
     * rebuilt from the nodes on decode (ADR-038 §1).

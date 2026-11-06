@@ -4,6 +4,7 @@ import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, jsonDiscriminator}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron.{MetalogTermCount, PositiveLong, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /**
  * All inputs needed to reproduce one leaf's simulation: HDR seed hierarchy, distribution
@@ -104,7 +105,6 @@ object DistributionParams {
   given schema: Schema[DistributionParams] =
     import sttp.tapir.generic.auto.*
     import sttp.tapir.generic.Configuration
-    import com.risquanter.register.http.codecs.IronTapirCodecs.given
     given Configuration = Configuration.default.withDiscriminator(DistributionShape.TagField)
     Schema.derived[DistributionParams]
 }

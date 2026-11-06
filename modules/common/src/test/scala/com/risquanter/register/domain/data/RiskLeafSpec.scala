@@ -8,6 +8,7 @@ import zio.prelude.Validation
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError
 }
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.testutil.TestHelpers.{metalogShape, idStr, lognormalShape, nodeId, unsafeGet}
 
 /** What `RiskLeaf.create` refines, and nothing else.
@@ -136,7 +137,6 @@ object RiskLeafSpec extends ZIOSpecDefault {
         import sttp.tapir.Schema
         import sttp.tapir.SchemaType
         import sttp.tapir.generic.auto.*
-        import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
         def namesOf(s: Schema[?]): List[String] = s.schemaType match
           case p: SchemaType.SProduct[?] => p.fields.map(_.name.encodedName)

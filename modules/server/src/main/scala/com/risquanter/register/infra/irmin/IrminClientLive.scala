@@ -11,6 +11,8 @@ import com.risquanter.register.domain.errors.*
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
 import com.risquanter.register.infra.irmin.model.*
 import com.risquanter.register.infra.irmin.model.ListTreeResponse
+import com.risquanter.register.infra.irmin.model.GraphQLError.given
+import com.risquanter.register.infra.irmin.model.SetValueResponse.given
 
 import java.net.ConnectException
 import java.util.concurrent.TimeoutException as JTimeoutException
@@ -372,8 +374,6 @@ private final case class HeadCommit(
 )
 
 private object MainBranchResponse:
-  import SetValueResponse.given  // For InfoData codec
-  import GraphQLError.given      // For GraphQLError codec
   given JsonCodec[HeadCommit] = DeriveJsonCodec.gen[HeadCommit]
   given JsonCodec[MainBranchInfo] = DeriveJsonCodec.gen[MainBranchInfo]
   given JsonCodec[MainBranchResponseData] = DeriveJsonCodec.gen[MainBranchResponseData]
