@@ -1,15 +1,11 @@
 package com.risquanter.register.http.sse
 
 import sttp.tapir.*
-import sttp.tapir.server.ServerEndpoint
 import sttp.capabilities.zio.ZioStreams
-import sttp.model.MediaType
-import zio.*
-import zio.stream.*
 
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.TreeId
 
 /**
   * SSE endpoint definitions for real-time updates.
@@ -61,7 +57,7 @@ trait SSEEndpoints extends BaseEndpoint {
           |```
           |""".stripMargin
       )
-      .in("w" / path[WorkspaceKeySecret]("key") / "events" / "tree" / path[TreeId]("treeId"))
+      .in(workspaceRoute / "events" / "tree" / path[TreeId]("treeId"))
       .get
       .out(
         streamBody(ZioStreams)(

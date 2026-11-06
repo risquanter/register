@@ -3,13 +3,18 @@ package com.risquanter.register.http.endpoints
 import sttp.model.{Header, StatusCode}
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
-import sttp.tapir.generic.auto.*
+import sttp.tapir.generic.auto.schemaForCaseClass
 import com.risquanter.register.http.errors.WireError
+import com.risquanter.register.http.responses.LocationRoute
 import com.risquanter.register.domain.errors.RequestHeaderName
-import com.risquanter.register.domain.data.iron.{BranchChoice, UserId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 object BaseEndpoint {
+
+  /** The route `POST /workspaces` answers on, chosen by this API. The security
+    * headers interceptor matches the same segment. */
+  final val BootstrapSegment = "workspaces"
 
   /** The `500` output: the status and the body `WireError.InternalFault` is sent
     * with.
@@ -122,4 +127,16 @@ trait BaseEndpoint {
   val branchHeader: EndpointInput[BranchChoice] =
     header[BranchChoice](RequestHeaderName.Branch.wireName)
       .description("Target branch: \"main\" or a scenario name. Required.")
+
+  /** `/w/{key}`: every workspace-scoped route starts here. */
+  val workspaceRoute: EndpointInput[WorkspaceKeySecret] =
+    LocationRoute.Workspace.segment / path[WorkspaceKeySecret]("key")
+
+  /** `/w/{key}/risk-trees`: the route a tree create answers on. */
+  val treesRoute: EndpointInput[WorkspaceKeySecret] =
+    workspaceRoute / LocationRoute.Tree.segment
+
+  /** `/w/{key}/risk-trees/{treeId}`: every route addressing one tree starts here. */
+  val treeRoute: EndpointInput[(WorkspaceKeySecret, TreeId)] =
+    treesRoute / path[TreeId]("treeId")
 }

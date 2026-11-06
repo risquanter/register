@@ -303,3 +303,5 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/app/src/main/scala/app/components/TreeNodeRow.scala
 - modules/common/src/main/scala/com/risquanter/register/domain/data/LeafSimContent.scala
 - modules/server/src/main/scala/com/risquanter/register/simulation/RiskSampler.scala
+- modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceQueryEndpoints.scala
+- modules/server/src/main/scala/com/risquanter/register/http/SecurityHeadersInterceptor.scala

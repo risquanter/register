@@ -8,6 +8,7 @@ import sttp.tapir.server.interceptor.{EndpointInterceptor, RequestHandler, Reque
 import zio.{Task, ZIO}
 import zio.telemetry.opentelemetry.tracing.Tracing
 
+import com.risquanter.register.http.responses.LocationRoute
 import com.risquanter.register.telemetry.ActiveTrace
 
 /** Tapir request interceptor that opens one SERVER span per request.
@@ -88,7 +89,8 @@ object RequestSpanInterceptor:
     */
   private[register] def spanName(request: ServerRequest): String =
     val family = request.pathSegments match
-      case "w" :: _     => s"/w/$RedactedKeySegment"
+      case LocationRoute.Workspace.segment :: _ =>
+        s"/${LocationRoute.Workspace.segment}/$RedactedKeySegment"
       case segment :: _ => s"/$segment"
       case Nil          => "/"
     s"${request.method.method} $family"

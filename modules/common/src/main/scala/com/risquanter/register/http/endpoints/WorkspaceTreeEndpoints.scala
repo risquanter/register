@@ -3,13 +3,13 @@ package com.risquanter.register.http.endpoints
 import sttp.model.StatusCode
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
-import sttp.tapir.generic.auto.*
+import sttp.tapir.generic.auto.schemaForCaseClass
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.http.requests.{RiskTreeUpdateRequest, RevertTreeRequest}
 import com.risquanter.register.http.responses.{TreeSummaryResponse, ChangedNodesResponse, TreeHistoryResponse}
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, CommitHash, BranchChoice, PositiveInt}
+import com.risquanter.register.domain.data.iron.{CommitHash, BranchChoice, PositiveInt}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Workspace-scoped tree endpoints.
@@ -35,7 +35,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("getWorkspaceTreeById")
       .description("Get tree summary (workspace-scoped)")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
+      .in(treeRoute)
       .get
       .in(branchHeader)
       .out(jsonBody[TreeSummaryResponse])
@@ -45,7 +45,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("getWorkspaceTreeStructure")
       .description("Get full tree structure (workspace-scoped); optional `at` commit pin for point-in-time reads")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "structure")
+      .in(treeRoute / "structure")
       .get
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
@@ -63,7 +63,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("getChangedNodes")
       .description("Content-hash changed nodes of a tree between two revisions — no value-level comparison")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "changed-nodes")
+      .in(treeRoute / "changed-nodes")
       .get
       .in(query[BranchChoice]("a"))
       .in(query[Option[CommitHash]]("aAt"))
@@ -80,7 +80,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("getTreeHistory")
       .description("Per-tree commit history on a branch, oldest first")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "history")
+      .in(treeRoute / "history")
       .get
       .in(branchHeader)
       .in(query[PositiveInt]("n").default(WorkspaceTreeEndpoints.DefaultHistoryLimit))
@@ -95,7 +95,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("revertTree")
       .description("Revert a tree to a chosen commit as one forward commit (per-tree)")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "revert")
+      .in(treeRoute / "revert")
       .post
       .in(branchHeader)
       .in(jsonBody[RevertTreeRequest])
@@ -106,7 +106,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("updateWorkspaceTree")
       .description("Full replacement update of tree (workspace-scoped)")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
+      .in(treeRoute)
       .put
       .in(jsonBody[RiskTreeUpdateRequest])
       .in(branchHeader)
@@ -119,7 +119,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("deleteWorkspaceTree")
       .description("Delete a single tree from workspace")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
+      .in(treeRoute)
       .delete
       .in(branchHeader)
       .out(statusCode(StatusCode.NoContent))

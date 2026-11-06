@@ -5,12 +5,15 @@ import sttp.tapir.model.ServerRequest
 import sttp.tapir.server.interceptor.{RequestInterceptor, RequestResult}
 import zio.Task
 
+import com.risquanter.register.http.endpoints.BaseEndpoint
+import com.risquanter.register.http.responses.LocationRoute
+
 /** Tapir request interceptor that appends security response headers.
   *
   * Two header sets are applied:
-  *  - '''Global''' (A21–A23): `X-Frame-Options`, `X-XSS-Protection`,
+  *  - '''Global''': `X-Frame-Options`, `X-XSS-Protection`,
   *    `Content-Security-Policy` — added to every response.
-  *  - '''Workspace-specific''' (A1–A4): `Referrer-Policy`, `Cache-Control`,
+  *  - '''Workspace-specific''': `Referrer-Policy`, `Cache-Control`,
   *    `X-Content-Type-Options`, `Strict-Transport-Security` — added only to
   *    responses for `/w/…` and `/workspaces` paths, to prevent workspace-key
   *    leakage.
@@ -26,7 +29,7 @@ object SecurityHeadersInterceptor:
 
   // ── Header constants ───────────────────────────────────────────────
 
-  /** Global security headers applied to every response (A21-A23). */
+  /** Global security headers applied to every response. */
   private[http] val globalHeaders: Seq[Header] = Seq(
     Header("X-Frame-Options", "DENY"),
     Header("X-XSS-Protection", "0"),
@@ -34,7 +37,7 @@ object SecurityHeadersInterceptor:
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'")
   )
 
-  /** Workspace-specific headers for key leakage prevention (A1-A4). */
+  /** Workspace-specific headers for key leakage prevention. */
   private[http] val workspaceHeaders: Seq[Header] = Seq(
     Header("Referrer-Policy", "no-referrer"),
     Header("Cache-Control", "no-store"),
@@ -49,9 +52,9 @@ object SecurityHeadersInterceptor:
     */
   private[http] def isWorkspacePath(segments: List[String]): Boolean =
     segments match
-      case "w" :: _          => true   // /w/{key}/…
-      case "workspaces" :: _ => true   // /workspaces (bootstrap)
-      case _                 => false
+      case LocationRoute.Workspace.segment :: _ => true   // /w/{key}/…
+      case BaseEndpoint.BootstrapSegment :: _   => true   // /workspaces (bootstrap)
+      case _                                    => false
 
   // ── Interceptor factory ────────────────────────────────────────────
 

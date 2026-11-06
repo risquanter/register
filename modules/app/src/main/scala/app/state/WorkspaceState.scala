@@ -1,12 +1,12 @@
 package app.state
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.http.responses.TreeSummaryResponse
+import com.risquanter.register.http.responses.{LocationRoute, TreeSummaryResponse}
 
 import app.core.ZJS.*
 import app.core.{BackendClient, RequestFailure}
@@ -32,7 +32,8 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
 
   // ── URL management ────────────────────────────────────────────
 
-  private val workspacePathPattern = "^/w/([A-Za-z0-9_-]{22})(?:/.*)?$".r
+  private val workspacePathPattern =
+    s"^/${LocationRoute.Workspace.segment}/([A-Za-z0-9_-]{22})(?:/.*)?$$".r
 
   /** The active workspace key. None until bootstrap or pre-validation succeeds. */
   val workspaceKey: Var[Option[WorkspaceKeySecret]] = Var(extractKeyFromURL())
@@ -48,7 +49,6 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
 
   /** Current user identity for API calls.
     * Layer 0 (capability-only): always None — x-user-id header absent.
-    * Layer 1+ (Task L1.3): replace with AuthState.currentUserId signal.
     */
   def currentUserId: Option[UserId.Authenticated] = None
 
@@ -62,7 +62,7 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
 
   /** Push workspace key into the browser URL (no page reload). */
   private def pushKeyToURL(key: WorkspaceKeySecret): Unit =
-    dom.window.history.replaceState(null, "", s"/w/${key.reveal}")
+    dom.window.history.replaceState(null, "", s"/${LocationRoute.Workspace.segment}/${key.reveal}")
 
   /** Reset URL to root (used when clearing a stale key). */
   private def clearURL(): Unit =

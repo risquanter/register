@@ -2,12 +2,13 @@ package com.risquanter.register.http.endpoints
 
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
-import sttp.tapir.generic.auto.*
+import sttp.tapir.generic.auto.schemaForCaseClass
 import sttp.model.{HeaderNames, StatusCode}
 
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{EvictExpiredResponse, TreeListResponse, TreeLocation, TreeSummaryResponse, WorkspaceBootstrapResponse, WorkspaceLocation, WorkspaceRotateResponse}
-import com.risquanter.register.domain.data.iron.{SeedEntityId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{SeedEntityId, UserId}
+import com.risquanter.register.domain.errors.RequestHeaderName
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Workspace lifecycle API endpoints.
@@ -27,9 +28,9 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("bootstrapWorkspace")
       .description("Create workspace + first tree")
-      .in("workspaces")
+      .in(BaseEndpoint.BootstrapSegment)
       .post
-      .in(header[Option[UserId.Authenticated]]("x-user-id"))
+      .in(header[Option[UserId.Authenticated]](RequestHeaderName.UserId.wireName))
       .in(query[Option[SeedEntityId.SeedEntityId]]("seedEntityId")
         .description("HDR Entity-axis seed for the new workspace (1..99999999). Omit to auto-assign; provide to reproduce an exported workspace's figures."))
       .in(jsonBody[RiskTreeDefinitionRequest])
@@ -42,7 +43,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("listWorkspaceTrees")
       .description("List trees in workspace")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
+      .in(treesRoute)
       .get
       .in(branchHeader)
       .out(jsonBody[TreeListResponse])
@@ -52,7 +53,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("createWorkspaceTree")
       .description("Create tree in workspace")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
+      .in(treesRoute)
       .post
       .in(jsonBody[RiskTreeDefinitionRequest])
       .in(branchHeader)
@@ -65,7 +66,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("rotateWorkspace")
       .description("Rotate workspace key (instant revocation)")
-      .in("w" / path[WorkspaceKeySecret]("key") / "rotate")
+      .in(workspaceRoute / "rotate")
       .post
       .out(jsonBody[WorkspaceRotateResponse])
 
@@ -74,7 +75,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("deleteWorkspace")
       .description("Hard delete workspace + all associated trees")
-      .in("w" / path[WorkspaceKeySecret]("key"))
+      .in(workspaceRoute)
       .delete
       .out(statusCode(StatusCode.NoContent))
 

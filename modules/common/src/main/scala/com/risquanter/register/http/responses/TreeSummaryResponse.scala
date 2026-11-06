@@ -24,12 +24,17 @@ object TreeListResponse:
   given codec: JsonCodec[TreeListResponse] = DeriveJsonCodec.gen[TreeListResponse]
   given schema: Schema[TreeListResponse] = Schema.derived[TreeListResponse]
 
-/** The route a create names in `Location`. Each prefix is a contract with the
-  * route it resolves to, so it is declared rather than derived.
+/** The routes a create names in `Location`, and the one spelling of each route's
+  * path segment. Every endpoint under the route and every site that matches it
+  * reads `segment`. A segment is a contract with the URL a client holds, so it is
+  * declared rather than derived.
   */
-enum LocationRoute(val prefix: String):
-  case Workspace extends LocationRoute("w/")
-  case Tree      extends LocationRoute("risk-trees/")
+enum LocationRoute(val segment: String):
+  case Workspace extends LocationRoute("w")
+  case Tree      extends LocationRoute("risk-trees")
+
+  /** The segment as a `Location` value's leading text. */
+  def prefix: String = s"$segment/"
 
 /** A `Location` value as a route's prefix followed by one encoded value. Render
   * and parse form one pair: `parse(render(l)) == Value(l)`. A value without the
