@@ -92,8 +92,8 @@ finite sample), but the chart avoids presenting them as reliable visual facts.
   meaningful point, so the rendered line visually descends toward zero rather
   than terminating abruptly at a non-zero value.
 
-- **Configurable**: the threshold is defined as `LECGenerator.tailCutoff` and
-  can be adjusted if requirements change (e.g., a future regulatory context
+- **Configurable**: the threshold is the `register.simulation.curveTailCutoff`
+  setting and can be adjusted if requirements change (e.g., a future regulatory context
   demands 1-in-250 or 1-in-100 floors).
 
 ---

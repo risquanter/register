@@ -67,8 +67,8 @@ Confirmed by reading the current sources:
   `probabilityOfNoLoss`, `findQuantileLoss`.
 - `generateCurvePointsMulti[K]` — a shared-tick multi-curve overlay engine
   (already used for comparisons); the base-vs-mitigated overlay reuses it.
-- `val tailCutoff: Double = 0.005` — display trims at 0.5% exceedance (1-in-200,
-  Solvency II); the full sample is retained behind the trimmed curve.
+- The `register.simulation.curveTailCutoff` setting, 0.005 by default — display
+  trims at 0.5% exceedance (1-in-200, Solvency II); the full sample is retained behind the trimmed curve.
 - **No TVaR method exists.** This is the one genuinely missing engine output.
 
 **`modules/common/.../domain/data/LEC.scala`**
