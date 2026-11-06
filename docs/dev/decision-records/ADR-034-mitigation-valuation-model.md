@@ -167,7 +167,7 @@ Adding a transform therefore means deciding its annihilating case against the
 layer check, rather than assuming a factor bound covers it.
 
 One thing is not an instance of the rule: `applyDeductible` and `scaleLosses` end
-with `.filter(_._2 > 0)`. `TrialOutcomes.outcomeOf` reads an absent trial as `0L`,
+with `.filterLosses(_ > 0L)`. `TrialOutcomes.outcomeOf` reads an absent trial as `0L`,
 so a stored zero and an absent entry are the same value and the filter puts a zero
 into its canonical form. No outcome is discarded.
 

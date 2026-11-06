@@ -2394,41 +2394,27 @@ without identity.
 
 ---
 
-**ETag / `baseVersion` conflict detection — how it works**
+**`ETag` / `If-Match` conflict detection — how it works**
 
 This is the core of Phase 6 correctness. "ETag" is borrowed from HTTP semantics: an
 opaque token that identifies a specific version of a resource. Here the token is the
 **Irmin commit hash** of the tree at the moment a user loaded it.
 
-**Wire protocol:**
-```
-GET  /w/{key}/trees/{id}          →  200 { ...treeData, "version": "a3f9c2..." }
-PUT  /w/{key}/trees/{id}/nodes/{n}  body: { ...edit, "baseVersion": "a3f9c2..." }
-```
-
-**Server-side check (ConflictDetector):**
-```
-1. Client loads tree at commit C1 ("a3f9c2...") — server returns version in response
-2. Client edits a node and submits PUT with baseVersion = "a3f9c2..."
-3. Server asks Irmin: what is current head?
-   a. Head == C1 → no concurrent edit → apply mutation → new commit C2 → 200 OK
-   b. Head == C2 (someone else committed) → fetch C1..C2 diff
-      - diff touches a DIFFERENT path  → apply mutation (clean merge) → 200 OK
-      - diff touches the SAME path     → 409 Conflict { "currentVersion": "...", "conflictingUserId": "..." }
-4. On 409: client reloads node at current version, user re-applies their change, resubmits
-```
+**Wire protocol and server-side check:** a tree read answers the tree's version in
+`ETag`, and a save sends it back in `If-Match`. See
+`PLAN-TREE-WRITE-CONCURRENCY.md` TWC-D-1, TWC-D-2 and TWC-D-5.
 
 **Concrete timeline:**
 ```
-t=0   Alice loads node X at commit C1
-t=0   Bob   loads node X at commit C1
+t=0   Alice loads tree T at version C1
+t=0   Bob   loads tree T at version C1
 
-t=5s  Alice submits PUT { nodeX edit, baseVersion: C1 }
-      → head == C1 → accepted → head advances to C2
+t=5s  Alice submits PUT with If-Match: C1
+      → T's version is C1 → accepted → T's version advances to C2
 
-t=6s  Bob   submits PUT { nodeX edit, baseVersion: C1 }
-      → head == C2 ≠ C1, same path → 409 Conflict
-      → Bob sees "conflict — Alice just updated this node" → reloads → retries
+t=6s  Bob   submits PUT with If-Match: C1
+      → T's version is C2 ≠ C1 → refused
+      → Bob sees "conflict — this tree was just updated" → reloads → retries
 ```
 
 This is optimistic concurrency control: no locks, no coordination, just a version check
@@ -2461,7 +2447,7 @@ This extends the existing `SSEHub` infrastructure. The `SSEHub` handles per-tree
 service/collaboration/ConflictDetector.scala
 ```
 
-- Track `baseVersion` (Irmin commit hash) on edit requests
+- Read the `If-Match` version (Irmin commit hash) on edit requests
 - Compare with current head commit before applying mutation
 - Return `EditResult.Success` or `EditResult.Conflict` with conflict info
 - Uses Irmin's content-addressed hashes for conflict detection
@@ -2470,7 +2456,7 @@ service/collaboration/ConflictDetector.scala
 
 #### Task 4: Update Mutation Endpoints
 
-- Accept `baseVersion` (ETag) in edit requests
+- Accept `If-Match` in edit requests
 - Check for conflicts before applying changes
 - Broadcast events after successful mutation
 - Exclude originator from broadcast (no self-echo)
@@ -2729,14 +2715,14 @@ Upon completing Tier 3, promote the following proposals:
 
 **Status: DEFERRED — post-Tier-4, low priority**
 
-A soft lock would warn User B ("Alice is editing this node") before they begin typing, reducing the chance of hitting the `baseVersion` ETag rejection. The concept was listed as a WebSocket advantage, but analysis shows its value is substantially superseded by other mechanisms already in the plan:
+A soft lock would warn User B ("Alice is editing this node") before they begin typing, reducing the chance of hitting the `If-Match` rejection. The concept was listed as a WebSocket advantage, but analysis shows its value is substantially superseded by other mechanisms already in the plan:
 
 **Use cases and what already handles them:**
 
 | Case | Soft lock prevents | What actually handles it |
 |------|--------------------|--------------------------|
 | Two users edit **different nodes** on the same tree | Not applicable | Irmin: different paths → clean three-way merge, zero conflict |
-| Two users edit **same node** concurrently on main | Race to same field | Phase 6 `ConflictDetector`: `baseVersion` ETag check rejects stale submitter — correct outcome, user retries |
+| Two users edit **same node** concurrently on main | Race to same field | Phase 6 `ConflictDetector`: `If-Match` check rejects stale submitter — correct outcome, user retries |
 | User A edits, User B working on a scenario branch | Not applicable | Irmin scenario branch gives complete isolation — no conflict possible until deliberate merge |
 | User A edits node, User B deletes it | Deletion not lockable | Neither mechanism covers this cleanly; both leave residual conflict at UX layer |
 
