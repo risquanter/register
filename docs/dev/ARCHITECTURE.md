@@ -213,7 +213,7 @@ RiskNode (sealed trait)
 ├── RiskLeaf (terminal node - actual risk)
 │   ├── id: NodeId                              // ULID-based nominal wrapper
 │   ├── name: SafeName
-│   ├── probability: OccurrenceProbability (0.0 <= p <= 1.0)
+│   ├── probability: Probability (0.0 <= p <= 1.0)
 │   ├── shape: DistributionShape                 // one of the two modes below
 │   │   ├── Metalog(anchors, terms)              // percentiles paired with losses
 │   │   └── Lognormal(bounds)                    // the 90% interval's two bounds
@@ -406,7 +406,7 @@ LossDistribution (leaf content cached in ContentCache by ContentHash; portfolios
   ↓
 LECCurve.probOfExceedance(threshold)
   ↓
-OccurrenceProbability (JSON number in [0, 1])
+Probability (JSON number in [0, 1])
 ```
 
 `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi` takes the same path for

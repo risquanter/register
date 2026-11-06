@@ -63,7 +63,7 @@ Each case carries its own payload, so a match is exhaustive and the reader needs
 .out(jsonBody[Double])
 
 // GOOD: the reader learns the closed interval, and decoding rejects anything outside it
-.out(jsonBody[OccurrenceProbability])
+.out(jsonBody[Probability])
 ```
 
 This covers a map's key type as much as a field, and a response body is never a bare primitive or a bare collection.

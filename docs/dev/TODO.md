@@ -2581,7 +2581,7 @@ childless portfolio.
 
 **What is not duplicated, for contrast.** Every field-level rule has one
 definition that both sides call. A leaf's occurrence probability is refined by
-`ValidationUtil.refineOccurrenceProbability`, which carries the single
+`ValidationUtil.refineProbability`, which carries the single
 `GreaterEqual[0.0] & LessEqual[1.0]` constraint in the codebase, so that rule
 cannot drift between the two sides. The duplication is confined to the rules over
 the assembled node set.

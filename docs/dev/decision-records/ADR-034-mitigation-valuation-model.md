@@ -141,7 +141,7 @@ on whether the parameter annihilates on its own.
 `AbsoluteReplacement.Likelihood` takes a
 `ResidualProbability` and `CapLosses` a `PositiveLong`, so a probability of zero
 and a cap of zero are refused before any handler runs. `ResidualProbability` is
-deliberately narrower than `OccurrenceProbability`: an author may declare a leaf
+deliberately narrower than `Probability`: an author may declare a leaf
 that never occurs, which is a statement about the world, while a mitigation may
 not set the probability to zero, which claims a control cannot fail.
 

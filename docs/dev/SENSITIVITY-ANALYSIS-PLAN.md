@@ -109,7 +109,7 @@ the sweep loop stays ignorant of *how* a leaf is modified.
 enum LeafPerturbation:
   case ScaleUpperLoss(factor: Double)
   case ScaleProbability(factor: Double)
-  case SetProbability(p: OccurrenceProbability)
+  case SetProbability(p: Probability)
   // extend as needed
 
 /** Pure, structural identity preserved (only params change). */

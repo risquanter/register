@@ -499,7 +499,7 @@ rather than an `Override` case inside each component:
 sealed trait RelativeLikelihood        // Keep | Scale(factor: RetentionFactor)
 sealed trait RelativeSeverity          // Keep | ScaleSeverity(factor: RetentionFactor)
 sealed trait AbsoluteReplacement       // Likelihood(probability) | Severity(shape) | Both(probability, shape)
-final case class LeafParams(probability: OccurrenceProbability, shape: DistributionShape)
+final case class LeafParams(probability: Probability, shape: DistributionShape)
 object RiskLeafTransform               // no constructor: the severity-scaling arithmetic only
 ```
 
@@ -521,7 +521,7 @@ object LikelihoodTransform {
   case object Keep extends LikelihoodTransform                              // identity component
   final case class Scale(factor: RetentionFactor) extends LikelihoodTransform
       // factor and probability are both at most 1, so probability × factor stays
-      // inside OccurrenceProbability's closed [0, 1] domain and needs no clamp
+      // inside Probability's closed [0, 1] domain and needs no clamp
   final case class Override(probability: ResidualProbability) extends LikelihoodTransform
       // strictly above zero: an author may declare a leaf that never occurs,
       // a mitigation may not assert that a risk has been prevented
@@ -5060,21 +5060,20 @@ there.
    typed `MitigationId` payload + register-provided
    `given Extract[MitigationId]`. Convention application, not a new
    decision.
-4. **Probability-type naming cleanup — boyscout scope of the first phase
-   whose file inventory covers `iron/OpaqueTypes.scala`,
-   `iron/ValidationUtil.scala`, `RiskNode.scala` (the §9 hardening phase is
-   the natural host).** RULED (user, 2026-08-14): rename the open-interval
-   metalog-only type `Probability` → **`MetalogPercentile`** (with
-   `ValidationUtil.refineProbability`; it has no production caller — decide
-   rename vs delete at that pass); fix the stale `RiskNode` scaladoc that
-   documents the leaf field as `Probability (0<p<1)` when the field is
-   `OccurrenceProbability` [0,1]; reword `OccurrenceProbability`'s
-   "semantically distinct from Probability" comment to describe the interval
-   difference. Explicitly ruled OUT (do not reopen): a general
-   `EventProbability` rename, nominal occurrence-vs-exceedance separation,
-   and typing `probOfExceedance` (stays `Double`) — occurrence and
-   exceedance probability are the same semantic type; roles live in
-   field/method names.
+4. **Probability-type naming — boyscout scope of the first phase whose file
+   inventory covers `iron/OpaqueTypes.scala`, `iron/ValidationUtil.scala`,
+   `RiskNode.scala` (the §9 hardening phase is the natural host).** RULED
+   (user): the open-interval type, which metalog anchors and the preview grid
+   use, is **`OpenProbability`**, refined by
+   `ValidationUtil.refineOpenProbability`. The closed-interval type, which a
+   leaf's likelihood and every probability read off the trials use, is
+   **`Probability`**, refined by `ValidationUtil.refineProbability`.
+   `probOfExceedance` returns `Probability`. The `RiskNode` scaladoc documents
+   the leaf field as `Probability` [0,1], and `Probability`'s comment describes
+   the interval difference. Explicitly ruled OUT (do not reopen): a general
+   `EventProbability` rename and nominal occurrence-vs-exceedance separation —
+   occurrence and exceedance probability are the same semantic type; roles
+   live in field/method names.
 
 ### 8.8 M2 resolver-edge rulings (2026-08-15)
 

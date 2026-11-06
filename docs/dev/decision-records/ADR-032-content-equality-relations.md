@@ -30,7 +30,7 @@ The projections differ deliberately:
 // Domain relation input — simulation-relevant fields only:
 final case class LeafSimContent(
   seedVarId: SeedVarId.SeedVarId,
-  probability: OccurrenceProbability,
+  probability: Probability,
   shape: DistributionShape
 )
 

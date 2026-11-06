@@ -2774,8 +2774,8 @@ exercised on a small surface before the largest one:
    the shape ADR-038 §2 names. They are one coproduct, `PreviewFit`, tagged
    under `DistributionShape.TagField` with the case names `Metalog` and
    `Lognormal`, and `EWB-D-64` rules that the anchor count leaves the wire. A
-   point's `cdf` is a `Probability`, typed once at the grid. Two files joined
-   the list: `OpaqueTypes.scala`, where `MetalogTermCount` and `Probability`
+   point's `cdf` is a `OpenProbability`, typed once at the grid. Two files joined
+   the list: `OpaqueTypes.scala`, where `MetalogTermCount` and `OpenProbability`
    gain the JSON codecs the derived codecs need and two comments naming the
    old response are corrected, and `DistributionShape.scala`, whose
    `termsToFit` comment now names the grid as the other justified
@@ -2785,7 +2785,7 @@ exercised on a small surface before the largest one:
    is a `String` where `SafeName` exists, and its `quantiles` map holds a fixed
    key set as `Map[String, Double]`. The same step types the four bodies that are
    a bare primitive or map: probability of exceedance returns `Double` where
-   `OccurrenceProbability` states the interval, the workspace reap count returns
+   `Probability` states the interval, the workspace reap count returns
    `Map[String, Int]`, and `/health` returns `Map[String, String]`. Last because
    `SimulationResponse` is the response four endpoints share, so it changes the
    most observable wire at once, and because it is the only step reaching the
@@ -2809,7 +2809,7 @@ exercised on a small surface before the largest one:
    bootstrap answer `201` with a relative `Location` (`EWB-D-68`). The CORS
    policy exposes `Location`, the finding of the security review that passed
    Option B. Delete answers `204`. Probability of exceedance answers
-   `OccurrenceProbability`, lec-multi answers `LECCurvesResponse`, a curve's
+   `Probability`, lec-multi answers `LECCurvesResponse`, a curve's
    quantile keys are `QuantileLevel`, the reap count is
    `EvictExpiredResponse(evicted: NonNegativeInt)`, and both probes answer
    `ProbeResponse`. History's `n` is a `PositiveInt` query parameter with a
@@ -4799,9 +4799,9 @@ The four return types become:
 
 ```scala
 Seq[(SafeName.SafeName, ParentRef)]
-Seq[(SafeName.SafeName, ParentRef, OccurrenceProbability, Distribution, SeedVarIdChoice)]
+Seq[(SafeName.SafeName, ParentRef, Probability, Distribution, SeedVarIdChoice)]
 Seq[(SafeId.SafeId, SafeName.SafeName, ParentRef)]
-Seq[(SafeId.SafeId, SafeName.SafeName, ParentRef, OccurrenceProbability, Distribution)]
+Seq[(SafeId.SafeId, SafeName.SafeName, ParentRef, Probability, Distribution)]
 ```
 
 **The sweep of every `Option` reaching this service from JSON**, so the rule is
@@ -4909,7 +4909,7 @@ final case class SubmittedLeaf(
   subject: ErrorSubject,
   name: SafeName.SafeName,
   parent: ParentRef,
-  probability: OccurrenceProbability,
+  probability: Probability,
   distribution: Distribution,
   seedVarId: SeedVarIdChoice
 )
@@ -4926,7 +4926,7 @@ final case class ExistingLeaf(
   id: SafeId.SafeId,
   name: SafeName.SafeName,
   parent: ParentRef,
-  probability: OccurrenceProbability,
+  probability: Probability,
   distribution: Distribution
 )
 ```
@@ -5114,7 +5114,7 @@ failure, replacing the tuple of options the view matches on today. The form's
 own fields stay unrefined; everything past `toDraft` is refined.**
 
 ```scala
-def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, Distribution)]
+def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, Probability, Distribution)]
 ```
 
 Today the leaf view matches three containers — a `Validation` for the
@@ -5530,7 +5530,7 @@ equally be the typo — but because one field had to be written there.
 **Option A is also not consistently applicable, which is what decided it.**
 Applied as a principle, "the rule names the field" would have single-field
 refinements name their own field too. They cannot:
-`ValidationUtil.refineOccurrenceProbability` is called with three different
+`ValidationUtil.refineProbability` is called with three different
 locations — a submitted row at `RiskTreeRequests.scala:171`, a form's draft node
 at `RiskLeafFormState.scala:135`, and `codecLocation` at
 `IronTapirCodecs.scala:275`, which names no field at all. For every single-field
@@ -6672,7 +6672,7 @@ Phase 3 landed a typed location and left its supply at the call site. Three
 consequences, each verifiable in the code as it stands.
 
 **The pairing of a field to a rule is asserted at every call site.**
-`ValidationUtil.refineOccurrenceProbability` is called from six production sites
+`ValidationUtil.refineProbability` is called from six production sites
 across five files, counted on 2026-10-21. Five of them write
 `FieldName.Probability` by hand — `RiskNode.scala:178`,
 `RiskTreeRequests.scala:171`, `RiskTreeRequests.scala:215` and, through the `at`
@@ -6782,7 +6782,7 @@ case class Located[+A](value: A, location: ErrorLocation):
     *
     * {{{
     * probabilityLocated.map(pctToDomain)
-    *   .refine(ValidationUtil.refineOccurrenceProbability)
+    *   .refine(ValidationUtil.refineProbability)
     * }}}
     */
   def refine[B](
@@ -6815,7 +6815,7 @@ browser-side defect, and collapsing it is a separate change with its own scope.
 Each refinement in `ValidationUtil` keeps the signature Phase 3 gave it:
 
 ```scala
-  def refineOccurrenceProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], OccurrenceProbability]
+  def refineProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], Probability]
 
   def refineName(value: String, location: ErrorLocation): Either[List[ValidationError], SafeName.SafeName]
 ```
@@ -6881,12 +6881,12 @@ text as `REQUIRED_FIELD` and unreadable text as `TYPE_MISMATCH`, the meanings
 field is entered on:
 
 ```scala
-  private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, OccurrenceProbability] =
+  private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, Probability] =
     parseRequired(input, parseDouble, ValidationMessages.probabilityRequired, ValidationMessages.probabilityNotANumber)
       .flatMap { pct =>
         Validation.fromEither(
           pct.map(RiskLeafFormState.pctToDomain)
-            .refine(ValidationUtil.refineOccurrenceProbability)
+            .refine(ValidationUtil.refineProbability)
             .left.map(_ => pct.reject(ValidationErrorCode.INVALID_RANGE, ValidationMessages.probabilityPercentOutOfRange))
         )
       }
