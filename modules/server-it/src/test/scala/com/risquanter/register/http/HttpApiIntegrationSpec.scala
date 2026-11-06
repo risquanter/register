@@ -6,8 +6,8 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
-import com.risquanter.register.http.responses.{ScenarioResponse, TreeListResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
+import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
 import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice}
@@ -245,6 +245,100 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
             BranchChoice.Scenario(ScenarioName.fromString(scenarioName).toOption.get)),
           !rawBody.contains(key),
           !rawBody.contains(created.id.value)
+        )
+      },
+      /** The same absence answers the same way on every other read that reaches
+        * it. Each request names a tree the workspace holds and the scenario lacks.
+        */
+      test("every other read of a held tree absent on the named branch answers the same 404") {
+        val scenarioName = "fork-before-reads"
+        val absence      = NotFoundKind.TreeNotOnBranch(
+          BranchChoice.Scenario(ScenarioName.fromString(scenarioName).toOption.get))
+        val update = RiskTreeUpdateRequest(
+          name = "Tree on main",
+          portfolios = Seq.empty,
+          leaves = Seq.empty,
+          newPortfolios = Seq.empty,
+          newLeaves = Seq.empty
+        )
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(sampleRequest())
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+
+          scenarioResp <- basicRequest
+            .post(uri"${client.baseUrl}/w/$key/scenarios")
+            .body(CreateScenarioRequest(
+              name = ScenarioName.fromString(scenarioName).toOption.get,
+              source = ScenarioSourceDto.Branch(BranchChoice.Main)
+            ))
+            .response(asJson[ScenarioResponse])
+            .send(client.backend)
+          _ <- ZIO.fromEither(scenarioResp.body)
+
+          createResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/w/$key/risk-trees")
+            .body(sampleRequest())
+            .response(asJson[TreeSummaryResponse])
+            .send(client.backend)
+          created <- ZIO.fromEither(createResp.body)
+          treeUri  = uri"${client.baseUrl}/w/$key/risk-trees/${created.id.value}"
+
+          structResp <- basicRequest.header("X-Branch", "main")
+            .get(uri"$treeUri/structure")
+            .response(asJson[RiskTree])
+            .send(client.backend)
+          structure <- ZIO.fromEither(structResp.body)
+          rootId     = structure.rootId
+
+          onScenario = basicRequest.header("X-Branch", scenarioName).response(asStringAlways)
+          answers <- ZIO.foreach(List(
+            onScenario.get(treeUri),
+            onScenario.post(uri"$treeUri/nodes/lec-multi").body(List(rootId).toJson),
+            onScenario.get(uri"$treeUri/nodes/${rootId.value}/prob-of-exceedance?threshold=1000"),
+            onScenario.put(treeUri).body(update),
+            onScenario.post(uri"$treeUri/query").body(QueryRequest("Q[>=]^{1/2} x (leaf(x), true)"))
+          ))(_.send(client.backend))
+        yield assertTrue(
+          answers.forall(_.code == StatusCode.NotFound),
+          answers.forall(_.body.fromJson[WireError.NotFound].map(_.absence) == Right(absence))
+        )
+      },
+      /** The history read's limit defaults when absent and is refused at the
+        * codec when it is not positive.
+        */
+      test("a history read with no n is accepted, and n=0 answers 400") {
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(sampleRequest())
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+          historyUri = uri"${client.baseUrl}/w/$key/risk-trees/${bootstrap.tree.id.value}/history"
+
+          defaulted <- basicRequest.header("X-Branch", "main")
+            .get(historyUri)
+            .response(asJson[TreeHistoryResponse])
+            .send(client.backend)
+          _ <- ZIO.fromEither(defaulted.body)
+
+          refused <- basicRequest.header("X-Branch", "main")
+            .get(uri"$historyUri?n=0")
+            .response(asStringAlways)
+            .send(client.backend)
+        yield assertTrue(
+          defaulted.code == StatusCode.Ok,
+          refused.code == StatusCode.BadRequest
         )
       },
       /** The route names a tree, so content it refuses is that tree's content
