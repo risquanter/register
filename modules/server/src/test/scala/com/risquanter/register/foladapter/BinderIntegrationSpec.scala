@@ -15,7 +15,6 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 import vql.parser.VagueQueryParser
 import vql.semantics.VagueSemantics
-import vql.sampling.{SamplingParams, HDRConfig}
 import vql.typed.{FolModel, QueryBinder, TypeCheckError}
 
 /** Integration tests for the parse → bind path against a register-side
@@ -68,16 +67,16 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
   // Five-trial outcomes; large enough that gt_loss(p95(x, "inherent"), 1000) is true for both leaves.
   private val cyberResult = withCfg(5) {
-    leafOf(cyberId, Map(1 -> 0L, 2 -> 5000L, 3 -> 10000L, 4 -> 20000L, 5 -> 50000L))
+    leafOf(cyberId, Map(0 -> 0L, 1 -> 5000L, 2 -> 10000L, 3 -> 20000L, 4 -> 50000L), None)
   }
   private val hardwareResult = withCfg(5) {
-    leafOf(hardwareId, Map(1 -> 500L, 2 -> 1000L, 3 -> 1000L, 4 -> 2000L, 5 -> 8000L))
+    leafOf(hardwareId, Map(0 -> 500L, 1 -> 1000L, 2 -> 1000L, 3 -> 2000L, 4 -> 8000L), None)
   }
   private val rootResult = withCfg(5) {
-    leafOf(rootId, Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L))
+    leafOf(rootId, Map(0 -> 500L, 1 -> 6000L, 2 -> 11000L, 3 -> 22000L, 4 -> 58000L), None)
   }
   private val itResult = withCfg(5) {
-    leafOf(itId, Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L))
+    leafOf(itId, Map(0 -> 500L, 1 -> 6000L, 2 -> 11000L, 3 -> 22000L, 4 -> 58000L), None)
   }
   private val results: Map[NodeId, LossDistribution] =
     Map(rootId -> rootResult, itId -> itResult, cyberId -> cyberResult, hardwareId -> hardwareResult)

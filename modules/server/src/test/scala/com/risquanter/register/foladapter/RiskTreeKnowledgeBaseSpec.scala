@@ -94,21 +94,21 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   // Cyber: outcomes [0, 5000, 10000, 20000, 50000] — 5 trials
   private val cyberResult = withCfg(5) {
-    leafOf(cyberId, Map(1 -> 0L, 2 -> 5000L, 3 -> 10000L, 4 -> 20000L, 5 -> 50000L))
+    leafOf(cyberId, Map(0 -> 0L, 1 -> 5000L, 2 -> 10000L, 3 -> 20000L, 4 -> 50000L), None)
   }
 
   // Hardware: outcomes [500, 1000, 1000, 2000, 8000] — 5 trials
   private val hardwareResult = withCfg(5) {
-    leafOf(hardwareId, Map(1 -> 500L, 2 -> 1000L, 3 -> 1000L, 4 -> 2000L, 5 -> 8000L))
+    leafOf(hardwareId, Map(0 -> 500L, 1 -> 1000L, 2 -> 1000L, 3 -> 2000L, 4 -> 8000L), None)
   }
 
   // Root and IT: dummy aggregated results
   private val rootResult = withCfg(5) {
-    leafOf(rootId, Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L))
+    leafOf(rootId, Map(0 -> 500L, 1 -> 6000L, 2 -> 11000L, 3 -> 22000L, 4 -> 58000L), None)
   }
 
   private val itResult = withCfg(5) {
-    leafOf(itId, Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L))
+    leafOf(itId, Map(0 -> 500L, 1 -> 6000L, 2 -> 11000L, 3 -> 22000L, 4 -> 58000L), None)
   }
 
   private val results: Map[NodeId, LossDistribution] =
@@ -116,22 +116,22 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   // Empty result for edge case tests
   private val emptyResult = withCfg(5) {
-    leafOf(cyberId, Map.empty)
+    leafOf(cyberId, Map.empty, None)
   }
 
   // Sparse result for unconditional VaR tests: nTrials=10, only 3 outcomes fire
   // outcomeCount: {5000→1, 10000→1, 50000→1}, implicitZeros = 10 - 3 = 7
   private val sparseCyberResult = withCfg(10) {
-    leafOf(cyberId, Map(1 -> 5000L, 2 -> 10000L, 3 -> 50000L))
+    leafOf(cyberId, Map(1 -> 5000L, 2 -> 10000L, 3 -> 50000L), None)
   }
   private val sparseHardwareResult = withCfg(10) {
-    leafOf(hardwareId, Map(1 -> 500L, 2 -> 1000L, 3 -> 2000L))
+    leafOf(hardwareId, Map(1 -> 500L, 2 -> 1000L, 3 -> 2000L), None)
   }
   private val sparseRootResult = withCfg(10) {
-    leafOf(rootId, Map(1 -> 5500L, 2 -> 11000L, 3 -> 52000L))
+    leafOf(rootId, Map(1 -> 5500L, 2 -> 11000L, 3 -> 52000L), None)
   }
   private val sparseItResult = withCfg(10) {
-    leafOf(itId, Map(1 -> 5500L, 2 -> 11000L, 3 -> 52000L))
+    leafOf(itId, Map(1 -> 5500L, 2 -> 11000L, 3 -> 52000L), None)
   }
   private val sparseResults: Map[NodeId, LossDistribution] =
     Map(rootId -> sparseRootResult, itId -> sparseItResult, cyberId -> sparseCyberResult, hardwareId -> sparseHardwareResult)
@@ -213,10 +213,10 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   // the selection argument is observable: cyber's inherent p95 is 50000, a flat
   // 5000 under residual, and a flat 10000 under the mCyber-only Selected.
   private val residualCyber = withCfg(5) {
-    leafOf(cyberId, Map(1 -> 5000L, 2 -> 5000L, 3 -> 5000L, 4 -> 5000L, 5 -> 5000L))
+    leafOf(cyberId, Map(0 -> 5000L, 1 -> 5000L, 2 -> 5000L, 3 -> 5000L, 4 -> 5000L), None)
   }
   private val selectedCyber = withCfg(5) {
-    leafOf(cyberId, Map(1 -> 10000L, 2 -> 10000L, 3 -> 10000L, 4 -> 10000L, 5 -> 10000L))
+    leafOf(cyberId, Map(0 -> 10000L, 1 -> 10000L, 2 -> 10000L, 3 -> 10000L, 4 -> 10000L), None)
   }
   private val mCyberSelection = MitigationSelection.Selected(Map(mCyberId -> ScopeRestriction.FullScope))
 
@@ -339,7 +339,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // target = 100 * 0.95 = 95.0
       // cumulative starts at 98 >= 95.0 → 0L
       val verySparse = withCfg(100) {
-        leafOf(cyberId, Map(1 -> 10000L, 2 -> 50000L))
+        leafOf(cyberId, Map(1 -> 10000L, 2 -> 50000L), None)
       }
       val sparseKb = kbInherent(tree, results.updated(cyberId, verySparse))
       val result = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
@@ -350,7 +350,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // p95 target=95.0, 99 >= 95 → 0L
       // p99 target=99.0, 99 >= 99 → 0L (boundary: 99.0 >= 99.0 is true)
       val single = withCfg(100) {
-        leafOf(cyberId, Map(1 -> 42000L))
+        leafOf(cyberId, Map(1 -> 42000L), None)
       }
       val singleKb = kbInherent(tree, results.updated(cyberId, single))
       val p95 = singleKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
@@ -365,7 +365,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // p95 target=9.5, cum starts at 5, walk: {7000→5} → cum=10. 10 >= 9.5 → 7000L
       // p99 target=9.9, same → 7000L
       val identical = withCfg(10) {
-        leafOf(cyberId, Map(1 -> 7000L, 2 -> 7000L, 3 -> 7000L, 4 -> 7000L, 5 -> 7000L))
+        leafOf(cyberId, Map(1 -> 7000L, 2 -> 7000L, 3 -> 7000L, 4 -> 7000L, 5 -> 7000L), None)
       }
       val identKb = kbInherent(tree, results.updated(cyberId, identical))
       val p95 = identKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
@@ -380,7 +380,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // 19.0 >= 19.0 → true → returns 0L (percentile is AT the boundary of zero mass)
       // This is correct: 95% of trials have $0 loss = VaR₉₅ is $0
       val boundary = withCfg(20) {
-        leafOf(cyberId, Map(1 -> 30000L))
+        leafOf(cyberId, Map(1 -> 30000L), None)
       }
       val bKb = kbInherent(tree, results.updated(cyberId, boundary))
       val p95 = bKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
@@ -391,7 +391,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // 19.0 < 19.8, walk: {30000→1} → cum=20. 20 >= 19.8 → 30000L
       // Correct: 1 of 20 trials exceeds the 99th percentile → last outcome
       val boundary = withCfg(20) {
-        leafOf(cyberId, Map(1 -> 30000L))
+        leafOf(cyberId, Map(1 -> 30000L), None)
       }
       val bKb = kbInherent(tree, results.updated(cyberId, boundary))
       val p99 = bKb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
@@ -628,7 +628,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         kb.catalog.constants.keySet == ValuationBasis.values.map(_.symbol).toSet,
         kb.riskNameToId.keySet == Set("Root", "IT Risk", "Cyber", "Hardware"),
         nodeV("Cyber")       == Some(cyberId),   // Node slot: quoted node name → its id
-        nodeV(cyberId.value) == None,            // Node slot is name-only: an id no longer binds
+        nodeV(cyberId.value) == None,            // Node slot is name-only: an id does not bind
         nodeV("Nonexistent") == None,            // unknown name → unbindable
         nameV("Cyber")       == Some(cyberId),   // named_risk: name → id
         nameV(cyberId.value) == None,            // named_risk rejects an id

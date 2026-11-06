@@ -1,39 +1,37 @@
 package com.risquanter.register.simulation
 
 import zio.test.*
-import zio.test.Assertion.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
-import com.risquanter.register.domain.data.iron.{NodeId, OccurrenceProbability, PositiveInt}
+import com.risquanter.register.domain.data.iron.{OccurrenceProbability, PositiveInt}
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
-import com.risquanter.register.configs.SimulationConfig
 
 object LECGeneratorSpec extends ZIOSpecDefault {
 
   // Test fixtures - simulation outcomes (scoped with withCfg)
   val cyberResult = withCfg(5) {
-    leafOf(nodeId("cyber"), Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L))
+    leafOf(nodeId("cyber"), Map(0 -> 10000L, 1 -> 25000L, 2 -> 0L, 3 -> 15000L, 4 -> 0L), None)
   }
 
   val hardwareResult = withCfg(5) {
-    leafOf(nodeId("hardware"), Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L))
+    leafOf(nodeId("hardware"), Map(0 -> 5000L, 1 -> 0L, 2 -> 8000L, 3 -> 0L, 4 -> 3000L), None)
   }
 
   val wideRangeResult = withCfg(3) {
-    leafOf(nodeId("wide"), Map(1 -> 1000L, 2 -> 100000L, 3 -> 50000L))
+    leafOf(nodeId("wide"), Map(0 -> 1000L, 1 -> 100000L, 2 -> 50000L), None)
   }
 
   // Occurrence probability 0.2% (< 0.5%): more than 99.5% of trials are
   // zero-loss, so the unconditional p99.5 quantile is 0 — below minLoss.
-  // Guards the clippedMaxLoss fallback (previously getTicks threw).
+  // Guards the clippedMaxLoss fallback.
   val rareResult = withCfg(1000) {
-    leafOf(nodeId("rare"), Map(1 -> 3000L, 2 -> 5000L))
+    leafOf(nodeId("rare"), Map(1 -> 3000L, 2 -> 5000L), None)
   }
 
   val emptyResult = withCfg(5) {
-    leafOf(nodeId("empty"), Map.empty)
+    leafOf(nodeId("empty"), Map.empty, None)
   }
 
   private val tailCutoff: OccurrenceProbability = 0.005
@@ -178,7 +176,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // 20 trials, outcomes spread across a range — exceedance drops
         // gradually so the tail cutoff (0.5%) can actually be reached.
         val manyTrialsResult = withCfg(20) {
-          leafOf(nodeId("many"), (1 to 20).map(i => i -> (i * 1000L)).toMap)
+          leafOf(nodeId("many"), (0 until 20).map(i => i -> ((i + 1) * 1000L)).toMap, None)
         }
         val results = Map("many" -> manyTrialsResult)
         val curves = LECGenerator.generateCurvePointsMulti(results, 100, tailCutoff)
@@ -244,7 +242,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // nTrials=10, implicitZeros=7, outcomeCount: {5000→1, 20000→1, 50000→1}
         // AAL = (5000 + 20000 + 50000) / 10 = 7500.0
         val sparse = withCfg(10) {
-          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), None)
         }
         assertTrue(LECGenerator.averageAnnualLoss(sparse) == 7500.0)
       },
@@ -255,7 +253,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
 
     suite("probabilityOfNoLoss")(
       test("counts both implicit zeros and explicit zero-valued outcomes") {
-        // nTrials=5, outcomes: {10000, 25000, 0, 15000, 0} — trials 3 and 5
+        // nTrials=5, outcomes: {10000, 25000, 0, 15000, 0} — trials 2 and 4
         // are explicit zero-valued outcomes, not implicit (outcomes.size == nTrials)
         // probabilityOfNoLoss = 2 / 5 = 0.4
         assertTrue(LECGenerator.probabilityOfNoLoss(cyberResult) == 0.4)
@@ -263,7 +261,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("sparse result — implicit zeros only") {
         // nTrials=10, 3 recorded outcomes → implicitZeros=7, no explicit zero outcomes
         val sparse = withCfg(10) {
-          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), None)
         }
         assertTrue(LECGenerator.probabilityOfNoLoss(sparse) == 0.7)
       },
@@ -282,7 +280,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // p99: target=9.9, cum at 50000→10 → 50000.0
         // p99.5: target=9.95, cum at 50000→10 → 50000.0
         val sparse = withCfg(10) {
-          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), None)
         }
         val quantiles = LECGenerator.calculateQuantiles(sparse)
         assertTrue(
@@ -295,14 +293,13 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("exact boundary — implicitZeros equals target (p50 via findQuantileLoss, half-sparse)") {
         // nTrials=10, 5 outcomes → implicitZeros=5
         // outcomeCount: {1000→1, 2000→1, 3000→1, 4000→1, 5000→1}
-        // p50 isn't in calculateQuantiles' output anymore (see its doc comment),
-        // but the boundary behavior it was demonstrating is a property of
-        // unconditionalQuantile/findQuantileLoss itself, still worth covering directly.
+        // p50 isn't in calculateQuantiles' output, so this boundary is covered
+        // on findQuantileLoss directly.
         // p50: target=5.0, implicitZeros=5, 5.0 >= 5.0 → 0.0 (AT boundary)
         // p90: target=9.0, cum: 5, 6, 7, 8, 9, 10 → 4000 at cum=9 → 4000.0
         // p95: target=9.5, cum at 5000→10, 10 >= 9.5 → 5000.0
         val halfSparse = withCfg(10) {
-          leafOf(nodeId("half"), Map(1 -> 1000L, 2 -> 2000L, 3 -> 3000L, 4 -> 4000L, 5 -> 5000L))
+          leafOf(nodeId("half"), Map(1 -> 1000L, 2 -> 2000L, 3 -> 3000L, 4 -> 4000L, 5 -> 5000L), None)
         }
         val quantiles = LECGenerator.calculateQuantiles(halfSparse)
         assertTrue(
@@ -316,7 +313,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // p=0.95: target = (0.95 * 20).toLong = 19
         // 19 >= 19 → returns 0L (boundary exact)
         val boundary = withCfg(20) {
-          leafOf(nodeId("boundary"), Map(1 -> 30000L))
+          leafOf(nodeId("boundary"), Map(1 -> 30000L), None)
         }
         val q95 = LECGenerator.findQuantileLoss(boundary, 0.95)
         assertTrue(q95 == Some(0L))
@@ -327,7 +324,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // p=0.951: target = 19.02, 19 < 19.02 → walk: {30000→1} → cum=20 → 30000L
         // p=1.0: target = 20.0, 19 < 20 → walk: 30000L
         val boundary = withCfg(20) {
-          leafOf(nodeId("boundary"), Map(1 -> 30000L))
+          leafOf(nodeId("boundary"), Map(1 -> 30000L), None)
         }
         val qJustPast = LECGenerator.findQuantileLoss(boundary, 0.951)
         val qFull = LECGenerator.findQuantileLoss(boundary, 1.0)
@@ -343,7 +340,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // p99: target=99, 99 >= 99 → 0.0 (boundary exact)
         // p99.5: target=99.5, 99 < 99.5 → walk: {42000→1} → cum=100 → 42000.0
         val single = withCfg(100) {
-          leafOf(nodeId("single"), Map(1 -> 42000L))
+          leafOf(nodeId("single"), Map(1 -> 42000L), None)
         }
         val quantiles = LECGenerator.calculateQuantiles(single)
         assertTrue(
@@ -360,7 +357,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // p99: target=9.9, same → 7000.0
         // p99.5: target=9.95, same → 7000.0
         val identical = withCfg(10) {
-          leafOf(nodeId("ident"), Map(1 -> 7000L, 2 -> 7000L, 3 -> 7000L, 4 -> 7000L, 5 -> 7000L))
+          leafOf(nodeId("ident"), Map(1 -> 7000L, 2 -> 7000L, 3 -> 7000L, 4 -> 7000L, 5 -> 7000L), None)
         }
         val quantiles = LECGenerator.calculateQuantiles(identical)
         assertTrue(
@@ -372,7 +369,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       },
       test("findQuantileLoss at p=0.0 returns 0") {
         val sparse = withCfg(10) {
-          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), None)
         }
         // target = (0.0 * 10).toLong = 0, implicitZeros=7, 7 >= 0 → 0L
         val q0 = LECGenerator.findQuantileLoss(sparse, 0.0)
@@ -383,7 +380,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // p99.5: target = 10 * 0.995 = 9.95
         // Walk: 5000→cum 8, 20000→cum 9 (< 9.95), 50000→cum 10 (≥ 9.95) → 50000
         val sparse = withCfg(10) {
-          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), None)
         }
         val q995 = LECGenerator.findQuantileLoss(sparse, 0.995)
         assertTrue(q995 == Some(50000L))
@@ -392,7 +389,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // nTrials=100, 2 outcomes → implicitZeros=98
         // p50: target = (0.50 * 100).toLong = 50 → 98 >= 50 → 0
         val verySparse = withCfg(100) {
-          leafOf(nodeId("sparse"), Map(1 -> 10000L, 2 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 10000L, 2 -> 50000L), None)
         }
         val q50 = LECGenerator.findQuantileLoss(verySparse, 0.50)
         assertTrue(q50 == Some(0L))
@@ -400,7 +397,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("calculateQuantiles and findQuantileLoss agree") {
         // Both delegate to unconditionalQuantile — must return same value
         val sparse = withCfg(10) {
-          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), None)
         }
         val quantiles = LECGenerator.calculateQuantiles(sparse)
         val q95viaFind = LECGenerator.findQuantileLoss(sparse, 0.95)
@@ -412,7 +409,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       },
       test("quantiles monotonicity holds with sparse results") {
         val sparse = withCfg(10) {
-          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L))
+          leafOf(nodeId("sparse"), Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), None)
         }
         val quantiles = LECGenerator.calculateQuantiles(sparse)
         assertTrue(

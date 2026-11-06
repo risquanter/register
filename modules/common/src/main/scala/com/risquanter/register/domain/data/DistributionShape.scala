@@ -49,9 +49,7 @@ final case class QuantileAnchors private (values: Vector[QuantileAnchor]):
     * [`MinAnchors`, `MaxAnchors`], which is `[2, 20]` and therefore inside
     * `MetalogTermCount`'s own range. ADR-001 names `.refineUnsafe` in
     * production as a smell because it crashes on invalid input; it cannot be
-    * reached with invalid input from here. The one other production site with
-    * the same justification is the preview service's probability grid, whose
-    * values lie between two literal bounds inside the open interval.
+    * reached with invalid input from here.
     */
   def termsToFit: MetalogTermCount = values.length.refineUnsafe
 

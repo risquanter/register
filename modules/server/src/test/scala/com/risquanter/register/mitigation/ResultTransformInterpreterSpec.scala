@@ -5,7 +5,7 @@ import zio.prelude.Identity
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.{ResultTransformSpec, TransformPipeline}
-import com.risquanter.register.simulation.TrialOutcomes
+import com.risquanter.register.testutil.RiskResultTestSupport.outcomesOf
 import com.risquanter.register.testutil.TestHelpers.retentionFactor
 
 /**
@@ -17,7 +17,7 @@ object ResultTransformInterpreterSpec extends ZIOSpecDefault {
 
   import ResultTransformSpec.*
 
-  private val outcomes = TrialOutcomes(100, Map(1 -> 2000000L, 2 -> 50000L, 3 -> 5000L))
+  private val outcomes = outcomesOf(100,Map(1 -> 2000000L, 2 -> 50000L, 3 -> 5000L))
 
   def spec = suite("ResultTransformInterpreterSpec")(
 
@@ -57,7 +57,7 @@ object ResultTransformInterpreterSpec extends ZIOSpecDefault {
           TransformPipeline(List(ApplyDeductible(10000L), ScaleLosses(retentionFactor(0.5))))
         val scaleThenDeductible =
           TransformPipeline(List(ScaleLosses(retentionFactor(0.5)), ApplyDeductible(10000L)))
-        val input = TrialOutcomes(100, Map(1 -> 100000L))
+        val input = outcomesOf(100,Map(1 -> 100000L))
         assertTrue(
           ResultTransformInterpreter.toTransform(deductibleThenScale).run(input).outcomeOf(1) == 45000L,
           ResultTransformInterpreter.toTransform(scaleThenDeductible).run(input).outcomeOf(1) == 40000L

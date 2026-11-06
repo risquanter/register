@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
-import com.risquanter.register.simulation.TrialOutcomes
+import com.risquanter.register.testutil.RiskResultTestSupport.outcomesOf
 import com.risquanter.register.testutil.TestHelpers.{
   idStr, lognormalShape, mitigationId, nodeId, resultStage, retentionFactor, treeId, unsafeGet
 }
@@ -202,7 +202,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
     suite("recordsByNode + run (result-stage half of the action)")(
       test("a node's layer composes its pipelines in precedence order") {
-        val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
+        val outcomes = outcomesOf(100,Map(1 -> 100000L))
         val dFirst = resultDeductible("m-a-ded", 10000L, MitigationPrecedence(-1))
         val scale  = Mitigation.create(
           mitigationId("m-b-scale"), name("m-b-scale"), pred,
@@ -244,7 +244,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       },
       test("an empty layer returns the same reference it was given") {
         // The identity of the transform monoid.
-        val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
+        val outcomes = outcomesOf(100,Map(1 -> 100000L))
         assertTrue(MitigationApplication.run(Nil, outcomes) eq outcomes)
       }
     ),

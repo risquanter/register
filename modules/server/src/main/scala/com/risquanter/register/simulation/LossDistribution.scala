@@ -17,16 +17,47 @@ trait LECCurve {
   def minLoss: Loss
 }
 
-/** Trial count and the sparse trial→loss map. The commutative monoid is defined per
-  * fixed `nTrials` slice; mismatched counts throw `IllegalArgumentException`, and
-  * per-trial sums past `Long.MaxValue` throw `ArithmeticException` rather than wrapping.
+/** Trial count and the sparse trial→loss map, with every trial id in `0 until nTrials`
+  * (ADR-001 §5). The commutative monoid is defined per fixed `nTrials` slice; mismatched
+  * counts throw `IllegalArgumentException`, and per-trial sums past `Long.MaxValue`
+  * throw `ArithmeticException` rather than wrapping.
   */
-case class TrialOutcomes(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]) {
+final case class TrialOutcomes private (nTrials: PositiveInt, outcomes: Map[TrialId, Loss]) {
   def outcomeOf(trial: TrialId): Loss = outcomes.getOrElse(trial, 0L)
   def trialIds: Set[TrialId] = outcomes.keySet
+
+  /** Rewrites each recorded loss under its own trial id. */
+  def mapLosses(f: Loss => Loss): TrialOutcomes =
+    TrialOutcomes(nTrials, outcomes.map { case (trial, loss) => trial -> f(loss) })
+
+  /** Keeps the trials whose loss satisfies `keep`; a dropped trial reads as `0L`. */
+  def filterLosses(keep: Loss => Boolean): TrialOutcomes =
+    TrialOutcomes(nTrials, outcomes.filter { case (_, loss) => keep(loss) })
+
+  /** `count` of this value's trials as a share of all of them. A count read off
+    * `outcomes` is at most `nTrials`, because every trial id lies in
+    * `0 until nTrials`, so the refinement cannot fail for one.
+    */
+  private[simulation] def shareOf(count: Long): OccurrenceProbability =
+    (count.toDouble / nTrials.toDouble).refineUnsafe[OccurrenceProbabilityConstraint]
 }
 
 object TrialOutcomes {
+  /** The only way to build a value from a raw map. Only a programming mistake
+    * can place a trial id outside `0 until nTrials`: the simulator draws its ids
+    * from that range.
+    *
+    * {{{
+    * create(10, Map(0 -> 5L, 9 -> 7L))  // succeeds
+    * create(10, Map(10 -> 5L))          // TrialIdOutOfRange
+    * }}}
+    */
+  def create(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]): Validation[ValidationError, TrialOutcomes] =
+    if (outcomes.keysIterator.forall(trial => trial >= 0 && trial < nTrials))
+      Validation.succeed(TrialOutcomes(nTrials, outcomes))
+    else
+      Validation.fail(ValidationError(ErrorLocation.Whole, FieldProblem.TrialIdOutOfRange))
+
   /** Identity for the `cfg.defaultNTrials` slice only; combining with a different trial count throws. */
   def empty(using cfg: SimulationConfig): TrialOutcomes =
     TrialOutcomes(cfg.defaultNTrials, Map.empty)
@@ -82,17 +113,13 @@ final case class LossDistribution private (
     TreeMap.from(outcomes.values.groupMapReduce(x => x)(_ => 1)(_ + _))(using Ord[Loss].toScala)
 
   override lazy val maxLoss: Loss =
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max(using Ord[Loss].toScala)
+    outcomeCount.keys.maxOption(using Ord[Loss].toScala).getOrElse(0L)
 
   override lazy val minLoss: Loss =
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
+    outcomeCount.keys.minOption(using Ord[Loss].toScala).getOrElse(0L)
 
-  override def probOfExceedance(threshold: Loss): OccurrenceProbability = {
-    val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
-    // A count of trials over the positive total of trials lies in [0, 1], so
-    // the refinement cannot fail.
-    (exceedingCount.toDouble / nTrials.toDouble).refineUnsafe[OccurrenceProbabilityConstraint]
-  }
+  override def probOfExceedance(threshold: Loss): OccurrenceProbability =
+    trials.shareOf(outcomeCount.rangeFrom(threshold).values.sum)
 }
 
 object LossDistribution {
@@ -108,15 +135,15 @@ object LossDistribution {
     applied: List[MitigationApplicationRecord],
     run: TrialOutcomes => TrialOutcomes
   ): Validation[ValidationError, LossDistribution] =
-    if (applied.isEmpty)
-      Validation.succeed(LossDistribution(nodeId, source, source, Nil, provenance))
-    else
-      try {
-        val mitigated = run(source)
-        if (eliminatesEveryLoss(source, mitigated)) Validation.fail(layerEliminatesRisk(nodeId))
-        else Validation.succeed(LossDistribution(nodeId, mitigated, source, applied, provenance))
-      }
-      catch { case _: ArithmeticException => Validation.fail(layerOverflow(nodeId)) }
+    applied match
+      case Nil => Validation.succeed(LossDistribution(nodeId, source, source, Nil, provenance))
+      case _ =>
+        try {
+          val mitigated = run(source)
+          if (eliminatesEveryLoss(source, mitigated)) Validation.fail(layerEliminatesRisk(nodeId))
+          else Validation.succeed(LossDistribution(nodeId, mitigated, source, applied, provenance))
+        }
+        catch { case _: ArithmeticException => Validation.fail(layerOverflow(nodeId)) }
 
   /** A layer eliminates the risk when the node had at least one loss and the
     * layer leaves none. A node whose outcomes held no loss to begin with is not

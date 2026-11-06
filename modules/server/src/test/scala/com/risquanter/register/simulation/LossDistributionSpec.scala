@@ -12,7 +12,7 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldPro
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage, retentionFactor}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
-import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
+import com.risquanter.register.testutil.RiskResultTestSupport.{leafOf, outcomesOf}
 import java.time.Instant
 import io.github.iltotore.iron.refineUnsafe
 
@@ -79,7 +79,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
   )(using cfg: SimulationConfig) =
     LossDistribution.decorate(
       id,
-      TrialOutcomes(cfg.defaultNTrials, outcomes),
+      outcomesOf(cfg.defaultNTrials, outcomes),
       None,
       applied,
       MitigationApplication.run(applied, _)
@@ -88,7 +88,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
   def spec = suite("LossDistributionSpec")(
     suite("basic functionality")(
       test("empty result has zero losses") {
-        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map.empty) }
+        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map.empty, None) }
 
         assertTrue(result.outcomes.isEmpty) &&
         assertTrue(result.maxLoss == 0L) &&
@@ -96,7 +96,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(result.outcomeCount.isEmpty)
       },
       test("single outcome is captured") {
-        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map(5 -> 1000L)) }
+        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map(5 -> 1000L), None) }
 
         assertTrue(result.outcomeOf(5) == 1000L) &&
         assertTrue(result.outcomeOf(10) == 0L) &&
@@ -105,7 +105,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("multiple outcomes create frequency distribution") {
         val result = withCfg(1000) {
-          leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L, 3 -> 1000L, 4 -> 3000L))
+          leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L, 3 -> 1000L, 4 -> 3000L), None)
         }
 
         val expected = Map(1000L -> 2, 2000L -> 1, 3000L -> 1)
@@ -116,7 +116,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("outcomeCount is sorted by loss") {
         val result = withCfg(1000) {
-          leafOf(nodeId("RISK-001"), Map(1 -> 3000L, 2 -> 1000L, 3 -> 2000L))
+          leafOf(nodeId("RISK-001"), Map(1 -> 3000L, 2 -> 1000L, 3 -> 2000L), None)
         }
 
         val keys = result.outcomeCount.keys.toList
@@ -125,7 +125,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("probability of exceedance")(
       test("probOfExceedance with no outcomes returns 0") {
-        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map.empty) }
+        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map.empty, None) }
 
         assertTrue(result.probOfExceedance(1000L) == 0.0)
       },
@@ -139,7 +139,8 @@ object LossDistributionSpec extends ZIOSpecDefault {
               3 -> 5000L,  // At threshold
               4 -> 10000L, // Above threshold
               5 -> 15000L  // Above threshold
-            )
+            ),
+            None
           )
         }
 
@@ -150,7 +151,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("probOfExceedance handles threshold above max loss") {
         val result = withCfg(1000) {
-          leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L))
+          leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L), None)
         }
 
         val prob = result.probOfExceedance(10000L)
@@ -161,33 +162,33 @@ object LossDistributionSpec extends ZIOSpecDefault {
     // `TrialOutcomes.combine`, which is what the portfolio factory folds with.
     suite("TrialOutcomes.combine - outer join semantics")(
       test("combines disjoint trial IDs") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(3 -> 3000L, 4 -> 4000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(3 -> 3000L, 4 -> 4000L), None) }
 
         val merged = TrialOutcomes.combine(r1.trials, r2.trials).outcomes
 
         assertTrue(merged == Map(1 -> 1000L, 2 -> 2000L, 3 -> 3000L, 4 -> 4000L))
       },
       test("combines overlapping trial IDs by summing losses") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), None) }
 
         val merged = TrialOutcomes.combine(r1.trials, r2.trials).outcomes
 
         assertTrue(merged == Map(1 -> 1500L, 2 -> 2000L, 3 -> 3000L))
       },
       test("combining with an empty result is identity") {
-        val r1    = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
-        val empty = withCfg(100) { leafOf(nodeId("EMPTY"), Map.empty) }
+        val r1    = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
+        val empty = withCfg(100) { leafOf(nodeId("EMPTY"), Map.empty, None) }
 
         val merged = TrialOutcomes.combine(r1.trials, empty.trials).outcomes
 
         assertTrue(merged == r1.outcomes)
       },
       test("combines three results correctly") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 2000L, 2 -> 500L)) }
-        val r3 = withCfg(100) { leafOf(nodeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), None) }
+        val r3 = withCfg(100) { leafOf(nodeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), None) }
 
         val merged = List(r1, r2, r3).map(_.trials).reduce(TrialOutcomes.combine).outcomes
 
@@ -196,7 +197,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("decorate - the node's own layer")(
       test("an empty layer leaves the figures unchanged by reference") {
-        val value = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
+        val value = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
 
         // Reference equality, not structural: an unmitigated node holds one
         // outcome map, not two.
@@ -308,7 +309,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
           leafOf(nodeId("risk-001"), Map(1 -> 1000L), Some(sampleProvenance))
         }
         val portfolioShaped = withCfg(100) {
-          leafOf(nodeId("TOTAL"), Map(1 -> 1000L))
+          leafOf(nodeId("TOTAL"), Map(1 -> 1000L), None)
         }
 
         assertTrue(leaf.provenance.contains(sampleProvenance)) &&
@@ -319,7 +320,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
           (
             leafOf(nodeId("risk-001"), Map(1 -> 1000L), Some(sampleProvenance)),
             leafOf(nodeId("risk-002"), Map(1 -> 2000L), Some(sampleProvenance)),
-            leafOf(nodeId("TOTAL"), Map(1 -> 3000L))
+            leafOf(nodeId("TOTAL"), Map(1 -> 3000L), None)
           )
         }
 
@@ -333,20 +334,20 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("equality")(
       test("equal results are equal") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
 
         assertTrue(Equal[LossDistribution].equal(r1, r2))
       },
       test("different outcomes are not equal") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 2000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 2000L), None) }
 
         assertTrue(!Equal[LossDistribution].equal(r1, r2))
       },
       test("different trial counts are not equal") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
-        val r2 = withCfg(200) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L), None) }
+        val r2 = withCfg(200) { leafOf(nodeId("risk-001"), Map(1 -> 1000L), None) }
 
         assertTrue(!Equal[LossDistribution].equal(r1, r2))
       },
@@ -363,29 +364,29 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("edge cases")(
       test("handles large trial IDs") {
-        val result = withCfg(2000000) { leafOf(nodeId("risk-001"), Map(1000000 -> 1000L)) }
+        val result = withCfg(2000000) { leafOf(nodeId("risk-001"), Map(1000000 -> 1000L), None) }
 
         assertTrue(result.outcomeOf(1000000) == 1000L)
       },
       test("handles large loss values") {
         val largeLoss = Long.MaxValue / 2
-        val result    = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> largeLoss)) }
+        val result    = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> largeLoss), None) }
 
         assertTrue(result.maxLoss == largeLoss)
       },
       test("combine handles potential overflow scenario") {
         // Long.MaxValue/2 + Long.MaxValue/2 = Long.MaxValue - 1: the largest
         // sum that still fits, so the checked addition must accept it
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue / 2)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> Long.MaxValue / 2)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue / 2), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> Long.MaxValue / 2), None) }
 
         val merged = TrialOutcomes.combine(r1.trials, r2.trials).outcomes
 
         assertTrue(merged.contains(1))
       },
       test("combine throws on Long overflow (checked addition)") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 1L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 1L), None) }
 
         assertTrue(
           try { TrialOutcomes.combine(r1.trials, r2.trials); false }

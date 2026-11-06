@@ -5,13 +5,16 @@ import zio.prelude.Identity
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import com.risquanter.register.domain.data.{Loss, TrialId}
 import com.risquanter.register.domain.data.iron.PositiveInt
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
+import com.risquanter.register.testutil.RiskResultTestSupport.outcomesOf
 
 /**
- * Law tests for the TrialOutcomes monoid.
+ * The gate on trial ids, the loss operations that keep it, and the law tests
+ * for the TrialOutcomes monoid.
  *
  * Each law is exercised through the type class instance itself
- * (TrialOutcomes.associative / .commutative / Identity[TrialOutcomes]),
+ * (TrialOutcomes.commutative / Identity[TrialOutcomes]),
  * not through the underlying combine function — an unlawful instance must
  * fail here even if the function it delegates to is correct.
  */
@@ -39,16 +42,47 @@ object TrialOutcomesSpec extends ZIOSpecDefault {
         o2 <- genOutcomeMap(nTrials)
         o3 <- genOutcomeMap(nTrials)
       } yield (
-        TrialOutcomes(nTrials, o1),
-        TrialOutcomes(nTrials, o2),
-        TrialOutcomes(nTrials, o3)
+        outcomesOf(nTrials,o1),
+        outcomesOf(nTrials,o2),
+        outcomesOf(nTrials,o3)
       )
     }
 
   private val genAligned2: Gen[Any, (TrialOutcomes, TrialOutcomes)] =
     genAligned3.map { case (a, b, _) => (a, b) }
 
+  private val trialIdRefusal = ValidationError(ErrorLocation.Whole, FieldProblem.TrialIdOutOfRange)
+
   def spec = suite("TrialOutcomesSpec")(
+
+    suite("create - the gate on trial ids")(
+      test("accepts the lowest and the highest trial id") {
+        val built = TrialOutcomes.create(10, Map(0 -> 5L, 9 -> 7L)).toEither
+        assertTrue(built.map(_.outcomes) == Right(Map(0 -> 5L, 9 -> 7L)))
+      },
+      test("accepts an empty map") {
+        assertTrue(TrialOutcomes.create(10, Map.empty).toEither.map(_.outcomes) == Right(Map.empty[TrialId, Loss]))
+      },
+      test("refuses a trial id equal to the trial count") {
+        val refused = TrialOutcomes.create(10, Map(10 -> 5L)).toEither.left.map(_.toList)
+        assertTrue(refused == Left(List(trialIdRefusal)))
+      },
+      test("refuses a negative trial id") {
+        val refused = TrialOutcomes.create(10, Map(-1 -> 5L)).toEither.left.map(_.toList)
+        assertTrue(refused == Left(List(trialIdRefusal)))
+      }
+    ),
+
+    suite("loss operations")(
+      test("mapLosses rewrites each loss under its own trial id and keeps the trial count") {
+        val mapped = outcomesOf(100, Map(1 -> 10L, 2 -> 20L)).mapLosses(_ * 2)
+        assertTrue(mapped.nTrials == 100, mapped.outcomes == Map(1 -> 20L, 2 -> 40L))
+      },
+      test("filterLosses keeps the satisfying trials and keeps the trial count") {
+        val filtered = outcomesOf(100, Map(1 -> 10L, 2 -> 20L)).filterLosses(_ > 15L)
+        assertTrue(filtered.nTrials == 100, filtered.outcomes == Map(2 -> 20L))
+      }
+    ),
 
     suite("Associative law (via the Commutative instance, which extends Associative)")(
       test("associativity: (a ⊕ b) ⊕ c == a ⊕ (b ⊕ c)") {
@@ -74,7 +108,7 @@ object TrialOutcomesSpec extends ZIOSpecDefault {
       test("left identity: ∅ ⊕ a == a") {
         check(genNTrials.flatMap(n => genOutcomeMap(n).map(n -> _))) { case (nTrials, o) =>
           withCfg(nTrials) {
-            val a  = TrialOutcomes(nTrials, o)
+            val a  = outcomesOf(nTrials,o)
             val id = Identity[TrialOutcomes]
             assertTrue(id.combine(id.identity, a) == a)
           }
@@ -83,7 +117,7 @@ object TrialOutcomesSpec extends ZIOSpecDefault {
       test("right identity: a ⊕ ∅ == a") {
         check(genNTrials.flatMap(n => genOutcomeMap(n).map(n -> _))) { case (nTrials, o) =>
           withCfg(nTrials) {
-            val a  = TrialOutcomes(nTrials, o)
+            val a  = outcomesOf(nTrials,o)
             val id = Identity[TrialOutcomes]
             assertTrue(id.combine(a, id.identity) == a)
           }
@@ -114,26 +148,26 @@ object TrialOutcomesSpec extends ZIOSpecDefault {
         }
       },
       test("rejects operands with different trial counts") {
-        val a = TrialOutcomes(100, Map(1 -> 1000L))
-        val b = TrialOutcomes(200, Map(1 -> 2000L))
+        val a = outcomesOf(100,Map(1 -> 1000L))
+        val b = outcomesOf(200,Map(1 -> 2000L))
         assertTrue(
           try { TrialOutcomes.combine(a, b); false }
           catch { case _: IllegalArgumentException => true }
         )
       },
       test("zero losses are preserved (not filtered out)") {
-        val withZero = TrialOutcomes(100, Map(1 -> 0L, 2 -> 1000L))
-        val empty    = TrialOutcomes(100, Map.empty)
+        val withZero = outcomesOf(100,Map(1 -> 0L, 2 -> 1000L))
+        val empty    = outcomesOf(100,Map.empty)
         val combined = TrialOutcomes.combine(withZero, empty)
         assertTrue(combined.trialIds.contains(1), combined.outcomeOf(1) == 0L)
       },
       test("combining empty operands stays empty") {
-        val e = TrialOutcomes(100, Map.empty)
+        val e = outcomesOf(100,Map.empty)
         assertTrue(TrialOutcomes.combine(TrialOutcomes.combine(e, e), e).outcomes.isEmpty)
       },
       test("overflowing pointwise sum throws instead of wrapping to a negative loss") {
-        val a = TrialOutcomes(100, Map(1 -> Long.MaxValue))
-        val b = TrialOutcomes(100, Map(1 -> 1L))
+        val a = outcomesOf(100,Map(1 -> Long.MaxValue))
+        val b = outcomesOf(100,Map(1 -> 1L))
         assertTrue(
           try { TrialOutcomes.combine(a, b); false }
           catch { case _: ArithmeticException => true }
@@ -141,7 +175,7 @@ object TrialOutcomesSpec extends ZIOSpecDefault {
       },
       test("large loss values don't overflow with reasonable aggregation") {
         val largeLoss = Long.MaxValue / 100
-        val a = TrialOutcomes(100, Map(1 -> largeLoss))
+        val a = outcomesOf(100,Map(1 -> largeLoss))
         val combined = TrialOutcomes.combine(a, a)
         assertTrue(
           combined.outcomeOf(1) == largeLoss * 2,

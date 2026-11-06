@@ -12,7 +12,7 @@ import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
-import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
+import com.risquanter.register.testutil.RiskResultTestSupport.{leafOf, outcomesOf}
 import java.time.Instant
 import io.github.iltotore.iron.refineUnsafe
 
@@ -53,7 +53,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
     loss: Long,
     applied: List[MitigationApplicationRecord]
   )(using cfg: SimulationConfig): LossDistribution = {
-    val losses = NodeLosses.leaf(id, TrialOutcomes(cfg.defaultNTrials, Map(1 -> loss)), sampleProvenance)
+    val losses = NodeLosses.leaf(id, outcomesOf(cfg.defaultNTrials, Map(1 -> loss)), sampleProvenance)
     LossDistribution.decorate(
       losses.nodeId, losses.trials, Some(losses.provenance), applied,
       MitigationApplication.run(applied, _)
@@ -76,7 +76,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
 
     suite("LeafLosses.create")(
       test("carries the figures and the record through without altering either") {
-        val trials = withCfg(100) { TrialOutcomes(summon[SimulationConfig].defaultNTrials, Map(1 -> 1000L)) }
+        val trials = withCfg(100) { outcomesOf(summon[SimulationConfig].defaultNTrials, Map(1 -> 1000L)) }
         val losses = NodeLosses.leaf(nodeId("risk-001"), trials, sampleProvenance)
 
         assertTrue(losses.nodeId == nodeId("risk-001")) &&
@@ -87,8 +87,8 @@ object NodeLossesSpec extends ZIOSpecDefault {
 
     suite("PortfolioLosses.create - the derived aggregate")(
       test("derives trials as the combine of exactly its children") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), None) }
 
         val losses = NodeLosses.portfolio(nodeId("TOTAL"), List(r1, r2)).toEither.toOption.get
 
@@ -97,8 +97,8 @@ object NodeLossesSpec extends ZIOSpecDefault {
         assertTrue(losses.children == List(r1, r2))
       },
       test("the trial count comes from the children, never from SimulationConfig") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 2000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 2000L), None) }
 
         // A config naming 999 is in scope and is not read. The count is the
         // denominator of probOfExceedance, so a wrong one corrupts every
@@ -109,8 +109,8 @@ object NodeLossesSpec extends ZIOSpecDefault {
         assertTrue(losses.trials.nTrials == 100)
       },
       test("children at differing trial counts are a programming error and throw") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
-        val r2 = withCfg(200) { leafOf(nodeId("risk-002"), Map(2 -> 2000L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L), None) }
+        val r2 = withCfg(200) { leafOf(nodeId("risk-002"), Map(2 -> 2000L), None) }
 
         // The resolver builds every child under one config, so a mismatch is a
         // defect and propagates rather than becoming a ValidationError (ADR-010).
@@ -120,8 +120,8 @@ object NodeLossesSpec extends ZIOSpecDefault {
         )
       },
       test("a combine overflow becomes an aggregated-loss overflow refusal") {
-        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue)) }
-        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 1L)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue), None) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 1L), None) }
 
         val parentId = nodeId("TOTAL")
         NodeLosses.portfolio(parentId, List(r1, r2)).toEither match {
@@ -148,7 +148,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
         }
       },
       test("a single child aggregate equals that child") {
-        val child  = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
+        val child  = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None) }
         val losses = NodeLosses.portfolio(nodeId("TOTAL"), List(child)).toEither.toOption.get
 
         assertTrue(losses.trials.outcomes == child.outcomes) &&
@@ -159,8 +159,8 @@ object NodeLossesSpec extends ZIOSpecDefault {
     suite("aggregated values - Ord[Loss] with TreeMap")(
       test("maxLoss uses Ord[Loss] for aggregated results") {
         val value = withCfg(10) {
-          val child1 = leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L))
-          val child2 = leafOf(nodeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L))
+          val child1 = leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None)
+          val child2 = leafOf(nodeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L), None)
           portfolioValue(nodeId("total-risk"), List(child1, child2), Nil)
         }
 
@@ -170,8 +170,8 @@ object NodeLossesSpec extends ZIOSpecDefault {
       },
       test("minLoss uses Ord[Loss] for aggregated results") {
         val value = withCfg(10) {
-          val child1 = leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L))
-          val child2 = leafOf(nodeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L))
+          val child1 = leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None)
+          val child2 = leafOf(nodeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L), None)
           portfolioValue(nodeId("total-risk"), List(child1, child2), Nil)
         }
 
@@ -181,8 +181,8 @@ object NodeLossesSpec extends ZIOSpecDefault {
       },
       test("outcomeCount sorted with aggregated losses") {
         val value = withCfg(10) {
-          val child1 = leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L))
-          val child2 = leafOf(nodeId("risk-002"), Map(1 -> 500L, 2 -> 3000L))
+          val child1 = leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), None)
+          val child2 = leafOf(nodeId("risk-002"), Map(1 -> 500L, 2 -> 3000L), None)
           portfolioValue(nodeId("total-risk"), List(child1, child2), Nil)
         }
 
@@ -201,7 +201,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
       // |   \-- PowerLoss        (leaf)  raw 14
       // \-- Fraud                (leaf)  raw  3
       test("the inherent reading is the identity instance of the same fold") {
-        withCfg(1) {
+        withCfg(2) {
           val disk  = leafValue(nodeId("DiskFailure"), 9L, Nil)
           val power = leafValue(nodeId("PowerLoss"), 14L, Nil)
           val serv  = portfolioValue(nodeId("Servers"), List(disk, power), Nil)
@@ -221,7 +221,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
         }
       },
       test("the mitigated reading folds the mitigated children, then applies each node's layer") {
-        withCfg(1) {
+        withCfg(2) {
           val capDisk = List(capRecord("cap-disk", 6L))
           val capServ = List(capRecord("cap-servers", 18L))
 
@@ -246,7 +246,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
         }
       },
       test("a transformed portfolio keeps its children") {
-        withCfg(1) {
+        withCfg(2) {
           val capServ = List(capRecord("cap-servers", 18L))
           val disk    = leafValue(nodeId("DiskFailure"), 9L, Nil)
           val power   = leafValue(nodeId("PowerLoss"), 14L, Nil)
@@ -266,7 +266,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
         }
       },
       test("capping the mitigated children differs from capping the raw aggregate") {
-        withCfg(1) {
+        withCfg(2) {
           val capDisk = List(capRecord("cap-disk", 6L))
           val capServ = List(capRecord("cap-servers", 18L))
 

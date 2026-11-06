@@ -13,7 +13,6 @@ import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId}
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError}
 import com.risquanter.register.services.helper.Simulator
-import io.github.iltotore.iron.refineUnsafe
 
 /**
   * Live implementation of CachedResultResolver (ADR-015), content-addressed.
@@ -49,8 +48,8 @@ final case class CachedResultResolverLive(
   private given SimulationConfig = config
 
   // Read from config at construction time
-  private val nTrials: PositiveInt = config.defaultNTrials.refineUnsafe
-  private val parallelism: PositiveInt = config.defaultTrialParallelism.refineUnsafe
+  private val nTrials: PositiveInt = config.defaultNTrials
+  private val parallelism: PositiveInt = config.defaultTrialParallelism
   // HDR seeds for reproducible simulations (ADR-003)
   private val seed3: Long = config.defaultSeed3
   private val seed4: Long = config.defaultSeed4
@@ -209,17 +208,18 @@ final case class CachedResultResolverLive(
         // Rationale: Maintain chain of truth - provenance always in cache
         (sampler, provenance) <- Simulator.createSamplerFromLeaf(leaf, seedEntityId, seed3, seed4)
         losses                <- Simulator.performTrials(sampler, nTrials, parallelism)
-        content                = LeafSimResult(TrialOutcomes(nTrials, losses), provenance)
+        outcomes              <- fromValidation(TrialOutcomes.create(nTrials, losses))
+        content                = LeafSimResult(outcomes, provenance)
         _                     <- cache.put(key, content)
 
         endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
-        _       <- recordSimulationMetrics(leaf.id.value, nTrials, endTime - startTime)
+        _       <- recordSimulationMetrics(leaf.id, nTrials, endTime - startTime)
       } yield content
     }
 
   /** Record simulation performance metrics (ADR-002) */
-  private def recordSimulationMetrics(nodeName: String, nTrials: PositiveInt, durationMs: Long): UIO[Unit] = {
-    val attrs = Attributes(Attribute.string("node_name", nodeName))
+  private def recordSimulationMetrics(nodeId: NodeId, nTrials: PositiveInt, durationMs: Long): UIO[Unit] = {
+    val attrs = Attributes(Attribute.string("node_name", nodeId.value))
     simulationDuration.record(durationMs.toDouble, attrs) *>
       trialsCounter.add(nTrials.toLong, attrs)
   }

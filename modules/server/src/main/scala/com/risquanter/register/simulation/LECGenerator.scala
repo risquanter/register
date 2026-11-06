@@ -56,10 +56,7 @@ object LECGenerator {
   def probabilityOfNoLoss(result: LossDistribution): OccurrenceProbability =
     val implicitZeros = result.nTrials.toLong - result.outcomeCount.values.sum.toLong
     val explicitZeros = result.outcomeCount.getOrElse(0L, 0).toLong
-    // A count of trials over the positive total of trials lies in [0, 1], so
-    // the refinement cannot fail.
-    ((implicitZeros + explicitZeros).toDouble / result.nTrials.toDouble)
-      .refineUnsafe[OccurrenceProbabilityConstraint]
+    result.trials.shareOf(implicitZeros + explicitZeros)
 
   /** The unconditional VaR at `percentile`, or None when there are no outcomes.
     * Clips tick ranges to a meaningful percentile rather than `maxLoss`, which

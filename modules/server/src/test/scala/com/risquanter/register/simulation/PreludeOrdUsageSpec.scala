@@ -1,7 +1,6 @@
 package com.risquanter.register.simulation
 
 import zio.test.*
-import zio.test.Assertion.*
 import zio.prelude.Ord
 import com.risquanter.register.domain.data.Loss
 import com.risquanter.register.domain.PreludeInstances.given
@@ -28,31 +27,31 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
 
     suite("LossDistribution - Ord[Loss] with TreeMap")(
       test("maxLoss uses Ord[Loss] - single loss") {
-        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 5000L)) }
+        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 5000L), None) }
 
         assertTrue(result.maxLoss == 5000L)
       },
 
       test("maxLoss uses Ord[Loss] - multiple losses") {
-        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L)) }
+        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L), None) }
 
         assertTrue(result.maxLoss == 5000L)
       },
 
       test("minLoss uses Ord[Loss] - single loss") {
-        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 5000L)) }
+        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 5000L), None) }
 
         assertTrue(result.minLoss == 5000L)
       },
 
       test("minLoss uses Ord[Loss] - multiple losses") {
-        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L)) }
+        val result = withCfg(10) { leafOf(nodeId("test-risk"), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L), None) }
 
         assertTrue(result.minLoss == 1000L)
       },
 
       test("empty result has zero max/min") {
-        val result = withCfg(10) { leafOf(nodeId("empty-risk"), Map.empty) }
+        val result = withCfg(10) { leafOf(nodeId("empty-risk"), Map.empty, None) }
 
         assertTrue(result.maxLoss == 0L) &&
         assertTrue(result.minLoss == 0L)
@@ -67,7 +66,8 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
               2 -> 1000L,
               3 -> 5000L,
               4 -> 2000L
-            )
+            ),
+            None
           )
         }
 
@@ -87,7 +87,8 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
               2 -> 2000L,
               3 -> 1000L,  // Duplicate
               4 -> 2000L   // Duplicate
-            )
+            ),
+            None
           )
         }
 
@@ -108,7 +109,8 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
               3 -> 3000L,
               4 -> 4000L,
               5 -> 5000L
-            )
+            ),
+            None
           )
         }
 

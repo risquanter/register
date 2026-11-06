@@ -71,7 +71,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   // So with threshold 50: inherent → {a, b} exceed; residual → only {b}.
 
   private def flat(id: NodeId, v: Long): LossDistribution =
-    withCfg(5)(leafOf(id, Map(1 -> v, 2 -> v, 3 -> v, 4 -> v, 5 -> v)))
+    withCfg(5)(leafOf(id, Map(0 -> v, 1 -> v, 2 -> v, 3 -> v, 4 -> v), None))
 
   private val inherentResults = Map(aId -> flat(aId, 100L), bId -> flat(bId, 100L))
   private val residualResults  = Map(aId -> flat(aId, 10L),  bId -> flat(bId, 100L))

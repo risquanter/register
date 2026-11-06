@@ -31,7 +31,7 @@ private object TestSimulator {
     ZIO.collectAllPar(
       samplers.map { sampler =>
         Simulator.performTrials(sampler, cfg.defaultNTrials, cfg.defaultTrialParallelism)
-          .map(trials => leafOf(sampler.nodeId, trials))
+          .map(trials => leafOf(sampler.nodeId, trials, None))
       }
     ).withParallelism(cfg.maxConcurrentSimulations)
 
@@ -41,7 +41,7 @@ private object TestSimulator {
     samplers: Vector[RiskSampler]
   )(using cfg: SimulationConfig): Task[Vector[LossDistribution]] =
     ZIO.foreach(samplers) { sampler =>
-      ZIO.attempt(leafOf(sampler.nodeId, performTrialsSync(sampler, cfg.defaultNTrials)))
+      ZIO.attempt(leafOf(sampler.nodeId, performTrialsSync(sampler, cfg.defaultNTrials), None))
     }
 
   /** Every trial of one risk, computed in order on the calling thread. */

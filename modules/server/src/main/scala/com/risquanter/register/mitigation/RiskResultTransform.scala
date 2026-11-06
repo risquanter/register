@@ -120,11 +120,8 @@ object RiskResultTransform {
    * }}}
    */
   def applyDeductible(deductible: NonNegativeLong): RiskResultTransform = RiskResultTransform { to =>
-    val mitigated = to.outcomes.map { case (trial, loss) =>
-      trial -> Math.max(0L, loss - deductible)
-    }.filter(_._2 > 0)  // Remove zero losses (sparse storage)
-
-    to.copy(outcomes = mitigated)
+    to.mapLosses(loss => Math.max(0L, loss - deductible))
+      .filterLosses(_ > 0L)  // Remove zero losses (sparse storage)
   }
 
   /**
@@ -142,11 +139,7 @@ object RiskResultTransform {
    * }}}
    */
   def capLosses(cap: PositiveLong): RiskResultTransform = RiskResultTransform { to =>
-    val capped = to.outcomes.map { case (trial, loss) =>
-      trial -> Math.min(loss, cap)
-    }
-
-    to.copy(outcomes = capped)
+    to.mapLosses(loss => Math.min(loss, cap))
   }
 
   /**
@@ -173,16 +166,14 @@ object RiskResultTransform {
    */
   def scaleLosses(factor: RetentionFactor): RiskResultTransform = RiskResultTransform { to =>
     val fraction = factor.toFraction
-    val scaled = to.outcomes.map { case (trial, loss) =>
+    to.mapLosses { loss =>
       val product = loss * fraction
       // Narrowing would saturate silently at Long.MaxValue; throw instead, and
       // let LossDistribution.decorate convert it (ADR-033 §3).
       if (product.isNaN || product >= Long.MaxValue.toDouble)
         throw new ArithmeticException(s"scaled loss overflow: $loss * $fraction")
-      trial -> Math.round(product)
-    }.filter(_._2 > 0)  // Remove zero losses
-
-    to.copy(outcomes = scaled)
+      Math.round(product)
+    }.filterLosses(_ > 0L)  // Remove zero losses
   }
 
   /**
@@ -218,7 +209,6 @@ object RiskResultTransform {
    * @return Transformation filtering losses
    */
   def filterBelowThreshold(threshold: NonNegativeLong): RiskResultTransform = RiskResultTransform { to =>
-    val filtered = to.outcomes.filter { case (_, loss) => loss >= threshold }
-    to.copy(outcomes = filtered)
+    to.filterLosses(_ >= threshold)
   }
 }
