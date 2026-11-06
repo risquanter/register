@@ -98,8 +98,8 @@ object LECSpecBuilder:
     *                      mode, so single-tree and compare read alike
     * @param width         Chart width in pixels
     * @param height        Chart height in pixels
-    * @param pinned        Explicit axis extents; `None` (the default) keeps
-    *                      the automatic per-spec extents
+    * @param pinned        Explicit axis extents; `None` keeps the automatic
+    *                      per-spec extents
     * @param responsive    When true, `width`/`height` become `"container"` so
     *                      the chart fills its box (single/overlay Analyze
     *                      chart); false keeps the fixed pixel size (side-by-side
@@ -110,10 +110,10 @@ object LECSpecBuilder:
     */
   def build(
     curves: Vector[(LECNodeCurve, HexColor)],
-    origin: Option[String] = None,
+    origin: Option[String],
     width: Int = 950,
     height: Int = 400,
-    pinned: Option[PinnedAxes] = None,
+    pinned: Option[PinnedAxes],
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
@@ -127,14 +127,13 @@ object LECSpecBuilder:
     * comparison) — `NodeId` alone can't disambiguate them, and it can't be
     * faked with a synthetic string since it's Iron-refined to a real ULID;
     * the caller likewise says how the legend names each side
-    * ("Root — main · Tree A"). `build` delegates here with today's defaults
-    * so every existing call site is unchanged.
+    * ("Root — main · Tree A"). `build` delegates here with those defaults.
     */
   def buildFromSeries(
     series: Vector[ChartSeries],
     width: Int = 950,
     height: Int = 400,
-    pinned: Option[PinnedAxes] = None,
+    pinned: Option[PinnedAxes],
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
@@ -190,12 +189,12 @@ object LECSpecBuilder:
     // with the `QuantileLevel` it reads from the curve. All annotations
     // render as TWO datum-driven layers (rules + labels) regardless of curve
     // count — see `VegaSpecShared.verticalRuleLayers`.
-    val quantileToggles = List(
-      QuantileLevel.P90  -> LecAnnotation.P90,
-      QuantileLevel.P95  -> LecAnnotation.P95,
-      QuantileLevel.P99  -> LecAnnotation.P99,
-      QuantileLevel.P995 -> LecAnnotation.P995
-    )
+    val quantileToggles = QuantileLevel.values.toList.map {
+      case level @ QuantileLevel.P90  => level -> LecAnnotation.P90
+      case level @ QuantileLevel.P95  => level -> LecAnnotation.P95
+      case level @ QuantileLevel.P99  => level -> LecAnnotation.P99
+      case level @ QuantileLevel.P995 => level -> LecAnnotation.P995
+    }
     // Only curves with data get annotations — a node with an empty curve
     // (no simulation outcomes) carries aal = 0.0 / noLoss = 1.0 fallbacks
     // that would otherwise draw a solid rule pinned to the y-axis and a
@@ -227,7 +226,7 @@ object LECSpecBuilder:
         (s"${s.curve.name.value} — no loss: ${formatProbability(s.curve.probabilityOfNoLoss)}", s.colour, s.seriesId)
       }
 
-    // Fresh data values array — called per layer to avoid shared mutable state (F2)
+    // Fresh data values array — called per layer to avoid shared mutable state
     def makeDataValues(): js.Array[js.Any] =
       val arr = js.Array[js.Any]()
       ordered.foreach { s =>
@@ -242,7 +241,7 @@ object LECSpecBuilder:
       }
       arr
 
-    // Fresh colour encoding — called per layer to avoid shared mutable state (F2)
+    // Fresh colour encoding — called per layer to avoid shared mutable state
     def makeColorEncoding(): js.Dynamic =
       val domain = js.Array[js.Any]()
       val range = js.Array[js.Any]()

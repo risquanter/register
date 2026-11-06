@@ -4,8 +4,8 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 import app.components.{BranchBar, MergeModal, SplitPane}
 import app.state.{AppConfigState, DistributionChartState, LoadState, ScenarioMergeState, ScenarioState, TreeBuilderState, TreeLoadDecision, TreeLoadPolicy, TreeViewState, WorkspaceState}
-import com.risquanter.register.domain.data.{RiskNode, RiskTree}
-import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId}
+import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.iron.BranchChoice
 
 /** Design view — tree creation and editing workflow.
   *
@@ -82,7 +82,7 @@ object DesignView:
 
     val previewPanel = div(
       cls := "design-preview-panel",
-      TreeListView(treeViewState, Some(onNewTree)),
+      TreeListView(treeViewState, Some(onNewTree), leadingControl = None),
       TreePreview(builderState)
     )
 

@@ -8,7 +8,7 @@ import com.risquanter.register.domain.data.iron.{NodeId, CommitHash, SafeName}
 import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.http.responses.{TreeHistoryResponse, TreeHistoryEntry, HistoryOperation, TreeWriteKind}
 
-/** Pure tests for the Slice E-A derivations — no Laminar Var/Signal harness,
+/** Pure tests for the history derivations — no Laminar Var/Signal harness,
   * since both are plain functions of `LoadState`.
   */
 object TreeHistoryStateSpec extends ZIOSpecDefault:
@@ -21,7 +21,7 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
   private def curve(id: NodeId): LECNodeCurve =
     LECNodeCurve(id, SafeName.fromString("n").toOption.get, Vector.empty, Map.empty, 0.0, 0.0)
 
-  def spec = suite("Slice E-A pure derivations")(
+  def spec = suite("History pure derivations")(
 
     test("deriveCommits: Loaded → its entries, unmodified (oldest-first as fetched)") {
       val entries = List(

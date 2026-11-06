@@ -102,7 +102,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           structure.id == createdTree.id
         )
       },
-      test("bootstrap honours provided seedEntityId and seedVarId; structure exposes assigned seeds (PLAN §7)") {
+      test("bootstrap honours provided seedEntityId and seedVarId; structure exposes assigned seeds") {
         // Export→import round-trip prerequisite: caller pins both seed axes and
         // reads them back from the response / structure endpoint.
         val base = sampleRequest()

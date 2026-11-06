@@ -329,10 +329,10 @@ object Application extends ZIOAppDefault {
     TapirCORSConfig.default
       .allowMatchingOrigins(origins.contains)
       .allowHeaders(
-        "Content-Type", "Accept", "Authorization",
+        HeaderNames.ContentType, HeaderNames.Accept, HeaderNames.Authorization,
         RequestHeaderName.Branch.wireName, RequestHeaderName.IfMatch.wireName
       )
-      .exposeHeaders("Content-Type", HeaderNames.Location)
+      .exposeHeaders(HeaderNames.ContentType, HeaderNames.Location)
       .maxAge(PreflightMaxAge)
 
   def startServer = for {

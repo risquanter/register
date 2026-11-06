@@ -97,10 +97,10 @@ Every one of the seven files in
 `modules/common/src/main/scala/com/risquanter/register/http/responses/` follows
 it: a wire-only `final case class`, a codec derived with `DeriveJsonCodec.gen`,
 and a one-way projection from the domain type.
-`SimulationResponse.fromRiskTree` is the reference. There is no inverse
+`RiskTree.toSummary` is the reference. There is no inverse
 anywhere, and the browser holds the wire type directly —
-`app/state/TreeViewState.scala:109` declares
-`Signal[LoadState[List[SimulationResponse]]]`.
+`app/state/TreeViewState.scala:107` declares
+`Signal[LoadState[List[TreeSummaryResponse]]]`.
 
 The error path instead round-trips. `ErrorResponse.decode` takes a status code
 and a response body and tries to rebuild the server's own `AppError`. It is the
@@ -303,9 +303,11 @@ enum WireError:
     * (`EWB-D-28`). `RejectionDetail` is at §3.5. */
   case ValidationRejected(tree: TreeId, detail: RejectionDetail, trace: TraceId)
 
-  /** No such resource, or one the caller may not see. The two are one response
-    * so that neither is an existence oracle. */
-  case NotFound(trace: TraceId)
+  /** Nothing to answer with. `absence` says which kind: an unknown resource, a
+    * resource the caller may not see, or a tree this workspace holds that the
+    * revision read lacks. The first two share one kind so that neither is an
+    * existence oracle. */
+  case NotFound(absence: NotFoundKind, trace: TraceId)
 
   /** A workspace past one of its two deadlines.
     *
@@ -542,7 +544,7 @@ val baseEndpoint = endpoint
 ```
 
 There is no `mapErrorOut`, because there is nothing to map: `WireError` is
-already the type both sides want, exactly as `jsonBody[SimulationResponse]` needs
+already the type both sides want, exactly as `jsonBody[TreeSummaryResponse]` needs
 no mapping on the success side.
 
 **How `oneOf` runs, in each direction.** On the server Tapir holds a `WireError`
@@ -668,8 +670,8 @@ def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError =
     // Absent, or not the caller's. One shape for both, so neither is an
     // existence oracle. The workspace identifier may not cross (ADR-036); the
     // tree identifier is dropped because it would distinguish the two cases.
-    case WorkspaceNotFound()                  => NotFound(t)
-    case TreeNotInWorkspace(_, _)             => NotFound(t)
+    case WorkspaceNotFound()                  => NotFound(NotFoundKind.Unknown(), t)
+    case TreeNotInWorkspace(_, _)             => NotFound(NotFoundKind.Unknown(), t)
 
     // Expired. The cause and both windows cross; the workspace identifier may
     // not (ADR-036), and the moment this one expired is a fact about one
@@ -718,7 +720,7 @@ def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError =
     case FolEvaluationFailure(_, _)           => InternalFault(t)
 ```
 
-All 31 leaf types of `AppError` appear: 15 under `SimError`, 7 under
+All 32 leaf types of `AppError` appear: 16 under `DomainError`, 7 under
 `IrminError`, 2 under `AuthError` and 7 under `FolQueryFailure`. The match is on
 the leaf types rather than on the four sub-traits, so
 `-Wconf:msg=match may not be exhaustive:error` in `build.sbt` makes a new error
@@ -733,7 +735,7 @@ In the controllers, next to the success projection. The success side already
 reads, at `WorkspaceTreeController.scala:101`:
 
 ```scala
-result <- riskTreeService.update(ws.id, treeId, req, branch).map(SimulationResponse.fromRiskTree)
+result <- riskTreeService.update(ws.id, treeId, req, branch).map(_.toSummary)
 ```
 
 Every controller method ends `(for ... yield result).either`, because
@@ -2708,8 +2710,8 @@ exercised on a small surface before the largest one:
    on the two unpublished cases, and `ConnectionStatus.message` lost its
    default. `SSEHub`'s two log lines read `eventName`. `SSEEventSpec`, new,
    pins the round trip, the line-equals-tag law, the object payload and the
-   four published names. `LECUpdated.quantiles` keeps `Map[String, Double]`
-   until step 5 types the quantile keys for `SimulationResponse`.
+   four published names. `LECUpdated.quantiles` is a
+   `Map[QuantileLevel, Double]`, typed by step 5.
 
 2. **The changed-node report, and the merge conflict entry.**
    `ChangedNodesResponse.status` is four values held as `String`; it becomes a
@@ -6144,7 +6146,7 @@ the browser.
 | ADR | What this plan touches | Status |
 |---|---|---|
 | ADR-010 (error handling strategy) | the hierarchy, the HTTP mapping, the code smells | **Compliant, and it closes a violation.** The "String Matching on Errors" code smell instructs pattern matching on types; `isWorkspaceSentinel` matches a string prefix on the browser side, and this plan deletes it. **The ADR is amended in two places:** §5 "Pure HTTP Error Mapping" is rewritten to describe a one-way projection onto `WireError` instead of `encode` and `decode`, and §1's hierarchy listing gains `TreeLoadFailure` and the `SimError` to `DomainError` rename. |
-| ADR-035 (error leakage prevention) | the boundary, the encoders, the failure's own message member | **Compliant, and strengthened.** **Its naming amendment is made.** ADR-035 named the member as `getMessage` in its leakage-vector list, in its §3 heading, in §3's first sentence and in its ADR-036 cross-reference. `EWB-D-15` removes `extends Throwable`, so `AppError` has no `getMessage` and the member is `logMessage` (§6.1). All four now read `logMessage`, and §3's opening states why: the name carries the destination, and an `AppError` is plain data with no exception apparatus behind its text. The discipline the section states is unchanged and still binds. §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 31 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. **Phase 2b closes two paths that bypassed §2 entirely:** a defect reached the wire as `cause.squash.getMessage` in a plain-text body, and a request the codecs rejected reached it as Tapir's own plain-text `400`. After `EWB-D-21` and `EWB-D-23` every response this service sends is a declared output, which is what §2's exhaustive-encoding rule asks for. |
+| ADR-035 (error leakage prevention) | the boundary, the encoders, the failure's own message member | **Compliant, and strengthened.** **Its naming amendment is made.** ADR-035 named the member as `getMessage` in its leakage-vector list, in its §3 heading, in §3's first sentence and in its ADR-036 cross-reference. `EWB-D-15` removes `extends Throwable`, so `AppError` has no `getMessage` and the member is `logMessage` (§6.1). All four now read `logMessage`, and §3's opening states why: the name carries the destination, and an `AppError` is plain data with no exception apparatus behind its text. The discipline the section states is unchanged and still binds. §2 "Typed Error Channel" quotes the `mapErrorOut` line and argues that `ErrorResponse` is the only type that can reach the wire; the argument holds more strongly for `WireError`, which has no field for a confidential value rather than relying on a builder dropping it. **§2 is amended** to quote the `oneOf` declaration and to state that the single projection is the auditable list of what is dropped. §1's exhaustiveness guarantee improves: the match is on 32 leaf types, not on 4 sub-traits. **§3 is also amended, and the earlier claim that it was unchanged was wrong.** Its second bullet reads "Resource-neutral errors collapse to an opaque status (a missing resource is a plain 404 regardless of variant)" — that constrains the status, not only the message, and `EWB-D-4` answers `410 Gone` for expiry. The bullet is narrowed to not-found and not-yours, which is the pair A13 was narrowed to on the same grounds; the `getMessage` sentence it opens with is unchanged and still binds. **Phase 2b closes two paths that bypassed §2 entirely:** a defect reached the wire as `cause.squash.getMessage` in a plain-text body, and a request the codecs rejected reached it as Tapir's own plain-text `400`. After `EWB-D-21` and `EWB-D-23` every response this service sends is a declared output, which is what §2's exhaustive-encoding rule asks for. |
 | ADR-036 (confidential internal identifiers) | `TreeNotInWorkspace`, `WorkspaceExpired`, the log line | Compliant. No wire case declares a `WorkspaceId`, so the output half holds structurally rather than by discipline. The input half is untouched. §6.2's log annotation is explicitly permitted: a confidential identifier may appear in a server log. |
 | ADR-022 (secret handling) | the three workspace errors | Compliant and unchanged. None carries a credential, so R1's `final class` rule has nothing to be violated at the container. |
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention, and in Phase 3a the browser's refinement entry points | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. Phase 3a strengthens ADR-001's "smart constructors are the only valid construction path" on the browser side: a form's live checks and its submission both read a located accessor, so the value a refinement sees was built where the field is declared rather than assembled at the call site. The refinements keep their `(value, location)` parameters and stay public, because the server supplies a location it derives by iterating a submitted collection, so on that side the entry point is enforced by convention exactly as it is today. No amendment is needed — the record already states the rule this makes true. |
@@ -7487,8 +7489,8 @@ def submitInto(target: Var[SubmitState])(onSuccess: A => Unit): Unit =
 **`settleLoad` is deleted.** It reset a load to `Idle` on an expired workspace
 and on a `404`, so that the banner alone showed them. Under rule 1 a load's
 failure is shown where the load is displayed, so every failure becomes
-`LoadState.Failed`. `loadInto`, `loadStatePipeline` and
-`loadOptionStatePipeline` settle `Left(f)` to `LoadState.Failed(f)`. An expired
+`LoadState.Failed`. `loadInto` and `loadStatePipeline` settle `Left(f)` to
+`LoadState.Failed(f)`. An expired
 workspace is then shown in both places, by rule 3. A `404` is shown only inline,
 because the browser cannot tell an absent workspace from an absent tree: the two
 answer identically (ADR-035 §3), so it is not known to be a session condition.

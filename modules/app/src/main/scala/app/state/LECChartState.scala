@@ -119,7 +119,7 @@ final class LECChartState(
       .distinct
 
   /** User-selected nodes with no curve in the current cache — selections that
-    * do not exist at the pinned commit (H3). Empty at head (every selection has
+    * do not exist at the pinned commit. Empty at head (every selection has
     * a curve). Drives the transient "not present at this point in time" notice;
     * the chart already omits them. */
   val droppedSelections: Signal[Set[NodeId]] =
@@ -171,6 +171,7 @@ final class LECChartState(
           LECSpecBuilder.build(
             ColorAssigner.pairWithColors(allCurves, visible, colorMap),
             origin = o,
+            pinned = None,
             responsive = true,
             zoomable = true
           )
@@ -253,7 +254,7 @@ final class LECChartState(
     * when only the point-in-time (`at`) changes: the selection is unchanged but
     * its curves must be re-read at the new commit, so the same curves scrub
     * through history. Empty selection → clear. Nodes absent at the pin come
-    * back missing from the cache and surface via `droppedSelections` (H3). */
+    * back missing from the cache and surface via `droppedSelections`. */
   def reloadCurrentCurves(): Unit =
     (userSelectedNodeIds.now() ++ satisfyingNodeIds.now()).toList match
       case Nil => clearCurves()
@@ -273,7 +274,7 @@ final class LECChartState(
         curvesTrigger.emit(Some(() =>
           getWorkspaceLECCurvesMultiEndpoint(
             // omitAbsent = true: a rewound read must drop nodes that don't exist
-            // at the pinned commit (surfaced via droppedSelections / H3) rather
+            // at the pinned commit (surfaced via droppedSelections) rather
             // than fail the whole chart.
             (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor(), true)
           ).map(_.curves).toOutcomeEventStream

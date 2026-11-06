@@ -40,8 +40,8 @@ object TreeListView:
     */
   def apply(
     state: TreeViewState,
-    onNewTree: Option[() => Unit] = None,
-    leadingControl: Option[HtmlElement] = None,
+    onNewTree: Option[() => Unit],
+    leadingControl: Option[HtmlElement],
     onRefreshExtra: () => Unit = () => (),
     bare: Boolean = false
   ): HtmlElement =

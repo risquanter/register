@@ -226,7 +226,7 @@ object ValidationUtil {
   // Refinement for occurrence probability (must be between 0.0 and 1.0, inclusive)
   def refineOccurrenceProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], OccurrenceProbability] = {
     value
-      .refineEither[GreaterEqual[0.0] & LessEqual[1.0]]
+      .refineEither[OccurrenceProbabilityConstraint]
       .left
       .map(_ => refusal(location, FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)))
   }

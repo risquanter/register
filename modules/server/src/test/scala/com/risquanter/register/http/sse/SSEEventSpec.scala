@@ -8,8 +8,8 @@ import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.testutil.TestHelpers.*
 
-/** The event codec, and the law `EWB-D-62` rests on: the `event:` line and the
-  * payload's tag carry one name. */
+/** The event codec, and the law the event's name rests on: the `event:` line
+  * and the payload's tag carry one name. */
 object SSEEventSpec extends ZIOSpecDefault:
 
   private val every: List[SSEEvent] = List(

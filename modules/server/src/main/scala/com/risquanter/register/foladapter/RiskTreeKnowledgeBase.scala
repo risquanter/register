@@ -1,6 +1,7 @@
 package com.risquanter.register.foladapter
 
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId}
@@ -209,7 +210,7 @@ class RiskTreeKnowledgeBase(
           sel <- selectionOf(args(1))
           rs  <- resultsFor(sel)
           r   <- lookupResult(rs, id, "p95")
-        yield percentile(r, 0.95)
+        yield percentile(r, QuantileLevel.P95.probability)
       },
       SymbolName("p99") -> { args =>
         for
@@ -217,7 +218,7 @@ class RiskTreeKnowledgeBase(
           sel <- selectionOf(args(1))
           rs  <- resultsFor(sel)
           r   <- lookupResult(rs, id, "p99")
-        yield percentile(r, 0.99)
+        yield percentile(r, QuantileLevel.P99.probability)
       },
       SymbolName("lec") -> { args =>
         for

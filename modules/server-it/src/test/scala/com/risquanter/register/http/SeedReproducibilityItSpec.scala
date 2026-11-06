@@ -193,7 +193,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
         )
       },
 
-      test("demo-simple and demo-enterprise trees yield identical figures in both creation orders (original item-12 symptom)") {
+      test("demo-simple and demo-enterprise trees yield identical figures in both creation orders") {
         def run(first: RiskTreeDefinitionRequest, second: RiskTreeDefinitionRequest): Task[Map[String, Map[String, (Vector[LECPoint], Map[QuantileLevel, Double])]]] =
           withServer { client =>
             for

@@ -204,7 +204,7 @@ object AnalyzeView:
                         input.origin.getOrElse(branchName), input.explicitColors)
                     }
                     val paired = CompareColorAssigner.pairForOverlay(sides)
-                    if paired.nonEmpty then LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired, responsive = true, zoomable = true))
+                    if paired.nonEmpty then LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired, pinned = None, responsive = true, zoomable = true))
                     else if (baselineHidden || thisVisible.isEmpty) && comparandSides.forall(_._2.visible.isEmpty) then LoadState.Idle
                     else LoadState.Loading
         }
@@ -282,9 +282,8 @@ object AnalyzeView:
       treeViewState.selectedTreeId.signal.changes --> { _ => queryState.resetResult() },
       // The selected tree is held but absent at the branch or commit read —
       // nothing valid left to point at. Clears the tree picker back to "nothing
-      // selected" so it matches TreeDetailView's own placeholder for this event,
-      // giving a genuine "back to the initial state" result rather than a picker
-      // still showing a tree that no longer resolves to anything. Unlike
+      // selected", giving a genuine "back to the initial state" result rather than
+      // a picker still showing a tree that no longer resolves to anything. Unlike
       // DesignView's handling of the same event, this never needs to confirm
       // first — Analyze has no in-progress draft that this could discard.
       treeViewState.selectedTree.signal.changes
@@ -804,6 +803,7 @@ object AnalyzeView:
         ),
         TreeListView(
           treeViewState,
+          onNewTree = None,
           leadingControl = Some(BranchBar.picker(scenarioState, appConfigState.scenariosEnabled.signal)),
           onRefreshExtra = onRefreshExtra,
           bare = true

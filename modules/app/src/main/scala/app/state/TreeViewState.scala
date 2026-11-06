@@ -58,7 +58,7 @@ final class TreeViewState(
   activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
   atSignal: StrictSignal[Option[CommitHash]] = Val(None),
   userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua),
-  branchDisplay: Option[BranchChoice => String] = None
+  branchDisplay: Option[BranchChoice => String]
 ) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()
@@ -67,7 +67,7 @@ final class TreeViewState(
   // A rewind (pin change) re-reads the selected tree at the new pin and
   // re-fetches the current selection's curves there, WITHOUT clearing the
   // selection — so the same curves scrub back and forth through history
-  // (nodes absent at the pin drop via the H3 notice and return on moving
+  // (nodes absent at the pin drop via the `droppedSelections` notice and return on moving
   // forward). Distinct from a branch/tree switch, which resets the chart.
   atSignal.changes.foreach(_ => rewindReload())(using unsafeWindowOwner)
 

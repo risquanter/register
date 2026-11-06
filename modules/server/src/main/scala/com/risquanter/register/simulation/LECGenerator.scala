@@ -1,27 +1,23 @@
 package com.risquanter.register.simulation
 
-import io.github.iltotore.iron.{autoRefine, refineUnsafe}
+import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.{OccurrenceProbability, OccurrenceProbabilityConstraint}
 
 /** Generates Loss Exceedance Curve data from simulation outcomes.
   *
-  * A curve gives P(Loss >= x) at evenly spaced ticks over [minLoss, maxLoss];
-  * 100 ticks is the default. Loss values are in millions, so 1L = $1M.
+  * A curve gives P(Loss >= x) at evenly spaced ticks, `DefaultTickCount` of them
+  * unless a caller says otherwise. Loss values are in millions, so 1L = $1M.
   */
 object LECGenerator {
 
-  /** The probability of an event that happens in every trial: what a figure
-    * read from no trials at all reports for "no loss". */
-  private val Certain: OccurrenceProbability = 1.0
-
   /** The unconditional VaR at percentile `p`: the loss below which a fraction
     * `p` of all trials fall, counting the zero-loss trials where the risk did
-    * not occur. Returns 0L when there is no simulation data.
+    * not occur. Returns 0L when no trial recorded an outcome.
     */
   def unconditionalQuantile(result: LossDistribution, p: Double): Long =
     val outcomes = result.outcomeCount
-    if outcomes.isEmpty || result.nTrials == 0 then 0L
+    if outcomes.isEmpty then 0L
     else
       val implicitZeros = result.nTrials.toLong - outcomes.values.sum.toLong
       val target = result.nTrials.toDouble * p
@@ -37,51 +33,51 @@ object LECGenerator {
           .getOrElse(outcomes.lastKey)
 
   /** The unconditional VaR at every `QuantileLevel`, which is where the tail-only
-    * choice of levels is stated. Empty when there is no simulation data.
+    * choice of levels is stated. Empty when no trial recorded an outcome.
     */
   def calculateQuantiles(result: LossDistribution): Map[QuantileLevel, Double] =
-    if result.outcomeCount.isEmpty || result.nTrials == 0 then Map.empty
+    if result.outcomeCount.isEmpty then Map.empty
     else QuantileLevel.values.map(level =>
       level -> unconditionalQuantile(result, level.probability).toDouble).toMap
 
   /** Average Annual Loss: the mean loss across all trials, zero-loss trials
     * included. A percentile answers how bad it can get; this answers what to
-    * budget for on average. Returns 0.0 when there is no simulation data.
+    * budget for on average.
     */
   def averageAnnualLoss(result: LossDistribution): Double =
-    if result.nTrials == 0 then 0.0
-    else
-      val totalLoss = result.outcomeCount.iterator.map { case (loss, count) => loss.toDouble * count }.sum
-      totalLoss / result.nTrials.toDouble
+    val totalLoss = result.outcomeCount.iterator.map { case (loss, count) => loss.toDouble * count }.sum
+    totalLoss / result.nTrials.toDouble
 
   /** Probability that this risk causes no loss in a given trial, counting both
     * trials absent from the sparse map and explicit zero-valued outcomes — the
     * two sources `unconditionalQuantile` also treats as at or below zero.
-    * Returns 1.0 when there is no simulation data.
     */
   def probabilityOfNoLoss(result: LossDistribution): OccurrenceProbability =
-    if result.nTrials == 0 then Certain
-    else
-      val implicitZeros = result.nTrials.toLong - result.outcomeCount.values.sum.toLong
-      val explicitZeros = result.outcomeCount.getOrElse(0L, 0).toLong
-      // A count of trials over the positive total of trials lies in [0, 1], so
-      // the refinement cannot fail.
-      ((implicitZeros + explicitZeros).toDouble / result.nTrials.toDouble)
-        .refineUnsafe[OccurrenceProbabilityConstraint]
+    val implicitZeros = result.nTrials.toLong - result.outcomeCount.values.sum.toLong
+    val explicitZeros = result.outcomeCount.getOrElse(0L, 0).toLong
+    // A count of trials over the positive total of trials lies in [0, 1], so
+    // the refinement cannot fail.
+    ((implicitZeros + explicitZeros).toDouble / result.nTrials.toDouble)
+      .refineUnsafe[OccurrenceProbabilityConstraint]
 
   /** The unconditional VaR at `percentile`, or None when there are no outcomes.
     * Clips tick ranges to a meaningful percentile rather than `maxLoss`, which
     * is one outlier and stretches the x-axis past the informative range.
     */
   def findQuantileLoss(result: LossDistribution, percentile: Double): Option[Long] =
-    Option.when(result.nTrials > 0 && result.outcomeCount.nonEmpty) {
+    Option.when(result.outcomeCount.nonEmpty) {
       unconditionalQuantile(result, percentile)
     }
   
+  /** How many thresholds a curve is sampled at unless a caller says otherwise.
+    * Chosen by this project: enough for a smooth line on a chart.
+    */
+  val DefaultTickCount: Int = 100
+
   /** Evenly-spaced loss ticks over [minLoss, maxLoss * 1.1], taking the
     * minimum from the data rather than assuming zero.
     */
-  def getTicks(minLoss: Long, maxLoss: Long, nEntries: Int = 100): Vector[Long] = {
+  def getTicks(minLoss: Long, maxLoss: Long, nEntries: Int = DefaultTickCount): Vector[Long] = {
     require(nEntries > 1, "nEntries must be > 1")
     require(minLoss >= 0, "minLoss must be >= 0")
     require(maxLoss >= minLoss, "maxLoss must be >= minLoss")
@@ -99,18 +95,21 @@ object LECGenerator {
   }
   
   /** Curve points as (loss, exceedance probability) pairs. */
-  def generateCurvePoints(result: LossDistribution, nEntries: Int = 100): Vector[(Long, OccurrenceProbability)] = {
+  def generateCurvePoints(result: LossDistribution, nEntries: Int = DefaultTickCount): Vector[(Long, OccurrenceProbability)] = {
     if (result.outcomeCount.isEmpty) Vector.empty
-    else {
-      val minLoss = result.minLoss
-      val maxLoss = clippedMaxLoss(result)
-      val ticks = (0L +: getTicks(minLoss, maxLoss, nEntries)).distinct
-
-      ticks.map { loss =>
-        (loss, exceedanceAt(result, loss))
-      }
-    }
+    else curveAt(result, curveTicks(result.minLoss, clippedMaxLoss(result), nEntries))
   }
+
+  /** The thresholds a curve is sampled at. Tick 0 is always included so every
+    * curve starts on the y-axis at its occurrence-probability plateau (see
+    * `exceedanceAt` for the y-intercept convention).
+    */
+  private def curveTicks(minLoss: Long, maxLoss: Long, nEntries: Int): Vector[Long] =
+    (0L +: getTicks(minLoss, maxLoss, nEntries)).distinct
+
+  /** One node's curve, evaluated at the given thresholds. */
+  private def curveAt(result: LossDistribution, ticks: Vector[Long]): Vector[(Long, OccurrenceProbability)] =
+    ticks.map(loss => (loss, exceedanceAt(result, loss)))
 
   /** Upper end of the tick range: the p99.5 quantile, so outliers do not
     * stretch the x-axis. Falls back to the observed maximum when that quantile
@@ -118,7 +117,7 @@ object LECGenerator {
     * of trials and would otherwise violate `getTicks`' precondition.
     */
   private def clippedMaxLoss(result: LossDistribution): Long = {
-    val q = findQuantileLoss(result, 0.995).getOrElse(result.maxLoss)
+    val q = findQuantileLoss(result, QuantileLevel.P995.probability).getOrElse(result.maxLoss)
     if (q < result.minLoss) result.maxLoss else q
   }
 
@@ -146,8 +145,8 @@ object LECGenerator {
     * interpolated, which the cached distributions make cheap (ADR-014).
     */
   def generateCurvePointsMulti[K](
-    results: Map[K, LossDistribution], 
-    nEntries: Int = 100
+    results: Map[K, LossDistribution],
+    nEntries: Int = DefaultTickCount
   ): Map[K, Vector[(Long, OccurrenceProbability)]] = {
     if (results.isEmpty) return Map.empty
     
@@ -161,15 +160,12 @@ object LECGenerator {
     val combinedMin = nonEmpty.values.map(_.minLoss).min
     val combinedMax = nonEmpty.values.map(clippedMaxLoss).max
     
-    // Generate shared tick domain. Tick 0 is always included so every
-    // curve starts on the y-axis at its occurrence-probability plateau
-    // (see exceedanceAt for the y-intercept convention).
-    val sharedTicks = (0L +: getTicks(combinedMin, combinedMax, nEntries)).distinct
+    val sharedTicks = curveTicks(combinedMin, combinedMax, nEntries)
 
     // Evaluate all curves at every tick
     val evaluated: Map[K, Vector[(Long, OccurrenceProbability)]] = results.map { case (nodeId, result) =>
       if (result.outcomeCount.isEmpty) nodeId -> Vector.empty
-      else nodeId -> sharedTicks.map(loss => (loss, exceedanceAt(result, loss)))
+      else nodeId -> curveAt(result, sharedTicks)
     }
 
     trimTail(evaluated, sharedTicks)
@@ -192,7 +188,7 @@ object LECGenerator {
     val trimIdx = math.min(lastMeaningfulIdx + 1, sharedTicks.size - 1)
 
     evaluated.map { case (k, pts) =>
-      k -> (if (pts.isEmpty) pts else pts.take(trimIdx + 1))
+      k -> pts.take(trimIdx + 1)
     }
   }
 }

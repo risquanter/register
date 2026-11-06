@@ -41,8 +41,9 @@ class RiskTreeServiceLive private (
   private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[AppError,(RiskTree, CommitHash)] =
     repo.getById(wsId, treeId, rev).someOrFail(TreeAbsentAtRevision(wsId, treeId, rev))
 
-  /** Fetch tree, its resolved commit, and the node together, or fail with
-    * ValidationFailed. */
+  /** Fetch tree, its resolved commit, and the node together. Fails with
+    * `TreeAbsentAtRevision` when the revision lacks the tree, and with
+    * `ValidationFailed` when the tree lacks the node. */
   private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): IO[AppError,(RiskTree, CommitHash, RiskNode)] =
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
