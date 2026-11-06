@@ -59,7 +59,6 @@ object MergeRefusal:
     * Declaring it here is what makes the published description the same from
     * every holder. */
   given schema: Schema[MergeRefusal] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[MergeRefusal]
 

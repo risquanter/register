@@ -41,6 +41,5 @@ object NotFoundKind:
     * published description is the three cases rather than an unconstrained
     * object, and names the key that decides between them. */
   given schema: Schema[NotFoundKind] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[NotFoundKind]

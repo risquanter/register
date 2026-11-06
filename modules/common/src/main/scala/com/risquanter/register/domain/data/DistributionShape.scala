@@ -354,7 +354,6 @@ object DistributionShape:
     * sequences. Derived from the raw coproduct for the same reason `RiskTree`
     * derives its schema from `RiskTreeRaw`. */
   given schema: Schema[DistributionShape] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[ShapeRaw].as[DistributionShape]
 

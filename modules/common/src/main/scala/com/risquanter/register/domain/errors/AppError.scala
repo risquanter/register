@@ -6,6 +6,7 @@ import sttp.model.StatusCode
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{CommitHash, Revision, ScenarioName, StoreBranch, TreeId, ValidationMessages, WorkspaceId}
+import vql.error.{BindErrorDetail, QueryError}
 
 /** Who a failure is attributable to, which decides the level its log line is
   * written at (ADR-002).
@@ -432,7 +433,7 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable]) exte
 // FOL Query Errors (ADR-028: Vague Quantifier Query Evaluation)
 // ============================================================================
 
-/** Errors originating from fol-engine interaction or query preconditions.
+/** Errors originating from vql-engine interaction or query preconditions.
   * The `Fol` prefix identifies types mapped from `vql.error.QueryError`
   * (the library's error algebra); the `Failure` suffix follows the
   * `RepositoryFailure` / `SimulationFailure` naming convention.
@@ -470,17 +471,17 @@ object FolQueryFailure:
   /** The `TypeId.value` of the `named` predicate's name-literal argument sort.
     * A `named(x, "Nonexistent")` whose literal fails the name validator crosses
     * this sort in `UnparseableConstant.sortName`, not `NodeSortName`, so it must
-    * join the set below to keep classifying as `UNKNOWN_REFERENCE`. Bound to the
-    * catalog by the same drift-guard assertion as `NodeSortName`.
+    * join the set below to keep classifying as `FolUnknownReference`. Bound to
+    * the catalog by the same drift-guard assertion as `NodeSortName`.
     */
   val NodeNameLiteralSortName: String = "NodeNameLiteral"
 
   /** Sorts whose unresolved quoted literal means "no such node", not a type
     * error: a bare node slot (`Node`) and the `named` name literal
     * (`NodeNameLiteral`). Both carry a node name that simply is not in the tree,
-    * so a bind failure homogeneous in these sorts is `UNKNOWN_REFERENCE`. The
+    * so a bind failure homogeneous in these sorts is `FolUnknownReference`. The
     * `has_id` id-literal sort is excluded: a malformed id is a genuine
-    * `BIND_FAILED`, and a well-formed-but-absent id parses and evaluates false.
+    * `FolBindFailure`, and a well-formed-but-absent id parses and evaluates false.
     */
   val NodeReferenceSortNames: Set[String] = Set(NodeSortName, NodeNameLiteralSortName)
   /** Maps from `vql.error.QueryError.ParseError`.
@@ -567,7 +568,7 @@ object FolQueryFailure:
       s"Runtime model validation failed: ${errors.mkString("; ")}"
     override def origin: FailureOrigin = FailureOrigin.Service
 
-  /** Maps from `vql.error.QueryError.DomainNotFoundError` (D14).
+  /** Maps from `vql.error.QueryError.DomainNotFoundError`.
     *
     * The query attempts to quantify over a type that has no registered
     * domain in the `RuntimeModel`. In a correctly wired system this is
@@ -604,7 +605,7 @@ object FolQueryFailure:
     override def logMessage: String = s"Evaluation failed in $phase: $message"
     override def origin: FailureOrigin = FailureOrigin.Service
 
-  /** Register precondition — no `Fol` prefix because no fol-engine involvement.
+  /** Register precondition — no `Fol` prefix because no vql-engine involvement.
     *
     * Simulation results have not yet been computed for the requested tree.
     * The user must run a simulation before querying.
@@ -624,21 +625,18 @@ object FolQueryFailure:
   /** Centralised mapping from library `vql.error.QueryError` to register's
     * `FolQueryFailure` hierarchy. Used by both the controller (parse errors)
     * and the service layer (evaluation errors).
-    *
     */
-  def fromQueryError(err: vql.error.QueryError): FolQueryFailure =
-    import vql.error.QueryError as QE
-    import vql.error.BindErrorDetail
+  def fromQueryError(err: QueryError): FolQueryFailure =
     err match
-      // ── Parse-phase errors → 400 ────────────────────────────────
-      case e: QE.ParseError               => FolParseFailure(e.message, e.position)
-      // ── Unknown constant/literal reference → 400 ────────────────
+      // ── Parse-phase errors → 422 ────────────────────────────────
+      case e: QueryError.ParseError               => FolParseFailure(e.message, e.position)
+      // ── Unknown constant/literal reference → 422 ────────────────
       // Unreachable for register (the binder folds this into BindError), kept correct.
-      case e: QE.UnknownConstantOrLiteralError => FolUnknownReference(List(e.message))
-      // ── Bind-phase errors → 400 ─────────────────────────────────
-      // Every error an unresolved node reference → UNKNOWN_REFERENCE; any genuine
-      // type error (arity, sort conflict, non-node constant) dominates → BIND_FAILED.
-      case e: QE.BindError                =>
+      case e: QueryError.UnknownConstantOrLiteralError => FolUnknownReference(List(e.message))
+      // ── Bind-phase errors → 422 ─────────────────────────────────
+      // Every error an unresolved node reference → FolUnknownReference; any genuine
+      // type error (arity, sort conflict, non-node constant) dominates → FolBindFailure.
+      case e: QueryError.BindError                =>
         val allNodeUnresolved =
           e.details.nonEmpty && e.details.forall {
             case BindErrorDetail.UnparseableConstant(_, sortName, _, _) =>
@@ -647,15 +645,15 @@ object FolQueryFailure:
           }
         if allNodeUnresolved then FolUnknownReference(e.messages)
         else                      FolBindFailure(e.messages)
-      // ── Domain-not-found → 400 (D14, defensive fallback) ───────
-      case e: QE.DomainNotFoundError      =>
+      // ── Domain-not-found → 422 (defensive fallback) ────────────
+      case e: QueryError.DomainNotFoundError      =>
         FolDomainNotQuantifiable(
           s"Queries can only range over tree nodes (type 'Asset'). " +
           s"The type '${e.typeName}' cannot be enumerated. " +
           s"Available quantifiable types: ${e.availableTypes.mkString(", ")}")
       // ── Model-validation → 500 (wiring error) ──────────────────
-      case e: QE.ModelValidationError     => FolModelValidationFailure(e.errors)
+      case e: QueryError.ModelValidationError     => FolModelValidationFailure(e.errors)
       // ── Evaluation-phase errors → 500 ───────────────────────────
-      case e: QE.EvaluationError          => FolEvaluationFailure(e.message, e.phase)
-      case e: QE.ValidationError          => FolEvaluationFailure(e.message, "validation")
-      case e: QE.UnboundVariableError     => FolEvaluationFailure(e.message, "unbound_variable")
+      case e: QueryError.EvaluationError          => FolEvaluationFailure(e.message, e.phase)
+      case e: QueryError.ValidationError          => FolEvaluationFailure(e.message, "validation")
+      case e: QueryError.UnboundVariableError     => FolEvaluationFailure(e.message, "unbound_variable")

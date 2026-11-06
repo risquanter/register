@@ -214,7 +214,6 @@ object MitigationSpec {
   // names the discriminator, so the published description states the key the
   // decoder reads.
   given schema: Schema[MitigationSpec] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(StageField)
     Schema.derived[MitigationSpec]
 }
@@ -301,11 +300,8 @@ object Mitigation {
   )
 
   // The published description is the case class's real field list, with the spec
-  // described as the coproduct it is. The auto-derivation import is scoped to
-  // this body, so it reaches the nominal wrappers over Iron identifiers without
-  // widening implicit scope across the file.
+  // described as the coproduct it is.
   given schema: Schema[Mitigation] =
-    import sttp.tapir.generic.auto.*
     Schema.derived[Mitigation]
 }
 
@@ -322,8 +318,6 @@ final case class MitigationApplicationRecord(
 
 object MitigationApplicationRecord {
   given codec: JsonCodec[MitigationApplicationRecord] = DeriveJsonCodec.gen[MitigationApplicationRecord]
-  // Derived against a body-scoped import, for the same reason as `Mitigation`'s.
   given schema: Schema[MitigationApplicationRecord] =
-    import sttp.tapir.generic.auto.*
     Schema.derived[MitigationApplicationRecord]
 }

@@ -4,6 +4,7 @@ import zio.test.*
 import zio.prelude.{Equal, Identity}
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
+import com.risquanter.register.domain.data.ResultTransformSpec.*
 import com.risquanter.register.testutil.TestHelpers.retentionFactor
 
 /**
@@ -13,8 +14,6 @@ import com.risquanter.register.testutil.TestHelpers.retentionFactor
  * is the server's concern and is tested there.
  */
 object ResultTransformSpecSpec extends ZIOSpecDefault {
-
-  import ResultTransformSpec.*
 
   private val allSpecs: List[ResultTransformSpec] = List(
     ApplyDeductible(10000L),

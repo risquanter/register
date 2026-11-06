@@ -1,6 +1,7 @@
 package com.risquanter.register.mitigation
 
 import zio.test.*
+import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
   AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence,
@@ -269,7 +270,6 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
     suite("selection codec")(
       test("selection kinds round-trip") {
-        import zio.json.{EncoderOps, DecoderOps}
         val selections: List[MitigationSelection] = List(
           MitigationSelection.Inherent,
           MitigationSelection.Residual,

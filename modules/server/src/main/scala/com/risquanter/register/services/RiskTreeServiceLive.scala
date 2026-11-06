@@ -13,6 +13,7 @@ import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.services.cache.CachedResultResolver
+import com.risquanter.register.services.RiskTreeServiceLive.{ErrorContext, Operation}
 import com.risquanter.register.services.helper.SeedVarIdAssigner
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
@@ -34,9 +35,7 @@ class RiskTreeServiceLive private (
   // Pre-created metric instruments (cached at construction time)
   operationsCounter: Counter[Long]
 ) extends RiskTreeService {
-  
-  import RiskTreeServiceLive.{ErrorContext, Operation}
-  
+
   /** Fetch tree by id, with the commit it resolved to. Every caller runs after
     * the controller has confirmed the workspace holds the tree, so an empty
     * read means the revision lacks it. */
@@ -228,7 +227,7 @@ class RiskTreeServiceLive private (
       }
     }.toMap
 
-  /** Build domain nodes and rootId from a resolved V2 request. */
+  /** Build domain nodes and rootId from a resolved request. */
   private def buildNodes(
     nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
     leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],

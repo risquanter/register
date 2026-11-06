@@ -1,14 +1,17 @@
 package com.risquanter.register.domain.data
 
+import zio.NonEmptyChunk
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
+import zio.prelude.Validation
 import io.github.iltotore.iron.autoRefine
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, NodeId, SeedVarId}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeId, SafeName, Probability, NodeId, SeedVarId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
-/** Recursive ADT representing a risk hierarchy tree.
+/** ADT representing a node of a risk hierarchy tree.
   *
   * Tree Structure:
   * - RiskLeaf: Terminal node with distribution parameters (actual risk)
@@ -37,9 +40,6 @@ sealed trait RiskNode {
 }
 
 object RiskNode {
-  import sttp.tapir.generic.auto.*
-
-  // Recursive JSON codec - handles nested structures
   given codec: JsonCodec[RiskNode] = DeriveJsonCodec.gen[RiskNode]
 
   given schema: Schema[RiskNode] = Schema.derived[RiskNode]
@@ -49,7 +49,7 @@ object RiskNode {
   *
   * Domain Model: Uses Iron refined types for type safety
   * - safeId: SafeId (26-character ULID)
-  * - safeName: SafeName (non-blank, max 50 chars)
+  * - safeName: SafeName (a node name; see `SafeNameConstraint`)
   * - probability: Probability (0.0 <= p <= 1.0)
   *
   * @param safeId Unique identifier (Iron refined type)
@@ -80,8 +80,6 @@ final case class RiskLeaf private (
 }
 
 object RiskLeaf {
-  import zio.prelude.Validation
-  import com.risquanter.register.domain.data.iron.ValidationUtil
 
   /** Production constructor: accepts already-validated Iron types.
     *
@@ -122,9 +120,7 @@ object RiskLeaf {
     seedVarId: Long,
     subject: ErrorSubject = ErrorSubject.Request
   ): Validation[ValidationError, RiskLeaf] = {
-    import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-
-    val idV        = toValidation(ValidationUtil.refineId(id, ErrorLocation.Field(subject, FieldName.Id)))
+    val idV       = toValidation(ValidationUtil.refineId(id, ErrorLocation.Field(subject, FieldName.Id)))
     val nameV      = toValidation(ValidationUtil.refineName(name, ErrorLocation.Field(subject, FieldName.Name)))
     val probV      = toValidation(ValidationUtil.refineProbability(probability, ErrorLocation.Field(subject, FieldName.Probability)))
     val seedVarIdV = toValidation(ValidationUtil.refineSeedVarId(seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId)))
@@ -211,10 +207,7 @@ object RiskLeaf {
     * list: the identifier and name are refined types in the domain and strings
     * here. Derived from the raw type for the same reason `RiskTree` derives its
     * schema from `RiskTreeRaw`. */
-  given schema: Schema[RiskLeaf] = {
-    import sttp.tapir.generic.auto.*
-    Schema.derived[RiskLeafRaw].as[RiskLeaf]
-  }
+  given schema: Schema[RiskLeaf] = Schema.derived[RiskLeafRaw].as[RiskLeaf]
 }
 
 /** RiskPortfolio node: Aggregates child risks (can be leaves or other portfolios).
@@ -227,7 +220,7 @@ object RiskLeaf {
   *
   * Domain Model: Uses Iron refined types for type safety
   * - safeId: SafeId (26-character ULID)
-  * - safeName: SafeName (non-blank, max 50 chars)
+  * - safeName: SafeName (a node name; see `SafeNameConstraint`)
   * - childIds: Vector[NodeId] (references to child nodes, must be non-empty)
   *
   * The children are held in an immutable sequence, so two portfolios with the
@@ -254,8 +247,6 @@ final case class RiskPortfolio private (
 }
 
 object RiskPortfolio {
-  import zio.prelude.Validation
-  import com.risquanter.register.domain.data.iron.*
 
   /** Upper bound on a portfolio's direct child count — a resource limit
     * against oversized fan-out. */
@@ -264,8 +255,8 @@ object RiskPortfolio {
   /** Smart constructor: Validates all fields and returns Validation.
     *
     * Validation Rules:
-    * 1. ID must be valid SafeId (3-30 chars, alphanumeric + hyphen/underscore)
-    * 2. Name must be valid SafeName (non-blank, max 50 chars)
+    * 1. ID must be a valid SafeId (a 26-character ULID)
+    * 2. Name must be a valid SafeName (see `SafeNameConstraint`)
     * 3. childIds must be non-empty and within the child-count limit
     *
     * Returns:
@@ -278,10 +269,7 @@ object RiskPortfolio {
     childIds: Vector[NodeId],
     parentId: Option[NodeId],
     subject: ErrorSubject = ErrorSubject.Request
-  ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
-
-    import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-
+  ): Validation[ValidationError, RiskPortfolio] = {
     // Step 1: Validate ID (Iron refinement)
     val idValidation: Validation[ValidationError, SafeId.SafeId] =
       toValidation(ValidationUtil.refineId(id, ErrorLocation.Field(subject, FieldName.Id)))
@@ -326,7 +314,7 @@ object RiskPortfolio {
     childIds: Vector[String],
     parentId: Option[NodeId],
     subject: ErrorSubject = ErrorSubject.Request
-  ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
+  ): Validation[ValidationError, RiskPortfolio] = {
 
     // Each child identifier is refined at its own position, so a malformed one
     // is refused where it was submitted.
@@ -334,14 +322,12 @@ object RiskPortfolio {
       ValidationUtil.refineId(cid, ErrorLocation.Field(subject, FieldName.childAt(idx)))
     }
 
-    val errors = childIdResults.collect { case Left(es) => es }.flatten
-    if (errors.nonEmpty) {
-      // Accumulate all errors using NonEmptyChunk
-      val nonEmpty = zio.NonEmptyChunk.fromIterable(errors.head, errors.tail)
-      Validation.failNonEmptyChunk(nonEmpty)
-    } else {
-      val validChildIds = childIdResults.collect { case Right(id) => NodeId(id) }
-      create(id, name, validChildIds, parentId, subject)
+    childIdResults.collect { case Left(es) => es }.flatten match {
+      case head +: tail =>
+        Validation.failNonEmptyChunk(NonEmptyChunk.fromIterable(head, tail))
+      case _ =>
+        val validChildIds = childIdResults.collect { case Right(id) => NodeId(id) }
+        create(id, name, validChildIds, parentId, subject)
     }
   }
 

@@ -11,6 +11,7 @@ import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, RepositoryFailure, ValidationFailed, ValidationError, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.QuillMappings.given
+import com.risquanter.register.services.workspace.WorkspaceStorePostgres.{DurationString, WorkspaceRow, WorkspaceTreeRow}
 import com.risquanter.register.util.IdGenerators
 
 final class WorkspaceStorePostgres private (
@@ -18,7 +19,6 @@ final class WorkspaceStorePostgres private (
   config: WorkspaceConfig
 ) extends WorkspaceStore:
 
-  import WorkspaceStorePostgres.*
   import quill.*
 
   private inline given workspaceSchema: SchemaMeta[WorkspaceRow] =

@@ -2,6 +2,7 @@ package com.risquanter.register.http.errors
 
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
+import sttp.tapir.generic.auto.schemaForCaseClass
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 
 import com.risquanter.register.domain.errors.ValidationError
@@ -39,13 +40,11 @@ object RejectionDetail:
     * this payload (ADR-001 §2). The configuration names the discriminator, so
     * the published description states the key the decoder reads.
     *
-    * The auto-derivation import is scoped to this body rather than to the file,
-    * so it reaches the two cases without widening implicit scope across the
-    * file. It needs no Iron schemas of its own: a validation error names its
-    * location through `ErrorLocation`, which declares a schema that carries
-    * them, and `QueryProblem` declares its own.
+    * `ValidationError` declares no schema, so `schemaForCaseClass` derives the
+    * one the `Fields` case needs. It takes no Iron schemas of its own: a
+    * validation error names its location through `ErrorLocation`, which declares
+    * a schema that carries them, and `QueryProblem` declares its own.
     */
   given schema: Schema[RejectionDetail] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[RejectionDetail]

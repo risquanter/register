@@ -2,6 +2,7 @@ package com.risquanter.register.testutil
 
 import com.risquanter.register.configs.SimulationConfig
 import com.typesafe.config.ConfigFactory
+import io.github.iltotore.iron.refineUnsafe
 
 import java.io.File
 
@@ -34,7 +35,6 @@ object ConfigTestLoader {
 
     val c = merged.getConfig("register.simulation")
 
-    import io.github.iltotore.iron.refineUnsafe
     SimulationConfig(
       defaultNTrials = c.getInt("defaultNTrials").refineUnsafe,
       defaultTrialParallelism = c.getInt("defaultTrialParallelism").refineUnsafe,
@@ -49,7 +49,6 @@ object ConfigTestLoader {
   lazy val simulation: SimulationConfig = load()
 
   def withCfg[A](nTrials: Int)(f: SimulationConfig ?=> A): A = {
-    import io.github.iltotore.iron.refineUnsafe
     given SimulationConfig = ConfigTestLoader.simulation.copy(defaultNTrials = nTrials.refineUnsafe)
     f
   }

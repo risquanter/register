@@ -141,8 +141,7 @@ object ResultTransformSpec {
     )
   }
 
-  // Lawful: structural equality on scalar data (unlike the deleted
-  // Equal[RiskTransform], whose function field compared by reference).
+  // Lawful: structural equality on scalar data.
   given Equal[ResultTransformSpec] = Equal.default
 
   /** The tag comes from the case name and each case's fields from its own
@@ -155,7 +154,6 @@ object ResultTransformSpec {
   // configuration names the discriminator, so the published description states
   // the key the decoder reads.
   given schema: Schema[ResultTransformSpec] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(OpField)
     Schema.derived[ResultTransformSpec]
 }

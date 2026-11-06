@@ -5,6 +5,7 @@ import zio.prelude.Identity
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.{ResultTransformSpec, TransformPipeline}
+import com.risquanter.register.domain.data.ResultTransformSpec.*
 import com.risquanter.register.testutil.RiskResultTestSupport.outcomesOf
 import com.risquanter.register.testutil.TestHelpers.retentionFactor
 
@@ -14,8 +15,6 @@ import com.risquanter.register.testutil.TestHelpers.retentionFactor
  * interpretation law with its order sensitivity.
  */
 object ResultTransformInterpreterSpec extends ZIOSpecDefault {
-
-  import ResultTransformSpec.*
 
   private val outcomes = outcomesOf(100,Map(1 -> 2000000L, 2 -> 50000L, 3 -> 5000L))
 

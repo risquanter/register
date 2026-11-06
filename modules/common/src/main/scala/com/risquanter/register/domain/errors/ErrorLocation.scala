@@ -34,7 +34,6 @@ object SubmittedCollection:
   given codec: JsonCodec[SubmittedCollection] = DeriveJsonCodec.gen[SubmittedCollection]
 
   given schema: Schema[SubmittedCollection] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[SubmittedCollection]
 
@@ -78,7 +77,6 @@ object ErrorSubject:
   given codec: JsonCodec[ErrorSubject] = DeriveJsonCodec.gen[ErrorSubject]
 
   given schema: Schema[ErrorSubject] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[ErrorSubject]
 
@@ -162,7 +160,6 @@ object FieldName:
   given codec: JsonCodec[FieldName] = DeriveJsonCodec.gen[FieldName]
 
   given schema: Schema[FieldName] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[FieldName]
 
@@ -213,7 +210,6 @@ object ErrorLocation:
   given codec: JsonCodec[ErrorLocation] = DeriveJsonCodec.gen[ErrorLocation]
 
   given schema: Schema[ErrorLocation] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[ErrorLocation]
 
@@ -268,7 +264,6 @@ object RequestHeaderName:
   given codec: JsonCodec[RequestHeaderName] = DeriveJsonCodec.gen[RequestHeaderName]
 
   given schema: Schema[RequestHeaderName] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[RequestHeaderName]
 
@@ -323,7 +318,6 @@ object RequestQueryParam:
   given codec: JsonCodec[RequestQueryParam] = DeriveJsonCodec.gen[RequestQueryParam]
 
   given schema: Schema[RequestQueryParam] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[RequestQueryParam]
 
@@ -362,7 +356,6 @@ object ExpectedInput:
   given codec: JsonCodec[ExpectedInput] = DeriveJsonCodec.gen[ExpectedInput]
 
   given schema: Schema[ExpectedInput] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[ExpectedInput]
 
@@ -379,7 +372,6 @@ object Alphabet:
   given codec: JsonCodec[Alphabet] = DeriveJsonCodec.gen[Alphabet]
 
   given schema: Schema[Alphabet] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[Alphabet]
 
@@ -397,7 +389,6 @@ object ValueFormat:
   given codec: JsonCodec[ValueFormat] = DeriveJsonCodec.gen[ValueFormat]
 
   given schema: Schema[ValueFormat] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[ValueFormat]
 
@@ -414,7 +405,6 @@ object ValueRange:
   given codec: JsonCodec[ValueRange] = DeriveJsonCodec.gen[ValueRange]
 
   given schema: Schema[ValueRange] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[ValueRange]
 
@@ -537,7 +527,6 @@ object FieldProblem:
   given codec: JsonCodec[FieldProblem] = DeriveJsonCodec.gen[FieldProblem]
 
   given schema: Schema[FieldProblem] =
-    import sttp.tapir.generic.auto.*
     given Configuration = discriminated
     Schema.derived[FieldProblem]
 

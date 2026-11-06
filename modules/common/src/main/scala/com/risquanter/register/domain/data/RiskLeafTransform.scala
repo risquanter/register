@@ -39,7 +39,6 @@ object RelativeLikelihood {
   // the key the decoder reads rather than leaving a reader to infer the case
   // from which fields are present.
   given schema: Schema[RelativeLikelihood] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.OpField)
     Schema.derived[RelativeLikelihood]
 }
@@ -70,7 +69,6 @@ object RelativeSeverity {
   // Declared, and names its discriminator, for the same reasons as
   // `RelativeLikelihood`'s.
   given schema: Schema[RelativeSeverity] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.OpField)
     Schema.derived[RelativeSeverity]
 }
@@ -109,7 +107,6 @@ object AbsoluteReplacement {
   // `RelativeLikelihood`'s. The two cases that carry a whole shape reach
   // `DistributionShape`'s own schema through it.
   given schema: Schema[AbsoluteReplacement] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(RiskLeafTransform.ReplacesField)
     Schema.derived[AbsoluteReplacement]
 }
@@ -119,10 +116,9 @@ object AbsoluteReplacement {
  * loss distribution. Identity, name, parent and seed identity are outside a
  * transform's reach, so they are outside its type.
  *
- * Making this the arrow's object is what removes the repeated widening a
- * whole-leaf arrow performs: with n leaf-stage mitigations scoping one leaf, the
- * identifier, the name and the seed identifier were each widened to a primitive
- * and re-refined n times although no transform can change any of them.
+ * The arrow acts on these two alone, so a chain of n leaf-stage mitigations
+ * scoping one leaf leaves the identifier, the name and the seed identifier
+ * refined throughout, and the leaf is rebuilt once from the result.
  */
 final case class LeafParams(
   probability: Probability,

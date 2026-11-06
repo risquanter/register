@@ -8,6 +8,7 @@ import com.risquanter.register.http.responses.TreeSummaryResponse
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import zio.prelude.Validation
 import io.github.iltotore.iron.autoRefine
+import sttp.tapir.Schema
 
 /** Domain model for a risk tree configuration.
   * 
@@ -52,8 +53,6 @@ final case class RiskTree private (
 }
 
 object RiskTree {
-  import sttp.tapir.Schema
-  import sttp.tapir.generic.auto.*
 
   /** Wire form: the tree's serialised fields, omitting the index, which is
     * rebuilt from the nodes on decode (ADR-038 §1).

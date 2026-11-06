@@ -2,6 +2,7 @@ package com.risquanter.register.http.responses
 
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
+import sttp.tapir.generic.auto.schemaForCaseClass
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
@@ -25,7 +26,6 @@ final case class NodeChangeEntry(nodeId: NodeId, status: NodeChangeStatus)
 object NodeChangeEntry:
   given codec: JsonCodec[NodeChangeEntry] = DeriveJsonCodec.gen[NodeChangeEntry]
   given schema: Schema[NodeChangeEntry] =
-    import sttp.tapir.generic.auto.*
     Schema.derived[NodeChangeEntry]
 
 /** The outcome of a changed-nodes comparison, as a closed set (ADR-038 §2). A
@@ -51,7 +51,6 @@ object ChangedNodesStatus:
     * published description is the four outcomes and names the key that
     * decides between them. */
   given schema: Schema[ChangedNodesStatus] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[ChangedNodesStatus]
 

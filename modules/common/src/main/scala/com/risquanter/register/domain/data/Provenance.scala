@@ -2,6 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, jsonDiscriminator}
 import java.time.Instant
+import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import com.risquanter.register.domain.data.iron.{MetalogTermCount, PositiveLong, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
@@ -46,7 +48,6 @@ case class NodeProvenance(
 sealed trait DistributionParams
 
 object DistributionParams {
-  import sttp.tapir.Schema
 
   /** Metalog quantile-function parameters. */
   final case class Metalog(
@@ -103,21 +104,15 @@ object DistributionParams {
     * decoder reads rather than leaving a reader to infer the mode from which
     * fields are present. */
   given schema: Schema[DistributionParams] =
-    import sttp.tapir.generic.auto.*
-    import sttp.tapir.generic.Configuration
     given Configuration = Configuration.default.withDiscriminator(DistributionShape.TagField)
     Schema.derived[DistributionParams]
 }
 
 object NodeProvenance {
-  import sttp.tapir.Schema
-
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
   // The published description is the case class's real field list, with the
   // parameter union described as the coproduct it is, through the schema
-  // `DistributionParams` declares. The auto-derivation import is scoped to this
-  // body rather than to the file, so it does not widen implicit scope.
+  // `DistributionParams` declares.
   given schema: Schema[NodeProvenance] =
-    import sttp.tapir.generic.auto.*
     Schema.derived[NodeProvenance]
 }

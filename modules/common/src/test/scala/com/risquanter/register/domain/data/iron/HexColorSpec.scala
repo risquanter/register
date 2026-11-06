@@ -3,10 +3,9 @@ package com.risquanter.register.domain.data.iron
 import zio.test.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.string.Match
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 object HexColorSpec extends ZIOSpecDefault:
-
-  import HexColor.HexColor
 
   def spec = suite("HexColor")(
     test("accepts valid lowercase hex colour") {

@@ -43,6 +43,5 @@ object QueryProblem:
     * published description is the four cases rather than an unconstrained
     * object, and names the key that decides between them. */
   given schema: Schema[QueryProblem] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[QueryProblem]

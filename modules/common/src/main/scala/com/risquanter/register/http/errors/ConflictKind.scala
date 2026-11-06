@@ -59,6 +59,5 @@ object ConflictKind:
     * published description is the seven cases rather than an unconstrained
     * object, and names the key that decides between them. */
   given schema: Schema[ConflictKind] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[ConflictKind]

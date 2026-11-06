@@ -2,8 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.json.{DecoderOps, EncoderOps}
-import com.risquanter.register.domain.data.RiskLeaf
 import zio.prelude.Validation
+import sttp.tapir.{Schema, SchemaType}
 
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, SubmittedCollection, ValidationError
@@ -134,10 +134,6 @@ object RiskLeafSpec extends ZIOSpecDefault {
       // the schema has to carry the same rename or the generated OpenAPI
       // describes properties that are not on the wire.
       test("the derived schema names id and name, not safeId and safeName") {
-        import sttp.tapir.Schema
-        import sttp.tapir.SchemaType
-        import sttp.tapir.generic.auto.*
-
         def namesOf(s: Schema[?]): List[String] = s.schemaType match
           case p: SchemaType.SProduct[?] => p.fields.map(_.name.encodedName)
           case _                         => Nil

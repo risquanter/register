@@ -7,8 +7,12 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, RelativeLikelihood, RelativeSeverity}
-import com.risquanter.register.domain.data.iron.{SafeName, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
+import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
+import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.repositories.RiskTreeRepository
+import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry}
+import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
+import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
   AppError, ErrorLocation, FieldName, FieldProblem, RepositoryFailure, TreeLoadFailure,
   ValidationError, ValidationErrorCode, ValidationFailed
@@ -183,7 +187,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   // revert is the only operation whose storage half reads at the target commit
   // and never at the head, so it is the only one that can repair a stored tree
   // that breaks a tree invariant. These fixtures pin that a failing head read
-  // no longer stops it, and that the notification degrades to naming every node
+  // does not stop it, and that the notification degrades to naming every node
   // rather than being skipped.
 
   private val revertRootId = nodeId("revert-root")
@@ -236,9 +240,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     */
   private final class RecordingInvalidationHandler(
     calls: Ref[List[(String, List[NodeId])]]
-  ) extends com.risquanter.register.services.pipeline.InvalidationHandler {
-    import com.risquanter.register.services.pipeline.InvalidationResult
-    import com.risquanter.register.domain.data.iron.BranchChoice
+  ) extends InvalidationHandler {
 
     private def record(kind: String, ids: List[NodeId]): UIO[InvalidationResult] =
       calls.update(_ :+ (kind, ids)).as(InvalidationResult(invalidatedNodes = ids, subscribersNotified = 0))
@@ -258,12 +260,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         svc     <- ZIO.service[RiskTreeService].provide(
                      RiskTreeServiceLive.layer,
                      ZLayer.succeed[RiskTreeRepository](revertRepo(headReadFails = false)),
-                     ZLayer.succeed[com.risquanter.register.services.pipeline.InvalidationHandler](
-                       new RecordingInvalidationHandler(calls)),
-                     com.risquanter.register.configs.TestConfigs.simulationLayer,
-                     com.risquanter.register.services.cache.CachedResultResolverLive.layer,
-                     com.risquanter.register.services.cache.ContentCacheRegistry.layer,
-                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
+                     ZLayer.succeed[InvalidationHandler](new RecordingInvalidationHandler(calls)),
+                     TestConfigs.simulationLayer,
+                     CachedResultResolverLive.layer,
+                     ContentCacheRegistry.layer,
+                     TestConfigs.telemetryLayer >>> TelemetryLive.configured
                    )
         result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
         recorded <- calls.get
@@ -278,12 +279,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         svc     <- ZIO.service[RiskTreeService].provide(
                      RiskTreeServiceLive.layer,
                      ZLayer.succeed[RiskTreeRepository](revertRepo(headReadFails = true)),
-                     ZLayer.succeed[com.risquanter.register.services.pipeline.InvalidationHandler](
-                       new RecordingInvalidationHandler(calls)),
-                     com.risquanter.register.configs.TestConfigs.simulationLayer,
-                     com.risquanter.register.services.cache.CachedResultResolverLive.layer,
-                     com.risquanter.register.services.cache.ContentCacheRegistry.layer,
-                     com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
+                     ZLayer.succeed[InvalidationHandler](new RecordingInvalidationHandler(calls)),
+                     TestConfigs.simulationLayer,
+                     CachedResultResolverLive.layer,
+                     ContentCacheRegistry.layer,
+                     TestConfigs.telemetryLayer >>> TelemetryLive.configured
                    )
         result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
         recorded <- calls.get
@@ -423,7 +423,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       // ========================================
-      // New Query APIs (ADR-015)
+      // Query APIs (ADR-015)
       // ========================================
       test("probOfExceedance returns probability for given threshold") {
         val program = for {
@@ -748,7 +748,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       // ========================================
-      // Per-branch uniqueness (§C1)
+      // Per-branch uniqueness
       // ========================================
       suite("Per-branch uniqueness")(
         test("same tree name on two branches is allowed") {
@@ -846,13 +846,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     ).provide(
       RiskTreeServiceLive.layer,
       stubRepoLayer,
-      com.risquanter.register.configs.TestConfigs.simulationLayer,
-      com.risquanter.register.services.cache.CachedResultResolverLive.layer,
-      com.risquanter.register.services.cache.ContentCacheRegistry.layer,
-      com.risquanter.register.services.pipeline.InvalidationHandler.live,
-      com.risquanter.register.services.sse.SSEHub.live,
-      // Concurrency control (uses SimulationConfig)
+      TestConfigs.simulationLayer,
+      CachedResultResolverLive.layer,
+      ContentCacheRegistry.layer,
+      InvalidationHandler.live,
+      SSEHub.live,
       // Telemetry layers require TelemetryConfig
-      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured
     ) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom
 }

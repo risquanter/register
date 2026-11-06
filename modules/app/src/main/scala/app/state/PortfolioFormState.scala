@@ -6,6 +6,7 @@ import com.risquanter.register.domain.data.iron.{SafeName, ValidationMessages, V
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
+import app.state.PortfolioField.*
 
 /** Type-safe field identifiers for the portfolio form. */
 enum PortfolioField:
@@ -30,7 +31,6 @@ object PortfolioField:
  * Validates name eagerly (Iron SafeName) and exposes parent selection as a ParentSelection.
  */
 final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
-  import PortfolioField.*
 
   // Fields
   val nameVar: Var[String] = Var("")
@@ -107,10 +107,8 @@ final class PortfolioFormState extends SubmitRefusals[PortfolioField]:
     Validation.validateWith(nameV, parentV)((name, parent) => (name, parent))
 
   /** Reset form fields and error display state after successful submit.
-   *  Note: parentVar and subjectVar are NOT reset here — callers set them
-   *  explicitly at clear/reset call sites (PortfolioFormView), same as every
-   *  other reset does; resetting them inside this method too would just be a
-   *  second place doing the same thing. */
+   *  `parentVar` and `subjectVar` are not reset here: `PortfolioFormView` sets
+   *  them at each clear or reset call site. */
   def reset(): Unit =
     nameVar.set("")
     setSubmitErrors(Nil)

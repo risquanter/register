@@ -66,6 +66,5 @@ object DistributionShapeRequest:
   given codec: JsonCodec[DistributionShapeRequest] = DeriveJsonCodec.gen[DistributionShapeRequest]
 
   given schema: Schema[DistributionShapeRequest] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(DistributionShape.TagField)
     Schema.derived[DistributionShapeRequest]

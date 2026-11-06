@@ -19,7 +19,6 @@ object TreeWriteKind:
   given codec: JsonCodec[TreeWriteKind] = DeriveJsonCodec.gen[TreeWriteKind]
 
   given schema: Schema[TreeWriteKind] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[TreeWriteKind]
 
@@ -43,7 +42,6 @@ object HistoryOperation:
   given codec: JsonCodec[HistoryOperation] = DeriveJsonCodec.gen[HistoryOperation]
 
   given schema: Schema[HistoryOperation] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[HistoryOperation]
 

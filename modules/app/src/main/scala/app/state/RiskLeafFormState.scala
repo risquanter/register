@@ -6,6 +6,8 @@ import com.risquanter.register.domain.data.iron.{NonNegativeInt, Probability, Sa
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError, ValueRange}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import zio.prelude.Validation
+import app.core.NumberFormat
+import app.state.RiskLeafField.*
 
 /** Type-safe field identifiers for the risk leaf form. */
 enum RiskLeafField:
@@ -40,7 +42,7 @@ object RiskLeafField:
  * - Error display timing: controlled by showErrors flag (set on blur/submit)
  *
  * Validation rules use Iron types from common module (same as backend):
- * - SafeName: non-blank, max 50 chars
+ * - SafeName: a node name; see `SafeNameConstraint`
  * - Probability: 0 ≤ p ≤ 1 (closed interval), entered on the 0–100 scale
  * - Metalog mode: requires percentiles + quantiles of equal length
  * - Lognormal mode: requires minLoss < maxLoss (both positive)
@@ -50,7 +52,6 @@ object RiskLeafField:
  * cross-field checks locate their refusal at the pair they constrain.
  */
 final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
-  import RiskLeafField.*
 
   // ============================================================
   // Form Field Vars (mutable reactive state)
@@ -655,7 +656,7 @@ object RiskLeafFormState:
   /** Convert a 0–1 domain value to its 0–100 display string — the shared
     * [[app.core.NumberFormat.percentValue]] under this form-facing name. */
   def domainToDisplayPct(p: Double, decimals: Int): String =
-    app.core.NumberFormat.percentValue(p, decimals)
+    NumberFormat.percentValue(p, decimals)
 
   /** The advisory shown when the implied P90/P10 loss ratio exceeds 100×.
     *

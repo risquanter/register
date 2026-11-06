@@ -106,7 +106,6 @@ object MergeConflictEntry:
   final val TagField = "kind"
   given codec: JsonCodec[MergeConflictEntry] = DeriveJsonCodec.gen[MergeConflictEntry]
   given schema: Schema[MergeConflictEntry] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[MergeConflictEntry]
 
@@ -147,7 +146,6 @@ object MergePreviewStatus:
     * published description is the four outcomes rather than an unconstrained
     * object, and names the key that decides between them. */
   given schema: Schema[MergePreviewStatus] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[MergePreviewStatus]
 

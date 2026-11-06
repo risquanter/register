@@ -9,6 +9,7 @@ import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.frontend.TreeBuilderLogic
+import app.state.TreeBuilderField.*
 
 final case class PortfolioDraft(
   name: SafeName.SafeName,
@@ -46,7 +47,6 @@ object TreeBuilderField:
  * derived from its current state.
  */
 final class TreeBuilderState extends FormState[TreeBuilderField]:
-  import TreeBuilderField.*
   val treeNameVar: Var[String] = Var("")
   val portfoliosVar: Var[List[PortfolioDraft]] = Var(Nil)
   val leavesVar: Var[List[LeafDraft]] = Var(Nil)
@@ -192,7 +192,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * a Blank draft, which has no identity of its own and correctly cannot
     * claim root while another node already holds it.
     */
-  def parentOptions(excludeSelf: Signal[Option[String]] = Val(None)): Signal[List[String]] =
+  def parentOptions(excludeSelf: Signal[Option[String]]): Signal[List[String]] =
     portfoliosVar.signal.combineWith(leavesVar.signal, excludeSelf).map { (ps, ls, excl) =>
       val others = ps.filterNot(p => excl.contains(p.name.value))
       val otherLeaves = ls.filterNot(l => excl.contains(l.name.value))

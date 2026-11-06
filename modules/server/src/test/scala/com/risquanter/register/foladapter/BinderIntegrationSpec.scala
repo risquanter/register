@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.data.iron.SeedVarId
+import com.risquanter.register.domain.errors.{Alphabet, FieldProblem, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
@@ -20,10 +21,11 @@ import vql.typed.{FolModel, QueryBinder, TypeCheckError}
 /** Integration tests for the parse → bind path against a register-side
   * [[RiskTreeKnowledgeBase]] populated with quoted node-name literals.
   *
-  * Covers three cases:
+  * Covers four cases:
   *   - end-to-end parse + bind + evaluate; range projects to node ids
   *   - unknown literal rejected by binder with `UnparseableConstant`
-  *   - injection-shaped node name does not feed the binder error path
+  *   - injection-shaped node name refused when the name is built
+  *   - injection-shaped query refused at parse or bind
   */
 object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
@@ -58,7 +60,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
   private val tree = RiskTree.fromNodesUnsafe(
     id     = treeId("test-tree"),
-    name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
+    name   = SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
     seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
@@ -130,21 +132,15 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
       },
 
       test("B3: injection-shaped node name is rejected at SafeName construction with a clear error") {
-        // SafeName now enforces ^[A-Za-z0-9 /\\-]+$ — the characters `"` and `)`
-        // used in the canonical injection payload `foo")` are forbidden.
-        // This test documents that:
+        // SafeName enforces ^[A-Za-z0-9 /\\-]+$, so the characters `"` and `)`
+        // used in the canonical injection payload `foo")` are forbidden on every
+        // construction path. This test documents that:
         //   1. The injection-shaped name is rejected (not silently accepted)
         //   2. The rejection produces a structured ValidationError with a user-readable message
         //   3. The error code is INVALID_PATTERN so clients can distinguish it from
         //      REQUIRED_FIELD or INVALID_LENGTH
-        //
-        // The threat model tested by the original B3 (a node with `foo")` bypassing
-        // DTO validators via a direct write path) is now CLOSED at the type level:
-        // SafeName.fromString enforces the whitelist on every construction path.
         val payloadName = """foo")"""
         val result = SafeName.fromString(payloadName)
-
-        import com.risquanter.register.domain.errors.{Alphabet, FieldProblem, ValidationErrorCode}
 
         assertTrue(
           result.isLeft,

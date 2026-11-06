@@ -39,7 +39,6 @@ object PreviewFit:
     * published description is the two fits and names the key that decides
     * between them. */
   given schema: Schema[PreviewFit] =
-    import sttp.tapir.generic.auto.*
     given Configuration = Configuration.default.withDiscriminator(DistributionShape.TagField)
     Schema.derived[PreviewFit]
 
