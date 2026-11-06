@@ -1,6 +1,7 @@
 package com.risquanter.register.foladapter
 
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given
 import com.risquanter.register.http.responses.QueryResponse
 
 import vql.result.EvaluationOutput
@@ -14,8 +15,6 @@ import vql.typed.{Value, extract}
   * carrier in `common` for frontend consumption.
   */
 object QueryResponseBuilder:
-
-  import RiskTreeKnowledgeBase.given
 
   /** Builds a response from vql-engine typed evaluation output.
     *
