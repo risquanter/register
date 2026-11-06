@@ -838,13 +838,19 @@ kinds below behave differently.
 ### 8.2 Secret
 
 A **secret** is a value where holding it *is* permission. The workspace key is
-the one in this system: a 22-character token drawn from a cryptographic random
-source, its length and alphabet fixed by the encoding that source is read
-through. Anyone who has it can read and write that workspace until it expires —
-after 72 hours, or after an hour of no use. Both limits are this project's
-defaults.
+the only secret that reaches a client: a 22-character token drawn from a
+cryptographic random source, its length and alphabet fixed by the encoding that
+source is read through. Anyone who has it can read and write that workspace until
+it expires — after 72 hours, or after an hour of no use. Both limits are this
+project's defaults.
 
-Its trust boundary is the narrowest in the system, and two consequences follow.
+The server holds two more kinds, read from configuration: the database password
+and the authorization service's token. It sends each only to that service. The
+infrastructure holds the rest, such as user passwords, signing keys and mesh
+certificates, and the application never sees them.
+
+The workspace key's trust boundary is the narrowest in the system, and two
+consequences follow.
 
 **It may never be written to a log.** The cause is that a log's audience is wider
 than the service. The symptom, if it happens, is a key sitting in plain text in a
@@ -852,10 +858,11 @@ file or a dashboard several people and tools can read. The fix is that the value
 prints as asterisks rather than its contents, and reading the real value takes an
 explicit step, which makes every such place findable.
 
-**It does cross to the client, because that is its purpose.** A credential you
-bear exists to be sent. The server returns it exactly twice — when a workspace is
-created, and when its key is rotated — and those are the only two answers that
-carry it. Where it may never appear is a failure message, which would put it in a
+**The workspace key does cross to the client, because that is its purpose.** A
+credential you bear exists to be sent. The server returns it exactly twice — when a
+workspace is created, and when its key is rotated — and those are the only two
+answers that carry it. The answer to a create carries it in both its body and its
+`Location` header. Where it may never appear is a failure message, which would put it in a
 log and in front of a caller at once, and neither needs it.
 
 ### 8.3 Confidential identifier

@@ -29,7 +29,8 @@ The three-layer authorization model ([AUTHORIZATION-PLAN.md](./plans/AUTHORIZATI
 
 This ADR covers:
 1. **`WorkspaceKeySecret`** — the Layer 0 capability credential that lives in application code
-2. **Infrastructure config secrets** — database passwords, SpiceDB pre-shared keys, loaded via `Config.Secret`
+2. **`SpiceDbToken`** — the pre-shared key sent to the authorization service, read from configuration and placed in a request header
+3. **Infrastructure config secrets** — database passwords, loaded via `Config.Secret`
 
 Preventing internal detail from leaking through error responses is [ADR-035](./ADR-035-error-leakage-prevention.md); confining non-secret internal identifiers is [ADR-036](./ADR-036-confidential-internal-identifiers.md).
 
@@ -58,7 +59,7 @@ Any type that wraps a credential flowing through application code (request lifec
 
 #### Reference Implementation: `WorkspaceKeySecret`
 
-`WorkspaceKeySecret` is the sole credential in Layer 0 application code. It satisfies all eight requirements:
+`WorkspaceKeySecret` is the sole credential in Layer 0 application code. It satisfies all eight requirements. `SpiceDbToken` (`SpiceDbConfig.scala`) is the second implementation of the checklist. It holds no JSON codec under R8, because it never crosses the wire.
 
 ```scala
 // R5: Iron-refined type alias — validation proof carried through to the class
@@ -97,9 +98,9 @@ The `Secret` suffix in the name is deliberate: it signals the special handling p
 
 ### 2. `WorkspaceKeySecret` and `Config.Secret` — The Two Tools and Their Boundary
 
-`WorkspaceKeySecret` is the only credential that flows through application code. All Layer 1/2 secrets (passwords, JWT signing keys, mTLS certs) are handled by the service mesh (ADR-012) and never enter the application.
+`WorkspaceKeySecret` and `SpiceDbToken` are the credentials that flow through application code. All Layer 1/2 secrets (passwords, JWT signing keys, mTLS certs) are handled by the service mesh (ADR-012) and never enter the application.
 
-For config-loaded infrastructure secrets (database passwords, SpiceDB pre-shared keys), use ZIO's built-in `Config.Secret`:
+For config-loaded infrastructure secrets (database passwords), use ZIO's built-in `Config.Secret`:
 
 ```scala
 val dbPassword: Config[Config.Secret] = Config.secret("DB_PASSWORD")
@@ -182,7 +183,8 @@ final class ApiToken private (private val raw: ApiTokenStr):
 | Location | Pattern | Effort |
 |----------|---------|--------|
 | `WorkspaceKeySecret` (`OpaqueTypes.scala`) | `final class` with Iron-validated `WorkspaceKeyStr` internal, `reveal`, `equals`/`hashCode`, redacted `toString` (R1–R8) | Low (~40 lines) |
-| `Config.Secret` | Infrastructure secrets (DB, SpiceDB) — boundary in Decision 2 | Trivial (when added) |
+| `SpiceDbToken` (`SpiceDbConfig.scala`) | `final class` with Iron-validated `ExternalTokenStr` internal and no JSON codec (R1–R8) | Low |
+| `Config.Secret` (`FlywayConfig.scala`, `PostgresDataSourceConfig.scala`) | Database passwords — boundary in Decision 2 | Trivial |
 | Scoped lifecycle | `ZIO.acquireRelease` char-array wipe for config-loaded byte secrets | Low |
 
 ---
@@ -199,7 +201,7 @@ The following secrets are handled by the service mesh (ADR-012) and **never ente
 | mTLS certificates | ztunnel | Auto-rotated, zero-config; app is unaware of cert lifecycle |
 | OAuth2 client secrets | Keycloak service accounts | Service-to-service auth via mTLS, not client secrets in app code |
 
-If a future deployment requires app-code access to infrastructure secrets (direct database connection without mesh, SpiceDB pre-shared key), use `Config.Secret` (Decision 2) and the scoped lifecycle (Decision 3). If the secret flows through the request lifecycle (not just config loading), apply the credential checklist (Decision 1).
+If a future deployment requires app-code access to another infrastructure secret, use `Config.Secret` (Decision 2) and the scoped lifecycle (Decision 3). If the secret leaves the config layer, as `SpiceDbToken` does into a request header, apply the credential checklist (Decision 1).
 
 ---
 

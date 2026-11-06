@@ -69,8 +69,8 @@ final class SpiceDbToken private (private val raw: ExternalTokenStr):
   override def toString: String = "SpiceDbToken(***)"
 
 object SpiceDbToken:
-  def fromString(s: String, fieldPath: String = "token"): Either[List[ValidationError], SpiceDbToken] =
-    ValidationUtil.refineExternalToken(s, fieldPath).map(new SpiceDbToken(_))
+  def fromString(s: String, location: ErrorLocation): Either[List[ValidationError], SpiceDbToken] =
+    ValidationUtil.refineExternalToken(s, location).map(new SpiceDbToken(_))
 
 // ❌ BAD — raw String reaches HTTP header; CRLF injection is possible
 def callExternalService(token: String): Task[Response] =
