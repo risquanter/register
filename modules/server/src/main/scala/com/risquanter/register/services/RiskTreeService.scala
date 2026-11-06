@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, OccurrenceProbability, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.auth.{Authority, Checked}
 
@@ -95,9 +95,9 @@ trait RiskTreeService {
     * @param seedEntityId Owning workspace's stochastic identity (from the controller's resolved workspace)
     * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
     * @param rev Read coordinate — branch head or a pinned commit.
-    * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
+    * @return The share of trials whose loss was at or above `threshold`.
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError, Double]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError, OccurrenceProbability]
 
   /** Get LEC curves for multiple nodes with shared tick domain.
     *

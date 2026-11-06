@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{ScenarioName, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
 import com.risquanter.register.http.errors.{
-  Capability, ConflictKind, QueryProblem, RejectionDetail, WireError
+  Capability, ConflictKind, NotFoundKind, QueryProblem, RejectionDetail, WireError
 }
 
 /** Which failures the banner shows, and the sentence each failure gets where
@@ -67,7 +67,8 @@ object GlobalErrorSpec extends ZIOSpecDefault:
             WireError.RequestRejected(fieldErrors, trace),
             WireError.ValidationRejected(treeId, RejectionDetail.Fields(fieldErrors), trace),
             WireError.ValidationRejected(treeId, RejectionDetail.Query(QueryProblem.Unparseable("unexpected token", Some(7))), trace),
-            WireError.NotFound(trace),
+            WireError.NotFound(NotFoundKind.Unknown(), trace),
+            WireError.NotFound(NotFoundKind.TreeNotAtCommit(), trace),
             WireError.AccessDenied(trace),
             WireError.Conflict(conflict, trace),
             WireError.NotSupported(Capability.Scenarios, trace),

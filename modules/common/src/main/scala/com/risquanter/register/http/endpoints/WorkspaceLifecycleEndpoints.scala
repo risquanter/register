@@ -3,10 +3,10 @@ package com.risquanter.register.http.endpoints
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
-import sttp.model.StatusCode
+import sttp.model.{HeaderNames, StatusCode}
 
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, WorkspaceRotateResponse, SimulationResponse}
+import com.risquanter.register.http.responses.{EvictExpiredResponse, TreeListResponse, TreeLocation, TreeSummaryResponse, WorkspaceBootstrapResponse, WorkspaceLocation, WorkspaceRotateResponse}
 import com.risquanter.register.domain.data.iron.{SeedEntityId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -14,6 +14,11 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   *
   * Owns workspace bootstrap and lifecycle management plus workspace-level
   * tree creation and listing.
+  *
+  * The two creates answer `201` and name the created resource in `Location`
+  * as a relative reference (RFC 9110 §10.2.2), which the client resolves
+  * against the request's target. The tree create's reference carries no
+  * workspace key; the bootstrap's carries the key the body also carries.
   */
 trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
 
@@ -28,6 +33,8 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .in(query[Option[SeedEntityId.SeedEntityId]]("seedEntityId")
         .description("HDR Entity-axis seed for the new workspace (1..99999999). Omit to auto-assign; provide to reproduce an exported workspace's figures."))
       .in(jsonBody[RiskTreeDefinitionRequest])
+      .out(statusCode(StatusCode.Created))
+      .out(header[WorkspaceLocation](HeaderNames.Location))
       .out(jsonBody[WorkspaceBootstrapResponse])
 
   val listWorkspaceTreesEndpoint =
@@ -38,7 +45,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
       .get
       .in(branchHeader)
-      .out(jsonBody[List[SimulationResponse]])
+      .out(jsonBody[TreeListResponse])
 
   val createWorkspaceTreeEndpoint =
     authedBaseEndpoint
@@ -49,7 +56,9 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .post
       .in(jsonBody[RiskTreeDefinitionRequest])
       .in(branchHeader)
-      .out(jsonBody[SimulationResponse])
+      .out(statusCode(StatusCode.Created))
+      .out(header[TreeLocation](HeaderNames.Location))
+      .out(jsonBody[TreeSummaryResponse])
 
   val rotateWorkspaceKeySecretEndpoint =
     authedBaseEndpoint
@@ -76,4 +85,4 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .description("Evict all expired workspaces (admin)")
       .in("admin" / "workspaces" / "expired")
       .delete
-      .out(jsonBody[Map[String, Int]])
+      .out(jsonBody[EvictExpiredResponse])

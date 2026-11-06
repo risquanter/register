@@ -10,8 +10,10 @@ import sttp.tapir.EndpointOutput
 
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{
+  BranchChoice,
   BranchRef,
   CommitHash,
+  Revision,
   ScenarioName,
   TelemetryPlaceholders,
   TreeId,
@@ -72,7 +74,9 @@ object WireErrorSpec extends ZIOSpecDefault:
       RejectionDetail.Query(QueryProblem.Unparseable("bad syntax", Some(4))),
       trace
     )
-  private val notFound: WireError.NotFound = WireError.NotFound(trace)
+  private val notFound: WireError.NotFound = WireError.NotFound(NotFoundKind.Unknown(), trace)
+  private val treeNotOnBranch: WireError.NotFound =
+    WireError.NotFound(NotFoundKind.TreeNotOnBranch(BranchChoice.Scenario(scenario)), trace)
   private val workspaceExpired: WireError.WorkspaceExpired = WireError.WorkspaceExpired(
     ExpiryCause.Inactivity,
     JDuration.ofHours(72),
@@ -159,10 +163,39 @@ object WireErrorSpec extends ZIOSpecDefault:
             case nf: WireError.NotFound => nf.toJson
             case other                  => throw MatchError(other)
           assertTrue(!json.contains(wsId.value)) && assertTrue(!json.contains(treeId.value))
+        },
+        test("a tree absent on a scenario names the scenario and neither identifier") {
+          // The internal branch reference embeds the workspace identifier; the
+          // wire carries the client-facing branch name instead (ADR-036).
+          val scenarioRef = BranchRef.scenario(wsId, scenario).toOption.get
+          val projected   = WireError.fromAppError(
+            TreeAbsentAtRevision(wsId, treeId, Revision.Head(scenarioRef)), trace, TreeScope.InTree(treeId))
+          val json        = projected match
+            case nf: WireError.NotFound => nf.toJson
+            case other                  => throw MatchError(other)
+          assertTrue(
+            projected == treeNotOnBranch,
+            !json.contains(wsId.value),
+            !json.contains(treeId.value),
+            json.contains(scenario.value)
+          )
+        },
+        test("a tree absent at a commit names neither the commit nor an identifier") {
+          val projected = WireError.fromAppError(
+            TreeAbsentAtRevision(wsId, treeId, Revision.At(commit)), trace, TreeScope.InTree(treeId))
+          val json      = projected match
+            case nf: WireError.NotFound => nf.toJson
+            case other                  => throw MatchError(other)
+          assertTrue(
+            projected == WireError.NotFound(NotFoundKind.TreeNotAtCommit(), trace),
+            !json.contains(commit.value),
+            !json.contains(wsId.value),
+            !json.contains(treeId.value)
+          )
         }
       ),
       suite("fromAppError maps every internal leaf type")(
-        test("each of the 31 leaves reaches the case this plan assigns it") {
+        test("each of the 32 leaves reaches the case assigned to it") {
           val mapping: List[(AppError, String)] = List(
             // Rejected request. Read with no tree in scope, so the content
             // failures answer at the request level; the suite below reads the
@@ -178,6 +211,8 @@ object WireErrorSpec extends ZIOSpecDefault:
             // Absent, or not the caller's
             WorkspaceNotFound()                                    -> "NotFound",
             TreeNotInWorkspace(wsId, treeId)                       -> "NotFound",
+            // Held, but absent at the revision read
+            TreeAbsentAtRevision(wsId, treeId, Revision.At(commit)) -> "NotFound",
             // Expired
             WorkspaceExpired(wsId, JDuration.ofHours(72), JDuration.ofHours(24), ExpiryCause.Lifetime, Instant.EPOCH)
                                                                    -> "WorkspaceExpired",
@@ -214,7 +249,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 31)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 32)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope
@@ -263,6 +298,9 @@ object WireErrorSpec extends ZIOSpecDefault:
         },
         test("an absent resource keeps its trace") {
           assertTrue(notFound.toJson.fromJson[WireError.NotFound] == Right(notFound))
+        },
+        test("a tree absent on a branch keeps the branch") {
+          assertTrue(treeNotOnBranch.toJson.fromJson[WireError.NotFound] == Right(treeNotOnBranch))
         },
         test("an expired workspace keeps both durations and its cause") {
           assertTrue(workspaceExpired.toJson.fromJson[WireError.WorkspaceExpired] == Right(workspaceExpired))

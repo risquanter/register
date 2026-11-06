@@ -7,6 +7,8 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import zio.http.Server
 
+import com.risquanter.register.http.responses.ProbeResponse
+
 /** Dedicated health-probe HTTP server for kubelet liveness/readiness probes.
   *
   * Runs on a separate port (default 8081) from the main API server (8080) to
@@ -17,12 +19,12 @@ import zio.http.Server
   * This follows the established OPA pattern of separating gRPC (9191, STRICT)
   * from diagnostics (8282, PERMISSIVE).
   *
-  * '''Design constraints (FR-7, NFR-2):'''
+  * '''Design constraints:'''
   *   - No application dependencies (no repository, no auth, no Keycloak)
   *   - No Tapir interceptors, no CORS, no security headers, no Swagger
-  *   - Only `/health` and `/ready` are served; all other paths return 404 (FR-3)
+  *   - Only `/health` and `/ready` are served; all other paths return 404
   *
-  * '''Infrastructure note (THREAT-CATALOG.md T1):'''
+  * '''Infrastructure note:'''
   *   Port 8081 uses PeerAuthentication PERMISSIVE to accept plaintext kubelet
   *   probes. The accompanying NetworkPolicy must restrict 8081 ingress to
   *   kubelet/ztunnel source only — otherwise an attacker with direct pod access
@@ -31,22 +33,20 @@ import zio.http.Server
   *   limited to information disclosure of service liveness (acceptable).
   *
   * @see ADR-012 (service mesh strategy)
-  * @see AUTHORIZATION-PLAN.md Phase K.5 (Istio ambient mode)
-  * @see THREAT-CATALOG.md T1 (mesh bypass prevention)
   */
 object HealthProbeServer:
 
   // ── Endpoint definitions ─────────────────────────────────────────
 
-  private val healthEndpoint: PublicEndpoint[Unit, Unit, Map[String, String], Any] =
+  private val healthEndpoint: PublicEndpoint[Unit, Unit, ProbeResponse, Any] =
     endpoint.get
       .in("health")
-      .out(jsonBody[Map[String, String]])
+      .out(jsonBody[ProbeResponse])
 
-  private val readyEndpoint: PublicEndpoint[Unit, Unit, Map[String, String], Any] =
+  private val readyEndpoint: PublicEndpoint[Unit, Unit, ProbeResponse, Any] =
     endpoint.get
       .in("ready")
-      .out(jsonBody[Map[String, String]])
+      .out(jsonBody[ProbeResponse])
 
   // ── Server logic ─────────────────────────────────────────────────
 

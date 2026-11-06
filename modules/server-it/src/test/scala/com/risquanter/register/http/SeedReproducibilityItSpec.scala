@@ -13,9 +13,9 @@ import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, Node
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
-import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
+import com.risquanter.register.http.responses.{LECCurvesResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
-import com.risquanter.register.domain.data.LECNodeCurve
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
@@ -112,29 +112,28 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       .response(asJson[WorkspaceBootstrapResponse]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
 
-  private def addTree(client: SttpClientFixture.Client, key: String, req: RiskTreeDefinitionRequest): Task[SimulationResponse] =
+  private def addTree(client: SttpClientFixture.Client, key: String, req: RiskTreeDefinitionRequest): Task[TreeSummaryResponse] =
     basicRequest.header("X-Branch", "main").post(uri"${client.baseUrl}/w/$key/risk-trees").body(req)
-      .response(asJson[SimulationResponse]).send(client.backend)
+      .response(asJson[TreeSummaryResponse]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
 
   private def structure(client: SttpClientFixture.Client, key: String, treeId: String): Task[RiskTree] =
     basicRequest.header("X-Branch", "main").get(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/structure")
-      .response(asJson[Option[RiskTree]]).send(client.backend)
+      .response(asJson[RiskTree]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
-      .flatMap(opt => ZIO.fromOption(opt).orElseFail(new RuntimeException(s"structure not found for tree $treeId")))
 
   /** LEC curves + quantiles for the root and every leaf, keyed by node name —
     * node IDs are ULIDs and differ across servers, names are the stable key.
     */
   private given zio.json.JsonEncoder[List[NodeId]] = zio.json.JsonEncoder.list[NodeId]
 
-  private def curvesByName(client: SttpClientFixture.Client, key: String, tree: RiskTree): Task[Map[String, (Vector[LECPoint], Map[String, Double])]] =
+  private def curvesByName(client: SttpClientFixture.Client, key: String, tree: RiskTree): Task[Map[String, (Vector[LECPoint], Map[QuantileLevel, Double])]] =
     val nodeIds: List[NodeId] = tree.rootId :: tree.nodes.collect { case l: RiskLeaf => l.id }.toList
     basicRequest.header("X-Branch", "main").post(uri"${client.baseUrl}/w/$key/risk-trees/${tree.id.value}/nodes/lec-multi")
       .body(nodeIds)
-      .response(asJson[Map[NodeId, LECNodeCurve]]).send(client.backend)
+      .response(asJson[LECCurvesResponse]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
-      .map(_.values.map(c => c.name -> (c.curve, c.quantiles)).toMap)
+      .map(_.curves.values.map(c => (c.name.value: String) -> (c.curve, c.quantiles)).toMap)
 
   override def spec =
     suite("SeedReproducibilityItSpec")(
@@ -195,7 +194,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       },
 
       test("demo-simple and demo-enterprise trees yield identical figures in both creation orders (original item-12 symptom)") {
-        def run(first: RiskTreeDefinitionRequest, second: RiskTreeDefinitionRequest): Task[Map[String, Map[String, (Vector[LECPoint], Map[String, Double])]]] =
+        def run(first: RiskTreeDefinitionRequest, second: RiskTreeDefinitionRequest): Task[Map[String, Map[String, (Vector[LECPoint], Map[QuantileLevel, Double])]]] =
           withServer { client =>
             for
               boot    <- bootstrap(client, first)

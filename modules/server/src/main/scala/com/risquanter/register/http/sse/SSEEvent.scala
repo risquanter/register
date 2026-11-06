@@ -1,6 +1,7 @@
 package com.risquanter.register.http.sse
 
 import zio.json.*
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, BranchChoice}
 
 /** Kind of structural change reported by a `NodeChanged` event. */
@@ -29,7 +30,7 @@ enum SSEEvent:
   /** Quantiles recomputed for a node. Defined by ADR-004a; nothing publishes
     * it yet. */
   @jsonHint(SSEEvent.Names.LecUpdated)
-  case LECUpdated(nodeId: NodeId, treeId: TreeId, quantiles: Map[String, Double])
+  case LECUpdated(nodeId: NodeId, treeId: TreeId, quantiles: Map[QuantileLevel, Double])
 
   /** The tree's structure changed at a node. Defined by ADR-004a; nothing
     * publishes it yet. */

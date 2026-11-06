@@ -224,27 +224,6 @@ object ZJS:
       }
     )
 
-  /** `loadStatePipeline` for requests returning `Option[A]`: `Some` loads,
-    * `None` is `Absent`, error routing as `loadStatePipeline`.
-    *
-    * A `None` here is a request that succeeded and found nothing, which is not
-    * a failure and carries no reason, so it needs no sentence and the target
-    * renders a placeholder for it.
-    */
-  def loadOptionStatePipeline[A](
-    triggers: EventStream[Option[() => EventStream[Either[RequestFailure, Option[A]]]]]
-  ): EventStream[LoadState[A]] =
-    requestPipeline[Either[RequestFailure, Option[A]], LoadState[A]](
-      triggers,
-      idle    = LoadState.Idle,
-      loading = LoadState.Loading,
-      settle  = {
-        case Right(Some(a)) => LoadState.Loaded(a)
-        case Right(None)    => LoadState.Absent
-        case Left(f)        => LoadState.Failed(f)
-      }
-    )
-
   // ---------------------------------------------------------------------------
   // Extensions on ZIO + SubmitState — DRY the submit lifecycle
   // ---------------------------------------------------------------------------
@@ -280,10 +259,10 @@ object ZJS:
     * {{{
     *   import app.core.ZJS.*
     *
-    *   healthEndpoint(())           // RIO[BackendClient, Map[String, String]]
+    *   healthEndpoint(())           // RIO[BackendClient, ProbeResponse]
     *     .emitTo(healthBus)
     *
-    *   createEndpoint(requestDto)   // RIO[BackendClient, SimulationResponse]
+    *   createEndpoint(requestDto)   // RIO[BackendClient, (TreeLocation, TreeSummaryResponse)]
     *     .emitTo(responseBus)
     * }}}
     */

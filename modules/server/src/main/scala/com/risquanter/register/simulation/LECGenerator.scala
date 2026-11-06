@@ -1,6 +1,8 @@
 package com.risquanter.register.simulation
 
-import scala.collection.immutable.TreeMap
+import io.github.iltotore.iron.{autoRefine, refineUnsafe}
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
+import com.risquanter.register.domain.data.iron.{OccurrenceProbability, OccurrenceProbabilityConstraint}
 
 /** Generates Loss Exceedance Curve data from simulation outcomes.
   *
@@ -8,7 +10,11 @@ import scala.collection.immutable.TreeMap
   * 100 ticks is the default. Loss values are in millions, so 1L = $1M.
   */
 object LECGenerator {
-  
+
+  /** The probability of an event that happens in every trial: what a figure
+    * read from no trials at all reports for "no loss". */
+  private val Certain: OccurrenceProbability = 1.0
+
   /** The unconditional VaR at percentile `p`: the loss below which a fraction
     * `p` of all trials fall, counting the zero-loss trials where the risk did
     * not occur. Returns 0L when there is no simulation data.
@@ -30,20 +36,13 @@ object LECGenerator {
           .map(_._1)
           .getOrElse(outcomes.lastKey)
 
-  /** Unconditional VaR quantiles: p90, p95, p99 and p99.5.
-    *
-    * Tail-only by design. For a risk occurring less than half the time — the
-    * common case — the unconditional median collapses to 0 and says nothing;
-    * `probabilityOfNoLoss` carries that information instead.
+  /** The unconditional VaR at every `QuantileLevel`, which is where the tail-only
+    * choice of levels is stated. Empty when there is no simulation data.
     */
-  def calculateQuantiles(result: LossDistribution): Map[String, Double] =
+  def calculateQuantiles(result: LossDistribution): Map[QuantileLevel, Double] =
     if result.outcomeCount.isEmpty || result.nTrials == 0 then Map.empty
-    else Map(
-      "p90"   -> unconditionalQuantile(result, 0.90).toDouble,
-      "p95"   -> unconditionalQuantile(result, 0.95).toDouble,
-      "p99"   -> unconditionalQuantile(result, 0.99).toDouble,
-      "p99.5" -> unconditionalQuantile(result, 0.995).toDouble
-    )
+    else QuantileLevel.values.map(level =>
+      level -> unconditionalQuantile(result, level.probability).toDouble).toMap
 
   /** Average Annual Loss: the mean loss across all trials, zero-loss trials
     * included. A percentile answers how bad it can get; this answers what to
@@ -60,12 +59,15 @@ object LECGenerator {
     * two sources `unconditionalQuantile` also treats as at or below zero.
     * Returns 1.0 when there is no simulation data.
     */
-  def probabilityOfNoLoss(result: LossDistribution): Double =
-    if result.nTrials == 0 then 1.0
+  def probabilityOfNoLoss(result: LossDistribution): OccurrenceProbability =
+    if result.nTrials == 0 then Certain
     else
       val implicitZeros = result.nTrials.toLong - result.outcomeCount.values.sum.toLong
       val explicitZeros = result.outcomeCount.getOrElse(0L, 0).toLong
-      (implicitZeros + explicitZeros).toDouble / result.nTrials.toDouble
+      // A count of trials over the positive total of trials lies in [0, 1], so
+      // the refinement cannot fail.
+      ((implicitZeros + explicitZeros).toDouble / result.nTrials.toDouble)
+        .refineUnsafe[OccurrenceProbabilityConstraint]
 
   /** The unconditional VaR at `percentile`, or None when there are no outcomes.
     * Clips tick ranges to a meaningful percentile rather than `maxLoss`, which
@@ -75,68 +77,6 @@ object LECGenerator {
     Option.when(result.nTrials > 0 && result.outcomeCount.nonEmpty) {
       unconditionalQuantile(result, percentile)
     }
-  
-  /** Vega-Lite specification for a step chart of P(Loss >= x) against Loss,
-    * sampled down to `maxPoints`. None when there is no data.
-    */
-  def generateVegaLiteSpec(result: LossDistribution, maxPoints: Int = 100): Option[String] = {
-    val outcomes = result.outcomeCount
-    if (outcomes.isEmpty || outcomes.values.sum == 0) None
-    else {
-    
-    // Sample points for large datasets
-    val sampledOutcomes = if (outcomes.size > maxPoints) {
-      val step = outcomes.size / maxPoints
-      outcomes.toSeq.zipWithIndex
-        .filter { case (_, idx) => idx % step == 0 }
-        .map(_._1)
-        .to(TreeMap)
-    } else {
-      outcomes
-    }
-    
-    // Generate exceedance curve data points
-    val dataPoints = sampledOutcomes.map { case (loss, _) =>
-      val exceedProb = result.probOfExceedance(loss)
-      s"""{"loss": $loss, "exceedance": ${exceedProb.toDouble}}"""
-    }.mkString(",\n      ")
-    
-    val spec = s"""{
-      "$$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-      "description": "Loss Exceedance Curve showing P(Loss >= x)",
-      "title": "Loss Exceedance Curve",
-      "width": 600,
-      "height": 400,
-      "data": {
-        "values": [
-      $dataPoints
-        ]
-      },
-      "mark": "line",
-      "encoding": {
-        "x": {
-          "field": "loss",
-          "type": "quantitative",
-          "title": "Loss (Millions)",
-          "scale": {"zero": false}
-        },
-        "y": {
-          "field": "exceedance",
-          "type": "quantitative",
-          "title": "Probability of Exceedance",
-          "scale": {"domain": [0, 1]}
-        }
-      }
-    }"""
-    
-    Some(spec)
-    }
-  }
-  
-  /** Quantiles and Vega-Lite spec together, in one pass over the outcomes. */
-  def generateLEC(result: LossDistribution, maxVegaPoints: Int = 100): (Map[String, Double], Option[String]) = {
-    (calculateQuantiles(result), generateVegaLiteSpec(result, maxVegaPoints))
-  }
   
   /** Evenly-spaced loss ticks over [minLoss, maxLoss * 1.1], taking the
     * minimum from the data rather than assuming zero.
@@ -159,7 +99,7 @@ object LECGenerator {
   }
   
   /** Curve points as (loss, exceedance probability) pairs. */
-  def generateCurvePoints(result: LossDistribution, nEntries: Int = 100): Vector[(Long, Double)] = {
+  def generateCurvePoints(result: LossDistribution, nEntries: Int = 100): Vector[(Long, OccurrenceProbability)] = {
     if (result.outcomeCount.isEmpty) Vector.empty
     else {
       val minLoss = result.minLoss
@@ -187,9 +127,11 @@ object LECGenerator {
     * instead, meeting the y-axis at the occurrence-probability plateau. Above
     * 0 the two readings coincide on integer losses.
     */
-  private def exceedanceAt(result: LossDistribution, loss: Long): Double =
-    if (loss == 0L) 1.0 - probabilityOfNoLoss(result)
-    else result.probOfExceedance(loss).toDouble
+  private def exceedanceAt(result: LossDistribution, loss: Long): OccurrenceProbability =
+    // The complement of a probability in [0, 1] is in [0, 1], so the
+    // refinement cannot fail.
+    if (loss == 0L) (1.0 - probabilityOfNoLoss(result)).refineUnsafe[OccurrenceProbabilityConstraint]
+    else result.probOfExceedance(loss)
   
   /** Visual-only threshold for tail trimming: ticks where every curve drops
     * below it are dropped from the rendered data, leaving analytical queries
@@ -206,7 +148,7 @@ object LECGenerator {
   def generateCurvePointsMulti[K](
     results: Map[K, LossDistribution], 
     nEntries: Int = 100
-  ): Map[K, Vector[(Long, Double)]] = {
+  ): Map[K, Vector[(Long, OccurrenceProbability)]] = {
     if (results.isEmpty) return Map.empty
     
     val nonEmpty = results.filter(_._2.outcomeCount.nonEmpty)
@@ -225,7 +167,7 @@ object LECGenerator {
     val sharedTicks = (0L +: getTicks(combinedMin, combinedMax, nEntries)).distinct
 
     // Evaluate all curves at every tick
-    val evaluated: Map[K, Vector[(Long, Double)]] = results.map { case (nodeId, result) =>
+    val evaluated: Map[K, Vector[(Long, OccurrenceProbability)]] = results.map { case (nodeId, result) =>
       if (result.outcomeCount.isEmpty) nodeId -> Vector.empty
       else nodeId -> sharedTicks.map(loss => (loss, exceedanceAt(result, loss)))
     }
@@ -237,9 +179,9 @@ object LECGenerator {
     * beyond the last meaningful point for visual continuity.
     */
   private def trimTail[K](
-    evaluated: Map[K, Vector[(Long, Double)]],
+    evaluated: Map[K, Vector[(Long, OccurrenceProbability)]],
     sharedTicks: Vector[Long]
-  ): Map[K, Vector[(Long, Double)]] = {
+  ): Map[K, Vector[(Long, OccurrenceProbability)]] = {
     val nonEmptyCurves = evaluated.values.filter(_.nonEmpty).toVector
     if (nonEmptyCurves.isEmpty) return evaluated
 

@@ -64,7 +64,7 @@ setup() {
     server_status=$(curl -s -o /dev/null -w '%{http_code}' "${REGISTER_URL}/health")
     server_body=$(curl -s "${REGISTER_URL}/health")
     [[ "$server_status" == "200" ]]
-    [[ "$server_body" == *"healthy"* ]]
+    [[ "$server_body" == *"Healthy"* ]]
 
     # Frontend nginx
     local frontend_status frontend_body

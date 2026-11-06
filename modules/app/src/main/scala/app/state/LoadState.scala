@@ -1,6 +1,7 @@
 package app.state
 
-import app.core.ViewFailure
+import app.core.{RequestFailure, ViewFailure}
+import com.risquanter.register.http.errors.{NotFoundKind, WireError}
 
 /** Generic async-read lifecycle ADT, parameterised on the loaded data type.
   *
@@ -8,18 +9,15 @@ import app.core.ViewFailure
   * concerns decoupled.  Each `Var[LoadState[A]]` tracks a single
   * data-fetching operation (e.g. tree list, selected tree structure).
   *
-  * `Absent` and `Failed` are different outcomes and a view renders them
-  * differently. `Absent` means the request succeeded and the thing is not
-  * there, which is a placeholder rather than an error. `Failed` carries why
-  * there is nothing to show, and the sentence for it is composed where it is
-  * rendered.
+  * A request that found nothing is a `Failed` carrying the server's
+  * not-found answer, which names which absence it was. The sentence for a
+  * failure is composed where it is rendered.
   *
   * @tparam A The type of data being loaded
   */
 enum LoadState[+A]:
   case Idle
   case Loading
-  case Absent
   case Loaded(data: A)
   case Failed(failure: ViewFailure)
 
@@ -28,7 +26,6 @@ enum LoadState[+A]:
     case Loaded(a)  => Loaded(f(a))
     case Idle       => Idle
     case Loading    => Loading
-    case Absent     => Absent
     case Failed(v)  => Failed(v)
 
   /** Chain a dependent load operation on the loaded value. */
@@ -36,5 +33,22 @@ enum LoadState[+A]:
     case Loaded(a)  => f(a)
     case Idle       => Idle
     case Loading    => Loading
-    case Absent     => Absent
     case Failed(v)  => Failed(v)
+
+object LoadState:
+  /** A tree read that found the tree held but absent at the revision named:
+    * the branch lacks it, or the pinned commit predates it. The views that
+    * show a tree treat this as nothing to show rather than as an error, so
+    * they match it ahead of `Failed`.
+    *
+    * {{{
+    * selectedTree.now() match
+    *   case LoadState.TreeAbsent(f) => placeholder(sentenceFor(f))
+    *   case LoadState.Failed(f)     => notice(f)
+    * }}}
+    */
+  object TreeAbsent:
+    def unapply[A](state: LoadState[A]): Option[ViewFailure] = state match
+      case Failed(failure @ RequestFailure.Wire(WireError.NotFound(
+             NotFoundKind.TreeNotOnBranch(_) | NotFoundKind.TreeNotAtCommit(), _))) => Some(failure)
+      case _ => None

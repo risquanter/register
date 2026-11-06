@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import app.core.*
-import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchChoice, PositiveInt, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.http.responses.{TreeHistoryResponse, TreeHistoryEntry}
 
@@ -36,7 +36,7 @@ final class TreeHistoryState(
   }(using unsafeWindowOwner)
 
   /** Fetch `treeId`'s commit history on `branch` (oldest-first, most recent `n`). */
-  def loadHistory(treeId: TreeId, branch: BranchChoice, n: Int = 50): Unit =
+  def loadHistory(treeId: TreeId, branch: BranchChoice, n: PositiveInt = WorkspaceTreeEndpoints.DefaultHistoryLimit): Unit =
     keySignal.now() match
       case Some(key) =>
         historyTrigger.emit(Some(() =>

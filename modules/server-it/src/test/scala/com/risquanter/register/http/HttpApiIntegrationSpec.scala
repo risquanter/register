@@ -7,8 +7,8 @@ import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
-import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, ScenarioResponse}
-import com.risquanter.register.http.errors.{RejectionDetail, WireError}
+import com.risquanter.register.http.responses.{ScenarioResponse, TreeListResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
+import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
 import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice}
 import com.risquanter.register.http.support.SttpClientFixture
@@ -62,7 +62,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         for
           client   <- ZIO.service[SttpClientFixture.Client]
           response <- basicRequest.header("X-Branch", "main").get(uri"${client.baseUrl}/health").send(client.backend)
-        yield assertTrue(response.code.isSuccess) && assertTrue(response.body.exists(_.contains("healthy")))
+        yield assertTrue(response.code.isSuccess) && assertTrue(response.body.exists(_.contains("Healthy")))
       },
       test("workspace bootstrap, list, and get structure via workspace-scoped API") {
         val request = sampleRequest()
@@ -82,19 +82,25 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           // 2) List trees in workspace (GET /w/{key}/risk-trees)
           listResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees")
-            .response(asJson[List[SimulationResponse]])
+            .response(asJson[TreeListResponse])
             .send(client.backend)
           listed <- ZIO.fromEither(listResp.body)
 
           // 3) Get full tree structure (GET /w/{key}/risk-trees/{treeId}/structure)
           structResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${createdTree.id.value}/structure")
-            .response(asJson[Option[RiskTree]])
+            .response(asJson[RiskTree])
             .send(client.backend)
           structure <- ZIO.fromEither(structResp.body)
-        yield assertTrue(createdTree.name == request.name) &&
-          assertTrue(listed.exists(_.id == createdTree.id)) &&
-          assertTrue(structure.exists(_.id == createdTree.id))
+        yield assertTrue(
+          // The bootstrap is a create: it names the workspace it made, as a
+          // reference relative to `/workspaces`.
+          bootstrapResp.code == StatusCode.Created,
+          bootstrapResp.header("Location").contains(s"w/$key"),
+          createdTree.name.value == request.name,
+          listed.trees.exists(_.id == createdTree.id),
+          structure.id == createdTree.id
+        )
       },
       test("bootstrap honours provided seedEntityId and seedVarId; structure exposes assigned seeds (PLAN §7)") {
         // Export→import round-trip prerequisite: caller pins both seed axes and
@@ -116,10 +122,10 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
 
           structResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${bootstrap.tree.id.value}/structure")
-            .response(asJson[Option[RiskTree]])
+            .response(asJson[RiskTree])
             .send(client.backend)
           structure <- ZIO.fromEither(structResp.body)
-          leafSeeds  = structure.toSeq.flatMap(_.nodes.collect { case l: RiskLeaf => l.seedVarId.value }).sorted
+          leafSeeds  = structure.nodes.collect { case l: RiskLeaf => l.seedVarId.value }.sorted
         yield assertTrue(bootstrap.seedEntityId.value == 4242L) &&
           assertTrue(leafSeeds == Seq(41L, 42L))
       },
@@ -142,21 +148,26 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           createResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees")
             .body(secondTreeReq)
-            .response(asJson[SimulationResponse])
+            .response(asJson[TreeSummaryResponse])
             .send(client.backend)
           created <- ZIO.fromEither(createResp.body)
 
           // Verify both trees appear in listing
           listResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees")
-            .response(asJson[List[SimulationResponse]])
+            .response(asJson[TreeListResponse])
             .send(client.backend)
           listed <- ZIO.fromEither(listResp.body)
-        yield assertTrue(createResp.code.isSuccess) &&
-          assertTrue(created.name == secondTreeReq.name) &&
-          assertTrue(listed.length == 2) &&
-          assertTrue(listed.exists(_.id == bootstrap.tree.id)) &&
-          assertTrue(listed.exists(_.id == created.id))
+        yield assertTrue(
+          createResp.code == StatusCode.Created,
+          // The new tree's reference is relative to the collection, so the
+          // header never carries the workspace key.
+          createResp.header("Location").contains(s"risk-trees/${created.id.value}"),
+          created.name.value == secondTreeReq.name,
+          listed.trees.length == 2,
+          listed.trees.exists(_.id == bootstrap.tree.id),
+          listed.trees.exists(_.id == created.id)
+        )
       },
       test("get tree summary by ID via GET /w/{key}/risk-trees/{treeId}") {
         val request = sampleRequest()
@@ -176,12 +187,65 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           // Get tree summary (GET /w/{key}/risk-trees/{treeId})
           summaryResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${treeId.value}")
-            .response(asJson[Option[SimulationResponse]])
+            .response(asJson[TreeSummaryResponse])
             .send(client.backend)
           summary <- ZIO.fromEither(summaryResp.body)
         yield assertTrue(summaryResp.code.isSuccess) &&
-          assertTrue(summary.exists(_.id == treeId)) &&
-          assertTrue(summary.exists(_.name == request.name))
+          assertTrue(summary.id == treeId) &&
+          assertTrue(summary.name.value == request.name)
+      },
+      /** A tree created on main after a scenario forked is held by the workspace
+        * and absent on that scenario. The answer names which absence, and the
+        * branch it was looked for on, so the browser can say so; it carries
+        * neither identifier.
+        */
+      test("a held tree absent on the named branch answers 404 naming the branch") {
+        val scenarioName = "fork-before-tree"
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(sampleRequest())
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+
+          scenarioResp <- basicRequest
+            .post(uri"${client.baseUrl}/w/$key/scenarios")
+            .body(CreateScenarioRequest(
+              name = ScenarioName.fromString(scenarioName).toOption.get,
+              source = ScenarioSourceDto.Branch(BranchChoice.Main)
+            ))
+            .response(asJson[ScenarioResponse])
+            .send(client.backend)
+          _ <- ZIO.fromEither(scenarioResp.body)
+
+          // Created on main after the fork, so the scenario never saw it.
+          createResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/w/$key/risk-trees")
+            .body(sampleRequest())
+            .response(asJson[TreeSummaryResponse])
+            .send(client.backend)
+          created <- ZIO.fromEither(createResp.body)
+
+          absentResp <- basicRequest.header("X-Branch", scenarioName)
+            .get(uri"${client.baseUrl}/w/$key/risk-trees/${created.id.value}/structure")
+            .response(asStringAlways)
+            .send(client.backend)
+          rawBody    = absentResp.body
+          absence   <- ZIO.fromEither(
+            rawBody.fromJson[WireError.NotFound]
+              .left.map(err => s"Failed to decode a not-found answer: $err\nBody was: $rawBody")
+          )
+        yield assertTrue(
+          absentResp.code == StatusCode.NotFound,
+          absence.absence == NotFoundKind.TreeNotOnBranch(
+            BranchChoice.Scenario(ScenarioName.fromString(scenarioName).toOption.get)),
+          !rawBody.contains(key),
+          !rawBody.contains(created.id.value)
+        )
       },
       /** The route names a tree, so content it refuses is that tree's content
         * rather than an unreadable request, and the two answer different
@@ -272,7 +336,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           freedCreateResp <- basicRequest.header("X-Branch", scenarioName)
             .post(uri"${client.baseUrl}/w/$key/risk-trees")
             .body(dupReq)
-            .response(asJson[SimulationResponse])
+            .response(asJson[TreeSummaryResponse])
             .send(client.backend)
           freedCreated <- ZIO.fromEither(freedCreateResp.body)
 
@@ -282,9 +346,9 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
             .body(dupReq)
             .send(client.backend)
         yield assertTrue(dupWhileInheritedResp.code == StatusCode.BadRequest) &&
-          assertTrue(deleteResp.code.isSuccess) &&
-          assertTrue(freedCreateResp.code.isSuccess) &&
-          assertTrue(freedCreated.name == treeName) &&
+          assertTrue(deleteResp.code == StatusCode.NoContent) &&
+          assertTrue(freedCreateResp.code == StatusCode.Created) &&
+          assertTrue(freedCreated.name.value == treeName) &&
           assertTrue(dupAgainResp.code == StatusCode.BadRequest)
       }
     ).provideLayerShared(harnessLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock

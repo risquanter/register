@@ -4,6 +4,7 @@ import zio.*
 import zio.http.Server
 import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
+import sttp.model.HeaderNames
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
@@ -317,8 +318,12 @@ object Application extends ZIOAppDefault {
   private val PreflightMaxAge: FiniteDuration = FiniteDuration(1, TimeUnit.HOURS)
 
   /** The CORS policy: the configured origins, every request header the SPA
-    * sends, and preflight caching. The headers are an explicit list rather than
-    * a reflection of whatever the browser asks for.
+    * sends, every response header it reads, and preflight caching. The headers
+    * are an explicit list rather than a reflection of whatever the browser asks
+    * for. `Location` is exposed because the two create endpoints answer it and
+    * the SPA's client decodes every declared output; a browser hides a
+    * non-exposed header from a cross-origin script, which is the development
+    * setup.
     */
   def corsPolicy(origins: List[String]): TapirCORSConfig =
     TapirCORSConfig.default
@@ -327,7 +332,7 @@ object Application extends ZIOAppDefault {
         "Content-Type", "Accept", "Authorization",
         RequestHeaderName.Branch.wireName, RequestHeaderName.IfMatch.wireName
       )
-      .exposeHeaders("Content-Type")
+      .exposeHeaders("Content-Type", HeaderNames.Location)
       .maxAge(PreflightMaxAge)
 
   def startServer = for {

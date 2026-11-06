@@ -57,7 +57,7 @@ object CompareColorAssigner:
             curve,
             s.overrides.getOrElse(nid, ColorAssigner.shade(s.palette, nid)),
             s"${nid.value}@${s.slotLabel}",
-            curve.name,
+            curve.name.value,
             Some(s.displayLabel)
           )
         }

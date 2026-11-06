@@ -3,6 +3,7 @@ package com.risquanter.register.domain.data
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeName, TreeId, NodeId, SeedVarId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.http.responses.TreeSummaryResponse
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import zio.prelude.Validation
 import io.github.iltotore.iron.autoRefine
@@ -42,6 +43,12 @@ final case class RiskTree private (
 ) {
   /** Get the root node */
   def root: RiskNode = index.nodes(rootId)
+
+  /** The tree's identity for a list, a write acknowledgement or a bootstrap.
+    * The projection is owned here, by the source (ADR-038 §5). It is not
+    * `toWire`, because this type is itself the structure endpoint's wire form.
+    */
+  def toSummary: TreeSummaryResponse = TreeSummaryResponse(id, name)
 }
 
 object RiskTree {

@@ -2,6 +2,7 @@ package com.risquanter.register.simulation
 
 import zio.test.*
 import zio.test.Assertion.*
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -203,22 +204,22 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("returns expected quantile keys") {
         val quantiles = LECGenerator.calculateQuantiles(cyberResult)
         assertTrue(
-          quantiles.contains("p90"),
-          quantiles.contains("p95"),
-          quantiles.contains("p99"),
-          quantiles.contains("p99.5")
+          quantiles.contains(QuantileLevel.P90),
+          quantiles.contains(QuantileLevel.P95),
+          quantiles.contains(QuantileLevel.P99),
+          quantiles.contains(QuantileLevel.P995)
         )
       },
-      test("does not include p05 or p50 — see calculateQuantiles' doc comment") {
+      test("reports every level and no other key") {
         val quantiles = LECGenerator.calculateQuantiles(cyberResult)
-        assertTrue(!quantiles.contains("p05"), !quantiles.contains("p50"))
+        assertTrue(quantiles.keySet == QuantileLevel.values.toSet)
       },
       test("quantiles are monotonically increasing") {
         val quantiles = LECGenerator.calculateQuantiles(cyberResult)
         assertTrue(
-          quantiles("p90") <= quantiles("p95"),
-          quantiles("p95") <= quantiles("p99"),
-          quantiles("p99") <= quantiles("p99.5")
+          quantiles(QuantileLevel.P90) <= quantiles(QuantileLevel.P95),
+          quantiles(QuantileLevel.P95) <= quantiles(QuantileLevel.P99),
+          quantiles(QuantileLevel.P99) <= quantiles(QuantileLevel.P995)
         )
       },
       test("empty result returns empty map") {
@@ -274,10 +275,10 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         }
         val quantiles = LECGenerator.calculateQuantiles(sparse)
         assertTrue(
-          quantiles("p90") == 20000.0,
-          quantiles("p95") == 50000.0,
-          quantiles("p99") == 50000.0,
-          quantiles("p99.5") == 50000.0
+          quantiles(QuantileLevel.P90) == 20000.0,
+          quantiles(QuantileLevel.P95) == 50000.0,
+          quantiles(QuantileLevel.P99) == 50000.0,
+          quantiles(QuantileLevel.P995) == 50000.0
         )
       },
       test("exact boundary — implicitZeros equals target (p50 via findQuantileLoss, half-sparse)") {
@@ -295,8 +296,8 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         val quantiles = LECGenerator.calculateQuantiles(halfSparse)
         assertTrue(
           LECGenerator.findQuantileLoss(halfSparse, 0.50) == Some(0L),
-          quantiles("p90") == 4000.0,
-          quantiles("p95") == 5000.0
+          quantiles(QuantileLevel.P90) == 4000.0,
+          quantiles(QuantileLevel.P95) == 5000.0
         )
       },
       test("findQuantileLoss exact boundary — target equals implicitZeros") {
@@ -335,10 +336,10 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         }
         val quantiles = LECGenerator.calculateQuantiles(single)
         assertTrue(
-          quantiles("p90") == 0.0,
-          quantiles("p95") == 0.0,
-          quantiles("p99") == 0.0,
-          quantiles("p99.5") == 42000.0
+          quantiles(QuantileLevel.P90) == 0.0,
+          quantiles(QuantileLevel.P95) == 0.0,
+          quantiles(QuantileLevel.P99) == 0.0,
+          quantiles(QuantileLevel.P995) == 42000.0
         )
       },
       test("all outcomes identical — single bin accumulation") {
@@ -352,10 +353,10 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         }
         val quantiles = LECGenerator.calculateQuantiles(identical)
         assertTrue(
-          quantiles("p90") == 7000.0,
-          quantiles("p95") == 7000.0,
-          quantiles("p99") == 7000.0,
-          quantiles("p99.5") == 7000.0
+          quantiles(QuantileLevel.P90) == 7000.0,
+          quantiles(QuantileLevel.P95) == 7000.0,
+          quantiles(QuantileLevel.P99) == 7000.0,
+          quantiles(QuantileLevel.P995) == 7000.0
         )
       },
       test("findQuantileLoss at p=0.0 returns 0") {
@@ -394,7 +395,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         val q95viaFind = LECGenerator.findQuantileLoss(sparse, 0.95)
         // p95: target = 10 * 0.95 = 9.5, walk: 5000→8, 20000→9, 50000→10 → 50000
         assertTrue(
-          quantiles("p95") == 50000.0,
+          quantiles(QuantileLevel.P95) == 50000.0,
           q95viaFind == Some(50000L)
         )
       },
@@ -404,9 +405,9 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         }
         val quantiles = LECGenerator.calculateQuantiles(sparse)
         assertTrue(
-          quantiles("p90") <= quantiles("p95"),
-          quantiles("p95") <= quantiles("p99"),
-          quantiles("p99") <= quantiles("p99.5")
+          quantiles(QuantileLevel.P90) <= quantiles(QuantileLevel.P95),
+          quantiles(QuantileLevel.P95) <= quantiles(QuantileLevel.P99),
+          quantiles(QuantileLevel.P99) <= quantiles(QuantileLevel.P995)
         )
       }
     )

@@ -523,7 +523,6 @@ enum FieldProblem:
   // Workspace limits and lookups the services report through ValidationFailed
   case SeedEntityIdInUse(seedEntityId: SeedEntityId.SeedEntityId)
   case MaxTreesReached(limit: NonNegativeInt)
-  case TreeNotFound(treeId: TreeId)
   case NodeNotFound
   case NodeIdsEmpty
   case TreeIdAlreadyExists(treeId: TreeId)
@@ -614,7 +613,6 @@ object FieldProblem:
     case TargetingMitigationStateReferenced         => ValidationErrorCode.CONSTRAINT_VIOLATION
     case SeedEntityIdInUse(_)                       => ValidationErrorCode.DUPLICATE_VALUE
     case MaxTreesReached(_)                         => ValidationErrorCode.CONSTRAINT_VIOLATION
-    case TreeNotFound(_)                            => ValidationErrorCode.NOT_FOUND
     case NodeNotFound                               => ValidationErrorCode.NOT_FOUND
     case NodeIdsEmpty                               => ValidationErrorCode.EMPTY_COLLECTION
     case TreeIdAlreadyExists(_)                     => ValidationErrorCode.DUPLICATE_VALUE

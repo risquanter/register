@@ -1,38 +1,27 @@
 package com.risquanter.register.http
 
-/** Canonical probe response bodies shared between the main API health endpoint
-  * (port 8080, `RiskTreeController.health`) and the dedicated health-probe
-  * server (port 8081, `HealthProbeServer`).
+import com.risquanter.register.http.responses.{ProbeResponse, ProbeStatus}
+
+/** The probe bodies, shared between the API port's `/health`
+  * (`SystemController`) and the probe port's `/health` and `/ready`
+  * (`HealthProbeServer`), so both ports answer the same body.
   *
-  * '''Why two ports serve the same `/health` response:'''
-  *   - Port 8080 `/health` — consumed by the frontend `HealthState` component
-  *     and Swagger documentation. Served through the full Tapir pipeline with
-  *     CORS and security-header interceptors.
-  *   - Port 8081 `/health` — consumed exclusively by kubelet liveness probes.
-  *     Served on a bare Tapir interpreter (no interceptors) so it can accept
-  *     plaintext kubelet probes while the API port enforces mTLS STRICT.
-  *
-  * Centralising the response maps here ensures both ports return identical JSON,
-  * and any future field changes (e.g. adding a `version` key) are made in one
-  * place.
+  * The API port's `/health` is read by the frontend's `HealthState` and runs
+  * through the full Tapir pipeline with CORS and security headers. The probe
+  * port is read by kubelet alone, on a bare interpreter, so it can accept
+  * plaintext probes while the API port enforces mTLS.
   */
 object ProbeResponses:
 
-  /** Liveness probe response: `{"status":"healthy","service":"risk-register"}`.
-    *
-    * Indicates the process is alive and able to serve HTTP. Does NOT imply
-    * that downstream dependencies (Irmin, future Postgres) are reachable —
-    * that is the responsibility of readiness checks.
-    */
-  val healthy: Map[String, String] =
-    Map("status" -> "healthy", "service" -> "risk-register")
+  /** The deployment's name as an operator reads it in a probe body. Free text
+    * with no narrower contract, chosen by this project. */
+  val ServiceName: String = "risk-register"
 
-  /** Readiness probe response: `{"status":"ready","service":"risk-register"}`.
-    *
-    * Currently unconditional (the application has no slow-start dependencies
-    * that would delay readiness). When downstream health checks are added
-    * (e.g. Postgres connection pool warmup), this response should be gated
-    * on those checks returning healthy.
-    */
-  val ready: Map[String, String] =
-    Map("status" -> "ready", "service" -> "risk-register")
+  /** Liveness: the process is up and serving HTTP. It says nothing about the
+    * dependencies, which is the readiness probe's question. */
+  val healthy: ProbeResponse = ProbeResponse(ProbeStatus.Healthy, ServiceName)
+
+  /** Readiness, unconditional today: the application has no slow-start
+    * dependency to wait for. A dependency check, when one is added, gates this
+    * value on its result. */
+  val ready: ProbeResponse = ProbeResponse(ProbeStatus.Ready, ServiceName)

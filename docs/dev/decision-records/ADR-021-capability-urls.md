@@ -88,6 +88,7 @@ DELETE /w/{key}                                → delete workspace + cascade tr
 - **HTTPS-only:** Prevents URL sniffing on the wire
 - **No Referer leakage:** `Referrer-Policy: no-referrer` header on workspace responses
 - **Cache-Control:** `no-store` on workspace responses to prevent proxy caching of keys
+- **Location:** the bootstrap answers `201` with the relative reference `w/{key}`; a response header reaches no log the request path does not already reach
 
 ### 5. PRNG — Cryptographic Randomness Required
 

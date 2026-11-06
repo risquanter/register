@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, NodeId, ScenarioName, SeedEntityId, TreeId, WorkspaceId, Revision}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, NodeId, OccurrenceProbability, ScenarioName, SeedEntityId, TreeId, WorkspaceId, Revision}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskTree}
 import com.risquanter.register.domain.errors.{AppError, RepositoryFailure}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
@@ -32,7 +32,7 @@ object CascadeTestStubs:
     def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[AppError, RiskTree] = onDelete(wsId, id)
     def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[AppError, RiskTree] = ZIO.die(new UnsupportedOperationException)
     def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[AppError, Option[(RiskTree, CommitHash)]] = onGetById(wsId, id, rev).map(_.map((_, stubCommit)))
-    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError, Double] = ZIO.die(new UnsupportedOperationException)
+    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError, OccurrenceProbability] = ZIO.die(new UnsupportedOperationException)
     def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[AppError, Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 
   /** `delete` always fails — simulates a tree that was already manually deleted.

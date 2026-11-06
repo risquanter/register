@@ -67,7 +67,7 @@ object GlobalError:
     case WireError.WorkspaceExpired(c, life, idle, _) => Some(WorkspaceExpired(ErrorMessages.workspaceExpired(c, life, idle)))
     case WireError.RequestRejected(_, _)              => None
     case WireError.ValidationRejected(_, _, _)        => None
-    case WireError.NotFound(_)                        => None
+    case WireError.NotFound(_, _)                     => None
     case WireError.AccessDenied(_)                    => None
     case WireError.Conflict(_, _)                     => None
     case WireError.NotSupported(_, _)                 => None

@@ -144,7 +144,7 @@ setup() {
     status=$(curl -s -o /dev/null -w '%{http_code}' "${FRONTEND_URL}/health")
     body=$(curl -s "${FRONTEND_URL}/health")
     [[ "$status" == "200" ]]
-    [[ "$body" == *"healthy"* ]]
+    [[ "$body" == *"Healthy"* ]]
 }
 
 @test "C12: /docs via nginx proxies to backend" {

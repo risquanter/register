@@ -4,9 +4,9 @@ import java.time.Duration
 import sttp.model.StatusCode
 import app.core.{LocalProblem, RequestFailure, ViewFailure}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{ScenarioName, TraceId, ValidationMessages}
+import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName, TraceId, ValidationMessages}
 import com.risquanter.register.domain.errors.{MergeRefusal, ValidationError}
-import com.risquanter.register.http.errors.{Capability, ConflictKind, QueryProblem, RejectionDetail, WireError}
+import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, QueryProblem, RejectionDetail, WireError}
 
 /** Every sentence the browser shows for a failure.
   *
@@ -150,7 +150,7 @@ object ErrorMessages:
     case WireError.ValidationRejected(_, detail, _)   => detail match
       case RejectionDetail.Fields(errors)             => errors.map(refusal).mkString("; ")
       case RejectionDetail.Query(problem)             => query(problem)
-    case WireError.NotFound(_)                        => NotFound
+    case WireError.NotFound(absence, _)               => notFound(absence)
     case WireError.WorkspaceExpired(c, life, idle, _) => workspaceExpired(c, life, idle)
     case WireError.AccessDenied(_)                    => Forbidden
     case WireError.Conflict(kind, _)                  => conflict(kind)
@@ -186,6 +186,27 @@ object ErrorMessages:
       case (m, _) if m < 60 => s"$m minutes"
       case (_, 1)           => "1 hour"
       case (_, h)           => s"$h hours"
+
+  /** One sentence per absence. The first names no cause, because the server
+    * answers an unknown resource and one the caller may not see identically
+    * (ADR-035 §3). The two tree cases name where the tree was looked for, so
+    * the reader knows the tree still exists elsewhere.
+    */
+  def notFound(absence: NotFoundKind): String = absence match
+    case NotFoundKind.Unknown()               => NotFound
+    case NotFoundKind.TreeNotOnBranch(branch) => treeNotOnBranch(branch)
+    case NotFoundKind.TreeNotAtCommit()       => TreeNotAtCommit
+
+  def treeNotOnBranch(branch: BranchChoice): String =
+    s"This tree is not on ${branchName(branch)}."
+
+  val TreeNotAtCommit: String =
+    "This tree did not exist at the selected point in history."
+
+  /** A branch as a sentence names it: main by its word, a scenario by its name. */
+  private def branchName(branch: BranchChoice): String = branch match
+    case BranchChoice.Main            => "main"
+    case BranchChoice.Scenario(name)  => s"scenario ${name.value}"
 
   def capabilityUnavailable(capability: Capability): String = capability match
     case Capability.Scenarios =>

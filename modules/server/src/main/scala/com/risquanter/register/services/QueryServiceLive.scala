@@ -7,7 +7,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, TreeAbsentAtRevision}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.common.ValuationBasis
@@ -77,12 +77,10 @@ class QueryServiceLive private (
 
         // 1. Load the tree and the concrete commit it resolved to — the
         //    storage revision the scope resolver memoizes on.
-        loaded <- repo.getById(wsId, treeId, Revision.Head(branch))
-        treeAndHash <- loaded match
-                         case Some(tc) => ZIO.succeed(tc)
-                         case None =>
-                           ZIO.fail(ValidationFailed(List(ValidationError(
-                             ErrorLocation.requestField(FieldName.TreeId), FieldProblem.TreeNotFound(treeId)))))
+        //    The controller has confirmed the workspace holds the tree, so an
+        //    empty read means the branch lacks it.
+        rev = Revision.Head(branch)
+        treeAndHash <- repo.getById(wsId, treeId, rev).someOrFail(TreeAbsentAtRevision(wsId, treeId, rev))
         (tree, commitHash) = treeAndHash
 
         // 2. Resolve every mitigation's scope for this tree version. The resolver

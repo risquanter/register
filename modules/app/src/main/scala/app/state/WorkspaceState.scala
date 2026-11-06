@@ -6,7 +6,7 @@ import org.scalajs.dom
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.http.responses.SimulationResponse
+import com.risquanter.register.http.responses.TreeSummaryResponse
 
 import app.core.ZJS.*
 import app.core.{BackendClient, RequestFailure}
@@ -84,21 +84,21 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     * @param onExpired        Callback to signal workspace expiry (sets GlobalError.WorkspaceExpired)
     */
   def preValidate(
-    onTreesLoaded: List[SimulationResponse] => Unit,
+    onTreesLoaded: List[TreeSummaryResponse] => Unit,
     onExpired: () => Unit
   ): Unit =
     currentKey match
       case None => () // Scenario 1 — nothing to validate
       case Some(key) =>
         listWorkspaceTreesEndpoint((currentUserId, key, BranchChoice.Main))
-          .tap(trees => zio.ZIO.succeed(onTreesLoaded(trees)))
+          .tap(listed => zio.ZIO.succeed(onTreesLoaded(listed.trees)))
           // Only an answer that actually means the workspace is gone discards
           // the key. A dropped connection or a server fault leaves it in place
           // and the startup listing simply fails, because throwing the key away
           // on any failure loses a workspace that was still valid.
           .tapError {
             case RequestFailure.Wire(
-                   WireError.WorkspaceExpired(_, _, _, _) | WireError.NotFound(_)
+                   WireError.WorkspaceExpired(_, _, _, _) | WireError.NotFound(_, _)
                  ) =>
               zio.ZIO.succeed {
                 workspaceKey.set(None)
@@ -119,8 +119,11 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     * created tree is returned. Every later create uses
     * `createWorkspaceTreeEndpoint` directly.
     */
-  def bootstrap(request: RiskTreeDefinitionRequest): zio.ZIO[BackendClient, RequestFailure, SimulationResponse] =
+  def bootstrap(request: RiskTreeDefinitionRequest): zio.ZIO[BackendClient, RequestFailure, TreeSummaryResponse] =
     bootstrapWorkspaceEndpoint((currentUserId, None, request))
+      // The answer names the workspace's location and carries its body; the
+      // body holds the same key, so it alone is kept.
+      .map((_, response) => response)
       .tap { response =>
         zio.ZIO.succeed {
           workspaceKey.set(Some(response.workspaceKey))

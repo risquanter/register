@@ -4,6 +4,7 @@ import scala.scalajs.js
 
 import app.core.NumberFormat
 import com.risquanter.register.domain.data.LECNodeCurve
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** Client-side Vega-Lite v6 specification builder for LEC curves.
@@ -116,7 +117,7 @@ object LECSpecBuilder:
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
-    buildFromSeries(curves.map { case (nc, color) => ChartSeries(nc, color, nc.id.value, nc.name, origin) }, width, height, pinned, responsive, zoomable)
+    buildFromSeries(curves.map { case (nc, color) => ChartSeries(nc, color, nc.id.value, nc.name.value, origin) }, width, height, pinned, responsive, zoomable)
 
   /** Same as `build`, but each curve's series identity (`seriesId` — the
     * data points, colour-scale domain, and legend match) AND its legend
@@ -185,11 +186,16 @@ object LECSpecBuilder:
     // curve's markers are told apart by the same colour as its line.
     // Each tail quantile gets its own independent toggle (not one shared
     // "show all percentiles" switch). The `LecAnnotation` case is the single
-    // source of truth for each toggle's signal name and label; the string key
-    // here is the `LECNodeCurve.quantiles` map key it reads. All annotations
+    // source of truth for each toggle's signal name and label, paired here
+    // with the `QuantileLevel` it reads from the curve. All annotations
     // render as TWO datum-driven layers (rules + labels) regardless of curve
     // count — see `VegaSpecShared.verticalRuleLayers`.
-    val quantileToggles = List("p90" -> LecAnnotation.P90, "p95" -> LecAnnotation.P95, "p99" -> LecAnnotation.P99, "p99.5" -> LecAnnotation.P995)
+    val quantileToggles = List(
+      QuantileLevel.P90  -> LecAnnotation.P90,
+      QuantileLevel.P95  -> LecAnnotation.P95,
+      QuantileLevel.P99  -> LecAnnotation.P99,
+      QuantileLevel.P995 -> LecAnnotation.P995
+    )
     // Only curves with data get annotations — a node with an empty curve
     // (no simulation outcomes) carries aal = 0.0 / noLoss = 1.0 fallbacks
     // that would otherwise draw a solid rule pinned to the y-axis and a
@@ -218,7 +224,7 @@ object LECSpecBuilder:
     // at a fixed pixel position rather than a line.
     val noLossRows: Vector[(String, HexColor, String)] =
       withData.map { s =>
-        (s"${s.curve.name} — no loss: ${formatProbability(s.curve.probabilityOfNoLoss)}", s.colour, s.seriesId)
+        (s"${s.curve.name.value} — no loss: ${formatProbability(s.curve.probabilityOfNoLoss)}", s.colour, s.seriesId)
       }
 
     // Fresh data values array — called per layer to avoid shared mutable state (F2)
@@ -228,9 +234,9 @@ object LECSpecBuilder:
         s.curve.curve.foreach { pt =>
           arr.push(js.Dynamic.literal(
             "curveId"    -> s.seriesId,
-            "risk"       -> s.curve.name,
+            "risk"       -> s.curve.name.value,
             "loss"       -> pt.loss.toDouble,
-            "exceedance" -> pt.exceedanceProbability
+            "exceedance" -> (pt.exceedanceProbability: Double)
           ))
         }
       }

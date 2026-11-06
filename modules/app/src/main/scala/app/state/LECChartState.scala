@@ -276,7 +276,7 @@ final class LECChartState(
             // at the pinned commit (surfaced via droppedSelections / H3) rather
             // than fail the whole chart.
             (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor(), true)
-          ).toOutcomeEventStream
+          ).map(_.curves).toOutcomeEventStream
         ))
       case _ => () // No workspace or tree selected — nothing to do
 

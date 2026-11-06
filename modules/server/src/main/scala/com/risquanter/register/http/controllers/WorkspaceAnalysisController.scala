@@ -7,6 +7,7 @@ import sttp.tapir.server.ServerEndpoint
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
 import com.risquanter.register.domain.data.iron.Revision
+import com.risquanter.register.http.responses.LECCurvesResponse
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.http.errors.TreeScope
@@ -60,8 +61,8 @@ class WorkspaceAnalysisController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
-        result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, rev, omitAbsent)
-      yield result).wireEither(TreeScope.InTree(treeId))
+        curves <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, rev, omitAbsent)
+      yield LECCurvesResponse(curves)).wireEither(TreeScope.InTree(treeId))
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

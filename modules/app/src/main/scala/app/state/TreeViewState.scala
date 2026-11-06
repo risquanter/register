@@ -11,7 +11,7 @@ import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
-import com.risquanter.register.http.responses.SimulationResponse
+import com.risquanter.register.http.responses.TreeSummaryResponse
 
 /** Reactive state for viewing server-persisted risk trees.
   *
@@ -104,7 +104,7 @@ final class TreeViewState(
   // ── Available trees (summary list) ────────────────────────────
   // This branch's slice of the shared, branch-keyed list — read-only; writes
   // go through TreeListState (`loadTreeList`/`ensureTreeListLoaded` below).
-  val availableTrees: Signal[LoadState[List[SimulationResponse]]] =
+  val availableTrees: Signal[LoadState[List[TreeSummaryResponse]]] =
     treeListState.listFor(activeBranchSignal)
 
   // ── Selected tree (full structure with nodes) ─────────────────
@@ -117,11 +117,11 @@ final class TreeViewState(
   // still doing, so a stale response can never land after a newer request
   // has started, regardless of which round trip finishes first.
   private val treeTrigger =
-    new EventBus[Option[() => EventStream[Either[RequestFailure, Option[RiskTree]]]]]
+    new EventBus[Option[() => EventStream[Either[RequestFailure, RiskTree]]]]
 
   // Idempotency guard: `Var.set` doesn't dedupe by value, and consumers of
   // `selectedTree` recompute on every set; only write on a real change.
-  loadOptionStatePipeline(treeTrigger.events).foreach { v =>
+  loadStatePipeline(treeTrigger.events).foreach { v =>
     if selectedTree.now() != v then selectedTree.set(v)
   }(using unsafeWindowOwner)
 

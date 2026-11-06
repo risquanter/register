@@ -365,10 +365,23 @@ given JsonEncoder[Probability] = JsonEncoder[Double].contramap(identity)
 given JsonDecoder[Probability] =
   JsonDecoder[Double].mapOrFail(_.refineEither[ProbabilityConstraint])
 
-// Occurrence probability for a risk leaf event (can be 0 = never, or 1 = always).
-// Semantically distinct from Probability: the closed [0,1] interval is correct here
-// because a risk event is allowed to never or always occur.
-type OccurrenceProbability = Double :| (GreaterEqual[0.0] & LessEqual[1.0])
+// A probability on the closed interval [0, 1]: a risk leaf's likelihood, which
+// may be 0 (never) or 1 (always), and every probability read off the trials,
+// such as the share of trials exceeding a loss or recording none. Distinct from
+// Probability, whose open interval the metalog fit needs. The constraint is
+// named so the decoder below refines against the same bounds the type is
+// declared with rather than restating them.
+type OccurrenceProbabilityConstraint = GreaterEqual[0.0] & LessEqual[1.0]
+
+type OccurrenceProbability = Double :| OccurrenceProbabilityConstraint
+
+// An occurrence probability crosses the wire on its own as the
+// probability-of-exceedance answer and inside a curve's points, so the derived
+// codecs need an instance here. The closed interval is re-checked on decode: a
+// decoded probability is as trustworthy as a constructed one (ADR-038).
+given JsonEncoder[OccurrenceProbability] = JsonEncoder[Double].contramap(identity)
+given JsonDecoder[OccurrenceProbability] =
+  JsonDecoder[Double].mapOrFail(_.refineEither[OccurrenceProbabilityConstraint])
 
 // The two mode spellings, named once so the decoder below refines against the
 // same pattern the type is declared with rather than restating it. Both are

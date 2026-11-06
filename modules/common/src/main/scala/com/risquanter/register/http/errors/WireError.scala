@@ -3,7 +3,7 @@ package com.risquanter.register.http.errors
 import java.time.Duration
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{TraceId, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, Revision, TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 // Two internal error names collide with the wire case that carries them. The
@@ -48,10 +48,12 @@ enum WireError:
     */
   case ValidationRejected(tree: TreeId, detail: RejectionDetail, trace: TraceId)
 
-  /** No such resource, or one the caller may not see. The two are one response
-    * so that neither is an existence oracle (ADR-035 §3).
+  /** Nothing to answer with. `absence` says which kind: an unknown resource, a
+    * resource the caller may not see, or a tree this workspace holds that the
+    * revision read lacks. The first two share one kind so that neither is an
+    * existence oracle (ADR-035 §3).
     */
-  case NotFound(trace: TraceId)
+  case NotFound(absence: NotFoundKind, trace: TraceId)
 
   /** A workspace past one of its two deadlines.
     *
@@ -117,12 +119,12 @@ object WireError:
     *
     * Every arm binds what it keeps and writes `_` only for what it deliberately
     * gives up, so the full set of drops is readable in one screen. The match is
-    * on the 31 leaf types rather than on the four sub-traits, so
+    * on the 32 leaf types rather than on the four sub-traits, so
     * `-Wconf:msg=match may not be exhaustive:error` makes a new error type a
     * compile error here until an arm is written for it.
     */
   def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError =
-    // A short local name, so the 31 arms below stay one line each and their
+    // A short local name, so the 32 arms below stay one line each and their
     // wire cases line up. The trace is not a field of the error: it is read
     // from the active span at the boundary that calls this, which is the only
     // place an effect exists to read it. `scope` arrives the same way and for
@@ -157,8 +159,22 @@ object WireError:
       // Absent, or not the caller's. One shape for both, so neither is an
       // existence oracle. The workspace identifier may not cross (ADR-036), and
       // the tree identifier is dropped because it would distinguish the two.
-      case WorkspaceNotFound()                 => WireError.NotFound(t)
-      case TreeNotInWorkspace(_, _)            => WireError.NotFound(t)
+      case WorkspaceNotFound()                 => WireError.NotFound(NotFoundKind.Unknown(), t)
+      case TreeNotInWorkspace(_, _)            => WireError.NotFound(NotFoundKind.Unknown(), t)
+
+      // A held tree, absent at the revision read. The branch crosses as the
+      // client-facing name, never as the composed reference that embeds the
+      // workspace identifier (ADR-036). A commit crosses as the bare fact: the
+      // caller supplied the hash, and the store reads an unknown commit the same
+      // way, so naming it would add nothing and disclose nothing.
+      case TreeAbsentAtRevision(wsId, _, Revision.Head(branch)) =>
+        BranchChoice.fromBranchRef(wsId, branch).fold(
+          // Unreachable for a reference `BranchRef.scenario` composed; a failure
+          // here is this service's defect and answers the opaque fault.
+          _      => WireError.InternalFault(t),
+          choice => WireError.NotFound(NotFoundKind.TreeNotOnBranch(choice), t))
+      case TreeAbsentAtRevision(_, _, Revision.At(_)) =>
+        WireError.NotFound(NotFoundKind.TreeNotAtCommit(), t)
 
       // Expired. The configured lifetime crosses; the workspace identifier may
       // not (ADR-036), and the moment this one expired is a fact about a single

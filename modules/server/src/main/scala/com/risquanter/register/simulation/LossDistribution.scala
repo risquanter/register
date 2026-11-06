@@ -5,13 +5,14 @@ import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.{Loss, MitigationApplicationRecord, NodeProvenance, TrialId}
-import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt}
+import com.risquanter.register.domain.data.iron.{NodeId, OccurrenceProbability, OccurrenceProbabilityConstraint, PositiveInt}
+import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 
 /** LEC functional interface: the mapping from loss threshold to exceedance probability. */
 trait LECCurve {
   def nTrials: Int
-  def probOfExceedance(threshold: Loss): Double
+  def probOfExceedance(threshold: Loss): OccurrenceProbability
   def maxLoss: Loss
   def minLoss: Loss
 }
@@ -86,9 +87,11 @@ final case class LossDistribution private (
   override lazy val minLoss: Loss =
     if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
 
-  override def probOfExceedance(threshold: Loss): Double = {
+  override def probOfExceedance(threshold: Loss): OccurrenceProbability = {
     val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
-    exceedingCount.toDouble / nTrials.toDouble
+    // A count of trials over the positive total of trials lies in [0, 1], so
+    // the refinement cannot fail.
+    (exceedingCount.toDouble / nTrials.toDouble).refineUnsafe[OccurrenceProbabilityConstraint]
   }
 }
 

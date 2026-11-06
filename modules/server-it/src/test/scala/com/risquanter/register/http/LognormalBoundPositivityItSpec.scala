@@ -146,7 +146,7 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
             .body(treeWith(lognormalLeaf(1L, 2L)))
             .response(asJson[WorkspaceBootstrapResponse])
             .send(client.backend)
-            .map(resp => assertTrue(resp.code.code == 200))
+            .map(resp => assertTrue(resp.code.code == 201))
         }
       }
 

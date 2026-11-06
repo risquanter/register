@@ -374,8 +374,8 @@ RiskTreeDefinitionRequest (DTO)
 RiskTree (Domain)
   ↓ [Repository]
 Persisted RiskTree
-  ↓ [DTO Conversion]
-SimulationResponse (without LEC)
+  ↓ [RiskTree.toSummary]
+TreeSummaryResponse (id and name)
 ```
 
 ### **2. Compute LEC (On-Demand)**

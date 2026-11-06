@@ -2,16 +2,17 @@ package com.risquanter.register.http
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import zio.json.*
 import zio.http.{Request, URL, Method, Status}
 
+import com.risquanter.register.http.responses.{ProbeResponse, ProbeStatus}
+
 /** Unit tests for the dedicated health-probe server endpoints.
   *
-  * Validates FR-2 (exactly `/health` and `/ready`), FR-3 (404 for other paths),
-  * and NFR-2 (no interceptors) by exercising `HealthProbeServer.endpoints`
-  * through a bare `ZioHttpInterpreter` with default options — the same
-  * configuration used in production.
+  * The probe server answers exactly `/health` and `/ready`, answers 404 for
+  * every other path, and runs no interceptors. The tests exercise
+  * `HealthProbeServer.endpoints` through a bare `ZioHttpInterpreter` with
+  * default options, the same configuration used in production.
   */
 object HealthProbeServerSpec extends ZIOSpecDefault:
 
@@ -24,7 +25,7 @@ object HealthProbeServerSpec extends ZIOSpecDefault:
 
   override def spec = suite("HealthProbeServer")(
 
-    suite("/health endpoint (FR-2)")(
+    suite("/health endpoint")(
       test("returns 200 OK") {
         for
           response <- httpApp.runZIO(makeRequest("/health"))
@@ -35,14 +36,14 @@ object HealthProbeServerSpec extends ZIOSpecDefault:
         for
           response <- httpApp.runZIO(makeRequest("/health"))
           body     <- response.body.asString
-          parsed    = body.fromJson[Map[String, String]]
+          parsed    = body.fromJson[ProbeResponse]
         yield assertTrue(
-          parsed == Right(Map("status" -> "healthy", "service" -> "risk-register"))
+          parsed == Right(ProbeResponse(ProbeStatus.Healthy, ProbeResponses.ServiceName))
         )
       }
     ),
 
-    suite("/ready endpoint (FR-2)")(
+    suite("/ready endpoint")(
       test("returns 200 OK") {
         for
           response <- httpApp.runZIO(makeRequest("/ready"))
@@ -53,14 +54,14 @@ object HealthProbeServerSpec extends ZIOSpecDefault:
         for
           response <- httpApp.runZIO(makeRequest("/ready"))
           body     <- response.body.asString
-          parsed    = body.fromJson[Map[String, String]]
+          parsed    = body.fromJson[ProbeResponse]
         yield assertTrue(
-          parsed == Right(Map("status" -> "ready", "service" -> "risk-register"))
+          parsed == Right(ProbeResponse(ProbeStatus.Ready, ProbeResponses.ServiceName))
         )
       }
     ),
 
-    suite("Unknown paths return 404 (FR-3)")(
+    suite("Unknown paths return 404")(
       test("GET /unknown returns 404") {
         for
           response <- httpApp.runZIO(makeRequest("/unknown"))
@@ -80,7 +81,7 @@ object HealthProbeServerSpec extends ZIOSpecDefault:
       }
     ),
 
-    suite("No interceptors (NFR-2)")(
+    suite("No interceptors")(
       test("response has no security headers") {
         for
           response <- httpApp.runZIO(makeRequest("/health"))

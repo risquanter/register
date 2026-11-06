@@ -135,7 +135,6 @@ object ValidationMessages:
       s"seedEntityId ${seedEntityId.value} is already used by another workspace — choose another value or omit to auto-assign"
     case FieldProblem.MaxTreesReached(limit) =>
       s"workspace already holds the maximum of $limit risk trees — delete one before creating another"
-    case FieldProblem.TreeNotFound(treeId)         => s"Tree not found: ${treeId.value}"
     case FieldProblem.NodeNotFound                 => "Node not found in tree"
     case FieldProblem.NodeIdsEmpty                 => "nodeIds set is empty"
     case FieldProblem.TreeIdAlreadyExists(treeId)  => s"Tree ID '${treeId.value}' already exists"

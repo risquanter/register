@@ -112,10 +112,7 @@ object LECChartView:
             case Some(msg) => renderError(FailureNotice.lines(List(msg), None))
             case None =>
               state match
-                // A curve set is computed from the loaded curves, so `Absent`
-                // cannot arise and shares the idle rendering rather than a
-                // spinner that would never resolve.
-                case LoadState.Idle | LoadState.Absent => renderIdle
+                case LoadState.Idle           => renderIdle
                 case LoadState.Loading        => renderLoading
                 case LoadState.Failed(f)      => renderError(FailureNotice(f, None))
                 case LoadState.Loaded(spec) =>

@@ -4,6 +4,7 @@ import zio.json.*
 import zio.json.ast.{Json, JsonCursor}
 import zio.test.*
 
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.testutil.TestHelpers.*
 
@@ -12,7 +13,7 @@ import com.risquanter.register.testutil.TestHelpers.*
 object SSEEventSpec extends ZIOSpecDefault:
 
   private val every: List[SSEEvent] = List(
-    SSEEvent.LECUpdated(nodeId("cyber"), treeId("tree-1"), Map("p50" -> 1000.0)),
+    SSEEvent.LECUpdated(nodeId("cyber"), treeId("tree-1"), Map(QuantileLevel.P90 -> 1000.0)),
     SSEEvent.NodeChanged(nodeId("cyber"), treeId("tree-1"), NodeChangeType.Updated),
     SSEEvent.FiguresChanged(List(nodeId("cyber"), nodeId("root")), treeId("tree-1"), BranchChoice.Main),
     SSEEvent.ConnectionStatus(ConnectionState.Heartbeat, None)

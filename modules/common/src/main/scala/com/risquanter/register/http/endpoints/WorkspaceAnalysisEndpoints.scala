@@ -5,9 +5,10 @@ import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.model.{Header, MediaType}
 
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, CommitHash}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, CommitHash, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.given
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.LECNodeCurve
+import com.risquanter.register.http.responses.LECCurvesResponse
 
 /** Workspace-scoped analysis endpoints.
   *
@@ -35,7 +36,7 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .in(query[Boolean]("includeProvenance").default(false))
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
-      .out(jsonBody[Double])
+      .out(jsonBody[OccurrenceProbability])
 
   val getWorkspaceLECCurvesMultiEndpoint =
     authedBaseEndpoint
@@ -50,4 +51,4 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
       .in(query[Boolean]("omitAbsent").default(false)
         .description("When true, requested node IDs absent from the tree at this revision are omitted from the result instead of failing the request (point-in-time reads)."))
-      .out(jsonBody[Map[NodeId, LECNodeCurve]])
+      .out(jsonBody[LECCurvesResponse])

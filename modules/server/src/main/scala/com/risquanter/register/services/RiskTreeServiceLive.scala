@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeLoadFailure, SimulationFailure, AppError}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
@@ -35,15 +35,11 @@ class RiskTreeServiceLive private (
   
   import RiskTreeServiceLive.{ErrorContext, Operation}
   
-  /** Fetch tree by id, with the commit it resolved to, or fail with
-    * ValidationFailed. */
+  /** Fetch tree by id, with the commit it resolved to. Every caller runs after
+    * the controller has confirmed the workspace holds the tree, so an empty
+    * read means the revision lacks it. */
   private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[AppError,(RiskTree, CommitHash)] =
-    repo.getById(wsId, treeId, rev).flatMap {
-      case Some(loaded) => ZIO.succeed(loaded)
-      case None =>
-        ZIO.fail(ValidationFailed(List(ValidationError(
-          ErrorLocation.requestField(FieldName.TreeId), FieldProblem.TreeNotFound(treeId)))))
-    }
+    repo.getById(wsId, treeId, rev).someOrFail(TreeAbsentAtRevision(wsId, treeId, rev))
 
   /** Fetch tree, its resolved commit, and the node together, or fail with
     * ValidationFailed. */
@@ -421,7 +417,7 @@ class RiskTreeServiceLive private (
   // LEC Query APIs (ADR-015)
   // ========================================
 
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError,Double] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError,OccurrenceProbability] =
     traced(Operation.ProbOfExceedance) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -471,14 +467,21 @@ class RiskTreeServiceLive private (
         // Generate curves with shared tick domain (ADR-014 render-time strategy)
         curvesData = LECGenerator.generateCurvePointsMulti(results)
         
-        // Enrich with id + name + quantiles + AAL + no-loss probability to produce LECNodeCurve per node
-        enriched = curvesData.map { case (nodeId, points) =>
-          val name = nodesMap.get(nodeId).map(_.name.value.toString).getOrElse(nodeId.value)
-          val curvePoints = points.map { case (loss, prob) => LECPoint(loss, prob) }
-          val quantiles = results.get(nodeId).map(LECGenerator.calculateQuantiles).getOrElse(Map.empty)
-          val aal = results.get(nodeId).map(LECGenerator.averageAnnualLoss).getOrElse(0.0)
-          val noLossProb = results.get(nodeId).map(LECGenerator.probabilityOfNoLoss).getOrElse(1.0)
-          nodeId -> LECNodeCurve(nodeId, name, curvePoints, quantiles, aal, noLossProb)
+        // One curve per node present at this revision. The point set is keyed
+        // by the results, which are keyed by `presentIds`, so every node here
+        // has a result and a node.
+        enriched = curvesData.flatMap { case (nodeId, points) =>
+          for
+            result <- results.get(nodeId)
+            node   <- nodesMap.get(nodeId)
+          yield nodeId -> LECNodeCurve(
+            nodeId,
+            node.name,
+            points.map { case (loss, prob) => LECPoint(loss, prob) },
+            LECGenerator.calculateQuantiles(result),
+            LECGenerator.averageAnnualLoss(result),
+            LECGenerator.probabilityOfNoLoss(result)
+          )
         }
         
         _ <- tracing.setAttribute("curves_generated", enriched.size.toLong)

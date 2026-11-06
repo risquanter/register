@@ -18,7 +18,7 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
-import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
+import com.risquanter.register.http.responses.{TreeListResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, RiskTreeServiceLive, ScenarioService, ScenarioServiceNotSupported, ScenarioSummary}
 import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry}
@@ -166,7 +166,11 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       for
         backend  <- buildBackend(UserContextExtractor.noOp, BootstrapProvisionerNoOp)
         response <- bootstrapRequest(backend, userId = None)
-      yield assertTrue(response.code.code == 200)
+        key       = response.body.toOption.get.fromJson[WorkspaceBootstrapResponse].toOption.get.workspaceKey.reveal
+      yield assertTrue(
+        response.code.code == 201,
+        response.header("Location").contains(s"w/$key")
+      )
     },
 
     test("fine-grained mode: bootstrap records one recordOwnership call with correct userId") {
@@ -176,7 +180,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         response <- bootstrapRequest(backend, userId = Some(validUuid))
         calls    <- stub.calls
       yield assertTrue(
-        response.code.code == 200,
+        response.code.code == 201,
         calls.size == 1,
         calls.head._1.value == validUuid
       )
@@ -218,13 +222,13 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         key           = bootstrap.workspaceKey.reveal
         createResp   <- createTreeRequest(backend, key, "Scenario Tree", branch = Some("stress-2026"))
         mainListResp <- listTreesRequest(backend, key, branch = None)
-        mainTrees     = mainListResp.body.toOption.get.fromJson[List[SimulationResponse]].toOption.get
+        mainTrees     = mainListResp.body.toOption.get.fromJson[TreeListResponse].toOption.get.trees
         branchListResp <- listTreesRequest(backend, key, branch = Some("stress-2026"))
-        branchTrees   = branchListResp.body.toOption.get.fromJson[List[SimulationResponse]].toOption.get
+        branchTrees   = branchListResp.body.toOption.get.fromJson[TreeListResponse].toOption.get.trees
       yield assertTrue(
-        createResp.code.code == 200,
-        mainTrees.map(_.name) == List("Bootstrap Test Tree"),
-        branchTrees.map(_.name) == List("Scenario Tree")
+        createResp.code.code == 201,
+        mainTrees.map(_.name.value) == List("Bootstrap Test Tree"),
+        branchTrees.map(_.name.value) == List("Scenario Tree")
       )
       // IdGenerators.nextTreeId needs a real Clock/Random to produce distinct
       // IDs across the two `create` calls in this test — ZIO Test's default

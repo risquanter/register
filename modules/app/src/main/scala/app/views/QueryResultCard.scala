@@ -28,11 +28,8 @@ object QueryResultCard:
     div(
       cls := "query-result-card",
       child <-- resultSignal.combineWith(nodeLookup).map {
-        // A query result is fetched by its own pipeline, which has no arm
-        // producing `Absent`, so it shares the idle rendering — the card's
-        // prompt to run a query, which is the right thing to show for a card
-        // with no result either way.
-        case (LoadState.Idle, _) | (LoadState.Absent, _) => renderIdle
+        // The idle rendering is the card's prompt to run a query.
+        case (LoadState.Idle, _)        => renderIdle
         case (LoadState.Loading, _)     => renderLoading
         // A refusal of the query text is shown under the input instead and
         // leaves the result idle, so this is every other failure of the run.

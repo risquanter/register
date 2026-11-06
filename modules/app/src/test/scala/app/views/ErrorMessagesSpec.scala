@@ -6,9 +6,9 @@ import sttp.model.StatusCode
 import app.components.{FormInputs, MergeMessages}
 import app.core.{LocalProblem, RequestFailure}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode}
-import com.risquanter.register.domain.data.iron.{SafeName, ScenarioName, SeedVarId, TelemetryPlaceholders, TraceId, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, ScenarioName, SeedVarId, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
-import com.risquanter.register.http.errors.{RejectionDetail, WireError}
+import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
 import com.risquanter.register.http.responses.{MergeConflictEntry, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId as treeIdOf, unsafeGet}
 
@@ -27,7 +27,35 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
-    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite, summaryHeadingSuite, mergeConflictSuite)
+    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite, summaryHeadingSuite, mergeConflictSuite, notFoundSuite)
+
+  // ── absence sentences ─────────────────────────────────────────────────────
+
+  private val notFoundSuite =
+    suite("ErrorMessages.notFound")(
+      test("an unknown resource reads the sentence that names no cause") {
+        assertTrue(ErrorMessages.wire(WireError.NotFound(NotFoundKind.Unknown(), trace)) == ErrorMessages.NotFound)
+      },
+      test("a tree absent on main names main") {
+        val sentence = ErrorMessages.wire(WireError.NotFound(NotFoundKind.TreeNotOnBranch(BranchChoice.Main), trace))
+        assertTrue(
+          sentence == ErrorMessages.treeNotOnBranch(BranchChoice.Main),
+          sentence.contains("main"),
+          sentence != ErrorMessages.NotFound
+        )
+      },
+      test("a tree absent on a scenario names that scenario") {
+        val sentence = ErrorMessages.wire(WireError.NotFound(NotFoundKind.TreeNotOnBranch(BranchChoice.Scenario(draftA)), trace))
+        assertTrue(sentence.contains("scenario draft-a"))
+      },
+      test("a tree absent at a commit says it did not exist at that point in history") {
+        val sentence = ErrorMessages.wire(WireError.NotFound(NotFoundKind.TreeNotAtCommit(), trace))
+        assertTrue(
+          sentence == ErrorMessages.TreeNotAtCommit,
+          sentence != ErrorMessages.NotFound
+        )
+      }
+    )
 
   // ── merge conflict sentences ──────────────────────────────────────────────
 
@@ -110,7 +138,7 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
       test("a refusal the user can correct offers none") {
         assertTrue(
           ErrorMessages.traceOf(RequestFailure.Wire(WireError.RequestRejected(List(blankName), trace))).isEmpty,
-          ErrorMessages.traceOf(RequestFailure.Wire(WireError.NotFound(trace))).isEmpty
+          ErrorMessages.traceOf(RequestFailure.Wire(WireError.NotFound(NotFoundKind.Unknown(), trace))).isEmpty
         )
       },
       test("a failure with no server answer offers none") {

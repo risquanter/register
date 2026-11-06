@@ -1,9 +1,10 @@
 package app.state
 
 import zio.test.*
+import io.github.iltotore.iron.autoRefine
 
 import app.core.LocalProblem
-import com.risquanter.register.domain.data.iron.{NodeId, CommitHash}
+import com.risquanter.register.domain.data.iron.{NodeId, CommitHash, SafeName}
 import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.http.responses.{TreeHistoryResponse, TreeHistoryEntry, HistoryOperation, TreeWriteKind}
 
@@ -18,7 +19,7 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
   private val n2 = NodeId.fromString("01HX9ABCDE0000000000000002").toOption.get
 
   private def curve(id: NodeId): LECNodeCurve =
-    LECNodeCurve(id, "n", Vector.empty, Map.empty, 0.0, 0.0)
+    LECNodeCurve(id, SafeName.fromString("n").toOption.get, Vector.empty, Map.empty, 0.0, 0.0)
 
   def spec = suite("Slice E-A pure derivations")(
 

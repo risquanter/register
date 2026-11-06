@@ -2,7 +2,7 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 import app.core.ZJS.*
-import com.risquanter.register.http.endpoints.RiskTreeEndpoints
+import com.risquanter.register.http.endpoints.SystemEndpoints
 import zio.ZIO
 
 /** Backend health status state.
@@ -14,7 +14,7 @@ import zio.ZIO
   *
   * Kept separate from `Main` so app wiring stays orchestration-only.
   */
-final class HealthState extends RiskTreeEndpoints:
+final class HealthState extends SystemEndpoints:
 
   val status: Var[Option[Boolean]] = Var(None)
 

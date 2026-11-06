@@ -1,9 +1,11 @@
 package app.chart
 
 import zio.test.*
+import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{NodeId, OccurrenceProbabilityConstraint, SafeName}
 import com.risquanter.register.domain.data.{LECNodeCurve, LECPoint}
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 
 /** Pure tests for `PinnedAxes.fromCurves` — the shared axis extents both
   * side-by-side panels are pinned to.
@@ -16,8 +18,8 @@ object PinnedAxesSpec extends ZIOSpecDefault:
   private def curve(i: Int, points: (Long, Double)*): LECNodeCurve =
     LECNodeCurve(
       nid(i),
-      name = s"c$i",
-      curve = points.toVector.map((l, p) => LECPoint(l, p)),
+      name = SafeName.fromString(s"c$i").toOption.get,
+      curve = points.toVector.map((l, p) => LECPoint(l, p.refineUnsafe[OccurrenceProbabilityConstraint])),
       quantiles = Map.empty,
       averageAnnualLoss = 0.0,
       probabilityOfNoLoss = 1.0
@@ -62,7 +64,7 @@ object PinnedAxesSpec extends ZIOSpecDefault:
     },
 
     test("annotation values beyond the last curve tick extend lossMax (quantile rules must stay inside the pinned plot)") {
-      val withQuantile = curve(1, 10L -> 0.5, 100L -> 0.1).copy(quantiles = Map("p99.5" -> 250.0))
+      val withQuantile = curve(1, 10L -> 0.5, 100L -> 0.1).copy(quantiles = Map(QuantileLevel.P995 -> 250.0))
       val pinned = PinnedAxes.fromCurves(List(withQuantile))
       assertTrue(pinned.map(_.lossMax).contains(250.0))
     },

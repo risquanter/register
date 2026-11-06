@@ -1,7 +1,7 @@
 package app.state
 
 import app.core.ViewFailure
-import com.risquanter.register.http.responses.SimulationResponse
+import com.risquanter.register.http.responses.TreeSummaryResponse
 
 /** Submission lifecycle ADT for the tree-creation request.
   *
@@ -12,5 +12,5 @@ import com.risquanter.register.http.responses.SimulationResponse
 enum SubmitState:
   case Idle
   case Submitting
-  case Success(response: SimulationResponse)
+  case Success(response: TreeSummaryResponse)
   case Failed(failure: ViewFailure)

@@ -6,9 +6,9 @@ import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
-import com.risquanter.register.domain.data.iron.{BranchRef, Revision, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationFailed}
-import com.risquanter.register.http.responses.{SimulationResponse, ChangedNodesResponse, TreeHistoryResponse}
+import com.risquanter.register.domain.data.iron.{BranchRef, Revision}
+import com.risquanter.register.domain.errors.TreeAbsentAtRevision
+import com.risquanter.register.http.responses.{ChangedNodesResponse, TreeHistoryResponse}
 import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, TreeHistoryService}
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.http.errors.TreeScope
@@ -48,9 +48,11 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.getById(ws.id, treeId, Revision.Head(branch))
-                    .map(_.map { case (tree, _) => SimulationResponse.fromRiskTree(tree) })
-      yield result).wireEither(TreeScope.InTree(treeId))
+        rev     = Revision.Head(branch)
+        // The workspace holds the tree, so an empty read means the branch lacks it.
+        loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrFail(TreeAbsentAtRevision(ws.id, treeId, rev))
+        (tree, _) = loaded
+      yield tree.toSummary).wireEither(TreeScope.InTree(treeId))
   }
 
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
@@ -61,8 +63,10 @@ class WorkspaceTreeController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
-        result <- riskTreeService.getById(ws.id, treeId, rev).map(_.map { case (tree, _) => tree })
-      yield result).wireEither(TreeScope.InTree(treeId))
+        // The workspace holds the tree, so an empty read means the revision lacks it.
+        loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrFail(TreeAbsentAtRevision(ws.id, treeId, rev))
+        (tree, _) = loaded
+      yield tree).wireEither(TreeScope.InTree(treeId))
   }
 
   val getChangedNodes: ServerEndpoint[Any, Task] = getChangedNodesEndpoint.serverLogic {
@@ -80,14 +84,12 @@ class WorkspaceTreeController private (
   }
 
   val getTreeHistory: ServerEndpoint[Any, Task] = getTreeHistoryEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, activeBranch, n) =>
+    case (maybeUserId, key, treeId, activeBranch, limit) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        limit  <- ZIO.fromEither(ValidationUtil.refinePositiveInt(n, ErrorLocation.requestField(FieldName.Limit)))
-                    .mapError(ValidationFailed(_))
         entries <- treeHistoryService.history(ws.id, treeId, branch, limit)
       yield TreeHistoryResponse(entries)).wireEither(TreeScope.InTree(treeId))
   }
@@ -99,7 +101,7 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.update(ws.id, treeId, req, branch).map(SimulationResponse.fromRiskTree)
+        result <- riskTreeService.update(ws.id, treeId, req, branch).map(_.toSummary)
       yield result).wireEither(TreeScope.InTree(treeId))
   }
 
@@ -110,7 +112,7 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.revertTree(ws.id, treeId, req.toCommit, branch).map(SimulationResponse.fromRiskTree)
+        result <- riskTreeService.revertTree(ws.id, treeId, req.toCommit, branch).map(_.toSummary)
       yield result).wireEither(TreeScope.InTree(treeId))
   }
 
@@ -127,10 +129,9 @@ class WorkspaceTreeController private (
         // from a scenario branch removes it from that branch alone; the tree
         // still exists on `main` and any other scenario, so the workspace
         // must keep tracking it.
-        result <- riskTreeService.delete(ws.id, treeId, branch)
+        _      <- riskTreeService.delete(ws.id, treeId, branch)
                       .tap(_ => ZIO.when(branch == BranchRef.Main)(workspaceStore.removeTree(key, treeId)))
-                      .map(SimulationResponse.fromRiskTree)
-      yield result).wireEither(TreeScope.InTree(treeId))
+      yield ()).wireEither(TreeScope.InTree(treeId))
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

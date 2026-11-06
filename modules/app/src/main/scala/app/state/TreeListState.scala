@@ -6,7 +6,7 @@ import app.core.ZJS.*
 import app.core.RequestFailure
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
-import com.risquanter.register.http.responses.{ScenarioSummaryResponse, SimulationResponse}
+import com.risquanter.register.http.responses.{ScenarioSummaryResponse, TreeSummaryResponse}
 
 /** The workspace's tree lists, one per branch — genuinely shared server
   * state, the same ownership argument as `ScenarioListState`: which trees
@@ -37,12 +37,12 @@ final class TreeListState(
   userIdAccessor: () => Option[UserId.Authenticated] = () => None
 ) extends WorkspaceLifecycleEndpoints:
 
-  private val byBranchVar: Var[Map[BranchChoice, LoadState[List[SimulationResponse]]]] =
+  private val byBranchVar: Var[Map[BranchChoice, LoadState[List[TreeSummaryResponse]]]] =
     Var(Map.empty)
 
   /** One branch's list as a signal — a branch with no entry has simply never
     * been fetched and reads as `Idle`. */
-  def listFor(branch: Signal[BranchChoice]): Signal[LoadState[List[SimulationResponse]]] =
+  def listFor(branch: Signal[BranchChoice]): Signal[LoadState[List[TreeSummaryResponse]]] =
     branch.combineWith(byBranchVar.signal).map((b, m) => m.getOrElse(b, LoadState.Idle))
 
   // One lazily-created trigger bus + pipeline per branch. The pipeline is the
@@ -52,12 +52,12 @@ final class TreeListState(
   // Single-threaded JS — a plain mutable map is safe here.
   private val triggers = collection.mutable.Map.empty[
     BranchChoice,
-    EventBus[Option[() => EventStream[Either[RequestFailure, List[SimulationResponse]]]]]
+    EventBus[Option[() => EventStream[Either[RequestFailure, List[TreeSummaryResponse]]]]]
   ]
 
   private def busFor(branch: BranchChoice) =
     triggers.getOrElseUpdate(branch, {
-      val bus = new EventBus[Option[() => EventStream[Either[RequestFailure, List[SimulationResponse]]]]]
+      val bus = new EventBus[Option[() => EventStream[Either[RequestFailure, List[TreeSummaryResponse]]]]]
       loadStatePipeline(bus.events).foreach(storeResult(branch))(using unsafeWindowOwner)
       bus
     })
@@ -69,7 +69,7 @@ final class TreeListState(
     * the map's invariant, and storing Idle would resurrect entries the
     * pruning/clear subscriptions below just removed.
     */
-  private def storeResult(branch: BranchChoice)(v: LoadState[List[SimulationResponse]]): Unit =
+  private def storeResult(branch: BranchChoice)(v: LoadState[List[TreeSummaryResponse]]): Unit =
     val current = byBranchVar.now().get(branch)
     v match
       case LoadState.Idle => if current.nonEmpty then byBranchVar.update(_ - branch)
@@ -82,7 +82,7 @@ final class TreeListState(
     keySignal.now() match
       case Some(key) =>
         busFor(branch).emit(Some(() =>
-          listWorkspaceTreesEndpoint((userIdAccessor(), key, branch)).toOutcomeEventStream
+          listWorkspaceTreesEndpoint((userIdAccessor(), key, branch)).map(_.trees).toOutcomeEventStream
         ))
       case None => ()
 
@@ -100,7 +100,7 @@ final class TreeListState(
   /** Seed main's list from data already fetched elsewhere
     * (`WorkspaceState.preValidate`'s startup listing) so nobody re-requests
     * what that call just returned. */
-  def seedMain(trees: List[SimulationResponse]): Unit =
+  def seedMain(trees: List[TreeSummaryResponse]): Unit =
     val v = LoadState.Loaded(trees)
     if !byBranchVar.now().get(BranchChoice.Main).contains(v) then
       byBranchVar.update(_.updated(BranchChoice.Main, v))

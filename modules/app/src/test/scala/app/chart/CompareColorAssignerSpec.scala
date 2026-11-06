@@ -1,8 +1,9 @@
 package app.chart
 
 import zio.test.*
+import io.github.iltotore.iron.autoRefine
 
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{NodeId, SafeName}
 import com.risquanter.register.domain.data.LECNodeCurve
 
 /** Pure tests for `CompareColorAssigner.pairForOverlay`. Series ids are
@@ -15,7 +16,14 @@ object CompareColorAssignerSpec extends ZIOSpecDefault:
   private val leaf2 = NodeId.fromString("01HX9ABCDE0000000000000002").toOption.get
 
   private def curve(id: NodeId): LECNodeCurve =
-    LECNodeCurve(id, name = s"Leaf ${id.value}", curve = Vector.empty, quantiles = Map.empty, averageAnnualLoss = 0.0, probabilityOfNoLoss = 1.0)
+    LECNodeCurve(
+      id,
+      name = SafeName.fromString(s"Leaf ${id.value}").toOption.get,
+      curve = Vector.empty,
+      quantiles = Map.empty,
+      averageAnnualLoss = 0.0,
+      probabilityOfNoLoss = 1.0
+    )
 
   private def side(
     curves: Map[NodeId, LECNodeCurve],

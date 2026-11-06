@@ -155,11 +155,10 @@ object TreeDetailView:
       child <-- state.selectedTree.signal.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
-        // The previously selected tree doesn't exist on the newly chosen branch
-        // (e.g. it only exists on a sibling scenario) — not a real error, just
-        // nothing valid to show. Same placeholder as "nothing selected yet"
-        // rather than an error banner.
-        case LoadState.Absent      => renderPlaceholder("Select a tree to view its structure.")
+        // The selected tree is held but absent at the branch or commit read.
+        // There is nothing to show, and the sentence saying where it was looked
+        // for is the one the server's answer carries.
+        case LoadState.TreeAbsent(failure) => renderPlaceholder(ErrorMessages.viewFailed(failure))
         case LoadState.Failed(failure) => FailureNotice(failure, None)
         case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, lockedNow.signal, lockedNoticeVisible)
       }

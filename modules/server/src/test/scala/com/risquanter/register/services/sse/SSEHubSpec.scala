@@ -7,6 +7,7 @@ import zio.test.Assertion.*
 import zio.stream.*
 
 import com.risquanter.register.http.sse.{SSEEvent, NodeChangeType, ConnectionState}
+import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.testutil.TestHelpers.*
 
@@ -63,7 +64,7 @@ object SSEHubSpec extends ZIOSpecDefault {
       for
         hub    <- ZIO.service[SSEHub]
         stream <- hub.subscribe(tid("tree-1"))
-        event   = SSEEvent.LECUpdated(nodeId("node-1"), tid("tree-1"), Map("p50" -> 1000.0))
+        event   = SSEEvent.LECUpdated(nodeId("node-1"), tid("tree-1"), Map(QuantileLevel.P90 -> 1000.0))
         // Use Queue to collect results
         queue  <- Queue.unbounded[SSEEvent]
         // Start consuming in background

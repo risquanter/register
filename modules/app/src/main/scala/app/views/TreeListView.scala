@@ -5,7 +5,7 @@ import com.raquo.laminar.api.L.{*, given}
 import app.state.{TreeViewState, LoadState}
 import app.components.{FailureNotice, Icons}
 import com.risquanter.register.domain.data.iron.TreeId
-import com.risquanter.register.http.responses.SimulationResponse
+import com.risquanter.register.http.responses.TreeSummaryResponse
 
 /** Dropdown selector for server-persisted risk trees.
   *
@@ -54,7 +54,7 @@ object TreeListView:
     // just because a new fetch started; only replace it once the new data
     // actually lands. `None` only means "never loaded successfully yet" — the
     // one case that should still show "Loading trees…", not a stale selector.
-    val lastKnownTrees: Var[Option[List[SimulationResponse]]] = Var(None)
+    val lastKnownTrees: Var[Option[List[TreeSummaryResponse]]] = Var(None)
 
     // The tree <select> (or a placeholder/error), shared by both layouts.
     val treeSelectChild: Signal[HtmlElement] =
@@ -67,10 +67,6 @@ object TreeListView:
         case (LoadState.Loading, _) => renderPlaceholder("Loading trees…")
         case (LoadState.Failed(failure), _) => FailureNotice(failure, Some(() => state.loadTreeList()))
         case (LoadState.Idle, _) => renderPlaceholder("Waiting to load…")
-        // The tree list is a collection, so a successful read with nothing in
-        // it is an empty list rather than an absent one. `Absent` is therefore
-        // unreachable here, and it shares the empty list's placeholder.
-        case (LoadState.Absent, _) => renderPlaceholder("No saved trees yet.")
       }
 
     // ensureTreeListLoaded, not loadTreeList: both views' instances mount at
@@ -128,7 +124,7 @@ object TreeListView:
   private def renderPlaceholder(message: String): HtmlElement =
     div(cls := "tree-list-placeholder", p(message))
 
-  private def renderSelector(trees: List[SimulationResponse], state: TreeViewState, onRefreshExtra: () => Unit): HtmlElement =
+  private def renderSelector(trees: List[TreeSummaryResponse], state: TreeViewState, onRefreshExtra: () => Unit): HtmlElement =
     val selectedValue: Signal[String] = state.selectedTreeId.signal.map {
       case Some(id) => id.value
       case None     => ""
@@ -145,7 +141,7 @@ object TreeListView:
         },
         option(value := "", disabled := true, selected := true, "— Select a tree —"),
         trees.map { tree =>
-          option(value := tree.id.value, tree.name)
+          option(value := tree.id.value, tree.name.value)
         }
       ),
       button(

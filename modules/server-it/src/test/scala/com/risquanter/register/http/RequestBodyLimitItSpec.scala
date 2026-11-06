@@ -10,15 +10,15 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPor
 import com.risquanter.register.http.responses.WorkspaceBootstrapResponse
 import com.risquanter.register.http.support.SttpClientFixture
 
-/** Lever 3: the configured request body-size cap
+/** The configured request body-size cap
   * (`ServerConfig.maxRequestBytes` → zio-http `RequestStreaming.Disabled`) binds
   * through the tapir routes. A body over the cap is rejected at the transport
-  * layer (413) before any handler runs; a valid body under it is accepted (200).
+  * layer (413) before any handler runs. A valid body under it creates the
+  * workspace (201).
   *
-  * This is the regression test for open question O-1 — whether the zio-http
-  * `requestStreaming` cap applies to the `ZioHttpInterpreter` routes. An
-  * over-cap body that returned 400/415 (parsed by a handler) instead of 413
-  * would mean the cap does not bind, and this test would fail.
+  * An over-cap body that returned 400 or 415, parsed by a handler, instead of
+  * 413 would mean the zio-http `requestStreaming` cap does not apply to the
+  * `ZioHttpInterpreter` routes, and this test would fail.
   */
 object RequestBodyLimitItSpec extends ZIOSpecDefault:
 
@@ -50,16 +50,16 @@ object RequestBodyLimitItSpec extends ZIOSpecDefault:
     }
 
   override def spec =
-    suite("RequestBodyLimitItSpec (Lever 3 — O-1)")(
+    suite("RequestBodyLimitItSpec")(
 
-      test("a valid request body under the cap is accepted (200)") {
+      test("a valid request body under the cap is accepted (201)") {
         withServer { client =>
           basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces")
             .body(smallTreeReq)
             .response(asJson[WorkspaceBootstrapResponse])
             .send(client.backend)
-            .map(resp => assertTrue(resp.code.code == 200))
+            .map(resp => assertTrue(resp.code.code == 201))
         }
       },
 

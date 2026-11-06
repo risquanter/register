@@ -8,7 +8,7 @@ import app.components.ConfirmGuard.proceedOrConfirm
 import app.core.LocalProblem
 import app.core.ZJS.*
 import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
-import com.risquanter.register.http.responses.SimulationResponse
+import com.risquanter.register.http.responses.TreeSummaryResponse
 
 /**
  * Orchestrates portfolio + leaf forms, preview, and tree submission
@@ -45,7 +45,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
     // `SameContext` case, needed after Update to pick up anything the server
     // round-trip changed) — running it here would immediately undo the
     // blank reset.
-    def onSuccess(wasCreate: Boolean)(response: SimulationResponse): Unit =
+    def onSuccess(wasCreate: Boolean)(response: TreeSummaryResponse): Unit =
       submitState.set(SubmitState.Success(response))
       if wasCreate then
         state.startNewTree()
@@ -111,7 +111,11 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
               case Validation.Success(_, request) =>
                 wsState.currentKey match
                   case Some(key) =>
-                    createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess(wasCreate = true))
+                    // The create answers the new tree's location and its summary; the
+                    // summary carries the identifier the location names, so it alone is kept.
+                    createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, scenarioState.activeBranch.now()))
+                      .map((_, summary) => summary)
+                      .submitInto(submitState)(onSuccess(wasCreate = true))
                   case None =>
                     wsState.bootstrap(request).submitInto(submitState)(onSuccess(wasCreate = true))
               case Validation.Failure(_, _) => validationFailed()

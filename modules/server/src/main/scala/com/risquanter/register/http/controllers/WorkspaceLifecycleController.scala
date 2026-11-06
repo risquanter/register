@@ -7,9 +7,9 @@ import sttp.tapir.server.ServerEndpoint
 import com.risquanter.register.auth.{AuthorizationService, BootstrapProvisioner, Checked, LifecycleMarker, Permission, UserContextExtractor}
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, RequestHeaderName, ValidationError, ValidationFailed}
-import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, Revision}
+import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, NonNegativeInt, Revision}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
-import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
+import com.risquanter.register.http.responses.{EvictExpiredResponse, TreeListResponse, TreeLocation, WorkspaceBootstrapResponse, WorkspaceLocation, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.http.errors.TreeScope
@@ -59,11 +59,14 @@ class WorkspaceLifecycleController private (
         tree   <- riskTreeService.create(ws.id, req, BranchRef.Main)
         _      <- workspaceStore.addTree(key, tree.id)
         _      <- bootstrapProvisioner.recordOwnership(userId, ws.id)
-      yield WorkspaceBootstrapResponse(
-        workspaceKey = key,
-        tree = SimulationResponse.fromRiskTree(tree),
-        expiresAt = ws.expiresAt,
-        seedEntityId = ws.seedEntityId
+      yield (
+        WorkspaceLocation(key),
+        WorkspaceBootstrapResponse(
+          workspaceKey = key,
+          tree = tree.toSummary,
+          expiresAt = ws.expiresAt,
+          seedEntityId = ws.seedEntityId
+        )
       )).wireEither(TreeScope.NoTree)
   }
 
@@ -76,8 +79,10 @@ class WorkspaceLifecycleController private (
         branch   <- ActiveBranch.resolve(ws.id, activeBranch)
         ids      <- workspaceStore.listTrees(key)
         trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, Revision.Head(branch)))
-        existing  = trees.collect { case Some((tree, _)) => SimulationResponse.fromRiskTree(tree) }
-      yield existing).wireEither(TreeScope.NoTree)
+        // A tree the workspace holds but this branch lacks is left out, so the
+        // list is what the branch shows.
+        existing  = trees.collect { case Some((tree, _)) => tree.toSummary }
+      yield TreeListResponse(existing)).wireEither(TreeScope.NoTree)
   }
 
   val createWorkspaceTree: ServerEndpoint[Any, Task] = createWorkspaceTreeEndpoint.serverLogic {
@@ -114,7 +119,7 @@ class WorkspaceLifecycleController private (
         // which is correct no matter which branch it lives on. Unlike deleteTree's
         // removeTree (main-only), there is no asymmetric bookkeeping risk here.
         _      <- workspaceStore.addTree(key, tree.id)
-      yield SimulationResponse.fromRiskTree(tree)).wireEither(TreeScope.NoTree)
+      yield (TreeLocation(tree.id), tree.toSummary)).wireEither(TreeScope.NoTree)
   }
 
   val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeySecretEndpoint.serverLogic { case (maybeUserId, key) =>
@@ -149,7 +154,7 @@ class WorkspaceLifecycleController private (
                    ZIO.foreachParDiscard(evicted)(ws =>
                      CascadeDelete.workspace(ws.id, ws.trees, riskTreeService, scenarioService))
                  }
-    yield Map("evicted" -> evicted.size)).wireEither(TreeScope.NoTree)
+    yield EvictExpiredResponse(NonNegativeInt.count(evicted.size))).wireEither(TreeScope.NoTree)
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

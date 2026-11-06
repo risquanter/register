@@ -280,7 +280,7 @@ object AnalyzeView:
       // so a stale query's matched nodes can't leak into the newly
       // selected tree's chart / Compare curve fetch.
       treeViewState.selectedTreeId.signal.changes --> { _ => queryState.resetResult() },
-      // The previously selected tree doesn't exist on the newly chosen branch —
+      // The selected tree is held but absent at the branch or commit read —
       // nothing valid left to point at. Clears the tree picker back to "nothing
       // selected" so it matches TreeDetailView's own placeholder for this event,
       // giving a genuine "back to the initial state" result rather than a picker
@@ -288,7 +288,7 @@ object AnalyzeView:
       // DesignView's handling of the same event, this never needs to confirm
       // first — Analyze has no in-progress draft that this could discard.
       treeViewState.selectedTree.signal.changes
-        .collect { case LoadState.Absent => () } --> { _ =>
+        .collect { case LoadState.TreeAbsent(_) => () } --> { _ =>
           treeViewState.selectedTreeId.set(None)
         },
       // Auto-LEC: fire curve fetch on any change to either node set
@@ -1115,7 +1115,7 @@ object AnalyzeView:
     // TreeViewState tracks the slot's chosen branch).
     val treeOptions: Signal[List[(String, String)]] =
       slot.treeViewState.availableTrees.map {
-        case LoadState.Loaded(trees) => trees.map(t => t.id.value.toString -> t.name)
+        case LoadState.Loaded(trees) => trees.map(t => t.id.value.toString -> t.name.value)
         case _                       => Nil
       }
 

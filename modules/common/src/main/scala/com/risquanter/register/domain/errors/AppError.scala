@@ -5,7 +5,7 @@ import scala.concurrent.duration.Duration as ScalaDuration
 import sttp.model.StatusCode
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, TreeId, ValidationMessages, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{CommitHash, Revision, ScenarioName, StoreBranch, TreeId, ValidationMessages, WorkspaceId}
 
 /** Who a failure is attributable to, which decides the level its log line is
   * written at (ADR-002).
@@ -212,6 +212,26 @@ case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends DomainE
   override def logAnnotations: Map[String, String] = Map(
     "workspace_id" -> wsId.value,
     "tree_id"      -> treeId.value
+  )
+}
+
+/** A tree the workspace holds, absent at the revision a read named: the head
+  * of a branch the tree was never written to, or a commit before the tree
+  * existed. Raised only after the workspace has been found to hold the tree,
+  * so it never describes another workspace's tree.
+  *
+  * `wsId` and the branch inside `rev` are diagnostics for the server's own
+  * logs. Both stay out of `logMessage` (ADR-035 §3) and out of every response
+  * (ADR-036): the wire carries the client-facing branch name or the fact of a
+  * pinned commit, never the composed branch reference.
+  */
+case class TreeAbsentAtRevision(wsId: WorkspaceId, treeId: TreeId, rev: Revision) extends DomainError {
+  override def logMessage: String = s"Tree ${treeId.value} absent at the revision read"
+  override def origin: FailureOrigin = FailureOrigin.Caller
+  override def logAnnotations: Map[String, String] = Map(
+    "workspace_id" -> wsId.value,
+    "tree_id"      -> treeId.value,
+    "revision"     -> rev.toString
   )
 }
 

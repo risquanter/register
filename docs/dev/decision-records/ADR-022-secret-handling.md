@@ -8,7 +8,7 @@
 
 ## Context
 
-- Secrets (API keys, tokens, infrastructure credentials) must never appear in logs, serialised responses, or error messages
+- Secrets must never appear in logs or error messages; a bearer credential crosses to its holder only in the answers that mint it
 - The JVM `String` type is **hostile to secrets**: immutable, interned, persists in heap until GC
 - Leakage vectors: `toString`, JSON serialisation, string interpolation, `getMessage`, stack traces, heap dumps
 - A credential type that traverses application code must make leakage **structurally impossible** — auto-generated `toString`, `copy`, and `unapply` on a `case class` silently defeat this requirement regardless of review discipline
