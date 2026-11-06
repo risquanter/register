@@ -796,9 +796,15 @@ repository's compare-and-set refuses the in-request race the early check cannot
 see. In §9 step 1 the controller passes the version it read in the same request;
 in step 3 it passes the `If-Match` value.
 
+**Design proposal, recorded 2026-11-06.** The sketch below is how TWC-D-19 is
+implemented. A deviation from it is stated in the Signature Echo and is not a
+decision.
+
 `ensureUniqueTree` keeps its one read and gains the resend case of TWC-D-19. Its
 name no longer fits and is settled in the echo. `excludeId` stays, because a `PUT`
-keeps its own name and must not clash with itself:
+keeps its own name and must not clash with itself. `idError` is matched as a shape
+and `isResend` stays a guard, because the first tests which case an `Option` holds
+and the second is a predicate over data:
 
 ```scala
 // modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala
@@ -824,6 +830,23 @@ private def ensureUniqueTree(
       case (Some(e), None)                          => ZIO.fail(ValidationFailed(List(e)))
       case (Some(e), Some(_))                       => ZIO.fail(ValidationFailed(List(e, treeNameTaken(treeName))))
   }
+```
+
+```scala
+// create: passes a real comparison, then branches on the outcome.
+check <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch, excludeId = None,
+                          isResend = stored => sameContent(stored, resolved))
+tree  <- check match
+           case TreeNameCheck.AlreadyStored(stored) => ZIO.succeed(stored)
+           case TreeNameCheck.NameFree              => buildAndWrite(...)
+
+// update: TWC-D-18 has already answered a resend, so here the answer is always no.
+_ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id), isResend = _ => false)
+
+// sameContent reduces each side to a map from node name to its content, then
+// compares the maps. A seed counts only where the request provided one.
+contentOf(stored) == contentOf(resolved) &&
+  resolved.providedSeedVarIds.forall((name, seed) => seedOf(stored, name) == seed)
 ```
 
 `create` passes a comparison over its resolved request. `update` passes
