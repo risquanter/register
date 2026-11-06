@@ -1,6 +1,7 @@
 package com.risquanter.register.simulation
 
 import io.github.iltotore.iron.refineUnsafe
+import com.risquanter.register.domain.data.Loss
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.domain.data.iron.{OccurrenceProbability, OccurrenceProbabilityConstraint}
 
@@ -15,7 +16,7 @@ object LECGenerator {
     * `p` of all trials fall, counting the zero-loss trials where the risk did
     * not occur. Returns 0L when no trial recorded an outcome.
     */
-  def unconditionalQuantile(result: LossDistribution, p: Double): Long =
+  def unconditionalQuantile(result: LossDistribution, p: Double): Loss =
     val outcomes = result.outcomeCount
     if outcomes.isEmpty then 0L
     else
@@ -64,7 +65,7 @@ object LECGenerator {
     * Clips tick ranges to a meaningful percentile rather than `maxLoss`, which
     * is one outlier and stretches the x-axis past the informative range.
     */
-  def findQuantileLoss(result: LossDistribution, percentile: Double): Option[Long] =
+  def findQuantileLoss(result: LossDistribution, percentile: Double): Option[Loss] =
     Option.when(result.outcomeCount.nonEmpty) {
       unconditionalQuantile(result, percentile)
     }

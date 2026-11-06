@@ -11,7 +11,7 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldPro
 
 /** LEC functional interface: the mapping from loss threshold to exceedance probability. */
 trait LECCurve {
-  def nTrials: Int
+  def nTrials: PositiveInt
   def probOfExceedance(threshold: Loss): OccurrenceProbability
   def maxLoss: Loss
   def minLoss: Loss
@@ -76,7 +76,7 @@ final case class LossDistribution private (
   def outcomeOf(trial: TrialId): Loss = trials.outcomeOf(trial)
   def trialIds(): Set[TrialId] = trials.trialIds
 
-  override def nTrials: Int = trials.nTrials
+  override def nTrials: PositiveInt = trials.nTrials
 
   lazy val outcomeCount: TreeMap[Loss, Int] =
     TreeMap.from(outcomes.values.groupMapReduce(x => x)(_ => 1)(_ + _))(using Ord[Loss].toScala)

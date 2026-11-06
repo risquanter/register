@@ -1,6 +1,6 @@
 package com.risquanter.register.foladapter
 
-import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
+import com.risquanter.register.domain.data.{Loss, RiskTree, RiskPortfolio}
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
@@ -112,7 +112,7 @@ class RiskTreeKnowledgeBase(
     * @param p      Percentile as fraction in [0.0, 1.0]
     * @return Loss value at the unconditional percentile, or 0L if empty
     */
-  private def percentile(result: LossDistribution, p: Double): Long =
+  private def percentile(result: LossDistribution, p: Double): Loss =
     LECGenerator.unconditionalQuantile(result, p)
 
   // ── TypeCatalog ────────────────────────────────────────────────────
