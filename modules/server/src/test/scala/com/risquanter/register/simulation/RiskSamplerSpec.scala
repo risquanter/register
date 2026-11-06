@@ -1,21 +1,19 @@
 package com.risquanter.register.simulation
 
 import zio.test.*
-import zio.test.Assertion.*
-import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability, SeedEntityId, SeedVarId}
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{OpenProbability, Probability, SeedEntityId, SeedVarId}
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 object RiskSamplerSpec extends ZIOSpecDefault {
   
-  // Helper to create OccurrenceProbability from raw double (closed [0,1] interval)
-  private def prob(value: Double): OccurrenceProbability =
+  // Helper to create Probability from raw double (closed [0,1] interval)
+  private def prob(value: Double): Probability =
     value.refineUnsafe
-  
-  // Helper to create Probability arrays from raw doubles (open (0,1) interval, for Metalog percentiles)
-  private def probArray(values: Double*): Array[Probability] =
+
+  // Helper to create OpenProbability arrays from raw doubles (open (0,1) interval, for Metalog percentiles)
+  private def probArray(values: Double*): Array[OpenProbability] =
     values.toArray.map(_.refineUnsafe)
   
   // Helper: HDR stream tuple via the production derivation site
@@ -30,7 +28,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
   private def createSimpleLossDistribution(): MetalogDistribution = {
     val percentiles = probArray(0.05, 0.5, 0.95)
     val quantiles = Array(1000.0, 5000.0, 25000.0)
-    MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+    MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
       .toOption.get
   }
   
@@ -125,7 +123,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
       
       test("occurrence rate approximates probability over many trials") {
         val metalog = createSimpleLossDistribution()
-        val targetProb: OccurrenceProbability = 0.3.refineUnsafe
+        val targetProb: Probability = 0.3.refineUnsafe
         val sampler = RiskSampler.fromDistribution(
           nodeId = nodeId("RISK-30PCT"),
           streams = streams(1L, 3L, seed3 = 0L, seed4 = 0L),

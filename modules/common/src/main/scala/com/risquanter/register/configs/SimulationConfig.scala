@@ -20,9 +20,6 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
   * @param maxConcurrentSimulations Intended cap on how many risk nodes resolve
   *   concurrently. No production code reads it: the resolver's fan-out across
   *   sibling nodes is unbounded, so the value an operator sets controls nothing.
-  *   PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS),
-  *   docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md — connects this value
-  *   and renames it.
   * @param defaultSeed3 Global seed 3 for HDR random number generation (reproducibility)
   * @param defaultSeed4 Global seed 4 for HDR random number generation (reproducibility)
   * @param curveTickCount How many thresholds a loss exceedance curve is sampled at
@@ -36,7 +33,7 @@ final case class SimulationConfig(
   defaultSeed3: Long,
   defaultSeed4: Long,
   curveTickCount: PositiveInt,
-  curveTailCutoff: OccurrenceProbability
+  curveTailCutoff: Probability
 )
 
 object SimulationConfig {
@@ -48,12 +45,12 @@ object SimulationConfig {
       ValidationUtil.refinePositiveInt(value, ErrorLocation.Whole).left.map(errorsToString)
     }
 
-  private val occurrenceProbabilityConfig: Config[OccurrenceProbability] =
+  private val probabilityConfig: Config[Probability] =
     deriveConfig[Double].mapOrFail { value =>
-      ValidationUtil.refineOccurrenceProbability(value, ErrorLocation.Whole).left.map(errorsToString)
+      ValidationUtil.refineProbability(value, ErrorLocation.Whole).left.map(errorsToString)
     }
 
   given DeriveConfig[PositiveInt] = DeriveConfig(positiveIntConfig)
-  given DeriveConfig[OccurrenceProbability] = DeriveConfig(occurrenceProbabilityConfig)
+  given DeriveConfig[Probability] = DeriveConfig(probabilityConfig)
   given DeriveConfig[SimulationConfig] = DeriveConfig.derived
 }

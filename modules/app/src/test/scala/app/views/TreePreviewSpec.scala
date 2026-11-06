@@ -3,7 +3,7 @@ package app.views
 import zio.test.*
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{SafeName, Probability}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.testutil.TestHelpers.lognormalShape
 import io.github.iltotore.iron.*
@@ -36,7 +36,7 @@ object TreePreviewSpec extends ZIOSpecDefault:
 
   private val leafShape: DistributionShape = lognormalShape(1000L, 50000L)
 
-  private val lognormalProb: OccurrenceProbability = 0.3
+  private val lognormalProb: Probability = 0.3
 
   /** Replication of renderTree's groupBy logic for structural assertion. */
   private def expectedGrouping(

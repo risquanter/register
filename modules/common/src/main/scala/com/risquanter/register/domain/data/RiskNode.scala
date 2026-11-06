@@ -4,7 +4,7 @@ import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField
 import io.github.iltotore.iron.autoRefine
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, NodeId, SeedVarId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, NodeId, SeedVarId}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -50,7 +50,7 @@ object RiskNode {
   * Domain Model: Uses Iron refined types for type safety
   * - safeId: SafeId (26-character ULID)
   * - safeName: SafeName (non-blank, max 50 chars)
-  * - probability: OccurrenceProbability (0.0 <= p <= 1.0)
+  * - probability: Probability (0.0 <= p <= 1.0)
   *
   * @param safeId Unique identifier (Iron refined type)
   * @param safeName Human-readable risk name (Iron refined type)
@@ -70,7 +70,7 @@ final case class RiskLeaf private (
   @jsonField("id") @encodedName("id") safeId: SafeId.SafeId,
   @jsonField("name") @encodedName("name") safeName: SafeName.SafeName,
   parentId: Option[NodeId],
-  probability: OccurrenceProbability,
+  probability: Probability,
   shape: DistributionShape,
   seedVarId: SeedVarId.SeedVarId
 ) extends RiskNode {
@@ -92,7 +92,7 @@ object RiskLeaf {
   def fromValidated(
     id: SafeId.SafeId,
     name: SafeName.SafeName,
-    probability: OccurrenceProbability,
+    probability: Probability,
     shape: DistributionShape,
     parentId: Option[NodeId],
     seedVarId: SeedVarId.SeedVarId
@@ -108,7 +108,7 @@ object RiskLeaf {
    *
    * @param id Plain string identifier (will be refined to SafeId)
    * @param name Plain string name (will be refined to SafeName)
-   * @param probability Plain double [0.0, 1.0] (will be refined to OccurrenceProbability)
+   * @param probability Plain double [0.0, 1.0] (will be refined to Probability)
    * @param shape The already-gated loss distribution
    * @param seedVarId Stochastic identity (will be refined to SeedVarId)
    * @return Validation with all errors accumulated, or a valid RiskLeaf
@@ -126,7 +126,7 @@ object RiskLeaf {
 
     val idV        = toValidation(ValidationUtil.refineId(id, ErrorLocation.Field(subject, FieldName.Id)))
     val nameV      = toValidation(ValidationUtil.refineName(name, ErrorLocation.Field(subject, FieldName.Name)))
-    val probV      = toValidation(ValidationUtil.refineOccurrenceProbability(probability, ErrorLocation.Field(subject, FieldName.Probability)))
+    val probV      = toValidation(ValidationUtil.refineProbability(probability, ErrorLocation.Field(subject, FieldName.Probability)))
     val seedVarIdV = toValidation(ValidationUtil.refineSeedVarId(seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId)))
 
     Validation.validateWith(idV, nameV, probV, seedVarIdV) {

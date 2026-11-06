@@ -3,7 +3,7 @@ package com.risquanter.register.http.codecs
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
 import zio.json.{DecoderOps, EncoderOps}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
 /**
@@ -281,14 +281,14 @@ object IronTapirCodecs {
     (s: String) => ValidationUtil.refineDistributionType(s, codecLocation).toOption
   )(identity)
 
+  /** Schema for OpenProbability for JSON body derivation. */
+  given Schema[OpenProbability] = Schema.schemaForDouble.map[OpenProbability](
+    d => ValidationUtil.refineOpenProbability(d, codecLocation).toOption
+  )(identity)
+
   /** Schema for Probability for JSON body derivation. */
   given Schema[Probability] = Schema.schemaForDouble.map[Probability](
     d => ValidationUtil.refineProbability(d, codecLocation).toOption
-  )(identity)
-
-  /** Schema for OccurrenceProbability for JSON body derivation. */
-  given Schema[OccurrenceProbability] = Schema.schemaForDouble.map[OccurrenceProbability](
-    d => ValidationUtil.refineOccurrenceProbability(d, codecLocation).toOption
   )(identity)
 
   /** Schema for NonNegativeLong for JSON body derivation. */

@@ -3,7 +3,7 @@ package com.risquanter.register.services.helper
 import zio.{IO, ZIO, Task}
 import zio.test.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
-import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability, PositiveInt, SeedEntityId, SeedVarId}
+import com.risquanter.register.domain.data.iron.{OpenProbability, Probability, PositiveInt, SeedEntityId, SeedVarId}
 import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, DistributionParams}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.simulation.LossDistribution
@@ -56,12 +56,12 @@ private object TestSimulator {
 
 object SimulatorSpec extends ZIOSpecDefault {
 
-  // Helper to create OccurrenceProbability values (closed [0,1] interval)
-  private def prob(value: Double): OccurrenceProbability =
+  // Helper to create Probability values (closed [0,1] interval)
+  private def prob(value: Double): Probability =
     value.refineUnsafe
 
   // Helper to create Metalog percentile values (open (0,1) interval)
-  private def pct(value: Double): Probability =
+  private def pct(value: Double): OpenProbability =
     value.refineUnsafe
   
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
@@ -78,7 +78,7 @@ object SimulatorSpec extends ZIOSpecDefault {
   private def createSimpleLossDistribution(): MetalogDistribution = {
     val percentiles = Array(0.05, 0.5, 0.95).map(pct)
     val quantiles = Array(1000.0, 5000.0, 25000.0)
-    MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+    MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
       .toOption.get
   }
   

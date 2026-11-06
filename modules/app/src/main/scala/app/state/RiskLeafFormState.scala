@@ -2,7 +2,7 @@ package app.state
 
 import com.raquo.laminar.api.L.*
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{NonNegativeInt, OccurrenceProbability, SafeName, ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, Probability, SafeName, ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError, ValueRange}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import zio.prelude.Validation
@@ -209,12 +209,12 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     * by 100. The range refusal is worded on the entered scale. The live check
     * and the submit both call it, so they refuse the same input with the same
     * sentence. */
-  private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, OccurrenceProbability] =
+  private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, Probability] =
     parseRequired(input, parseDouble, ExpectedInput.Number)
       .flatMap { pct =>
         Validation.fromEither(
           pct.map(RiskLeafFormState.pctToDomain)
-            .refine(ValidationUtil.refineOccurrenceProbability)
+            .refine(ValidationUtil.refineProbability)
             .left.map(_ => pct.reject(FieldProblem.OutOfRange(ValueRange.Percent)))
         )
       }
@@ -578,7 +578,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     * failure names the field it came from, so once the view stores it with
     * `setSubmitErrors`, the input it names selects it.
     */
-  def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, OccurrenceProbability, DistributionShape)] =
+  def toDraft: Validation[ValidationError, (SafeName.SafeName, ParentRef, Probability, DistributionShape)] =
     val nameV = ValidationUtil.toValidation(locatedNow(nameVar, nameField).refine(ValidationUtil.refineName))
     val parentV = ParentSelection.toParentRef(locatedNow(parentVar, parentField))
     val probabilityV = refineProbabilityInput(locatedNow(probabilityVar, probabilityField))

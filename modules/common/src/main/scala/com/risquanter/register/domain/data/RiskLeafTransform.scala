@@ -6,7 +6,7 @@ import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.iron.{
-  OccurrenceProbability, PositiveDouble, PositiveDoubleConstraint, PositiveLong, ResidualProbability, RetentionFactor
+  Probability, PositiveDouble, PositiveDoubleConstraint, PositiveLong, ResidualProbability, RetentionFactor
 }
 import com.risquanter.register.domain.data.iron.given
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
@@ -125,7 +125,7 @@ object AbsoluteReplacement {
  * and re-refined n times although no transform can change any of them.
  */
 final case class LeafParams(
-  probability: OccurrenceProbability,
+  probability: Probability,
   shape: DistributionShape
 )
 

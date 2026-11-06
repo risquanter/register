@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.iron.{OccurrenceProbability, NodeId}
+import com.risquanter.register.domain.data.iron.{Probability, NodeId}
 
 /**
  * Samples risk events combining occurrence probability and loss distribution.
@@ -74,7 +74,7 @@ object RiskSampler {
   def fromDistribution(
     nodeId: NodeId,
     streams: HdrStreams,
-    occurrenceProb: OccurrenceProbability,
+    occurrenceProb: Probability,
     lossDistribution: Distribution
   ): RiskSampler = {
 

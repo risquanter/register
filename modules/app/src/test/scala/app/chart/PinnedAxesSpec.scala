@@ -3,7 +3,7 @@ package app.chart
 import zio.test.*
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 
-import com.risquanter.register.domain.data.iron.{NodeId, OccurrenceProbabilityConstraint, SafeName}
+import com.risquanter.register.domain.data.iron.{NodeId, ProbabilityConstraint, SafeName}
 import com.risquanter.register.domain.data.{LECNodeCurve, LECPoint}
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 
@@ -19,7 +19,7 @@ object PinnedAxesSpec extends ZIOSpecDefault:
     LECNodeCurve(
       nid(i),
       name = SafeName.fromString(s"c$i").toOption.get,
-      curve = points.toVector.map((l, p) => LECPoint(l, p.refineUnsafe[OccurrenceProbabilityConstraint])),
+      curve = points.toVector.map((l, p) => LECPoint(l, p.refineUnsafe[ProbabilityConstraint])),
       quantiles = Map.empty,
       averageAnnualLoss = 0.0,
       probabilityOfNoLoss = 1.0

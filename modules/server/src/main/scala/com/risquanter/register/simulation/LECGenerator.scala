@@ -3,7 +3,7 @@ package com.risquanter.register.simulation
 import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.domain.data.Loss
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
-import com.risquanter.register.domain.data.iron.{OccurrenceProbability, OccurrenceProbabilityConstraint, PositiveInt}
+import com.risquanter.register.domain.data.iron.{Probability, ProbabilityConstraint, PositiveInt}
 
 /** Generates Loss Exceedance Curve data from simulation outcomes.
   *
@@ -16,7 +16,7 @@ object LECGenerator {
     * `p` of all trials fall, counting the zero-loss trials where the risk did
     * not occur. Returns 0L when no trial recorded an outcome.
     */
-  def unconditionalQuantile(result: LossDistribution, p: OccurrenceProbability): Loss =
+  def unconditionalQuantile(result: LossDistribution, p: Probability): Loss =
     val outcomes = result.outcomeCount
     outcomes.lastOption match
       case None => 0L
@@ -53,7 +53,7 @@ object LECGenerator {
     * trials absent from the sparse map and explicit zero-valued outcomes — the
     * two sources `unconditionalQuantile` also treats as at or below zero.
     */
-  def probabilityOfNoLoss(result: LossDistribution): OccurrenceProbability =
+  def probabilityOfNoLoss(result: LossDistribution): Probability =
     val implicitZeros = result.nTrials.toLong - result.outcomeCount.values.sum.toLong
     val explicitZeros = result.outcomeCount.getOrElse(0L, 0).toLong
     result.trials.shareOf(implicitZeros + explicitZeros)
@@ -62,7 +62,7 @@ object LECGenerator {
     * Clips tick ranges to a meaningful percentile rather than `maxLoss`, which
     * is one outlier and stretches the x-axis past the informative range.
     */
-  def findQuantileLoss(result: LossDistribution, percentile: OccurrenceProbability): Option[Loss] =
+  def findQuantileLoss(result: LossDistribution, percentile: Probability): Option[Loss] =
     Option.when(result.outcomeCount.nonEmpty) {
       unconditionalQuantile(result, percentile)
     }
@@ -94,7 +94,7 @@ object LECGenerator {
     (0L +: getTicks(minLoss, maxLoss, nEntries)).distinct
 
   /** One node's curve, evaluated at the given thresholds. */
-  private def curveAt(result: LossDistribution, ticks: Vector[Long]): Vector[(Long, OccurrenceProbability)] =
+  private def curveAt(result: LossDistribution, ticks: Vector[Long]): Vector[(Long, Probability)] =
     ticks.map(loss => (loss, exceedanceAt(result, loss)))
 
   /** Upper end of the tick range: the p99.5 quantile, so outliers do not
@@ -112,10 +112,10 @@ object LECGenerator {
     * instead, meeting the y-axis at the occurrence-probability plateau. Above
     * 0 the two readings coincide on integer losses.
     */
-  private def exceedanceAt(result: LossDistribution, loss: Long): OccurrenceProbability =
+  private def exceedanceAt(result: LossDistribution, loss: Long): Probability =
     // The complement of a probability in [0, 1] is in [0, 1], so the
     // refinement cannot fail.
-    if (loss == 0L) (1.0 - probabilityOfNoLoss(result)).refineUnsafe[OccurrenceProbabilityConstraint]
+    if (loss == 0L) (1.0 - probabilityOfNoLoss(result)).refineUnsafe[ProbabilityConstraint]
     else result.probOfExceedance(loss)
   
   /** Curves as (loss, exceedance probability) pairs for one or more nodes over
@@ -132,8 +132,8 @@ object LECGenerator {
   def generateCurvePointsMulti[K](
     results: Map[K, LossDistribution],
     nEntries: PositiveInt,
-    tailCutoff: OccurrenceProbability
-  ): Map[K, Vector[(Long, OccurrenceProbability)]] =
+    tailCutoff: Probability
+  ): Map[K, Vector[(Long, Probability)]] =
     results.values.filter(_.outcomeCount.nonEmpty).toList match
       // Covers an empty `results` too: mapping it answers an empty map.
       case Nil => results.map((k, _) => k -> Vector.empty)
@@ -148,7 +148,7 @@ object LECGenerator {
         val sharedTicks = curveTicks(combinedMin, combinedMax, nEntries)
 
         // Evaluate all curves at every tick
-        val evaluated: Map[K, Vector[(Long, OccurrenceProbability)]] = results.map {
+        val evaluated: Map[K, Vector[(Long, Probability)]] = results.map {
           case (nodeId, result) if result.outcomeCount.isEmpty => nodeId -> Vector.empty
           case (nodeId, result)                                => nodeId -> curveAt(result, sharedTicks)
         }
@@ -159,10 +159,10 @@ object LECGenerator {
     * beyond the last meaningful point for visual continuity.
     */
   private def trimTail[K](
-    evaluated: Map[K, Vector[(Long, OccurrenceProbability)]],
+    evaluated: Map[K, Vector[(Long, Probability)]],
     sharedTicks: Vector[Long],
-    tailCutoff: OccurrenceProbability
-  ): Map[K, Vector[(Long, OccurrenceProbability)]] =
+    tailCutoff: Probability
+  ): Map[K, Vector[(Long, Probability)]] =
     evaluated.values.filter(_.nonEmpty).toList match
       case Nil => evaluated
       case curves =>

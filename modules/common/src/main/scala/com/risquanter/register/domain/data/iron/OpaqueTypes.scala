@@ -140,8 +140,8 @@ given JsonDecoder[NonNegativeInt] = JsonDecoder[Int].mapOrFail(_.refineEither[Gr
 // Non-negative doubles (>= 0.0, e.g. scale factors)
 // LessEqual[1.7976931348623157e308] is Double.MaxValue as a literal type
 // (Iron's compile-time literal refinement needs a literal, not a reference
-// to the `Double.MaxValue` val) and excludes +Infinity: unlike Probability/
-// OccurrenceProbability, this type has no upper bound to reject +Infinity as
+// to the `Double.MaxValue` val) and excludes +Infinity: unlike OpenProbability/
+// Probability, this type has no upper bound to reject +Infinity as
 // a side effect, and downstream arithmetic (e.g. the server's
 // RiskResultTransform.scaleLosses'
 // `.toLong`) silently converts an unchecked Infinity/NaN into
@@ -185,7 +185,7 @@ final case class RetentionFactor(toFraction: UnitFraction)
 // Probability a mitigation may assert for a risk that remains in the tree. A
 // mitigation reduces the chance of an occurrence and can never remove the
 // possibility, because a residual of exactly zero asserts the control cannot
-// fail. Distinct from OccurrenceProbability, whose closed interval is correct
+// fail. Distinct from Probability, whose closed interval is correct
 // for a leaf's own declared probability: an author may state that an event
 // never occurs, a mitigation may not state that it has been prevented.
 final case class ResidualProbability(toFraction: UnitFraction)
@@ -346,42 +346,42 @@ object SeedVarId:
   given JsonDecoder[SeedVarId] = JsonDecoder[Long].mapOrFail(v =>
     fromLong(v).left.map(_.map(ValidationError.describe).mkString(", ")))
 
-// Probability values (must be between 0.0 and 1.0, exclusive)
+// A probability on the open interval (0, 1), excluding both ends.
 // Exclusive bounds are required for numerical stability in metalog-distribution's
 // inverse CDF calculations where 0.0 and 1.0 would cause division by zero or infinity.
 // Used for metalog anchor percentiles and for the probability grid a preview
 // curve is sampled at, both of which need the open interval. The constraint is
 // named so the decoder below refines against the same bounds the type is
 // declared with rather than restating them.
-type ProbabilityConstraint = Greater[0.0] & Less[1.0]
+type OpenProbabilityConstraint = Greater[0.0] & Less[1.0]
 
-type Probability = Double :| ProbabilityConstraint
+type OpenProbability = Double :| OpenProbabilityConstraint
 
-// A probability crosses the wire as a preview point's `cdf`, so the derived
+// An open probability crosses the wire as a preview point's `cdf`, so the derived
 // codec of that point needs an instance here. The open interval is re-checked
 // on decode: a decoded probability is as trustworthy as a constructed one
 // (ADR-038).
-given JsonEncoder[Probability] = JsonEncoder[Double].contramap(identity)
-given JsonDecoder[Probability] =
-  JsonDecoder[Double].mapOrFail(_.refineEither[ProbabilityConstraint])
+given JsonEncoder[OpenProbability] = JsonEncoder[Double].contramap(identity)
+given JsonDecoder[OpenProbability] =
+  JsonDecoder[Double].mapOrFail(_.refineEither[OpenProbabilityConstraint])
 
 // A probability on the closed interval [0, 1]: a risk leaf's likelihood, which
 // may be 0 (never) or 1 (always), and every probability read off the trials,
 // such as the share of trials exceeding a loss or recording none. Distinct from
-// Probability, whose open interval the metalog fit needs. The constraint is
+// OpenProbability, whose open interval the metalog fit needs. The constraint is
 // named so the decoder below refines against the same bounds the type is
 // declared with rather than restating them.
-type OccurrenceProbabilityConstraint = GreaterEqual[0.0] & LessEqual[1.0]
+type ProbabilityConstraint = GreaterEqual[0.0] & LessEqual[1.0]
 
-type OccurrenceProbability = Double :| OccurrenceProbabilityConstraint
+type Probability = Double :| ProbabilityConstraint
 
-// An occurrence probability crosses the wire on its own as the
+// A probability crosses the wire on its own as the
 // probability-of-exceedance answer and inside a curve's points, so the derived
 // codecs need an instance here. The closed interval is re-checked on decode: a
 // decoded probability is as trustworthy as a constructed one (ADR-038).
-given JsonEncoder[OccurrenceProbability] = JsonEncoder[Double].contramap(identity)
-given JsonDecoder[OccurrenceProbability] =
-  JsonDecoder[Double].mapOrFail(_.refineEither[OccurrenceProbabilityConstraint])
+given JsonEncoder[Probability] = JsonEncoder[Double].contramap(identity)
+given JsonDecoder[Probability] =
+  JsonDecoder[Double].mapOrFail(_.refineEither[ProbabilityConstraint])
 
 // The two mode spellings, named once so the decoder below refines against the
 // same pattern the type is declared with rather than restating it. Both are

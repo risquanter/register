@@ -7,7 +7,7 @@ import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, OccurrenceProbability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -231,7 +231,7 @@ class RiskTreeServiceLive private (
   /** Build domain nodes and rootId from a resolved V2 request. */
   private def buildNodes(
     nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
-    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
     rootName: SafeName.SafeName,
     seedVarIdByLeafName: Map[SafeName.SafeName, SeedVarId.SeedVarId]
   ): IO[AppError,(Seq[RiskNode], NodeId)] = ZIO.attempt {
@@ -421,7 +421,7 @@ class RiskTreeServiceLive private (
   // LEC Query APIs (ADR-015)
   // ========================================
 
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError,OccurrenceProbability] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError,Probability] =
     traced(Operation.ProbOfExceedance) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)

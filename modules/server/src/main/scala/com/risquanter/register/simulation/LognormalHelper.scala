@@ -1,8 +1,5 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.iron.Probability
-import io.github.iltotore.iron.*
-
 /** Helper for creating LognormalDistribution from confidence interval bounds.
   * 
   * BCG Implementation Note:

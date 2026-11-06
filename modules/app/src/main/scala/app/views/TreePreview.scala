@@ -6,7 +6,7 @@ import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, FormMode, FormTar
 import app.components.{Icons, TreeNodeRow}
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, IronConstants}
+import com.risquanter.register.domain.data.iron.{SafeName, Probability, IronConstants}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 
 /**
@@ -26,7 +26,7 @@ object TreePreview:
     case Portfolio(n: SafeName.SafeName) extends TreeNode(n)
     case Leaf(
       n:           SafeName.SafeName,
-      probability: OccurrenceProbability,
+      probability: Probability,
       shape:       DistributionShape
     ) extends TreeNode(n)
 

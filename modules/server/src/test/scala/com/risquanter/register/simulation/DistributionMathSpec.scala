@@ -1,44 +1,15 @@
 package com.risquanter.register.simulation
 
 import zio.test.*
-import com.risquanter.register.domain.data.iron.Probability
+import com.risquanter.register.domain.data.iron.{OpenProbability, OpenProbabilityConstraint}
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.numeric.{Greater, Less}
 
-/** Mathematical correctness tests for distribution implementations
-  * 
-  * Incremental test plan:
-  * 
-  * Phase 1: Metalog (Expert Opinion Mode) - CURRENT
-  *   ✓ Basic 3-point fit compiles and succeeds
-  *   ✓ Interpolation accuracy at input percentiles < 1%
-  *   ✓ Monotonicity property holds
-  * 
-  * Phase 2: Distribution Trait (TODO)
-  *   - Create Distribution trait with sample() and quantile()
-  *   - MetalogDistribution extends Distribution
-  *   - Tests still pass after refactor
-  * 
-  * Phase 3: Lognormal Wrapper (TODO)
-  *   - Create LognormalDistribution wrapper around Apache Commons Math
-  *   - Implements Distribution trait
-  *   - Basic construction test (compiles, doesn't throw)
-  * 
-  * Phase 4: Lognormal Math Validation (TODO)
-  *   - Verify BCG formula: meanLog, varLog calculation
-  *   - Test P10/P90 match input bounds (determine if 80% or 90% CI)
-  *   - Verify lognormal properties (right-skewed, geometric mean)
-  * 
-  * Phase 5: RiskSampler Integration (TODO)
-  *   - Update RiskSampler to accept Distribution trait
-  *   - Test with both Metalog and Lognormal
-  *   - Verify sampling produces expected quantiles
-  */
+/** Mathematical correctness tests for distribution implementations. */
 object DistributionMathSpec extends ZIOSpecDefault {
-  
-  // Helper to create Probability arrays from raw doubles
-  private def probArray(values: Double*): Array[Probability] =
-    values.toArray.map(_.refineUnsafe[Greater[0.0] & Less[1.0]])
+
+  // Helper to create OpenProbability arrays from raw doubles
+  private def probArray(values: Double*): Array[OpenProbability] =
+    values.toArray.map(_.refineUnsafe[OpenProbabilityConstraint])
   
   def spec = suite("DistributionMathSpec")(
     
@@ -48,7 +19,7 @@ object DistributionMathSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isRight)
       },
@@ -57,7 +28,7 @@ object DistributionMathSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.1, 0.5, 0.9)
         val quantiles = Array(1000.0, 5000.0, 20000.0)
         
-        MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3) match {
+        MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None) match {
           case Right(metalog) =>
             val p10 = metalog.quantile(0.1)
             val p50 = metalog.quantile(0.5)
@@ -77,7 +48,7 @@ object DistributionMathSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.1, 0.5, 0.9)
         val quantiles = Array(1000.0, 5000.0, 20000.0)
         
-        MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3) match {
+        MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None) match {
           case Right(metalog) =>
             val q1 = metalog.quantile(0.25)
             val q2 = metalog.quantile(0.50)

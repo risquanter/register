@@ -4,7 +4,7 @@ import com.risquanter.register.domain.data.{Loss, RiskTree, RiskPortfolio}
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
-import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, Probability}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.common.{FolSymbols, ValuationBasis}
@@ -111,7 +111,7 @@ class RiskTreeKnowledgeBase(
     * @param p      Percentile as fraction in [0.0, 1.0]
     * @return Loss value at the unconditional percentile, or 0L if empty
     */
-  private def percentile(result: LossDistribution, p: OccurrenceProbability): Loss =
+  private def percentile(result: LossDistribution, p: Probability): Loss =
     LECGenerator.unconditionalQuantile(result, p)
 
   // ── TypeCatalog ────────────────────────────────────────────────────

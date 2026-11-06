@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, OccurrenceProbability, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, Probability, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.auth.{Authority, Checked}
 
@@ -97,7 +97,7 @@ trait RiskTreeService {
     * @param rev Read coordinate — branch head or a pinned commit.
     * @return The share of trials whose loss was at or above `threshold`.
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError, OccurrenceProbability]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError, Probability]
 
   /** Get LEC curves for multiple nodes with shared tick domain.
     *

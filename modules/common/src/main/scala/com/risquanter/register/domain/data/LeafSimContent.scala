@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.json.{JsonEncoder, DeriveJsonEncoder, jsonDiscriminator, jsonHint}
-import com.risquanter.register.domain.data.iron.{OccurrenceProbability, SeedVarId}
+import com.risquanter.register.domain.data.iron.{Probability, SeedVarId}
 
 /**
  * The simulation-relevant projection of a `RiskLeaf` — the leaf cache-key
@@ -34,7 +34,7 @@ import com.risquanter.register.domain.data.iron.{OccurrenceProbability, SeedVarI
  */
 final case class LeafSimContent(
   seedVarId: SeedVarId.SeedVarId,
-  probability: OccurrenceProbability,
+  probability: Probability,
   shape: DistributionShape
 )
 

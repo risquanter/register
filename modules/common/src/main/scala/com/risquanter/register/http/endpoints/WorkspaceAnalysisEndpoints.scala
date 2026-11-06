@@ -2,10 +2,8 @@ package com.risquanter.register.http.endpoints
 
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
-import sttp.tapir.generic.auto.*
-import sttp.model.{Header, MediaType}
 
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, CommitHash, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, CommitHash, Probability}
 import com.risquanter.register.domain.data.iron.given
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.responses.LECCurvesResponse
@@ -36,7 +34,7 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .in(query[Boolean]("includeProvenance").default(false))
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
-      .out(jsonBody[OccurrenceProbability])
+      .out(jsonBody[Probability])
 
   val getWorkspaceLECCurvesMultiEndpoint =
     authedBaseEndpoint

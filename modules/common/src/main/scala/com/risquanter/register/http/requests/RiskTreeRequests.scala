@@ -3,7 +3,7 @@ package com.risquanter.register.http.requests
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
 import com.risquanter.register.domain.data.{DistributionShape, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, NodeId, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, NodeId, Probability}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{
@@ -77,7 +77,7 @@ object RiskTreeRequests {
     subject: ErrorSubject,
     name: SafeName.SafeName,
     parent: ParentRef,
-    probability: OccurrenceProbability,
+    probability: Probability,
     shape: DistributionShape,
     seedVarId: SeedVarIdChoice
   )
@@ -94,7 +94,7 @@ object RiskTreeRequests {
     id: SafeId.SafeId,
     name: SafeName.SafeName,
     parent: ParentRef,
-    probability: OccurrenceProbability,
+    probability: Probability,
     shape: DistributionShape
   )
 
@@ -111,7 +111,7 @@ object RiskTreeRequests {
   final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
-    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )
@@ -122,8 +122,8 @@ object RiskTreeRequests {
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
     added: Map[SafeName.SafeName, ResolvedNode],
-    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
-    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, DistributionShape)],
+    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
+    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )
@@ -168,7 +168,7 @@ object RiskTreeRequests {
       Validation.validateWith(
         refineNameField(l.name, ErrorLocation.Field(subject, FieldName.Name)),
         refineParentName(l.parentName, ErrorLocation.Field(subject, FieldName.ParentName)),
-        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
+        toValidation(ValidationUtil.refineProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
         l.distributionShape.toShape(subject),
         refineSeedVarIdChoice(l.seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId))
       )((name, parent, prob, shape, seed) => SubmittedLeaf(subject, name, parent, prob, shape, seed))
@@ -212,7 +212,7 @@ object RiskTreeRequests {
         toValidation(ValidationUtil.refineId(l.id, ErrorLocation.Field(subject, FieldName.Id))),
         refineNameField(l.name, ErrorLocation.Field(subject, FieldName.Name)),
         refineParentName(l.parentName, ErrorLocation.Field(subject, FieldName.ParentName)),
-        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
+        toValidation(ValidationUtil.refineProbability(l.probability, ErrorLocation.Field(subject, FieldName.Probability))),
         l.distributionShape.toShape(subject),
         requireAbsentSeedVarId(l.seedVarId, ErrorLocation.Field(subject, FieldName.SeedVarId))
       )((id, name, parent, prob, shape, _) => ExistingLeaf(ErrorSubject.ExistingNode(NodeId(id)), id, name, parent, prob, shape))

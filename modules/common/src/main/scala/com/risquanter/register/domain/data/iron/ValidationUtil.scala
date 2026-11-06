@@ -215,18 +215,18 @@ object ValidationUtil {
       .map(_ => refusal(location, FieldProblem.OutOfRange(ValueRange.SeedVarId)))
   }
 
-  // Refinement for probability (must be between 0.0 and 1.0, exclusive)
-  def refineProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], Probability] = {
+  // Refinement for an open-interval probability (must be between 0.0 and 1.0, exclusive)
+  def refineOpenProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], OpenProbability] = {
     value
-      .refineEither[Greater[0.0] & Less[1.0]]
+      .refineEither[OpenProbabilityConstraint]
       .left
       .map(_ => refusal(location, FieldProblem.OutOfRange(ValueRange.OpenUnitInterval)))
   }
 
-  // Refinement for occurrence probability (must be between 0.0 and 1.0, inclusive)
-  def refineOccurrenceProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], OccurrenceProbability] = {
+  // Refinement for a probability (must be between 0.0 and 1.0, inclusive)
+  def refineProbability(value: Double, location: ErrorLocation): Either[List[ValidationError], Probability] = {
     value
-      .refineEither[OccurrenceProbabilityConstraint]
+      .refineEither[ProbabilityConstraint]
       .left
       .map(_ => refusal(location, FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)))
   }

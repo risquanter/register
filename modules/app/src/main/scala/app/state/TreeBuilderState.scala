@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.domain.data.{DistributionShape, RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil, TreeId, SafeName, NodeId, Probability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
@@ -19,7 +19,7 @@ final case class LeafDraft(
   name:        SafeName.SafeName,
   parent:      ParentRef,
   shape:       DistributionShape,
-  probability: OccurrenceProbability,
+  probability: Probability,
   id:          Option[NodeId]
 )
 
@@ -233,7 +233,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     name:        SafeName.SafeName,
     parent:      ParentRef,
     shape:       DistributionShape,
-    probability: OccurrenceProbability
+    probability: Probability
   ): Validation[ValidationError, LeafDraft] =
     val draft = LeafDraft(name, parent, shape, probability, None)
     val result = TreeBuilderLogic.preValidateTopology(
@@ -289,7 +289,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     name:         SafeName.SafeName,
     parent:       ParentRef,
     shape:        DistributionShape,
-    probability:  OccurrenceProbability
+    probability:  Probability
   ): Validation[ValidationError, LeafDraft] =
     val existing = leavesVar.now().find(_.name == originalName)
     val draft = LeafDraft(name, parent, shape, probability, existing.flatMap(_.id))
@@ -557,7 +557,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     ParentRef.nameOf(parent).map(_.value.toString)
 
   // Total conversions: every field is already a refined domain type (`SafeName`,
-  // `DistributionShape`, `OccurrenceProbability`), so construction cannot fail.
+  // `DistributionShape`, `Probability`), so construction cannot fail.
   // Returning the plain request type keeps totality visible; callers wrap the whole
   // collection once with `Validation.succeed` where a `Validation` is needed for
   // `validateWith`.

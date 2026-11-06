@@ -6,7 +6,7 @@ import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.iron.{
-  ContentHash, MitigationId, NodeId, NonNegativeInt, OccurrenceProbability, ResidualProbability,
+  ContentHash, MitigationId, NodeId, NonNegativeInt, Probability, ResidualProbability,
   SafeName, ValidationUtil
 }
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
@@ -95,10 +95,10 @@ object LeafStageSpec {
     subject: ErrorSubject
   ): Validation[ValidationError, LeafParams] = spec match {
     case MitigationSpec.LeafRelative(likelihood, severity) =>
-      val probabilityV: Validation[ValidationError, OccurrenceProbability] = likelihood match {
+      val probabilityV: Validation[ValidationError, Probability] = likelihood match {
         case RelativeLikelihood.Keep => Validation.succeed(params.probability)
         case RelativeLikelihood.Scale(factor) =>
-          ValidationUtil.toValidation(ValidationUtil.refineOccurrenceProbability(
+          ValidationUtil.toValidation(ValidationUtil.refineProbability(
             params.probability * factor.toFraction,
             ErrorLocation.Field(subject, FieldName.Probability)
           ))
@@ -131,8 +131,8 @@ object LeafStageSpec {
   private def residualAsOccurrence(
     probability: ResidualProbability,
     subject:     ErrorSubject
-  ): Validation[ValidationError, OccurrenceProbability] =
-    ValidationUtil.toValidation(ValidationUtil.refineOccurrenceProbability(
+  ): Validation[ValidationError, Probability] =
+    ValidationUtil.toValidation(ValidationUtil.refineProbability(
       probability.toFraction,
       ErrorLocation.Field(subject, FieldName.Probability)
     ))

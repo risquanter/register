@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonFieldDecoder, JsonFieldEncoder}
 import sttp.tapir.Schema
 import io.github.iltotore.iron.autoRefine
-import com.risquanter.register.domain.data.iron.{NodeId, OccurrenceProbability, SafeName}
+import com.risquanter.register.domain.data.iron.{NodeId, Probability, SafeName}
 import com.risquanter.register.domain.data.iron.given
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -11,7 +11,7 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   * loss was at or above it. */
 final case class LECPoint(
   loss: Long,
-  exceedanceProbability: OccurrenceProbability
+  exceedanceProbability: Probability
 )
 
 object LECPoint {
@@ -29,7 +29,7 @@ final case class LECNodeCurve(
   curve: Vector[LECPoint],
   quantiles: Map[LECNodeCurve.QuantileLevel, Double],
   averageAnnualLoss: Double,
-  probabilityOfNoLoss: OccurrenceProbability
+  probabilityOfNoLoss: Probability
 )
 
 object LECNodeCurve {
@@ -40,7 +40,7 @@ object LECNodeCurve {
     * carries that information instead. The level is the share of trials whose
     * loss falls at or below the reported figure.
     */
-  enum QuantileLevel(val probability: OccurrenceProbability):
+  enum QuantileLevel(val probability: Probability):
     case P90  extends QuantileLevel(0.90)
     case P95  extends QuantileLevel(0.95)
     case P99  extends QuantileLevel(0.99)

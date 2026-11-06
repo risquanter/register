@@ -4,7 +4,7 @@ import zio.*
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 
 import com.risquanter.register.domain.data.{DistributionShape, DistributionParams}
-import com.risquanter.register.domain.data.iron.{MetalogTermCount, PositiveLong, Probability, ProbabilityConstraint}
+import com.risquanter.register.domain.data.iron.{MetalogTermCount, OpenProbability, OpenProbabilityConstraint, PositiveLong}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError, ValidationFailed}
 import com.risquanter.register.http.responses.{DistributionPreviewPoint, DistributionPreviewResponse, PreviewFit}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
@@ -29,19 +29,18 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
 
   /** The grid's two bounds, chosen here. They keep the grid off 0 and 1, where
     * many distribution families' quantile functions are singular. */
-  private val GridLower: Probability = 0.001
-  private val GridUpper: Probability = 0.999
+  private val GridLower: OpenProbability = 0.001
+  private val GridUpper: OpenProbability = 0.999
 
   /** Uniform probability grid over the open interval (`GridLower`, `GridUpper`).
     *
     * The `refineUnsafe` is sound here: every value lies strictly between the two
-    * bounds, which are themselves inside `Probability`'s open interval, so it
-    * cannot be reached with an invalid value. The one other production site with
-    * the same justification is `QuantileAnchors.termsToFit`.
+    * bounds, which are themselves inside `OpenProbability`'s open interval, so it
+    * cannot be reached with an invalid value.
     */
-  private val pGrid: Vector[Probability] =
+  private val pGrid: Vector[OpenProbability] =
     val step = (GridUpper - GridLower) / GridSize
-    (1 to GridSize).map(i => (GridLower + (i - 0.5) * step).refineUnsafe[ProbabilityConstraint]).toVector
+    (1 to GridSize).map(i => (GridLower + (i - 0.5) * step).refineUnsafe[OpenProbabilityConstraint]).toVector
 
   /** The preview runs the same resolution the simulator does, so the curve a
     * client sees is the curve a run would fit. */

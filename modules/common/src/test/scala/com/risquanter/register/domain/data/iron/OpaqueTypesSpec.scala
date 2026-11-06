@@ -70,46 +70,46 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
       }
     ),
     
-    suite("Probability type alias")(
+    suite("OpenProbability type alias")(
       test("accepts value between 0 and 1") {
-        val result: Either[String, Probability] = 0.5.refineEither
+        val result: Either[String, OpenProbability] = 0.5.refineEither
         assertTrue(result.isRight)
       },
-      
+
       test("rejects 0.0") {
-        val result: Either[String, Probability] = 0.0.refineEither
+        val result: Either[String, OpenProbability] = 0.0.refineEither
         assertTrue(result.isLeft)
       },
-      
+
       test("rejects 1.0") {
-        val result: Either[String, Probability] = 1.0.refineEither
+        val result: Either[String, OpenProbability] = 1.0.refineEither
         assertTrue(result.isLeft)
       },
-      
-      test("can be used as Probability value") {
-        val prob: Probability = 0.75.refineUnsafe
+
+      test("can be used as OpenProbability value") {
+        val prob: OpenProbability = 0.75.refineUnsafe
         assertTrue(prob == 0.75)
       }
     ),
 
-    suite("OccurrenceProbability type alias")(
+    suite("Probability type alias")(
       test("accepts 0.0 (event that never occurs)") {
-        val result: Either[String, OccurrenceProbability] = 0.0.refineEither
+        val result: Either[String, Probability] = 0.0.refineEither
         assertTrue(result.isRight)
       },
 
       test("accepts 1.0 (event that always occurs)") {
-        val result: Either[String, OccurrenceProbability] = 1.0.refineEither
+        val result: Either[String, Probability] = 1.0.refineEither
         assertTrue(result.isRight)
       },
 
       test("rejects value below 0.0") {
-        val result: Either[String, OccurrenceProbability] = (-0.001).refineEither
+        val result: Either[String, Probability] = (-0.001).refineEither
         assertTrue(result.isLeft)
       },
 
       test("rejects value above 1.0") {
-        val result: Either[String, OccurrenceProbability] = 1.001.refineEither
+        val result: Either[String, Probability] = 1.001.refineEither
         assertTrue(result.isLeft)
       }
     ),

@@ -412,9 +412,9 @@ object ValidationUtilSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("refineProbability")(
+    suite("refineOpenProbability")(
       test("accepts value between 0 and 1") {
-        val result = ValidationUtil.refineProbability(0.5, at)
+        val result = ValidationUtil.refineOpenProbability(0.5, at)
         assertTrue(
           result.isRight &&
           result.contains(0.5)
@@ -422,61 +422,61 @@ object ValidationUtilSpec extends ZIOSpecDefault {
       },
 
       test("rejects 0.0") {
-        val result = ValidationUtil.refineProbability(0.0, at)
+        val result = ValidationUtil.refineOpenProbability(0.0, at)
         assertTrue(result.isLeft)
       },
 
       test("rejects 1.0") {
-        val result = ValidationUtil.refineProbability(1.0, at)
+        val result = ValidationUtil.refineOpenProbability(1.0, at)
         assertTrue(result.isLeft)
       },
 
       test("rejects negative value") {
-        val result = ValidationUtil.refineProbability(-0.1, at)
+        val result = ValidationUtil.refineOpenProbability(-0.1, at)
         assertTrue(result.isLeft)
       },
 
       test("rejects value over 1") {
-        val result = ValidationUtil.refineProbability(1.5, at)
+        val result = ValidationUtil.refineOpenProbability(1.5, at)
         assertTrue(result.isLeft)
       }
     ),
 
-    suite("refineOccurrenceProbability")(
+    suite("refineProbability")(
       test("accepts value between 0 and 1 exclusive") {
-        val result = ValidationUtil.refineOccurrenceProbability(0.5, at)
+        val result = ValidationUtil.refineProbability(0.5, at)
         assertTrue(result.isRight && result.contains(0.5))
       },
 
       test("accepts 0.0 (event that never occurs)") {
-        val result = ValidationUtil.refineOccurrenceProbability(0.0, at)
+        val result = ValidationUtil.refineProbability(0.0, at)
         assertTrue(result.isRight && result.contains(0.0))
       },
 
       test("accepts 1.0 (event that always occurs)") {
-        val result = ValidationUtil.refineOccurrenceProbability(1.0, at)
+        val result = ValidationUtil.refineProbability(1.0, at)
         assertTrue(result.isRight && result.contains(1.0))
       },
 
       test("rejects value below 0.0") {
-        val result = ValidationUtil.refineOccurrenceProbability(-0.001, at)
+        val result = ValidationUtil.refineProbability(-0.001, at)
         assertTrue(result.isLeft)
       },
 
       test("rejects value above 1.0") {
-        val result = ValidationUtil.refineOccurrenceProbability(1.001, at)
+        val result = ValidationUtil.refineProbability(1.001, at)
         assertTrue(result.isLeft)
       },
 
       test("error message references inclusive range") {
-        val result = ValidationUtil.refineOccurrenceProbability(-0.1, at)
+        val result = ValidationUtil.refineProbability(-0.1, at)
         assertTrue(result.left.exists(errs =>
           errs.exists(e => ValidationMessages.render(e.problem).contains("inclusive"))
         ))
       },
 
       test("the location the caller passed reaches the error") {
-        val result = ValidationUtil.refineOccurrenceProbability(-0.1, passedIn)
+        val result = ValidationUtil.refineProbability(-0.1, passedIn)
         assertTrue(result.left.exists(errs =>
           errs.exists(e => e.location == passedIn)
         ))

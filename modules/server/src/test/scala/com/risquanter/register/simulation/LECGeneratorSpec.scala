@@ -3,7 +3,7 @@ package com.risquanter.register.simulation
 import zio.test.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
-import com.risquanter.register.domain.data.iron.{OccurrenceProbability, PositiveInt}
+import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
@@ -34,10 +34,10 @@ object LECGeneratorSpec extends ZIOSpecDefault {
     leafOf(nodeId("empty"), Map.empty, None)
   }
 
-  private val tailCutoff: OccurrenceProbability = 0.005
+  private val tailCutoff: Probability = 0.005
 
   /** One node's curve: the one-element case of the shared-domain builder. */
-  private def curveOf(result: LossDistribution, nEntries: PositiveInt): Vector[(Long, OccurrenceProbability)] =
+  private def curveOf(result: LossDistribution, nEntries: PositiveInt): Vector[(Long, Probability)] =
     LECGenerator.generateCurvePointsMulti(Map("only" -> result), nEntries, tailCutoff)("only")
 
   def spec = suite("LECGeneratorSpec")(

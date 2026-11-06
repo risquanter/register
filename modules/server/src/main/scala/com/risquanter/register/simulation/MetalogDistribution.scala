@@ -1,7 +1,7 @@
 package com.risquanter.register.simulation
 
 import com.risquanter.metalog.{Metalog, QPFitter}
-import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
+import com.risquanter.register.domain.data.iron.{OpenProbability, PositiveInt}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
@@ -55,7 +55,7 @@ object MetalogDistribution {
   /**
    * Create a Metalog distribution from percentile-quantile pairs.
    * 
-   * Uses Iron Probability type to ensure percentiles are in (0,1) (exclusive bounds).
+   * Uses Iron OpenProbability type to ensure percentiles are in (0,1) (exclusive bounds).
    * The underlying QPFitter library requires strict (0,1) bounds - 0.0 and 1.0 are not valid.
    * 
    * Validates inputs before calling metalog-distribution's QPFitter to provide
@@ -63,28 +63,28 @@ object MetalogDistribution {
    * 
    * @param percentiles Probabilities in (0, 1) (exclusive), must be sorted ascending
    * @param quantiles Corresponding quantile values
-   * @param terms Number of terms in the Metalog expansion (default 4; callers should pass min(n, 4) explicitly)
+   * @param terms Number of terms in the Metalog expansion
    * @param lower Optional lower bound for bounded distribution
    * @param upper Optional upper bound for bounded distribution
    * @return Either validation error or fitted Metalog distribution
    * 
    * @example
    * {{{
-   * val percentiles: Array[Probability] = Array(0.05, 0.5, 0.95).map(_.refineUnsafe)
+   * val percentiles: Array[OpenProbability] = Array(0.05, 0.5, 0.95).map(_.refineUnsafe)
    * val quantiles = Array(1000.0, 5000.0, 25000.0)
-   * 
-   * MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3) match {
+   *
+   * MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None) match {
    *   case Right(metalog) => println(s"P95 loss: ${metalog.quantile(0.95)}")
    *   case Left(err) => println(s"Validation failed: ${err.message}")
    * }
    * }}}
    */
   def fromPercentiles(
-    percentiles: Array[Probability],
+    percentiles: Array[OpenProbability],
     quantiles: Array[Double],
     terms: PositiveInt,
-    lower: Option[Double] = None,
-    upper: Option[Double] = None
+    lower: Option[Double],
+    upper: Option[Double]
   ): Either[ValidationError, MetalogDistribution] = {
     
     // Collect all validation errors
@@ -121,15 +121,15 @@ object MetalogDistribution {
   }
   
   /**
-   * Convenience method for creating Metalog from raw doubles (auto-refines to Probability).
+   * Convenience method for creating Metalog from raw doubles (auto-refines to OpenProbability).
    * Use this when percentiles are known to be valid at compile time.
    */
   def fromPercentilesUnsafe(
     percentiles: Array[Double],
     quantiles: Array[Double],
     terms: Int = 4,
-    lower: Option[Double] = None,
-    upper: Option[Double] = None
+    lower: Option[Double],
+    upper: Option[Double]
   ): Either[ValidationError, MetalogDistribution] = {
     
     // Validate percentiles are in (0,1) before refining (exclusive bounds per QPFitter)
@@ -139,7 +139,7 @@ object MetalogDistribution {
       Left(ValidationError(List("Terms must be positive")))
     } else {
       // Cast to refined array (unsafe but validated above)
-      val refinedPercentiles: Array[Probability] = percentiles.asInstanceOf[Array[Probability]]
+      val refinedPercentiles: Array[OpenProbability] = percentiles.asInstanceOf[Array[OpenProbability]]
       val refinedTerms: PositiveInt = terms.refineUnsafe
       fromPercentiles(refinedPercentiles, quantiles, refinedTerms, lower, upper)
     }
@@ -147,7 +147,7 @@ object MetalogDistribution {
   
   // Validation helper methods
   
-  private def validateSorted(ps: Array[Probability]): Either[String, Unit] = {
+  private def validateSorted(ps: Array[OpenProbability]): Either[String, Unit] = {
     // Convert refined array to base type for comparison
     val values: Array[Double] = ps.map(p => p: Double)
     if (ps.isEmpty) {
@@ -160,7 +160,7 @@ object MetalogDistribution {
   }
   
   private def validateArrayLengths(
-    ps: Array[Probability], 
+    ps: Array[OpenProbability],
     qs: Array[Double]
   ): Either[String, Unit] = {
     if (qs.isEmpty) {

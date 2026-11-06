@@ -38,7 +38,7 @@ case class Located[+A](value: A, location: ErrorLocation):
     *
     * {{{
     * probabilityLocated.map(RiskLeafFormState.pctToDomain)
-    *   .refine(ValidationUtil.refineOccurrenceProbability)
+    *   .refine(ValidationUtil.refineProbability)
     * }}}
     */
   def refine[B](

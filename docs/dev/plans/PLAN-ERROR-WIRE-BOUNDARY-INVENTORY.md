@@ -300,3 +300,6 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala
 - modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala
 - modules/server/src/main/scala/com/risquanter/register/foladapter/QueryResponseBuilder.scala
+- modules/app/src/main/scala/app/components/TreeNodeRow.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/LeafSimContent.scala
+- modules/server/src/main/scala/com/risquanter/register/simulation/RiskSampler.scala

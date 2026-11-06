@@ -7,8 +7,8 @@ import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 
 import com.risquanter.register.domain.data.iron.{
-  MetalogTermCount, NonNegativeInt, PositiveDouble, PositiveLong,
-  Probability, ValidationUtil
+  MetalogTermCount, NonNegativeInt, OpenProbability, PositiveDouble, PositiveLong,
+  ValidationUtil
 }
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{
@@ -20,7 +20,7 @@ import com.risquanter.register.domain.errors.{
   * quantile function is defined on. Both fields carry their own constraint and
   * neither constrains the other, so the pair needs no construction gate.
   */
-final case class QuantileAnchor(percentile: Probability, loss: PositiveDouble)
+final case class QuantileAnchor(percentile: OpenProbability, loss: PositiveDouble)
 
 /** Between two and twenty anchors, strictly increasing in percentile and in
   * loss. Construction is the only way in, so the ordering holds for every value
@@ -65,7 +65,7 @@ object QuantileAnchors:
     * that does not strictly increase in percentile or in loss. All three
     * refusals accumulate.
     *
-    * Per-element range is not checked here: `Probability` and `PositiveDouble`
+    * Per-element range is not checked here: `OpenProbability` and `PositiveDouble`
     * are the anchor's own field types, so an out-of-range element cannot reach
     * this call.
     *
@@ -133,7 +133,7 @@ object QuantileAnchors:
       val anchorVs = percentiles.zip(losses).zipWithIndex.map {
         case ((percentile, loss), index) =>
           Validation.validateWith(
-            toValidation(ValidationUtil.refineProbability(percentile, at(FieldName.percentileAt(index)))),
+            toValidation(ValidationUtil.refineOpenProbability(percentile, at(FieldName.percentileAt(index)))),
             toValidation(ValidationUtil.refinePositiveDouble(loss, at(FieldName.quantileAt(index))))
           )(QuantileAnchor.apply)
       }

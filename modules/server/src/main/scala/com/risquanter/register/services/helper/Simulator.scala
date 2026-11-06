@@ -96,7 +96,7 @@ object Simulator {
       sampler = RiskSampler.fromDistribution(
         nodeId = leaf.id,
         streams = streams,
-        occurrenceProb = leaf.probability, // Already OccurrenceProbability type from domain model
+        occurrenceProb = leaf.probability, // Already Probability type from domain model
         lossDistribution = distribution
       )
 
@@ -166,7 +166,8 @@ object Simulator {
             percentiles = percentiles.toArray,
             quantiles = quantiles.toArray,
             terms = terms,
-            lower = Some(0.0) // Loss cannot be negative
+            lower = Some(0.0), // Loss cannot be negative
+            upper = None
           )
           .left.map(error => FitRefusal(
             FieldProblem.MetalogFitFailed,

@@ -7,7 +7,7 @@ import com.raquo.airstream.ownership.ManualOwner
 
 import app.core.LocalProblem
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, DistributionShape}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, OccurrenceProbability, SeedVarId, ValidationMessages}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, Probability, SeedVarId, ValidationMessages}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.http.responses.TreeSummaryResponse
@@ -299,7 +299,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
 
         val newShape = lognormalShape(2000L, 8000L)
-        val newProb: OccurrenceProbability = 0.15
+        val newProb: Probability = 0.15
         val added = state.addLeaf(n("Fraud Risk"), under("Operational Risk"), newShape, newProb)
 
         state.toUpdateRequest() match
@@ -357,7 +357,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val originalName = state.leavesVar.now().head.name
         val newShape = lognormalShape(2000L, 80000L)
-        val newProb: OccurrenceProbability = 0.5
+        val newProb: Probability = 0.5
         state.updateLeaf(originalName, n("Renamed Risk"), under("Operational Risk"), newShape, newProb) match
           case Validation.Success(_, _) =>
             assertTrue(
@@ -725,7 +725,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("empties once the tree is valid") {
         val state = new TreeBuilderState()
-        val probability: OccurrenceProbability = 0.3
+        val probability: Probability = 0.3
         state.triggerValidation()
         state.addPortfolio(n("Ops"), ParentRef.Root)
         state.addLeaf(n("Outage"), under("Ops"), metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 20000.0), Some(3)), probability)

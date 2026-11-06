@@ -1,16 +1,14 @@
 package com.risquanter.register.simulation
 
 import zio.test.*
-import zio.test.Assertion.*
-import com.risquanter.register.domain.data.iron.Probability
+import com.risquanter.register.domain.data.iron.{OpenProbability, OpenProbabilityConstraint}
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.numeric.{Greater, Less}
 
 object MetalogDistributionSpec extends ZIOSpecDefault {
-  
-  // Helper to create Probability arrays from raw doubles for testing
-  private def probArray(values: Double*): Array[Probability] =
-    values.toArray.map(_.refineUnsafe[Greater[0.0] & Less[1.0]])
+
+  // Helper to create OpenProbability arrays from raw doubles for testing
+  private def probArray(values: Double*): Array[OpenProbability] =
+    values.toArray.map(_.refineUnsafe[OpenProbabilityConstraint])
   
   def spec = suite("MetalogDistributionSpec")(
     suite("fromPercentiles - valid inputs")(
@@ -18,7 +16,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isRight) &&
         assertTrue {
@@ -99,7 +97,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99)
         val quantiles = Array(100.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 20000.0, 30000.0, 50000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 9)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 9, lower = None, upper = None)
         
         assertTrue(result.isRight)
       },
@@ -128,8 +126,8 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
       // and neither the fitter nor validateBounds guards against it. The fit
       // then fails and the failure is returned on the error channel, rather
       // than producing non-finite coefficients a caller could mistake for a
-      // real distribution. Distribution.create rejects a zero quantile before
-      // simulation; this covers the library edge directly.
+      // real distribution. An anchor's `PositiveDouble` loss refuses a zero quantile
+      // before simulation; this covers the library edge directly.
       test("a zero quantile fails the fit rather than fitting to nonsense") {
         val percentiles = probArray(0.1, 0.5, 0.9)
         val quantiles = Array(0.0, 50.0, 200.0)
@@ -148,10 +146,10 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
 
     suite("fromPercentiles - defensive validation")(
       test("rejects empty percentiles array") {
-        val percentiles = Array.empty[Probability]
+        val percentiles = Array.empty[OpenProbability]
         val quantiles = Array.empty[Double]
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
         assertTrue(result.fold(err => err.message.contains("empty"), _ => false))
@@ -161,7 +159,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.5, 0.1, 0.9)  // Not sorted!
         val quantiles = Array(5000.0, 1000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
         assertTrue(result.fold(err => err.message.contains("sorted"), _ => false))
@@ -171,7 +169,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0)  // Only 2 elements!
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
         assertTrue(result.fold(err => err.message.contains("same length"), _ => false))
@@ -181,7 +179,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)  // 3 points
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 5)  // Terms > 3!
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 5, lower = None, upper = None)  // Terms > 3!
         
         assertTrue(result.isLeft) &&
         assertTrue(result.fold(err => err.message.contains("exceed"), _ => false))
@@ -220,11 +218,11 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
     ),
     
     suite("fromPercentilesUnsafe - raw double validation")(
-      test("successfully converts valid doubles to Probability") {
+      test("successfully converts valid doubles to OpenProbability") {
         val percentiles = Array(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isRight)
       },
@@ -233,7 +231,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = Array(-0.1, 0.5, 0.95)  // Negative!
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
         assertTrue(result.fold(err => err.message.contains("(0.0, 1.0)"), _ => false))
@@ -243,7 +241,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = Array(0.05, 0.5, 1.5)  // Greater than 1!
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
         assertTrue(result.fold(err => err.message.contains("(0.0, 1.0)"), _ => false))
@@ -253,7 +251,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = Array(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 0)
+        val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 0, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
         assertTrue(result.fold(err => err.message.contains("positive"), _ => false))
@@ -265,7 +263,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isRight) &&
         assertTrue {
@@ -283,7 +281,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isRight) &&
         assertTrue {
@@ -298,7 +296,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isRight) &&
         assertTrue {
@@ -317,7 +315,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val percentiles = probArray(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         
-        val metalogResult = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
+        val metalogResult = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(metalogResult.isRight) &&
         assertTrue {

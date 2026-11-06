@@ -5,7 +5,7 @@ import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 
 import com.risquanter.register.domain.data.DistributionShape
-import com.risquanter.register.domain.data.iron.{MetalogTermCount, Probability}
+import com.risquanter.register.domain.data.iron.{MetalogTermCount, OpenProbability}
 import com.risquanter.register.domain.data.iron.given
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -14,7 +14,7 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   * is the cumulative probability the point was sampled at, which is the
   * server's own grid and so is typed.
   */
-final case class DistributionPreviewPoint(x: Double, pdf: Double, cdf: Probability)
+final case class DistributionPreviewPoint(x: Double, pdf: Double, cdf: OpenProbability)
 
 object DistributionPreviewPoint:
   given codec: JsonCodec[DistributionPreviewPoint] = DeriveJsonCodec.gen[DistributionPreviewPoint]
