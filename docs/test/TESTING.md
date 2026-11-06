@@ -109,7 +109,7 @@ docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docke
 curl -X GET http://localhost:8090/health
 ```
 
-**Expect:** HTTP 200 with `status=healthy`; latency < 50ms
+**Expect:** HTTP 200 with the body `{"status":"Healthy","service":"risk-register"}`. Latency < 50ms.
 
 ---
 

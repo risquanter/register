@@ -109,14 +109,14 @@ ZIO.foreachPar(batches)(batch => ZIO.attempt(batch.map(sampleLoss)))
 
 #### 5. **Clean Layer Dependency Injection**
 ```scala
-val appLayer = ZLayer.make[RiskTreeController & Server](
+val appLayer = ZLayer.make[WorkspaceTreeController & Server](
   Server.default,
   RiskTreeRepositoryInMemory.layer,
   CachedResultResolverLive.layer,
   ContentCacheRegistry.layer,
   MitigationScopeResolverRegistry.layer,
   RiskTreeServiceLive.layer,
-  ZLayer.fromZIO(RiskTreeController.makeZIO)
+  ZLayer.fromZIO(WorkspaceTreeController.makeZIO)
 )
 ```
 
@@ -365,7 +365,7 @@ See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogr
 
 ### **1. Create Risk Tree (Config Only)**
 ```
-POST /risk-trees
+POST /w/{key}/risk-trees
 
 JSON Request
   ↓
@@ -375,8 +375,13 @@ RiskTree (Domain)
   ↓ [Repository]
 Persisted RiskTree
   ↓ [RiskTree.toSummary]
-TreeSummaryResponse (id and name)
+201 Created, Location: risk-trees/{treeId}, body TreeSummaryResponse (id and name)
 ```
+
+The workspace bootstrap, `POST /workspaces`, answers the same way: `201` with
+`Location: w/{key}`, and a body carrying the key and the first tree's summary.
+The two `Location` values are relative references, so each resolves against the
+request's own path to the new resource.
 
 ### **2. Compute LEC (On-Demand)**
 ```
@@ -399,14 +404,26 @@ CachedResultResolver.ensureCached(tree, nodeId, seedEntityId,
   ↓
 LossDistribution (leaf content cached in ContentCache by ContentHash; portfolios re-aggregated per read)
   ↓
-LECGenerator.generateCurvePoints
+LECCurve.probOfExceedance(threshold)
   ↓
-LECCurveResponse (JSON)
+OccurrenceProbability (JSON number in [0, 1])
 ```
 
-**Key Insight:** Configuration (POST) and Computation (GET /lec) are separate.
+`POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi` takes the same path for
+several nodes and ends in `LECGenerator.generateCurvePointsMulti`, which samples
+every curve at one shared set of thresholds. It answers `LECCurvesResponse`, an
+object whose `curves` field maps node id to `LECNodeCurve`, whose `quantiles` map is keyed by
+`QuantileLevel` (`P90`, `P95`, `P99`, `P995`).
+
+A tree the workspace holds but the read's branch or commit lacks answers `404`
+with a `NotFoundKind` naming which: `TreeNotOnBranch` with the branch, or
+`TreeNotAtCommit`. This holds on every tree read: summary, structure,
+probability of exceedance, lec-multi, update and query. A tree the workspace
+does not hold answers `404` with `Unknown`, the same answer as an unknown key.
+
+**Key Insight:** Configuration (POST) and computation (the analysis reads) are separate.
 - **POST:** Fast, synchronous, persists tree definition
-- **GET /lec:** Computes per-node, caches results, incremental recomputation
+- **Analysis reads:** Compute per node, cache leaf results, incremental recomputation
 
 ---
 

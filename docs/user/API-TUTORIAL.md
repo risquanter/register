@@ -162,15 +162,18 @@ http POST localhost:18080/workspaces \
   ]'
 ```
 
-The response contains your workspace key and the auto-assigned tree ID:
+The server answers `201 Created`. The `Location` header is `w/{key}`, a reference relative to `/workspaces` that resolves to the new workspace's address. The body carries your workspace key and the new tree's id and name:
 
 ```json
 {
   "workspaceKey": "aB3x7kLm2Pq9RwZvNsYt8u",
-  "tree": { "id": "01J...", "name": "Operational Risk Model", ... },
-  "expiresAt": "2026-04-22T10:00:00Z"
+  "tree": { "id": "01J...", "name": "Operational Risk Model" },
+  "expiresAt": "2026-04-22T10:00:00Z",
+  "seedEntityId": 1
 }
 ```
+
+`seedEntityId` is the number that keeps this workspace's random streams apart from every other workspace's, which is what makes its figures reproducible (see [Random stream](TERMINOLOGY.md#16-random-stream)).
 
 Store both values — every subsequent request uses them:
 
