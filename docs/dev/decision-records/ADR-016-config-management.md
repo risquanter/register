@@ -19,6 +19,7 @@ We currently define configuration case classes (e.g., `SimulationConfig`) and lo
 - Provide a reusable test loader in `modules/common/src/test/scala/com/risquanter/register/testutil/ConfigTestLoader.scala` that reads from the canonical application.conf (via Typesafe config) so common-module tests no longer hardcode values.
 - Maintain ZIO Config + magnolia derivation for configuration case classes. Tests load via `TypesafeConfigSource.fromTypesafeConfig(ConfigFactory.load())` (with fallback to the repository application.conf file when it is not on the classpath), ensuring values align with production defaults.
 - Keep the server `Configs.makeLayer` helper as the production entry point for layering configuration, with the expectation that the service is launched with the canonical application.conf (and environment overrides) on the classpath.
+- A value that can reasonably be assumed to change behaviour in a way that should be exposed as a user choice or as a best practice is a setting in application.conf. Parallelism limits and sampling resolutions are examples. It is read into the refined type the domain declares by the config decoder (ADR-039 §1), following the existing configuration convention and `.claude/rules/scala-algebraic-design.md`. It may have a default, and that default is listed in application.conf, so the file documents everything that can be set. A value that only states a fact about the code or an external contract stays a constant with its owner (ADR-037 §3).
 
 ## Consequences
 

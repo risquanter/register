@@ -258,6 +258,15 @@ compile error, and a category that is not escalated is not a rule. Requiring
 "no warnings" in prose while 197 unused imports sat in the build is what made
 the earlier version of this list untrue.
 
+### When each tier runs
+
+`commonJVM/test`, `server/test`, `app/test` and `serverIt/test` need no image
+rebuild, so they run after each change, and a commit may be proposed on them. BATS
+suites A and C need the server and frontend images at the current `APP_VERSION`, so
+they run once and the user runs them: for a set of review fixes, when all of them
+are implemented and the other tiers are green; for a plan, at the end of each phase.
+The work is not done until they have run green.
+
 ### Reporting test results
 
 Run tests. Report **pass or fail only**. Never report the count. Never comment on the count. Never act on the count. The count is a distraction and irrelevant to the user. The user only needs to know if the tests passed or failed. Failed test need to be investigated even if they are from earlier. A single failure is a blocker regardless of the count. The user needs to know about it and fix it before proceeding.

@@ -61,6 +61,14 @@ diff, apply the Layer A₀ questions from `.claude/rules/scala-algebraic-design.
   `String` IDs for distinct concepts.) → Missing nominal wrapper per ADR-018.
   **MUST-FIX.**
 - Does the field originate from user input and lack an Iron refinement? **MUST-FIX.**
+- Does the diff, or a plan, echo or decision guide behind it, introduce a new type
+  without the family search from `.claude/rules/scala-algebraic-design.md`: the
+  family, its file, one existing member quoted, and the naming pattern? This binds
+  wherever a new type is proposed, in any form. For a refinement, the search looks
+  for the same base type with any nearby constraint, not only an identical one.
+  Where an existing type is slightly wider, the finding states whether the code can
+  be made correct for the extra values, so that the existing type can be reused. A
+  new `:|` alias in a diff is always checked against this. **MUST-FIX.**
 - Does a signature the diff adds, changes **or calls** take or return `String`
   (or another raw primitive) for a value whose contract is narrower than "any
   text"? The receiver's signature is never the justification: if it is ours, the
@@ -76,6 +84,11 @@ diff, apply the Layer A₀ questions from `.claude/rules/scala-algebraic-design.
   A hand-written string survives only where it is a contract with something
   other than the serialiser, such as a query-language keyword, and says so.
   **MUST-FIX.**
+- Is a constant in code a value that can reasonably be assumed to change behaviour
+  in a way that should be exposed as a user choice or as a best practice, such as a
+  parallelism limit or a sampling resolution? It belongs in `application.conf`,
+  read by the config decoder into its refined type, with any default listed in that
+  file (ADR-016, ADR-037 §3). **MUST-FIX.**
 - Is `Option[T] = None` a default parameter? The `Option` stays and the default
   goes, so a caller with nothing to pass writes `None` where it is visible
   (ADR-037). **MUST-FIX**, at the same severity as a raw primitive standing in

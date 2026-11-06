@@ -66,6 +66,8 @@ object FolQueryFailure:
 
 Ownership must be unambiguous. A value two types need is not this pattern — it is a set not yet recognised, or it belongs to a third type neither site declares.
 
+A value that can reasonably be assumed to change behaviour in a way that should be exposed as a user choice or as a best practice is not this pattern either. It is a setting in `application.conf`, read into its refined type by the config decoder, with any default listed in that file (ADR-016).
+
 ### 4. A Defaulted `Option` Is Forbidden
 
 `Option[T]` states that absence is legitimate. A default states that omitting the argument is free, which makes dropped information invisible:

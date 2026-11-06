@@ -26,6 +26,15 @@ paths:
   carrying a note that says where the value came from. A user-facing sentence is
   a named template, and a template taking a parameter is a function of it, so the
   sentence cannot drift from the values it interpolates.
+- A value that can reasonably be assumed to change behaviour in a way that should
+  be exposed as a user choice or as a best practice is not a constant. It is a
+  setting in `modules/server/src/main/resources/application.conf`, overridable by
+  an environment variable in the file's existing style, and read by the config
+  decoder into the refined type the domain declares, reusing the existing type per
+  the family search in `scala-algebraic-design.md` (ADR-016, ADR-039 §1). It may
+  have a default, and that default is listed in `application.conf`, so the file
+  documents everything that can be set. Parallelism limits and sampling resolutions
+  are examples.
 - `Option[T] = None` as a default parameter is forbidden. The `Option` stays and
   the default goes, so a caller with nothing to pass writes `None` at the call
   site, where it is visible. A derived decoder still reads an absent JSON key as
