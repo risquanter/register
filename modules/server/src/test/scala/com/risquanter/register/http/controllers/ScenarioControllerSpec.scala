@@ -16,7 +16,7 @@ import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, MergeStagingRef, SafeName, ScenarioName, StoreBranch, TreeId, WorkspaceId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.{AppError, FieldName, IrminError}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
-import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioResponse, ScenarioSummaryResponse, TreeLabel, Versions}
+import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioListResponse, ScenarioResponse, TreeLabel, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
@@ -112,7 +112,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       // injects its own merge service in every case that exercises a merge, so
       // the fallback only has to be a real repository, not a configured one.
       repo           <- ZIO.service[RiskTreeRepository].provide(RiskTreeRepositoryInMemory.layer)
-      mergeSvc        = mergeService.getOrElse(new ScenarioMergeServiceLive(FakeIrminClient(state), repo))
+      mergeSvc        = mergeService.getOrElse(new ScenarioMergeServiceLive(FakeIrminClient(state), repo, TestConfigs.conflictScanFetchParallelism))
       ctrl           <- ScenarioController.makeZIO
         .provide(
           ZLayer.succeed(new ScenarioServiceLive(FakeIrminClient(state))),
@@ -159,7 +159,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
                    .body(CreateScenarioRequest(scenarioName("fork"), ScenarioSourceDto.Branch(BranchChoice.Scenario(scenarioName("base")))).toJson).contentType("application/json").send(backend)
         resp  <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios").send(backend)
         body   = orThrow(resp.body.toOption, s"expected list body, got: $resp")
-        listed = orThrow(body.fromJson[List[ScenarioSummaryResponse]].toOption, s"bad list json: $body")
+        listed = orThrow(body.fromJson[ScenarioListResponse].toOption, s"bad list json: $body").scenarios
       yield assertTrue(
         resp.code.code == 200,
         listed.map(s => s.name -> s.head).toMap.get(scenarioName("base")) ==
@@ -261,7 +261,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
                     .header("If-Match", s""""${hash('a').value}"""").send(backend)
         after  <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios").send(backend)
         afterBody = orThrow(after.body.toOption, s"expected body, got: $after")
-        listed  = orThrow(afterBody.fromJson[List[ScenarioSummaryResponse]].toOption, s"bad json: $afterBody")
+        listed  = orThrow(afterBody.fromJson[ScenarioListResponse].toOption, s"bad json: $afterBody").scenarios
       yield assertTrue(del.code.code == 204, listed.isEmpty)
     },
 

@@ -6,7 +6,7 @@ import sttp.tapir.generic.auto.*
 import sttp.model.StatusCode
 
 import com.risquanter.register.http.requests.CreateScenarioRequest
-import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergeScenarioResponse}
+import com.risquanter.register.http.responses.{ScenarioListResponse, ScenarioResponse, MergePreviewResponse, MergeScenarioResponse}
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, ScenarioName, CommitHash}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -38,7 +38,7 @@ trait ScenarioEndpoints extends BaseEndpoint:
       .description("List scenarios in workspace with each one's current head commit")
       .in("w" / path[WorkspaceKeySecret]("key") / "scenarios")
       .get
-      .out(jsonBody[List[ScenarioSummaryResponse]])
+      .out(jsonBody[ScenarioListResponse])
 
   val previewScenarioMergeEndpoint =
     authedBaseEndpoint

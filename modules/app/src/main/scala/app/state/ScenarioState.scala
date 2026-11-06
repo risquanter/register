@@ -127,7 +127,7 @@ final class ScenarioState(
         deleteFailure.set(None)
         listScenariosEndpoint((userIdAccessor(), key))
           .flatMap { fresh =>
-            fresh.find(_.name == name) match
+            fresh.scenarios.find(_.name == name) match
               case Some(s) =>
                 deleteScenarioEndpoint((userIdAccessor(), key, name, s.head))
                   .tap(_ => ZIO.succeed {

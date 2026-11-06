@@ -8,7 +8,7 @@ import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, 
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.ScenarioSourceDto
-import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergeScenarioResponse}
+import com.risquanter.register.http.responses.{ScenarioListResponse, ScenarioResponse, MergePreviewResponse, MergeScenarioResponse}
 import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService}
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -58,7 +58,7 @@ class ScenarioController private (
         ws      <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         summaries <- scenarioService.list(ws.id)
-      yield summaries.map(s => ScenarioSummaryResponse(s.name, s.head))).wireEither(TreeScope.NoTree)
+      yield ScenarioListResponse(summaries.map(_.toWire))).wireEither(TreeScope.NoTree)
   }
 
   val previewScenarioMerge: ServerEndpoint[Any, Task] = previewScenarioMergeEndpoint.serverLogic {

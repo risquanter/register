@@ -75,7 +75,7 @@ final class ScenarioListState(
   def refresh(): Unit =
     keySignal.now() match
       case Some(key) =>
-        refreshTrigger.emit(Some(() => listScenariosEndpoint((userIdAccessor(), key)).toOutcomeEventStream))
+        refreshTrigger.emit(Some(() => listScenariosEndpoint((userIdAccessor(), key)).map(_.scenarios).toOutcomeEventStream))
       case None => ()
 
   // A workspace key appearing for the first time (bootstrap via Create, or a
