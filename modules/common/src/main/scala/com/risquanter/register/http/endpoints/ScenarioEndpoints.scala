@@ -3,11 +3,12 @@ package com.risquanter.register.http.endpoints
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.schemaForCaseClass
-import sttp.model.{HeaderNames, StatusCode}
+import sttp.model.StatusCode
 
 import com.risquanter.register.http.requests.CreateScenarioRequest
 import com.risquanter.register.http.responses.{ScenarioListResponse, ScenarioResponse, MergePreviewResponse, MergeScenarioResponse}
 import com.risquanter.register.domain.data.iron.{ScenarioName, CommitHash}
+import com.risquanter.register.domain.errors.RequestHeaderName
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Workspace-scoped scenario endpoints: create, list, merge preview, merge and
@@ -61,6 +62,6 @@ trait ScenarioEndpoints extends BaseEndpoint:
       .name("deleteScenario")
       .description("Delete a scenario. Requires If-Match with the head observed from listScenarios (CAS, DD-5 Option A)")
       .in(scenariosRoute / path[ScenarioName.ScenarioName]("name"))
-      .in(header[CommitHash](HeaderNames.IfMatch))
+      .in(header[CommitHash](RequestHeaderName.IfMatch.wireName))
       .delete
       .out(statusCode(StatusCode.NoContent))
