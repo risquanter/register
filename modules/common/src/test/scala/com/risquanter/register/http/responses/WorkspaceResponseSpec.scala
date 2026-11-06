@@ -15,7 +15,7 @@ object WorkspaceResponseSpec extends ZIOSpecDefault {
   def spec = suite("WorkspaceResponse")(
     suite("WorkspaceLocation")(
       test("renders as the workspace segment and the key") {
-        assertTrue(WorkspaceLocation.codec.encode(WorkspaceLocation(key)) == WorkspaceLocation.Prefix + key.reveal)
+        assertTrue(WorkspaceLocation.codec.encode(WorkspaceLocation(key)) == LocationRoute.Workspace.prefix + key.reveal)
       },
       test("parse undoes render") {
         val location = WorkspaceLocation(key)

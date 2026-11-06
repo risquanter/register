@@ -374,7 +374,7 @@ RiskTreeDefinitionRequest (DTO)
 RiskTree (Domain)
   ↓ [Repository]
 Persisted RiskTree
-  ↓ [RiskTree.toSummary]
+  ↓ [RiskTree.toWire]
 201 Created, Location: risk-trees/{treeId}, body TreeSummaryResponse (id and name)
 ```
 

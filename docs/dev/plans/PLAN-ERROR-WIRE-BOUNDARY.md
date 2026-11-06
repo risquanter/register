@@ -97,7 +97,7 @@ Every one of the seven files in
 `modules/common/src/main/scala/com/risquanter/register/http/responses/` follows
 it: a wire-only `final case class`, a codec derived with `DeriveJsonCodec.gen`,
 and a one-way projection from the domain type.
-`RiskTree.toSummary` is the reference. There is no inverse
+`RiskTree.toWire` is the reference. There is no inverse
 anywhere, and the browser holds the wire type directly —
 `app/state/TreeViewState.scala:107` declares
 `Signal[LoadState[List[TreeSummaryResponse]]]`.
@@ -735,7 +735,7 @@ In the controllers, next to the success projection. The success side already
 reads, at `WorkspaceTreeController.scala:101`:
 
 ```scala
-result <- riskTreeService.update(ws.id, treeId, req, branch).map(_.toSummary)
+result <- riskTreeService.update(ws.id, treeId, req, branch).map(_.toWire)
 ```
 
 Every controller method ends `(for ... yield result).either`, because
@@ -2803,7 +2803,7 @@ exercised on a small surface before the largest one:
    *Implemented 2026-11-06*, under `EWB-D-65` to `EWB-D-68` and with the shape
    the step 5 echo approved. `SimulationResponse` is replaced by
    `TreeSummaryResponse(id: TreeId, name: SafeName)`, projected by
-   `RiskTree.toSummary`, and the list answers `TreeListResponse(trees)`. The
+   `RiskTree.toWire`, and the list answers `TreeListResponse(trees)`. The
    structure read answers a `RiskTree`, and an absent tree answers `404` with
    `NotFoundKind` on all six reads (`EWB-D-66`). Tree create and workspace
    bootstrap answer `201` with a relative `Location` (`EWB-D-68`). The CORS

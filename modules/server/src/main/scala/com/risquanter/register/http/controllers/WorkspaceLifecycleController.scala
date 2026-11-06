@@ -63,7 +63,7 @@ class WorkspaceLifecycleController private (
         WorkspaceLocation(key),
         WorkspaceBootstrapResponse(
           workspaceKey = key,
-          tree = tree.toSummary,
+          tree = tree.toWire,
           expiresAt = ws.expiresAt,
           seedEntityId = ws.seedEntityId
         )
@@ -81,7 +81,7 @@ class WorkspaceLifecycleController private (
         trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, Revision.Head(branch)))
         // A tree the workspace holds but this branch lacks is left out, so the
         // list is what the branch shows.
-        existing  = trees.collect { case Some((tree, _)) => tree.toSummary }
+        existing  = trees.collect { case Some((tree, _)) => tree.toWire }
       yield TreeListResponse(existing)).wireEither(TreeScope.NoTree)
   }
 
@@ -119,7 +119,7 @@ class WorkspaceLifecycleController private (
         // which is correct no matter which branch it lives on. Unlike deleteTree's
         // removeTree (main-only), there is no asymmetric bookkeeping risk here.
         _      <- workspaceStore.addTree(key, tree.id)
-      yield (TreeLocation(tree.id), tree.toSummary)).wireEither(TreeScope.NoTree)
+      yield (TreeLocation(tree.id), tree.toWire)).wireEither(TreeScope.NoTree)
   }
 
   val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeySecretEndpoint.serverLogic { case (maybeUserId, key) =>

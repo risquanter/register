@@ -45,10 +45,9 @@ final case class RiskTree private (
   def root: RiskNode = index.nodes(rootId)
 
   /** The tree's identity for a list, a write acknowledgement or a bootstrap.
-    * The projection is owned here, by the source (ADR-038 §5). It is not
-    * `toWire`, because this type is itself the structure endpoint's wire form.
+    * The projection is owned here, by the source (ADR-038 §5).
     */
-  def toSummary: TreeSummaryResponse = TreeSummaryResponse(id, name)
+  def toWire: TreeSummaryResponse = TreeSummaryResponse(id, name)
 }
 
 object RiskTree {

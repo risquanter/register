@@ -33,20 +33,20 @@ object TreeSummaryResponseSpec extends ZIOSpecDefault {
 
   def spec = suite("TreeSummaryResponse")(
     test("the summary is the tree's identifier and name") {
-      assertTrue(riskTree.toSummary == TreeSummaryResponse(treeId("sim-1"), name))
+      assertTrue(riskTree.toWire == TreeSummaryResponse(treeId("sim-1"), name))
     },
     test("round-trips through its codec with the name still refined") {
-      val summary = riskTree.toSummary
+      val summary = riskTree.toWire
       assertTrue(summary.toJson.fromJson[TreeSummaryResponse] == Right(summary))
     },
     test("a list wraps its trees in an object") {
-      val json = TreeListResponse(List(riskTree.toSummary)).toJson
+      val json = TreeListResponse(List(riskTree.toWire)).toJson
       assertTrue(json.startsWith("{\"trees\":["))
     },
     suite("TreeLocation")(
       test("renders as the collection segment and the identifier") {
         val id = treeId("sim-1")
-        assertTrue(TreeLocation.codec.encode(TreeLocation(id)) == TreeLocation.Prefix + id.value)
+        assertTrue(TreeLocation.codec.encode(TreeLocation(id)) == LocationRoute.Tree.prefix + id.value)
       },
       test("parse undoes render") {
         val location = TreeLocation(treeId("sim-1"))

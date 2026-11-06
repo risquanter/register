@@ -1,7 +1,7 @@
 package com.risquanter.register.http.responses
 
 import java.time.Instant
-import sttp.tapir.{Codec, CodecFormat, DecodeResult, Schema}
+import sttp.tapir.{Codec, CodecFormat, Schema}
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, SeedEntityId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.given
@@ -32,21 +32,14 @@ object WorkspaceBootstrapResponse:
 final case class WorkspaceLocation(key: WorkspaceKeySecret)
 
 object WorkspaceLocation:
-  /** The first segment of the workspace routes, fixed by the route. */
-  val Prefix: String = "w/"
-
   private val keyCodec: Codec[String, WorkspaceKeySecret, CodecFormat.TextPlain] =
     import IronTapirCodecs.given
     summon[Codec[String, WorkspaceKeySecret, CodecFormat.TextPlain]]
 
-  /** Render and parse form one pair: `parse(render(l)) == Value(l)`. Both go
-    * through the key's own codec, so this adds no site that reads the raw
-    * credential (ADR-022). */
+  /** Both directions go through the key's own codec, so this adds no site that
+    * reads the raw credential (ADR-022). */
   given codec: Codec[String, WorkspaceLocation, CodecFormat.TextPlain] =
-    Codec.string.mapDecode[WorkspaceLocation] { raw =>
-      if raw.startsWith(Prefix) then keyCodec.decode(raw.stripPrefix(Prefix)).map(WorkspaceLocation(_))
-      else DecodeResult.Mismatch(Prefix, raw)
-    }(l => Prefix + keyCodec.encode(l.key))
+    prefixedLocation(LocationRoute.Workspace, keyCodec)(WorkspaceLocation(_), _.key)
 
 /** The rotate answer: the replacement key. The other answer that carries the
   * key (ADR-021). */

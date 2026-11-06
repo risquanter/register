@@ -52,7 +52,7 @@ class WorkspaceTreeController private (
         // The workspace holds the tree, so an empty read means the branch lacks it.
         loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrFail(TreeAbsentAtRevision(ws.id, treeId, rev))
         (tree, _) = loaded
-      yield tree.toSummary).wireEither(TreeScope.InTree(treeId))
+      yield tree.toWire).wireEither(TreeScope.InTree(treeId))
   }
 
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
@@ -101,7 +101,7 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.update(ws.id, treeId, req, branch).map(_.toSummary)
+        result <- riskTreeService.update(ws.id, treeId, req, branch).map(_.toWire)
       yield result).wireEither(TreeScope.InTree(treeId))
   }
 
@@ -112,7 +112,7 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.revertTree(ws.id, treeId, req.toCommit, branch).map(_.toSummary)
+        result <- riskTreeService.revertTree(ws.id, treeId, req.toCommit, branch).map(_.toWire)
       yield result).wireEither(TreeScope.InTree(treeId))
   }
 
