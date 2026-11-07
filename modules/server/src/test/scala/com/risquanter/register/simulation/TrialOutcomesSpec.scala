@@ -1,16 +1,16 @@
 package com.risquanter.register.simulation
 
+import zio.ZIO
 import zio.test.*
 import zio.prelude.Identity
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import com.risquanter.register.domain.data.{Loss, TrialId}
 import com.risquanter.register.domain.data.iron.PositiveInt
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import com.risquanter.register.testutil.RiskResultTestSupport.outcomesOf
 
 /**
- * The gate on trial ids, the loss operations that keep it, and the law tests
+ * The invariant on trial ids, the loss operations that keep it, and the law tests
  * for the TrialOutcomes monoid.
  *
  * Each law is exercised through the type class instance itself
@@ -51,25 +51,26 @@ object TrialOutcomesSpec extends ZIOSpecDefault {
   private val genAligned2: Gen[Any, (TrialOutcomes, TrialOutcomes)] =
     genAligned3.map { case (a, b, _) => (a, b) }
 
-  private val trialIdRefusal = ValidationError(ErrorLocation.Whole, FieldProblem.TrialIdOutOfRange)
+  private val invariantViolation = Assertion.isSubtype[IllegalArgumentException](Assertion.anything)
 
   def spec = suite("TrialOutcomesSpec")(
 
-    suite("create - the gate on trial ids")(
+    suite("create - the invariant on trial ids")(
       test("accepts the lowest and the highest trial id") {
-        val built = TrialOutcomes.create(10, Map(0 -> 5L, 9 -> 7L)).toEither
-        assertTrue(built.map(_.outcomes) == Right(Map(0 -> 5L, 9 -> 7L)))
+        assertTrue(TrialOutcomes.create(10, Map(0 -> 5L, 9 -> 7L)).outcomes == Map(0 -> 5L, 9 -> 7L))
       },
       test("accepts an empty map") {
-        assertTrue(TrialOutcomes.create(10, Map.empty).toEither.map(_.outcomes) == Right(Map.empty[TrialId, Loss]))
+        assertTrue(TrialOutcomes.create(10, Map.empty).outcomes == Map.empty[TrialId, Loss])
       },
-      test("refuses a trial id equal to the trial count") {
-        val refused = TrialOutcomes.create(10, Map(10 -> 5L)).toEither.left.map(_.toList)
-        assertTrue(refused == Left(List(trialIdRefusal)))
+      test("throws on a trial id equal to the trial count") {
+        assertZIO(ZIO.attempt(TrialOutcomes.create(10, Map(10 -> 5L))).exit)(Assertion.fails(invariantViolation))
       },
-      test("refuses a negative trial id") {
-        val refused = TrialOutcomes.create(10, Map(-1 -> 5L)).toEither.left.map(_.toList)
-        assertTrue(refused == Left(List(trialIdRefusal)))
+      test("throws on a negative trial id") {
+        assertZIO(ZIO.attempt(TrialOutcomes.create(10, Map(-1 -> 5L))).exit)(Assertion.fails(invariantViolation))
+      },
+      test("is a defect when it throws inside an effect, so no typed error handler sees it") {
+        val inEffect = ZIO.succeed(Map(10 -> 5L)).map(TrialOutcomes.create(10, _))
+        assertZIO(inEffect.exit)(Assertion.dies(invariantViolation))
       }
     ),
 

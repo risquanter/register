@@ -2,8 +2,8 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-68`, is ruled. `EWB-D-1` to
-`EWB-D-43` and `EWB-D-61` to `EWB-D-68` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
+**Status.** Every decision, `EWB-D-1` to `EWB-D-69`, is ruled. `EWB-D-1` to
+`EWB-D-43` and `EWB-D-61` to `EWB-D-69` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
 and §16.7, `EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in
 §17, and `EWB-D-54` and `EWB-D-59` in §18. Approval
 is in place: the token names this document and the file inventory exists beside
@@ -6136,6 +6136,34 @@ not read `Location` across origins, because the CORS policy exposed only
 `Content-Type`. The policy now exposes `Location` as well. ADR-021 §4 gains a
 `Location` bullet, and ADR-022's context bullet now says a bearer credential
 crosses to its holder only in the answers that mint it.
+
+### EWB-D-69 — whether a trailing slash is served — RULED 2026-11-06
+
+**Goal.** `EWB-D-68`'s relative `Location` is correct only when the request's
+target has no trailing slash. RFC 3986 §5.2.3 appends the reference to everything
+before the target's last `/`, so `POST /w/{key}/risk-trees/` resolves
+`risk-trees/{id}` to `/w/{key}/risk-trees/risk-trees/{id}`. Tapir's zio-http
+adapter drops empty path segments, so that request was served and answered a
+`Location` naming nothing.
+
+**Option A — refuse the slash on the two creates.** Cost: every other route keeps
+serving both forms.
+
+**Option B — refuse the slash on every API route, through `baseEndpoint`.** Cost:
+a request with a slash that was served now answers `404` or `405`, with Tapir's
+constant body (ADR-035 §4). Zalando's API guideline #136 reads "MUST use normalized
+paths without empty path segments and trailing slashes".
+
+**Option C — answer an absolute `Location`.** Cost: the tree create's header then
+writes the workspace key, which `EWB-D-68` chose the relative form to avoid.
+
+**Ruled 2026-11-06: Option B.** The input cannot sit on `baseEndpoint`. Tapir
+1.13.4's zio-http interpreter builds each route's pattern from its inputs in order
+and reads `noTrailingSlash` as a wildcard at its position, so a guard placed first
+made routes without a slash answer `404` and failed the integration tier. Where
+the refusal is made is open. The probe port in `HealthProbeServer.scala` does not
+build on `baseEndpoint` and is not affected. A BATS failure caused by a request
+sending a slash is corrected in the suite.
 
 ### EWB-D-67 — what a tree write answers — RULED 2026-11-05
 

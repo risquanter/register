@@ -254,7 +254,7 @@ enum RequestHeaderName(val wireName: String):
   /** `authedBaseEndpoint` and the workspace bootstrap endpoint. */
   case UserId extends RequestHeaderName("x-user-id")
 
-  /** `BaseEndpoint.activeBranchHeader`. */
+  /** `BaseEndpoint.branchHeader`. */
   case Branch extends RequestHeaderName("X-Branch")
 
   /** The scenario delete endpoint's compare-and-set precondition. */
@@ -488,7 +488,6 @@ enum FieldProblem:
   case LossRangeNotOrdered(min: PositiveLong, max: PositiveLong)
   case MetalogFitFailed
   case LognormalFitFailed
-  case TrialIdOutOfRange
 
   // Mitigation
   case PipelineEmpty(min: NonNegativeInt)
@@ -581,7 +580,6 @@ object FieldProblem:
     case LossRangeNotOrdered(_, _)                  => ValidationErrorCode.INVALID_RANGE
     case MetalogFitFailed                           => ValidationErrorCode.INVALID_METALOG_PARAMS
     case LognormalFitFailed                         => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS
-    case TrialIdOutOfRange                          => ValidationErrorCode.CONSTRAINT_VIOLATION
     case PipelineEmpty(_)                          => ValidationErrorCode.CONSTRAINT_VIOLATION
     case PipelineTooLong(_, _)                      => ValidationErrorCode.CONSTRAINT_VIOLATION
     case CapMustExceedDeductible                    => ValidationErrorCode.INVALID_COMBINATION

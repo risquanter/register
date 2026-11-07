@@ -208,8 +208,7 @@ final case class CachedResultResolverLive(
         // Rationale: Maintain chain of truth - provenance always in cache
         (sampler, provenance) <- Simulator.createSamplerFromLeaf(leaf, seedEntityId, seed3, seed4)
         losses                <- Simulator.performTrials(sampler, nTrials, parallelism)
-        outcomes              <- fromValidation(TrialOutcomes.create(nTrials, losses))
-        content                = LeafSimResult(outcomes, provenance)
+        content                = LeafSimResult(TrialOutcomes.create(nTrials, losses), provenance)
         _                     <- cache.put(key, content)
 
         endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)

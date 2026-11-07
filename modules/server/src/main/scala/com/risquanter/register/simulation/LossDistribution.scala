@@ -43,20 +43,21 @@ final case class TrialOutcomes private (nTrials: PositiveInt, outcomes: Map[Tria
 }
 
 object TrialOutcomes {
-  /** The only way to build a value from a raw map. Only a programming mistake
-    * can place a trial id outside `0 until nTrials`: the simulator draws its ids
-    * from that range.
+  /** The only way to build a value from a raw map. No user input reaches this:
+    * the simulator draws its ids from `0 until nTrials`, so an id outside that
+    * range is a programming mistake and throws rather than refuses (ADR-033 §5).
     *
     * {{{
     * create(10, Map(0 -> 5L, 9 -> 7L))  // succeeds
-    * create(10, Map(10 -> 5L))          // TrialIdOutOfRange
+    * create(10, Map(10 -> 5L))          // throws IllegalArgumentException
     * }}}
     */
-  def create(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]): Validation[ValidationError, TrialOutcomes] =
-    if (outcomes.keysIterator.forall(trial => trial >= 0 && trial < nTrials))
-      Validation.succeed(TrialOutcomes(nTrials, outcomes))
-    else
-      Validation.fail(ValidationError(ErrorLocation.Whole, FieldProblem.TrialIdOutOfRange))
+  def create(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]): TrialOutcomes =
+    require(
+      outcomes.keysIterator.forall(trial => trial >= 0 && trial < nTrials),
+      s"A trial id lies outside 0 until $nTrials"
+    )
+    TrialOutcomes(nTrials, outcomes)
 
   /** Identity for the `cfg.defaultNTrials` slice only; combining with a different trial count throws. */
   def empty(using cfg: SimulationConfig): TrialOutcomes =

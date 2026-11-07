@@ -103,8 +103,6 @@ object ValidationMessages:
       "The bounds could not be fitted to a lognormal distribution. " +
       "Check that the minimum loss is above zero and below the maximum, " +
       "and that the two are far enough apart to describe a spread."
-    case FieldProblem.TrialIdOutOfRange =>
-      "Simulation recorded a trial outside its trial count"
 
     // Mitigation
     case FieldProblem.PipelineEmpty(min) =>

@@ -19,7 +19,7 @@ object RiskResultTestSupport {
   /** Trial outcomes through the gate. A fixture with a trial id outside
     * `0 until nTrials` throws here. */
   def outcomesOf(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]): TrialOutcomes =
-    TrialOutcomes.create(nTrials, outcomes).toEither.toOption.get
+    TrialOutcomes.create(nTrials, outcomes)
 
   /** One node's figures with no mitigation layer applied. */
   def leafOf(

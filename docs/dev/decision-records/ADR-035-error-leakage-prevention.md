@@ -26,9 +26,9 @@ crosses. Internal failures reach it through one total function:
 
 ```scala
 enum WireError:
-  case ValidationRejected(errors: List[ValidationError], trace: TraceId)
-  case QueryRejected(problem: QueryProblem, trace: TraceId)
-  case NotFound(trace: TraceId)
+  case RequestRejected(errors: List[ValidationError], trace: TraceId)
+  case ValidationRejected(tree: TreeId, detail: RejectionDetail, trace: TraceId)
+  case NotFound(absence: NotFoundKind, trace: TraceId)
   case WorkspaceExpired(cause: ExpiryCause, lifetime: Duration, idleLimit: Duration, trace: TraceId)
   case AccessDenied(trace: TraceId)
   case Conflict(conflict: ConflictKind, trace: TraceId)
@@ -37,8 +37,8 @@ enum WireError:
   case InternalFault(trace: TraceId)
 
 object WireError:
-  def fromAppError(e: AppError, trace: TraceId): WireError = e match
-    case ValidationFailed(errors) => WireError.ValidationRejected(errors, trace)
+  def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError = e match
+    case ValidationFailed(errors) => rejected(RejectionDetail.Fields(errors), errors)  // by scope
     // … one arm per AppError case
 ```
 
@@ -54,10 +54,10 @@ so no status is shared and no case is undeclared:
 ```scala
 .errorOut(
   oneOf[WireError](
-    oneOfVariant(BaseEndpoint.validationRejectedOut),         // 400
-    oneOfVariant(StatusCode.UnprocessableEntity, jsonBody[WireError.QueryRejected]),
+    oneOfVariant(BaseEndpoint.requestRejectedOut),            // 400
+    oneOfVariant(BaseEndpoint.validationRejectedOut),         // 422
     oneOfVariant(StatusCode.NotFound,            jsonBody[WireError.NotFound]),
-    // … seven in total
+    // … nine in total
   )
 )
 ```
@@ -66,12 +66,12 @@ Controllers reach it through one extension method, which is also the only place
 the trace is read, because reading the active span requires an effect:
 
 ```scala
-def wireEither(using Tracing): ZIO[R, Nothing, Either[WireError, A]] =
+def wireEither(scope: TreeScope)(using Tracing): ZIO[R, Nothing, Either[WireError, A]] =
   effect
     .map(Right(_))
     .catchAll(error =>
       ActiveTrace.id.flatMap(trace =>
-        logProjectedFailure(error, trace).as(Left(WireError.fromAppError(error, trace)))
+        logProjectedFailure(error, trace).as(Left(WireError.fromAppError(error, trace, scope)))
       )
     )
 ```
@@ -130,7 +130,7 @@ A request the codecs reject and a bug in a handler both bypass `wireEither`.
 Each has an interceptor that answers with a declared output:
 
 ```scala
-.decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))   // → ValidationRejected
+.decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))   // → RequestRejected
 .exceptionHandler(DefectCatchAllInterceptor.exceptionHandler)      // re-raises, so the catch-all answers
 .appendInterceptor(DefectCatchAllInterceptor.interceptor(tracing)) // → InternalFault, inside CORS
 ```
@@ -182,7 +182,7 @@ logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created"
 case TreeNotInWorkspace(_, _) => WireError.AccessDenied(trace)
 
 // GOOD: one opaque status for both, so neither answer distinguishes them
-case TreeNotInWorkspace(_, _) => WireError.NotFound(trace)
+case TreeNotInWorkspace(_, _) => WireError.NotFound(NotFoundKind.Unknown(), trace)
 ```
 
 ### ❌ An Error Shape Outside the Declared Output
@@ -204,7 +204,7 @@ ValuedEndpointOutput(BaseEndpoint.internalFaultOut, WireError.InternalFault(trac
 | `WireError.fromAppError` | One-way projection, exhaustive over `AppError` |
 | `BaseEndpoint` `oneOf` | One declared variant per wire case, each at its own status |
 | `WireEither.wireEither` | The single projection point, and the only reader of the trace for a controller failure |
-| `WireDecodeFailureHandler` | A rejected input answers `ValidationRejected` with the status the input decides |
+| `WireDecodeFailureHandler` | A rejected input answers `RequestRejected` with the status the input decides |
 | `DefectCatchAllInterceptor` | A defect or escaped failure answers `InternalFault`, from inside the CORS interceptor |
 | `build.sbt` | `-Wconf:msg=match may not be exhaustive:error` promotes an inexhaustive match to a compile error |
 
