@@ -305,3 +305,5 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/simulation/RiskSampler.scala
 - modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceQueryEndpoints.scala
 - modules/server/src/main/scala/com/risquanter/register/http/SecurityHeadersInterceptor.scala
+- modules/server/src/main/scala/com/risquanter/register/http/TrailingSlashInterceptor.scala
+- modules/server/src/main/scala/com/risquanter/register/http/HttpApi.scala

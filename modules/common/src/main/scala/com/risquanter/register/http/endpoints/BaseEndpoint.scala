@@ -46,6 +46,13 @@ object BaseEndpoint {
   val validationRejectedOut: EndpointOutput[WireError.ValidationRejected] =
     statusCode(StatusCode.UnprocessableEntity).and(jsonBody[WireError.ValidationRejected])
 
+  /** The `404` output. An endpoint's own variant below sends it, and so does the
+    * answer to a request matching no route, which has no declared output of its
+    * own to use.
+    */
+  val notFoundOut: EndpointOutput[WireError.NotFound] =
+    statusCode(StatusCode.NotFound).and(jsonBody[WireError.NotFound])
+
   /** The same body with the status as a value, for the decode-failure handler.
     *
     * A rejection it answers carries whichever status the rejected input decides
@@ -75,11 +82,11 @@ trait BaseEndpoint {
     * The status is declared beside the case it belongs to, so a case cannot be
     * sent with the wrong status, and the generated OpenAPI document gains one
     * schema per status instead of a single envelope for all of them. A browser
-    * selects the variant by status alone, so no two variants share one. Three
+    * selects the variant by status alone, so no two variants share one. Four
     * variants read their status and body from a named output in the companion,
     * which keeps one description of a body that two senders share: the
-    * decode-failure handler also sends a request rejection, and the catch-all
-    * also sends an internal fault.
+    * decode-failure handler also sends a request rejection, the catch-all also
+    * sends an internal fault, and the no-route answer also sends a not-found.
     *
     * Every variant names a concrete case rather than the enum, which is what
     * keeps a body free of a discriminator field. There is deliberately no
@@ -95,7 +102,7 @@ trait BaseEndpoint {
         oneOfVariant(BaseEndpoint.requestRejectedOut),
         oneOfVariant(BaseEndpoint.validationRejectedOut),
         oneOfVariant(StatusCode.Forbidden,           jsonBody[WireError.AccessDenied]),
-        oneOfVariant(StatusCode.NotFound,            jsonBody[WireError.NotFound]),
+        oneOfVariant(BaseEndpoint.notFoundOut),
         oneOfVariant(StatusCode.Gone,                jsonBody[WireError.WorkspaceExpired]),
         oneOfVariant(StatusCode.Conflict,            jsonBody[WireError.Conflict]),
         oneOfVariant(StatusCode.NotImplemented,      jsonBody[WireError.NotSupported]),

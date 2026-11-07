@@ -106,6 +106,23 @@ The 8 MiB body cap is sized above the largest valid tree payload (a maximal
 10 000-node expert-leaf tree serialises to ≈ 4.94 MiB). The body-size control is
 a transport-layer DoS defence and is cross-referenced from ADR-029.
 
+### 7. One Path Form per Resource
+
+Every route in the API has one path, with no trailing slash. A request carrying a
+trailing slash matches no route, and it receives the answer any such request
+receives (ADR-035 §4). `TrailingSlashInterceptor` makes this refusal once for all
+routes, so a new endpoint inherits it. Zalando's RESTful API guidelines, rule 136,
+state the same form: "MUST use normalized paths without empty path segments and
+trailing slashes".
+
+A create's relative `Location` depends on this. RFC 3986 §5.2.3 appends a relative
+reference to everything up to the last `/` of the request's target:
+
+| Request target | `Location` | Resolves to |
+|---|---|---|
+| `/w/{key}/risk-trees` | `risk-trees/{treeId}` | `/w/{key}/risk-trees/{treeId}`, the tree's route |
+| `/w/{key}/risk-trees/` | `risk-trees/{treeId}` | `/w/{key}/risk-trees/risk-trees/{treeId}`, which is no route |
+
 ---
 
 ## Code Smells

@@ -124,20 +124,30 @@ bind where the caller demonstrably holds the capability and the resource's own
 lifetime has ended: an expired workspace answers `410 Gone` to the holder of its
 key, which discloses nothing that holder did not already know.
 
-### 4. The Two Paths That Reach No Handler
+### 4. The Paths That Reach No Handler
 
-A request the codecs reject and a bug in a handler both bypass `wireEither`.
-Each has an interceptor that answers with a declared output:
+A request the codecs reject, a bug in a handler, and a request matching no route
+all bypass `wireEither`. Each answers with a declared output:
 
 ```scala
 .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))   // → RequestRejected
 .exceptionHandler(DefectCatchAllInterceptor.exceptionHandler)      // re-raises, so the catch-all answers
 .appendInterceptor(DefectCatchAllInterceptor.interceptor(tracing)) // → InternalFault, inside CORS
+.appendInterceptor(TrailingSlashInterceptor.interceptor(tracing))  // → NotFound, for a slash form
+HttpApi.noRouteEndpoint(tracing)                                   // → NotFound, for every other unmatched path
 ```
 
-Two answers remain Tapir's and carry a constant body: `404` for a request
-matching no route, and `405` for a method mismatch. Neither reports a failure of
-this service.
+A request matching no route takes two paths because zio-http matches a path
+pattern before Tapir runs. A path fitting no pattern reaches an interceptor only
+through a Tapir endpoint, which `noRouteEndpoint` is. It matches every path and
+method, is interpreted apart from the real routes, and is left out of the
+published document. A slash form fits a real route's pattern, so the interceptor
+answers it instead. Both send `NotFound(NotFoundKind.Unknown(), trace)`, the body
+an unknown workspace or tree receives, so a caller cannot tell these absences
+apart. Both pass through the security headers and CORS.
+
+One answer remains Tapir's and carries a constant body: `405` for a method
+mismatch. It does not report a failure of this service.
 
 ---
 

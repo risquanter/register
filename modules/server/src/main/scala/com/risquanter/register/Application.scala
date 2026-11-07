@@ -1,8 +1,9 @@
 package com.risquanter.register
 
 import zio.*
-import zio.http.Server
+import zio.http.{Response, Routes, Server}
 import zio.config.typesafe.TypesafeConfigProvider
+import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.model.HeaderNames
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
@@ -12,7 +13,7 @@ import com.risquanter.register.domain.errors.RequestHeaderName
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
-import com.risquanter.register.http.{DefectCatchAllInterceptor, HealthProbeServer, HttpApi, RequestSpanInterceptor, SecurityHeadersInterceptor, WireDecodeFailureHandler}
+import com.risquanter.register.http.{DefectCatchAllInterceptor, HealthProbeServer, HttpApi, RequestSpanInterceptor, SecurityHeadersInterceptor, TrailingSlashInterceptor, WireDecodeFailureHandler}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.StartupReadiness
@@ -335,6 +336,57 @@ object Application extends ZIOAppDefault {
       .exposeHeaders(HeaderNames.ContentType, HeaderNames.Location)
       .maxAge(PreflightMaxAge)
 
+  /** The interpreter options every API route runs under.
+    *
+    * Tapir enters the first interceptor in the stack first and leaves it last,
+    * so order decides what decorates whose response. Each prepend appends to
+    * the prepended list, which makes the security-headers interceptor —
+    * prepended first — the outermost, the span interceptor second, and the CORS
+    * interceptor inside both. Every response therefore passes outward through
+    * CORS and then the security headers.
+    *
+    * The catch-all and the slash refusal are appended rather than prepended, so
+    * they are the innermost request interceptors. Both have to be inside CORS:
+    * CORS adds its headers to the response coming back from below it, and a
+    * browser rejects a cross-origin response that lacks them before any script
+    * reads the body — which would lose the trace the answer exists to deliver.
+    * The catch-all stays inside the span interceptor too, so the cause it logs
+    * carries that span's trace.
+    *
+    * The decode-failure handler replaces Tapir's default, which answers a
+    * rejected input with a plain-text body. It, the catch-all and the slash
+    * refusal all send a declared `WireError` output, so every failure this
+    * server sends has one shape (ADR-035).
+    */
+  def serverOptions(tracing: Tracing, cors: TapirCORSConfig): ZioHttpServerOptions[Any] =
+    ZioHttpServerOptions
+      .customiseInterceptors[Any]
+      .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))
+      .exceptionHandler(DefectCatchAllInterceptor.exceptionHandler)
+      .serverLog(
+        ZioHttpServerOptions
+          .defaultServerLog[Any]
+          .showRequest(RequestSpanInterceptor.spanName)
+      )
+      .prependInterceptor(SecurityHeadersInterceptor.interceptor)
+      .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
+      .corsInterceptor(CORSInterceptor.customOrThrow[Task](cors))
+      .appendInterceptor(DefectCatchAllInterceptor.interceptor(tracing))
+      .appendInterceptor(TrailingSlashInterceptor.interceptor(tracing))
+      .options
+
+  /** The real routes, and the endpoint answering a path that fits none of them.
+    * The two are interpreted apart so that the second's pattern, which matches
+    * everything, is reached only when no real route's pattern matches.
+    */
+  def httpRoutes(
+    options:   ZioHttpServerOptions[Any],
+    endpoints: List[ServerEndpoint[Any, Task]],
+    tracing:   Tracing
+  ): Routes[Any, Response] =
+    val interpreter = ZioHttpInterpreter(options)
+    interpreter.toHttp(endpoints) ++ interpreter.toHttp(List(HttpApi.noRouteEndpoint(tracing)))
+
   def startServer = for {
     cfg        <- ZIO.service[ServerConfig]
     corsConfig <- ZIO.service[CorsConfig]
@@ -351,40 +403,7 @@ object Application extends ZIOAppDefault {
 
     // CORS at the tapir interceptor layer — handles OPTIONS preflight before
     // route matching, avoiding the 405 that zio-http Middleware.cors produces.
-    tapirCorsConfig = corsPolicy(corsConfig.normalised)
-    // Tapir enters the first interceptor in the stack first and leaves it last,
-    // so order decides what decorates whose response. Each prepend appends to
-    // the prepended list, which makes the security-headers interceptor —
-    // prepended first — the outermost, the span interceptor second, and the CORS
-    // interceptor inside both. Every response therefore passes outward through
-    // CORS and then the security headers.
-    //
-    // The catch-all is appended rather than prepended, so it is the innermost
-    // request interceptor. It has to be inside CORS: CORS adds its headers to
-    // the response coming back from below it, and a browser rejects a
-    // cross-origin response that lacks them before any script reads the body —
-    // which would lose the trace a 500 exists to deliver. It stays inside the
-    // span interceptor too, so the cause it logs carries that span's trace.
-    //
-    // The decode-failure handler replaces Tapir's default, which answers a
-    // rejected input with a plain-text body. It and the catch-all both send a
-    // declared `WireError` output, so every failure this server sends has one
-    // shape (ADR-035).
-    serverOptions = ZioHttpServerOptions
-      .customiseInterceptors[Any]
-      .decodeFailureHandler(WireDecodeFailureHandler.handler(tracing))
-      .exceptionHandler(DefectCatchAllInterceptor.exceptionHandler)
-      .serverLog(
-        ZioHttpServerOptions
-          .defaultServerLog[Any]
-          .showRequest(RequestSpanInterceptor.spanName)
-      )
-      .prependInterceptor(SecurityHeadersInterceptor.interceptor)
-      .prependInterceptor(RequestSpanInterceptor.interceptor(tracing))
-      .corsInterceptor(CORSInterceptor.customOrThrow[Task](tapirCorsConfig))
-      .appendInterceptor(DefectCatchAllInterceptor.interceptor(tracing))
-      .options
-    httpApp = ZioHttpInterpreter(serverOptions).toHttp(endpoints)
+    httpApp = httpRoutes(serverOptions(tracing, corsPolicy(corsConfig.normalised)), endpoints, tracing)
 
     _          <- ZIO.logInfo(s"Starting health probe server on ${cfg.host}:${cfg.healthPort}...")
     _          <- ZIO.logInfo(s"Starting API server on ${cfg.host}:${cfg.port}...")

@@ -6160,8 +6160,21 @@ writes the workspace key, which `EWB-D-68` chose the relative form to avoid.
 **Ruled 2026-11-06: Option B.** The input cannot sit on `baseEndpoint`. Tapir
 1.13.4's zio-http interpreter builds each route's pattern from its inputs in order
 and reads `noTrailingSlash` as a wildcard at its position, so a guard placed first
-made routes without a slash answer `404` and failed the integration tier. Where
-the refusal is made is open. The probe port in `HealthProbeServer.scala` does not
+made routes without a slash answer `404` and failed the integration tier.
+
+**Ruled 2026-11-07: where the refusal is made, the aligned answer.** Every request
+matching no route answers `404` with `WireError.NotFound(NotFoundKind.Unknown(),
+trace)`, and it passes through the security headers and CORS. `TrailingSlashInterceptor`
+answers a slash form. `HttpApi.noRouteEndpoint`, interpreted apart from the real
+routes and left out of the published document, answers a path fitting no route's
+pattern, which zio-http would otherwise answer before any Tapir interceptor runs.
+A `405` stays Tapir's. The refused alternatives were `noTrailingSlash` last on each
+route, which answers `405` for some slash forms and can be forgotten on a new route,
+and an interceptor returning `RequestResult.Failure(Nil)`, which leaves a key-bearing
+`404` without `Cache-Control: no-store` (ADR-021). ADR-017 §7 and ADR-035 §4 state
+the result.
+
+The probe port in `HealthProbeServer.scala` does not
 build on `baseEndpoint` and is not affected. A BATS failure caused by a request
 sending a slash is corrected in the suite.
 

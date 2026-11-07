@@ -141,7 +141,7 @@ Use this when you already know the topic or the record's name. It answers "where
 | ADR-014 | `ADR-014.md` | Simulation result caching: what is cached, the content-hash key, no invalidation, one instance per seed entity id |
 | ADR-015 | `ADR-015.md` | The cached-result resolver as the single simulation entry point. **Its storage layer is retired — read it with ADR-014** |
 | ADR-016 | `ADR-016-config-management.md` | Configuration loading and the single canonical source |
-| ADR-017 | `ADR-017-tree-api-design.md` | Tree API shape: create versus update DTOs, whole-tree submission, identity preservation, size limits |
+| ADR-017 | `ADR-017-tree-api-design.md` | Tree API shape: create versus update DTOs, whole-tree submission, identity preservation, size limits, one path form for every route |
 | ADR-017 notes | `ADR-017-NOTES.md` | Why per-operation batch types are not adopted |
 | ADR-018 | `ADR-018-nominal-wrappers.md` | Nominal wrappers over Iron types for identifiers that must not be interchangeable |
 | ADR-019 | `ADR-019-frontend-component-architecture.md` | Frontend architecture: component shape, state ownership, derived signals, state machines, error presentation |
