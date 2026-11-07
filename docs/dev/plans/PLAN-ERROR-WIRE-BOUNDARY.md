@@ -2,8 +2,8 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-69`, is ruled. `EWB-D-1` to
-`EWB-D-43` and `EWB-D-61` to `EWB-D-69` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
+**Status.** Every decision, `EWB-D-1` to `EWB-D-71`, is ruled. `EWB-D-1` to
+`EWB-D-43` and `EWB-D-61` to `EWB-D-71` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
 and §16.7, `EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in
 §17, and `EWB-D-54` and `EWB-D-59` in §18. Approval
 is in place: the token names this document and the file inventory exists beside
@@ -2385,7 +2385,9 @@ to read a trace from; this phase makes a trace exist to be read. Four items, fro
    Its span name is the HTTP method plus the first path segment, with a
    workspace-scoped path's key segment replaced by a fixed placeholder: a span
    name is exported to the collector, and the capability key must never reach it
-   (ADR-021).
+   (ADR-021). A first segment no route serves is replaced by a fixed placeholder
+   as well, because a caller chooses that text and a path fitting no route also
+   reaches this interceptor (`EWB-D-70`).
 2. Its connection in `Application.startServer`, beside
    `SecurityHeadersInterceptor.interceptor`.
 3. The eighteen test files that name `TracingLive.console` or
@@ -6177,6 +6179,26 @@ the result.
 The probe port in `HealthProbeServer.scala` does not
 build on `baseEndpoint` and is not affected. A BATS failure caused by a request
 sending a slash is corrected in the suite.
+
+### EWB-D-70 — what a span is named when no route matched — RULED 2026-11-07
+
+`EWB-D-69`'s no-route endpoint passes every path through `RequestSpanInterceptor`,
+so a span name reproducing the first segment reproduces caller-chosen text.
+`spanName` keeps the first segment only if it is one the API serves: `w`,
+`workspaces`, `admin`, `distribution`, `health` or `docs`. Any other reads as
+`{unmatched}`. The server log reads the same function. A test derives the served
+segments from the endpoint traits, so a new route family with no constant fails it.
+The refused alternatives were naming the span from the matched route's template,
+and leaving the name to a gateway rate limit, which does not exist yet (ADR-021 §4).
+
+### EWB-D-71 — how the Swagger UI page is reached — RULED 2026-11-07
+
+`EWB-D-69`'s slash refusal answers `404` at `/docs/`, the address Tapir's own `/docs`
+redirect names. An own `GET /docs` endpoint placed ahead of Tapir's redirects to
+`./docs/index.html` instead, so the slash rule keeps no exception and `/docs/`
+answers `404` like every slash form. The refused alternatives were exempting the
+documentation routes from the slash refusal, and dropping the page for the document
+alone.
 
 ### EWB-D-67 — what a tree write answers — RULED 2026-11-05
 

@@ -23,19 +23,18 @@ import com.risquanter.register.telemetry.ActiveTrace
   * `cause.squash.getMessage` into a plain-text body, which publishes an
   * exception message and a shape no client decodes.
   *
-  * Two answers still come from Tapir rather than from here, and both carry a
-  * constant body: a request matching no route answers `404`, and one whose
-  * method does not match answers `405`. Neither reports a failure of this
-  * service, so neither carries a trace worth delivering.
+  * One answer still comes from Tapir rather than from here, with a constant
+  * body: a request whose method does not match answers `405`. It reports no
+  * failure of this service, so it carries no trace worth delivering.
   *
-  * It is connected with `appendInterceptor`, which makes it the innermost
-  * request interceptor, and the position is load-bearing. Tapir enters the
+  * It is connected with `appendInterceptor`, which places it inside CORS and
+  * the security headers, and the position is load-bearing. Tapir enters the
   * first interceptor in the stack first and leaves it last, so a response is
   * decorated on the way out by every interceptor outside the one that built it.
   * The CORS interceptor adds its headers that way. Placed outside CORS this
   * interceptor would build a response CORS never sees, and a browser would
   * reject it on the cross-origin check before any script could read the body —
-  * losing exactly the trace the response exists to deliver. Being innermost
+  * losing exactly the trace the response exists to deliver. Being appended
   * also puts it inside `SecurityHeadersInterceptor`, so a defect response
   * carries the same headers as every other.
   *

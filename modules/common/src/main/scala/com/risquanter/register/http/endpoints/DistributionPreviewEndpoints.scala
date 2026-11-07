@@ -27,7 +27,7 @@ trait DistributionPreviewEndpoints extends BaseEndpoint:
       .tag("distribution")
       .name("distributionPreview")
       .description("Compute a sampled distribution preview curve from parameters. No workspace key required. L0: open. L1+: JWT required.")
-      .in("distribution" / "preview")
+      .in(BaseEndpoint.DistributionSegment / "preview")
       .post
       .in(jsonBody[DistributionShapeRequest])
       .out(jsonBody[DistributionPreviewResponse])

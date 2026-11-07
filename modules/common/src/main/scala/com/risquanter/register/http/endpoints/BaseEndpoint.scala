@@ -16,6 +16,17 @@ object BaseEndpoint {
     * headers interceptor matches the same segment. */
   final val BootstrapSegment = "workspaces"
 
+  /** The first path segments of the routes outside the workspace surface, chosen
+    * by this API. `RequestSpanInterceptor` keeps a request's first segment in a
+    * span name only if it is one the API serves. */
+  final val AdminSegment        = "admin"
+  final val DistributionSegment = "distribution"
+  final val HealthSegment       = "health"
+
+  /** The first path segment of the documentation routes, fixed by the default
+    * prefix of Tapir's `SwaggerUIOptions`. */
+  final val DocsSegment = "docs"
+
   /** The `500` output: the status and the body `WireError.InternalFault` is sent
     * with.
     *

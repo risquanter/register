@@ -16,6 +16,6 @@ trait SystemEndpoints extends BaseEndpoint:
       .tag("system")
       .name("health")
       .description("Health check endpoint")
-      .in("health")
+      .in(BaseEndpoint.HealthSegment)
       .get
       .out(jsonBody[ProbeResponse])

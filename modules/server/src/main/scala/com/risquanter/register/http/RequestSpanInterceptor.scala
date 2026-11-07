@@ -8,6 +8,7 @@ import sttp.tapir.server.interceptor.{EndpointInterceptor, RequestHandler, Reque
 import zio.{Task, ZIO}
 import zio.telemetry.opentelemetry.tracing.Tracing
 
+import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.responses.LocationRoute
 import com.risquanter.register.telemetry.ActiveTrace
 
@@ -50,6 +51,11 @@ object RequestSpanInterceptor:
     */
   private val RedactedKeySegment = "{key}"
 
+  /** Stands in for a first path segment no route serves. A caller chooses that
+    * text, so it is never reproduced in a span name or the server log.
+    */
+  private val UnmatchedSegment = "{unmatched}"
+
   /** Creates the interceptor, ready to pass to
     * `ZioHttpServerOptions.customiseInterceptors.prependInterceptor(…)`.
     *
@@ -82,6 +88,15 @@ object RequestSpanInterceptor:
     * credential. The later segments also hold per-resource identifiers, which
     * would make the name high-cardinality and useless for grouping.
     *
+    * That segment contributes only if the API serves it. The span opens before
+    * routing, and a path fitting no route reaches this interceptor too, so any
+    * other segment is caller-chosen text and reads as one placeholder:
+    * {{{
+    * GET /health/x      -> GET /health
+    * GET /w/{key}/trees -> GET /w/{key}
+    * GET /a1b2c3        -> GET /{unmatched}
+    * }}}
+    *
     * Two sinks read it: the span this interceptor opens, and the server log,
     * whose default renders the whole request line and would otherwise write the
     * key to standard output. One definition, so neither sink can drift from the
@@ -91,7 +106,11 @@ object RequestSpanInterceptor:
     val family = request.pathSegments match
       case LocationRoute.Workspace.segment :: _ =>
         s"/${LocationRoute.Workspace.segment}/$RedactedKeySegment"
-      case segment :: _ => s"/$segment"
-      case Nil          => "/"
+      case (segment @ (BaseEndpoint.BootstrapSegment | BaseEndpoint.AdminSegment |
+                       BaseEndpoint.DistributionSegment | BaseEndpoint.HealthSegment |
+                       BaseEndpoint.DocsSegment)) :: _ =>
+        s"/$segment"
+      case Nil => "/"
+      case _   => s"/$UnmatchedSegment"
     s"${request.method.method} $family"
 

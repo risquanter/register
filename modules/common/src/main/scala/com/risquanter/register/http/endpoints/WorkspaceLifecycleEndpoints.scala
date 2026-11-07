@@ -84,6 +84,6 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .tag("workspaces")
       .name("evictExpired")
       .description("Evict all expired workspaces (admin)")
-      .in("admin" / "workspaces" / "expired")
+      .in(BaseEndpoint.AdminSegment / "workspaces" / "expired")
       .delete
       .out(jsonBody[EvictExpiredResponse])

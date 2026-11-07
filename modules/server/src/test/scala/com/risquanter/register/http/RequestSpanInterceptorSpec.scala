@@ -6,15 +6,18 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 
 import sttp.model.{Header, Method, QueryParams, StatusCode, Uri}
 import sttp.monad.MonadError as SttpMonadError
-import sttp.tapir.AttributeKey
+import sttp.tapir.{AttributeKey, Endpoint}
 import sttp.tapir.model.{ConnectionInfo, ServerRequest}
 import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.interceptor.{EndpointInterceptor, RequestHandler, RequestResult, Responder, ResponseSource}
 import sttp.tapir.server.model.{ServerResponse, ValuedEndpointOutput}
+import sttp.tapir.swagger.SwaggerUIOptions
 import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{TelemetryPlaceholders, TraceId}
+import com.risquanter.register.http.endpoints.{BaseEndpoint, DistributionPreviewEndpoints, ScenarioEndpoints, SystemEndpoints, WorkspaceAnalysisEndpoints, WorkspaceLifecycleEndpoints, WorkspaceQueryEndpoints, WorkspaceTreeEndpoints}
+import com.risquanter.register.http.sse.SSEEndpoints
 import com.risquanter.register.telemetry.{ActiveTrace, TelemetryLive}
 
 /** One SERVER span is open around everything downstream, and nothing else is
@@ -41,9 +44,26 @@ object RequestSpanInterceptorSpec extends ZIOSpecDefault:
   private val telemetry: ZLayer[Any, Throwable, Tracing] =
     TestConfigs.telemetryLayer >>> TelemetryLive.configured
 
-  /** The path the stub request carries. One segment, so the span name is the
-    * method and that segment and no capability key is involved. */
+  /** The path the stub request carries. One segment, so no capability key is
+    * involved. */
   private val RequestPath = List("risk-trees")
+
+  private object AllEndpoints
+      extends DistributionPreviewEndpoints, ScenarioEndpoints, SSEEndpoints, SystemEndpoints,
+        WorkspaceAnalysisEndpoints, WorkspaceLifecycleEndpoints, WorkspaceQueryEndpoints,
+        WorkspaceTreeEndpoints
+
+  /** The first path segment of every endpoint the endpoint traits declare. Read
+    * from the endpoints, so a new route family with no constant behind it fails
+    * the test that uses this. The two base endpoints have no path and are left
+    * out. */
+  private val servedFirstSegments: List[String] =
+    AllEndpoints.getClass.getMethods.toList
+      .filter(method => method.getParameterCount == 0 && classOf[Endpoint[?, ?, ?, ?, ?]].isAssignableFrom(method.getReturnType))
+      .map(_.invoke(AllEndpoints))
+      .collect { case e: Endpoint[?, ?, ?, ?, ?] => e.showPathTemplate(showNoPathAs = "").stripPrefix("/").takeWhile(c => c != '/' && c != '?') }
+      .filter(_.nonEmpty)
+      .distinct
 
   /** Minimal `ServerRequest` stub exposing only what the interceptor reads. */
   private def stubRequest(path: List[String] = RequestPath, httpMethod: Method = Method.GET): ServerRequest =
@@ -147,10 +167,27 @@ object RequestSpanInterceptorSpec extends ZIOSpecDefault:
           !name.contains("a-capability-key")
         )
       },
-      test("another path contributes its first segment only") {
+      test("a served path contributes its first segment only") {
         assertTrue(
-          RequestSpanInterceptor.spanName(stubRequest(List("risk-trees", "42"))) == "GET /risk-trees"
+          RequestSpanInterceptor.spanName(stubRequest(List(BaseEndpoint.HealthSegment, "42"))) == "GET /health"
         )
+      },
+      test("a first segment no route serves contributes no caller text") {
+        assertTrue(
+          RequestSpanInterceptor.spanName(stubRequest(List("a1b2c3"))) == "GET /{unmatched}",
+          RequestSpanInterceptor.spanName(stubRequest(List("x\n2026-11-07 ERROR forged"))) == "GET /{unmatched}"
+        )
+      },
+      test("every endpoint's first segment is named") {
+        assertTrue(
+          servedFirstSegments.nonEmpty,
+          servedFirstSegments.forall(segment =>
+            !RequestSpanInterceptor.spanName(stubRequest(List(segment))).contains("{unmatched}")
+          )
+        )
+      },
+      test("the documentation segment is the one the Swagger routes are served under") {
+        assertTrue(SwaggerUIOptions.default.pathPrefix == List(BaseEndpoint.DocsSegment))
       },
       test("an empty path is the root") {
         assertTrue(RequestSpanInterceptor.spanName(stubRequest(Nil, Method.POST)) == "POST /")
