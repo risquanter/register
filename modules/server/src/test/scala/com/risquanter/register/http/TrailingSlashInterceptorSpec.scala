@@ -56,11 +56,31 @@ object TrailingSlashInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
     )
 
   private def send(method: Method, target: String): RIO[Tracing, Response] =
-    app.flatMap(routes =>
-      ZIO.scoped(routes.runZIO(
-        Request(method = method, url = URL.decode(target).toOption.get).addHeader("Origin", TestOrigin)
-      ))
+    app.flatMap(sendTo(_, method, target))
+
+  private def sendTo(routes: Routes[Any, Response], method: Method, target: String): Task[Response] =
+    ZIO.scoped(routes.runZIO(
+      Request(method = method, url = URL.decode(target).toOption.get).addHeader("Origin", TestOrigin)
+    ))
+
+  /** The production assembly over the documentation routes alone. */
+  private val docsApp: URIO[Tracing, Routes[Any, Response]] =
+    ZIO.serviceWith[Tracing](tracing =>
+      Application.httpRoutes(
+        Application.serverOptions(tracing, Application.corsPolicy(List(TestOrigin))),
+        HttpApi.gatherRoutes(Nil),
+        tracing
+      )
     )
+
+  private val docsPath = s"/${BaseEndpoint.DocsSegment}"
+
+  /** The files the Swagger UI page loads, each named by its `index.html` or its
+    * initializer script. */
+  private val docsFiles = List(
+    "index.html", "swagger-initializer.js", "swagger-ui.css", "index.css",
+    "swagger-ui-bundle.js", "swagger-ui-standalone-preset.js", "docs.yaml"
+  )
 
   private def isNoRouteAnswer(response: Response): Task[Boolean] =
     response.body.asString.map(body =>
@@ -109,5 +129,27 @@ object TrailingSlashInterceptorSpec extends ZIOSpecDefault with BaseEndpoint:
     test("a browser can read every such answer across origins") {
       for responses <- ZIO.foreach(noRouteRequests)((method, target) => send(method, target))
       yield assertTrue(responses.forall(_.rawHeader("Access-Control-Allow-Origin").contains(TestOrigin)))
+    },
+    test("the documentation address redirects to the page, not to a slash form") {
+      for
+        routes   <- docsApp
+        response <- sendTo(routes, Method.GET, docsPath)
+      yield assertTrue(
+        response.status == Status.PermanentRedirect,
+        response.rawHeader("Location").contains(s"./${BaseEndpoint.DocsSegment}/index.html")
+      )
+    },
+    test("every file the documentation page loads is served") {
+      for
+        routes    <- docsApp
+        responses <- ZIO.foreach(docsFiles)(file => sendTo(routes, Method.GET, s"$docsPath/$file"))
+      yield assertTrue(responses.forall(_.status == Status.Ok))
+    },
+    test("the documentation's slash form answers like every other") {
+      for
+        routes   <- docsApp
+        response <- sendTo(routes, Method.GET, s"$docsPath/")
+        answered <- isNoRouteAnswer(response)
+      yield assertTrue(answered)
     }
   ).provideLayerShared(telemetry)

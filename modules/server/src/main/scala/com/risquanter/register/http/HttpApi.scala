@@ -1,7 +1,8 @@
 package com.risquanter.register.http
 
 import zio.*
-import sttp.tapir.paths
+import sttp.model.{HeaderNames, StatusCode}
+import sttp.tapir.{endpoint, header, paths, statusCode, stringToPath}
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.server.ServerEndpoint
 import zio.telemetry.opentelemetry.tracing.Tracing
@@ -32,6 +33,26 @@ object HttpApi extends BaseEndpoint {
         ActiveTrace.id(using tracing).map(trace => Left(WireError.NotFound(NotFoundKind.Unknown(), trace)))
       )
 
+  /** The published document's title and version, chosen by this API. */
+  private val ApiTitle   = "Risk Register API"
+  private val ApiVersion = "0.1.0"
+
+  /** The file the Swagger UI's jar opens on. Fixed by that jar. */
+  private val DocsLandingFile = "index.html"
+
+  /** Answers `/docs` with the page's own address.
+    *
+    * Tapir's redirect names `/docs/`, which `TrailingSlashInterceptor` refuses
+    * (ADR-017 §7). This endpoint is listed ahead of Tapir's, which is what makes
+    * it the one that answers, and being outside `logicRoutes` keeps it out of the
+    * published document.
+    */
+  private val docsRedirectEndpoint: ServerEndpoint[Any, Task] =
+    endpoint.get
+      .in(BaseEndpoint.DocsSegment)
+      .out(statusCode(StatusCode.PermanentRedirect).and(header[String](HeaderNames.Location)))
+      .serverLogicSuccess[Task](_ => ZIO.succeed(s"./${BaseEndpoint.DocsSegment}/$DocsLandingFile"))
+
   /** Gathers routes from all controllers and adds Swagger documentation endpoints
     *
     * @param controllers List of controllers implementing BaseController
@@ -40,8 +61,8 @@ object HttpApi extends BaseEndpoint {
   def gatherRoutes(controllers: List[BaseController]): List[ServerEndpoint[Any, Task]] = {
     val logicRoutes = controllers.flatMap(_.routes)
     val docRoutes = SwaggerInterpreter()
-      .fromServerEndpoints(logicRoutes, "Risk Register API", "0.1.0")
-    logicRoutes ++ docRoutes
+      .fromServerEndpoints(logicRoutes, ApiTitle, ApiVersion)
+    logicRoutes ++ (docsRedirectEndpoint :: docRoutes)
   }
 
   /** Creates all application controllers with their dependencies
