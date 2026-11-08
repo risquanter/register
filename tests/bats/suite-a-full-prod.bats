@@ -149,12 +149,12 @@ irmin_get() {
     local response count
     response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
-    count=$(echo "$response" | jq 'length')
+    count=$(echo "$response" | jq '.trees | length')
     [[ "$count" -ge 1 ]]
 
     # The tree ID in the API response should match what we created
     local first_id
-    first_id=$(echo "$response" | jq -r '.[0].id')
+    first_id=$(echo "$response" | jq -r '.trees[0].id')
     [[ "$first_id" == "$TREE_ID" ]]
 }
 

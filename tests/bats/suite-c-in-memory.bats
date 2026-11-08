@@ -53,14 +53,14 @@ setup() {
     [[ "$TREE_ID" != "null" ]]
 }
 
-@test "C03: GET /w/{key}/risk-trees returns JSON array" {
+@test "C03: GET /w/{key}/risk-trees returns the tree list" {
     create_workspace
     local response
     response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${REGISTER_URL}/w/${WORKSPACE_KEY}/risk-trees")
-    # Response should be a JSON array with at least the bootstrap tree
+    # The response lists the workspace's trees, at least the bootstrap tree
     local count
-    count=$(echo "$response" | jq 'length')
+    count=$(echo "$response" | jq '.trees | length')
     [[ "$count" -ge 1 ]]
 }
 
@@ -129,9 +129,9 @@ setup() {
     response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
     [[ "$status" == "200" ]]
-    # Should be a JSON array from the real backend, not HTML from SPA fallback
+    # The tree list from the real backend, not HTML from the SPA fallback
     local count
-    count=$(echo "$response" | jq 'length')
+    count=$(echo "$response" | jq '.trees | length')
     [[ "$count" -ge 1 ]]
 }
 
@@ -150,7 +150,7 @@ setup() {
 @test "C12: /docs via nginx proxies to backend" {
     local status
     status=$(curl -s -o /dev/null -w '%{http_code}' "${FRONTEND_URL}/docs")
-    # Tapir Swagger: 308 redirect to /docs/docs.yaml, or 200/3xx depending on version
+    # The server answers 308 with the Swagger UI page's address, /docs/index.html
     [[ "$status" == "200" ]] || [[ "$status" == "301" ]] || [[ "$status" == "303" ]] || [[ "$status" == "308" ]]
 }
 
@@ -217,7 +217,7 @@ setup() {
     list_response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${REGISTER_URL}/w/${WORKSPACE_KEY}/risk-trees")
     local count
-    count=$(echo "$list_response" | jq 'length')
+    count=$(echo "$list_response" | jq '.trees | length')
     [[ "$count" -ge 1 ]]
 
     # Get specific tree by ID
