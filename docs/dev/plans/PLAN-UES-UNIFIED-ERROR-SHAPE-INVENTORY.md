@@ -1,0 +1,88 @@
+# File inventory — PLAN-UES-UNIFIED-ERROR-SHAPE.md
+
+The approval hook reads this file to decide whether a gated edit is
+permitted. A gated edit is allowed only when the edited file appears on a
+bullet line below, written as a full repo-relative path. Text that is not a
+bullet line authorizes nothing.
+
+Only the user writes this file, through `.claude/bin/approve-inventory`.
+
+- modules/server/src/main/scala/com/risquanter/register/domain/errors/Failure.scala
+- modules/server/src/main/scala/com/risquanter/register/domain/errors/TrustZone.scala
+- modules/server/src/main/scala/com/risquanter/register/domain/errors/Diagnostic.scala
+- modules/server/src/main/scala/com/risquanter/register/domain/errors/OutageMode.scala
+- modules/server/src/main/scala/com/risquanter/register/domain/errors/DenialKind.scala
+- modules/server/src/main/scala/com/risquanter/register/domain/errors/ValidationExtensions.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminWriteOutcome.scala
+- modules/server/src/test/scala/com/risquanter/register/domain/errors/FailureSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/TreeLoadProblem.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationExtensions.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/RiskNode.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/DistributionShape.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/Provenance.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/WireError.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/NotFoundKind.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/Capability.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/TreeScope.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/QueryRequest.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala
+- modules/common/src/test/scala/com/risquanter/register/http/errors/WireErrorSpec.scala
+- modules/server/src/main/scala/com/risquanter/register/Application.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/AuthorizationService.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/AuthorizationServiceNoOp.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/AuthorizationServiceSpiceDB.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/AuthorizationServiceStub.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/BootstrapProvisioner.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/BootstrapProvisionerNoOp.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/BootstrapProvisionerSpiceDB.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/BootstrapProvisionerStub.scala
+- modules/server/src/main/scala/com/risquanter/register/auth/UserContextExtractor.scala
+- modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala
+- modules/server/src/main/scala/com/risquanter/register/http/controllers/WireEither.scala
+- modules/server/src/main/scala/com/risquanter/register/http/controllers/QueryController.scala
+- modules/server/src/main/scala/com/risquanter/register/http/controllers/DistributionPreviewController.scala
+- modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleController.scala
+- modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminCommit.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminPath.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ChangedNodesService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/DistributionPreviewService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/QueryService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala
+- modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioBranchOps.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeServiceNotSupported.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceLive.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceNotSupported.scala
+- modules/server/src/main/scala/com/risquanter/register/services/TreeHistoryService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala
+- modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStore.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStoreLive.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
+- modules/app/src/main/scala/app/state/TreeBuilderState.scala
+- modules/app/src/main/scala/app/state/GlobalError.scala
+- modules/app/src/test/scala/app/state/TreeBuilderStateSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminMergeSemanticsSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminRevertSemanticsSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceItSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/auth/AuthorizationServiceSpiceDBItSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala
