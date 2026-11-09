@@ -307,3 +307,7 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/http/SecurityHeadersInterceptor.scala
 - modules/server/src/main/scala/com/risquanter/register/http/TrailingSlashInterceptor.scala
 - modules/server/src/main/scala/com/risquanter/register/http/HttpApi.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminCommit.scala
+- modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgresSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/auth/AuthorizationServiceSpiceDBSpec.scala

@@ -2,18 +2,18 @@
 
 Plan code `EWB`. Decisions in this document are labelled `EWB-D-<n>`.
 
-**Status.** Every decision, `EWB-D-1` to `EWB-D-71`, is ruled. `EWB-D-1` to
-`EWB-D-43` and `EWB-D-61` to `EWB-D-71` are recorded in §10, `EWB-D-44` to `EWB-D-47` in §16.2
-and §16.7, `EWB-D-48` to `EWB-D-53`, `EWB-D-55` to `EWB-D-58` and `EWB-D-60` in
-§17, and `EWB-D-54` and `EWB-D-59` in §18. Approval
-is in place: the token names this document and the file inventory exists beside
-it. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase 3a's
-continuation, and `EWB-D-27`'s projection change landed with them. §17 and §18
-are implemented as of 2026-11-02. §17.12, the review findings accepted after
-that, is implemented as of 2026-11-03. Phases 3b, 4 and 5 are implemented as
-of 2026-11-03. Phase 6 is implemented as of 2026-11-06. What remains is Phase 7.
-Tree history is out of this plan's scope from 2026-11-02 and belongs to
-`PLAN-BRANCH-HISTORY.md` (`BH-D-1`).
+**Status.** Closed 2026-11-09. Every decision, `EWB-D-1` to `EWB-D-74`, is
+ruled. `EWB-D-1` to `EWB-D-43` and `EWB-D-61` to `EWB-D-74` are recorded in
+§10, `EWB-D-44` to `EWB-D-47` in §16.2 and §16.7, `EWB-D-48` to `EWB-D-53`,
+`EWB-D-55` to `EWB-D-58` and `EWB-D-60` in §17, and `EWB-D-54` and `EWB-D-59`
+in §18. Phases 1, 1a, 1b, 2, 2b, 2c, 3 and 3a have landed, with §16 as Phase
+3a's continuation, and `EWB-D-27`'s projection change landed with them. §17 and
+§18 are implemented as of 2026-11-02. §17.12, the review findings accepted
+after that, is implemented as of 2026-11-03. Phases 3b, 4 and 5 are implemented
+as of 2026-11-03. Phase 6 is implemented as of 2026-11-06. Phase 7 was removed
+from this plan on 2026-11-09 and is carried by `PLAN-UES-UNIFIED-ERROR-SHAPE.md`,
+so every phase this plan holds has landed. Tree history is out of this plan's
+scope from 2026-11-02 and belongs to `PLAN-BRANCH-HISTORY.md` (`BH-D-1`).
 
 Phase 3a and `EWB-P-3` were added on 2026-10-21, and Phase 3a's scope was
 narrowed the same day. Phase 3 typed the location a refusal carries; Phase 3a
@@ -2611,9 +2611,9 @@ pattern is the subject followed by `Problem` or `Refusal`. The companion's
 No existing closed set denotes "a stored tree with neither metadata nor nodes",
 so `Empty` is new. `Failed` carries the typed failure `loadTreeAt` produced,
 where the text carried its `logMessage`: today that failure is always a
-`RepositoryFailure`, because `handleIrmin` maps every Irmin failure onto one,
-and Phase 7 widens it to `IrminError` and `IngressRejected` without touching
-this type. The type is not serialised: `TreeLoadFailure` projects to
+`RepositoryFailure`, because `handleIrmin` maps every Irmin failure onto one.
+`PLAN-UES-UNIFIED-ERROR-SHAPE.md` dissolves this type into an accumulated
+refusal list. The type is not serialised: `TreeLoadFailure` projects to
 `InternalFault`, which carries only the trace, so no codec is declared.
 
 The changed declaration in `AppError.scala`, with the rename applied:
@@ -2831,160 +2831,12 @@ changes the external API: status codes, response bodies and the not-found body
 all change. The project's versioning rule makes an external API change MINOR
 while the version is below 1.0.0. Ruled 2026-11-06: Phase 6 lands as `0.13.0`.
 
-**Phase 7 — the storage trust boundary.** ADR-039 states that a value entering
-process memory from outside is refined at the border, and that an ingress
-rejection is a typed failure rather than a transport fault. The Irmin store and
-the Postgres database are two such borders, and the error channel across both
-collapses to a string today. Joining this plan rather than becoming a separate
-one, for the reason Phase 6 gives: these are the error-path files this plan
-already opens, and a boundary migrated halfway is worse than one not started.
-
-It is last because Phase 3 gives it `ErrorLocation` and `ErrorSubject` to name a
-rejected value with, and Phase 4's rename opens every file that names an
-internal error. Phase 3's own pass over `RiskNode.scala` and `RiskTree.scala`
-stays mechanical — `field` becomes `location` and nothing else — because the
-decode change in step 3 below needs the repository side to move in the same
-step.
-
-Five steps.
-
-1. **The ingress rejection becomes a type.** Added to `AppError.scala`:
-
-```scala
-/** Which border a rejected value crossed. */
-enum TrustBoundary:
-  case Store, Database, Authorization
-
-/** Content an external system returned that this service refuses.
-  *
-  * Distinct from a transport failure at the same border: a peer that cannot be
-  * reached is retried or reported as an outage, and content that does not
-  * refine never succeeds on retry (ADR-039).
-  */
-case class IngressRejected(
-  boundary: TrustBoundary,
-  subject:  ErrorSubject,
-  errors:   List[ValidationError]
-) extends DomainError:
-  override def logMessage: String =
-    s"${boundary.toString} returned a value this service refuses: " +
-      errors.map(ValidationError.describe).mkString("; ")
-  override def origin: FailureOrigin = FailureOrigin.Service
-```
-
-   `subject` reuses Phase 3's enum rather than naming a storage path, which is
-   what keeps the "no storage-path refinement" ruling of §6.4 intact: a stored
-   value is a node, a mitigation or a tree, and `ErrorSubject` already says so.
-   `fromAppError` gains one arm projecting it to `InternalFault`, on the same
-   grounds as `RepositoryFailure`: a store this service wrote is not the
-   caller's doing and the caller can act on nothing.
-
-2. **`handleIrmin` is deleted.** `IrminError` already extends `AppError`, and the
-   repository's methods already declare `IO[AppError, A]`, so every call it
-   wraps type-checks without it. The wrapper is therefore pure loss: it maps
-   seven typed cases onto `RepositoryFailure(String)`, and §5.1's own table
-   sends the Irmin cases to `DependencyUnavailable` at `503` while
-   `RepositoryFailure` goes to `InternalFault` at `500`. An Irmin outage during
-   a tree read is reported as an internal fault today for no reason other than
-   this function. Deleting it and inlining its call sites restores the status
-   the projection already specifies. File:
-   `repositories/RiskTreeRepositoryIrmin.scala`.
-
-3. **A stored value keeps its validation structure.** `RiskLeaf` and
-   `RiskPortfolio` gain a decode that returns the accumulated errors, and the
-   derived `JsonDecoder` is defined in terms of it so there is one parse rather
-   than two:
-
-```scala
-object RiskLeaf:
-  def decodeValidated(json: String): Either[List[ValidationError], RiskLeaf]
-
-object RiskPortfolio:
-  def decodeValidated(json: String): Either[List[ValidationError], RiskPortfolio]
-```
-
-   A string that is not the expected JSON shape yields one `ValidationError` at
-   `ErrorLocation.Whole` with the problem `Unreadable(ExpectedInput.Json)`, so
-   a parse failure and a refinement failure have one shape and the caller is
-   not made to distinguish them. `ExpectedInput.Json` is a new case, added in
-   this step beside `Number`, `WholeNumber` and `NumberList`, and
-   `ValidationMessages.render` gains its sentence. `Unreadable` is the case
-   `ExpectedInput`'s own scaladoc reserves for "text that could not be read at
-   all", which is what a non-JSON string is. Its derived code is therefore
-   `TYPE_MISMATCH`, the code `FieldProblem.code` gives every `Unreadable`,
-   and not `INVALID_FORMAT`: the latter means a value that was read and then
-   refused (`EWB-D-25`), and a string that does not parse was never read. The flattening in the `given decoder` is what `zio-json`'s `mapOrFail`
-   forces — its function returns `Either[String, A]` — so the storage path stops
-   going through `JsonDecoder` and calls `decodeValidated` directly. The
-   repository's `decodeNode`, `decodeMeta`, `decodeMitigation` and `rebuildTree`
-   then fail with `IngressRejected` carrying the list, instead of interpolating
-   it into a sentence. Files: `domain/data/RiskNode.scala`,
-   `domain/data/RiskTree.scala`, `domain/data/Mitigation.scala`,
-   `domain/data/DistributionShape.scala`, `domain/data/Provenance.scala`,
-   `domain/errors/ErrorLocation.scala` for the new `ExpectedInput` case,
-   `domain/data/iron/ValidationMessages.scala` for its sentence, and
-   `repositories/RiskTreeRepositoryIrmin.scala`.
-
-   The shape and the provenance record hold flattening sites of their own. A
-   leaf's shape is a coproduct whose cases decode through their own
-   `JsonCodec`, so the refusal is composed there rather than in `RiskLeaf`:
-   `DistributionShape.Metalog.codec` and `DistributionShape.Lognormal.codec`
-   each end `.map(_.map(ValidationError.describe).mkString("; "))`. The text
-   keeps the element index `FieldName.PercentileAt` and `FieldName.QuantileAt`
-   carry, but only as text, so a caller can no longer read which anchor of a
-   twenty-anchor shape was refused. `DistributionParams`' decoder and its
-   two-sided accumulation do the same.
-   Both are reached on the store-read path through `RiskLeaf`'s decoder, so
-   step 3 moves them with it or the accumulated list is already a string by
-   the time `decodeValidated` returns.
-
-   `MitigationSpec`'s decoder and `Mitigation`'s own decoder both flatten with
-   `ValidationError.describe`, and the step replaces both.
-
-4. **The database classifies once, from a code rather than from prose.**
-   `WorkspaceStorePostgres.db` maps every driver failure to
-   `RepositoryFailure(getMessage)`, and one caller then recovers a decision from
-   that text with `reason.contains("seed_entity_id")`, dying on the arm that
-   does not match. The classification moves into the helper and reads the
-   driver's `SQLState`, which is a standard code and not a sentence:
-
-```scala
-private def classify(err: Throwable): AppError
-```
-
-   `23505` is the unique-violation state. Which unique constraint was violated
-   decides whether the result is the duplicate-seed-entity rejection or a plain
-   `RepositoryFailure`; whether the driver exposes the constraint name is
-   confirmed when the step opens the file, and the fallback if it does not is to
-   classify on the state alone and keep the constraint distinction at the one
-   call site that needs it. File:
-   `services/workspace/WorkspaceStorePostgres.scala`.
-
-5. **The Irmin response model names its identifiers.** `IrminCommit.hash`,
-   `.key` and `.parents` are `String` where `CommitHash` exists, and
-   `TreeNode.hash` is the same value in the GraphQL response type. They become
-   `CommitHash`, refined where the response is parsed, so the one late
-   refinement in `resolveHead` becomes the general case rather than the
-   exception. `TreeNode.path` becomes `IrminPath`, which `childPaths` already
-   refines by hand.
-
-   `IrminBranch.name` and `IrminClient.branches` stay `String`, and that is a
-   recorded exemption under ADR-039 §5 rather than an omission: the store may
-   hold branches this service did not create, so refining the listing to
-   `BranchRef` would reject a foreign branch instead of ignoring it. The comment
-   at the site says so. Files:
-   `infra/irmin/model/IrminCommit.scala`,
-   `infra/irmin/model/IrminResponses.scala`,
-   `infra/irmin/IrminClient.scala`,
-   `infra/irmin/IrminClientLive.scala`,
-   `repositories/RiskTreeRepositoryIrmin.scala`.
-
-The step order is smallest blast radius first: step 1 adds a type nothing yet
-throws, step 2 is a deletion, and steps 3 and 5 change how values are parsed.
-Step 4 is independent of the other four and could run at any point in the phase.
-
-`VersionConflict`'s three fields are typed per `EWB-D-29` and that edit has
-landed, so the phase does not carry it. No decision in this phase is open.
+**Phase 7 — the trust boundaries.** Removed from this plan on 2026-11-09 and
+carried into `PLAN-UES-UNIFIED-ERROR-SHAPE.md`, which replaces the `AppError`
+hierarchy with one shape and closes the ADR-039 borders as part of that. Its
+§11 states what it carried over from the six steps that stood here and what it
+dropped. `EWB-D-72` is superseded there; `EWB-D-73` and `EWB-D-74` are restated
+there as `UES-D-6` and `UES-D-5`.
 
 Phase 1b is the telemetry phase, and there is no separate telemetry plan.
 `PLAN-TELEMETRY-PLUMBING.md` is retired: its four open questions are ruled in
@@ -4554,7 +4406,7 @@ it is still nine cases at nine statuses.
 ### EWB-D-29 — `VersionConflict` is typed and kept — RULED 2026-10-19
 
 `VersionConflict` had three `String` fields and no production constructor, which
-is the same untyped-identifier defect Phase 7 step 5 removes elsewhere. The
+is the same untyped-identifier defect `IrminCommit`'s `String` hashes carry. The
 question was whether to type it or delete it, and the answer turns on whether
 the type marks a feature worth building. It does:
 `PLAN-TREE-WRITE-CONCURRENCY.md` names it in its draft signatures, its file
@@ -6200,6 +6052,96 @@ answers `404` like every slash form. The refused alternatives were exempting the
 documentation routes from the slash refusal, and dropping the page for the document
 alone.
 
+### EWB-D-72 — how content refused at a border is represented — RULED 2026-11-09, SUPERSEDED
+
+**Ruled 2026-11-09: one refusal type, carrying the border as data.**
+`ValidationFailed(errors, zone: TrustZone)` represents content refused
+at every border. `TrustZone` has the cases `Client`, `Store`, `Database`
+and `Authorization`, and each carries its `FailureOrigin` as a constructor
+value. The field has no default.
+
+Superseded the same day by `PLAN-UES-UNIFIED-ERROR-SHAPE.md` `UES-D-1` and
+`UES-D-2`: the substance, one refusal variant carrying the zone as data,
+survives as that plan's `Failure.Rejected`; the name `ValidationFailed` and the
+four-case `TrustZone(val origin)` do not. Not implemented under this plan.
+
+The refused alternatives were three. A second type for peer refusals,
+`IngressRejected`, put the same refusal list in two types and expressed the
+fault by which wrapper surrounds it. A `FailureOrigin` field without a border
+stated less than ADR-039 §4 requires and left the border to be inferred from the
+location. A separate `IrminError` case for a refused Irmin response repeated
+`ValidationFailed(errors, Store)` under another name.
+
+### EWB-D-73 — whether Phase 7 covers the SpiceDB border — RULED 2026-11-09
+
+**Ruled 2026-11-09: Option A.** Phase 7 step 6 is built, and `TrustZone` keeps its `Authorization` case.
+Carried into `PLAN-UES-UNIFIED-ERROR-SHAPE.md` as `UES-D-6` with Phase 7; not
+implemented under this plan.
+
+**Goal.** `TrustZone.Authorization` exists only if some step raises it,
+because a case nothing raises is speculative surface.
+`AuthorizationServiceSpiceDB` turns a SpiceDB response it cannot parse into
+`AuthServiceUnavailable`, which answers `503`. ADR-039 §1 lists
+"SpiceDB → server | the response parse" as a border, and §4 forbids answering
+refused content as an outage.
+
+**Option A — include it.** Phase 7 step 6 is built, and the two
+`AuthorizationService` signatures widen to `AuthError | ValidationFailed`.
+SpiceDB returns a garbled line: the client sees an internal fault rather than
+"service unavailable", and the log names the `Authorization` zone. All four
+borders are closed in one phase. The cost is two signature changes on the
+authorization interface.
+
+**Option B — leave it out.** `TrustZone` has three cases, step 6 is not
+built, and the SpiceDB collapse is routed to its own plan or to the backlog.
+SpiceDB parse failures keep answering "service unavailable". The phase is
+smaller, and a known ADR-039 violation on the same theme stays open and is
+planned twice.
+
+**Recommendation, the plan author's: Option A.** The work is on the same theme,
+in files this plan already lists.
+
+### EWB-D-74 — what subject a stored tree's own fields are reported at — RULED 2026-11-09
+
+**Ruled 2026-11-09: Option A, in the form A1.** `ErrorSubject.Tree(treeId)` is
+added, carrying the tree's identifier so that a listing's accumulated refusals
+name their trees apart. `RiskTree.fromNodes` reports its tree-own fields at
+`Field(Tree(id), f)` for a request and for a stored tree alike. Every location a
+stored value can be reported at names the thing it is about: the `subject`
+parameters of `RiskLeaf.create`, `RiskPortfolio.create` and
+`RiskPortfolio.createFromStrings` lose their `ErrorSubject.Request` default, so
+every caller states its subject. The browser's tree builder reads
+`ErrorSubject.Tree(id)` where it read `Request`. Carried into
+`PLAN-UES-UNIFIED-ERROR-SHAPE.md` as `UES-D-5` with Phase 7; not implemented
+under this plan.
+
+**Goal.** `RiskTree.fromNodes` reports a field the tree itself declares — its
+root id, its mitigations list, its seed high-water mark — at
+`ErrorLocation.requestField(f)`, which is `Field(ErrorSubject.Request, f)`.
+Under Phase 7 step 3 the repository runs `fromNodes` on a stored tree, so a
+stored tree whose root id names no node logs `request.rootId` with the zone
+`Store`, where no request exists. `TreeMetadata.decodeValidated` meets the same
+question for the `meta` value's fields. `ErrorSubject` has no case for a tree.
+The browser's tree builder sets `ErrorSubject.Request` as the subject of the
+tree's own fields, in `TreeBuilderState.scala` line 124.
+
+**Option A — a new `ErrorSubject.Tree`, used at both borders.** `fromNodes`
+reports its tree-own fields at `Field(ErrorSubject.Tree, f)` for a request and
+for a stored tree alike, as `ExistingNode` already serves both. The tree builder
+reads `ErrorSubject.Tree` instead of `Request`. A refused stored root id logs
+`tree.rootId` under `Store`, and a refused submitted one answers `400` at
+`tree.rootId`. The location is true at both borders. The cost is a new case on
+a wire enum and one changed browser reader.
+
+**Option B — keep `Request`.** The stored tree's own fields are reported at
+`Field(ErrorSubject.Request, f)`, and the `Store` zone on the error is what
+tells the reader no request was involved. Nothing changes on the wire or in the
+browser. The location text is false for every stored-tree refusal, and the
+reader has to correct it from the zone.
+
+**Recommendation, the plan author's: Option A.** A location that is false at one
+of the two borders it serves is the defect `EWB-D-72` was ruled to remove.
+
 ### EWB-D-67 — what a tree write answers — RULED 2026-11-05
 
 **Ruled 2026-11-05: Option A. Create, update and revert keep answering the
@@ -6223,7 +6165,7 @@ the browser.
 | ADR-001 and ADR-017 (API design) | `BaseEndpoint`, the DTO convention, and in Phase 3a the browser's refinement entry points | Compliant, and it removes an exception. The error output now follows the response-DTO convention the architecture document already declares complete. Phase 3a strengthens ADR-001's "smart constructors are the only valid construction path" on the browser side: a form's live checks and its submission both read a located accessor, so the value a refinement sees was built where the field is declared rather than assembled at the call site. The refinements keep their `(value, location)` parameters and stay public, because the server supplies a location it derives by iterating a submitted collection, so on that side the entry point is enforced by convention exactly as it is today. No amendment is needed — the record already states the rule this makes true. |
 | ADR-019 (frontend component architecture) | `GlobalError`, `ErrorBanner`, and in Phase 3a the form states and the per-form mapping | Compliant, and Phase 3a closes a smell — **with one staleness in the record to rule on.** Decision 7's two tiers are unchanged, and Phase 3a's reading of them is what decides §15.5: a control and the form's own line are both the inline tier the owning view renders, so both are cases of the form's display enum, and the banner is the unowned tier, so it is not. Routing before rendering is what makes decision 7's "an error belongs to exactly one tier" true, because today a refusal about a field the open form owns is rendered in the banner by `ErrorBanner.scala:42-43` regardless — the mirror of the record's own "Duplicating a Per-View Error into the Global Banner" smell. The classifier's input type changes and a `NotFound` display case is added. **The staleness:** the record's "Validation via `.now()` on Submit" smell gives a GOOD example that calls `ValidationUtil.refineName(v)` with one argument. Phase 3 already made that two arguments, so the example has been wrong since Phase 3 landed; Phase 3a leaves that signature alone and so does not move it again. The record is an accepted ADR, so this plan does not edit it: the amendment is presented and waits. Separately, that smell's heading reads as banning a snapshot read on submit while its example is an imperative check; the located submit accessor of §15.4 reads a snapshot to compose a submission and performs no check, which is what `toDraft` already does at `RiskLeafFormState.scala:428-431`. Two further points of the record bear on §15.5a and both are satisfied: "Signals Down, Callbacks Up" forbids mutating a `Var` you do not own, which is what `routeErrors` does to the view's `submitError` and what the inversion removes; and the "Self-Correcting Reactive Var" smell is why the form's own derived checks are not written into `submitErrors` but combined with it at the point of reading. |
 | ADR-028 (vague quantifier query pane) | `QueryProblem` | Compliant. The engine's rendered messages still reach the pane. `FolModelValidationFailure` and `FolEvaluationFailure` stop reaching it, which matches the ADR's own description of them as wiring faults rather than query errors. |
-| ADR-039 (trust-boundary ingress validation) | the Irmin and Postgres borders, the ingress rejection type | **Currently violated, fixed in Phase 7.** The record states that a value entering process memory from outside is refined at the border and that an ingress rejection is a typed failure distinct from a transport fault. Today `handleIrmin` collapses seven typed Irmin cases into `RepositoryFailure(String)`, the repository's four stored-value decoders interpolate an accumulated `ValidationError` list into a sentence, and `WorkspaceStorePostgres` recovers a branch from that sentence with `reason.contains`. Phase 7 closes all three and records the one exemption the record requires, on the branch listing. No amendment to the record is needed: it was written against these findings. |
+| ADR-039 (trust-boundary ingress validation) | the Irmin, Postgres and SpiceDB borders | **Violated today; not this plan's to fix.** The record states that a value entering process memory from outside is refined at the border and that an ingress rejection is a typed failure distinct from a transport fault. Today `handleIrmin` collapses seven typed Irmin cases into `RepositoryFailure(String)`, the repository's stored-value decoders interpolate an accumulated `ValidationError` list into a sentence, the Irmin client answers a malformed listing as `IrminUnavailable`, `WorkspaceStorePostgres` recovers a branch from a sentence with `reason.contains`, and the SpiceDB parse answers refused content as `AuthServiceUnavailable`. `PLAN-UES-UNIFIED-ERROR-SHAPE.md` closes all of them and declares the concrete error type §4 leaves to "the plan that implements this record". No amendment to the record from this plan. |
 | ADR-002 (observability) | the correlation identifier, the failure log line | **Currently violated, fixed here, and the record is amended.** A correlation identifier that never reaches a client cannot correlate anything; `EWB-D-8` decides the fix. The resolve-failure line annotated a redacted constant and so identified no workspace; `EWB-D-26` replaces it with one line per failed request, written where the trace is in scope, so every line carries the identifier the response carries. **The amendment:** the record's code-smell section demands differentiated log levels, which `EWB-D-26` satisfies by origin, but its one example put a validation failure at `logWarning`. That example now shows a caller-caused failure at `logInfo`. The section's decision is unchanged and binds more concretely than before. |
 
 `docs/dev/ARCHITECTURE.md`'s "DTO/Domain Model Separation" section gains the error
@@ -6389,30 +6331,8 @@ The two global instruction lines that `EWB-D-10` produces are written. The user'
 `boyscout` skill states each one with its test and its reason, as obligations 3
 and 5. Neither is this plan's work any more.
 
-**Added by Phase 7 — the storage trust boundary**
-
-Five paths the approved inventory does not yet carry. All five exist.
-
-- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala`
-- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminCommit.scala`
-- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala`
-- `modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala`
-- `modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala`
-
-Three further integration suites read a commit hash as a `String` and are
-reached if step 5's retyping touches them, which the compiler decides:
-`IrminMergeSemanticsSpec.scala`, `IrminRevertSemanticsSpec.scala` and
-`PinnedReadAuthorizationItSpec.scala`, all under
-`modules/server-it/src/test/scala/`. They are named here rather than discovered
-mid-phase, because `server-it` has no `src/main` and so carries no standing
-authorization for its own tests.
-
-Every other file Phase 7 edits is already named: `AppError.scala`,
-`WireError.scala`, `RiskNode.scala`, `RiskTree.scala`, `Mitigation.scala`,
-`RiskTreeRepositoryIrmin.scala`, `IrminClientLive.scala` and
-`WorkspaceStorePostgres.scala`. `WorkspaceStorePostgresSpec.scala` is reached by
-the standing authorization for a module's own tests, since `server`'s `src/main`
-is listed.
+The paths Phase 7 would have added are listed by `PLAN-UES-UNIFIED-ERROR-SHAPE.md`
+§9, which carries that work.
 
 **Added by Phase 3a — the located value and the routing destination**
 
@@ -6548,23 +6468,8 @@ must leave the stored capability key untouched. That test fails against the
 current wildcard, which is what makes it a regression test for the fourth defect
 in §1.
 
-**Phase 7, the storage trust boundary.** Four properties, each pinning one step.
-
-In `RiskTreeRepositoryIrminSpec`, a read whose Irmin call fails with
-`IrminUnavailable` fails with `IrminUnavailable` and not with
-`RepositoryFailure`, which is step 2's whole content and is the property
-`handleIrmin` silently removed. In the same suite, a stored node whose JSON
-refines to nothing fails with `IngressRejected` carrying more than one
-`ValidationError` when more than one field is bad — the accumulation is the
-point, and a single-error assertion would pass against a `.flatMap` rewrite.
-
-In `WorkspaceStorePostgresSpec`, inserting two workspaces with the same
-`seedEntityId` yields the duplicate rejection, and the suite drives the real
-database rather than a stubbed error, because the behaviour under test is the
-driver's `SQLState` reaching `classify`.
-
-In `WireErrorSpec`, `IngressRejected` projects to `InternalFault`, added to the
-existing exhaustive case-to-wire assertion rather than as a separate test.
+**Phase 7, the trust boundaries.** Carried into `PLAN-UES-UNIFIED-ERROR-SHAPE.md`,
+whose §4 names one behavioural test per moved row.
 
 **Phase 3a, the located value.** The scope is enumerated rather than discovered,
 because no shared signature changes: eleven refinement call sites in four files,
@@ -8832,15 +8737,15 @@ TWC-D-8 and TWC-D-15, and finding 2 as item 7 below.
      names.
 
    Stored content stays `String` (`get`, `getAtCommit`, `set`'s value,
-   `IrminTreeEntry.value`): its parse is the domain decoder in the same step
-   (Phase 7 step 3), and the merge compares it as bytes (ADR-032). The client's
-   scaladoc states that. On the response side, Phase 7 step 5 gains
-   `IrminCommit.info.message` parsed on arrival as `Option[CommitMessage]`,
-   `None` for a commit this service did not write. `IrminQueries`'
-   `author: String` is the client's one named constant `defaultAuthor`, the
-   text Irmin records as a commit's author, so it stays. Every `IrminClient`
-   fake in the test tree follows the trait. Implemented 2026-11-03, except the
-   Phase 7 step 5 extension, which lands with that step.
+   `IrminTreeEntry.value`): its parse is the domain decoder that reads it, and
+   the merge compares it as bytes (ADR-032). The client's scaladoc states that.
+   On the response side, `IrminCommit.info.message` parsed on arrival as
+   `Option[CommitMessage]`, `None` for a commit this service did not write, is
+   carried by `PLAN-UES-UNIFIED-ERROR-SHAPE.md` with `IrminCommit`'s refinement.
+   `IrminQueries`' `author: String` is the client's one named constant
+   `defaultAuthor`, the text Irmin records as a commit's author, so it stays.
+   Every `IrminClient` fake in the test tree follows the trait. Implemented
+   2026-11-03, except the `IrminCommit.info.message` extension.
 
 Every file these touch is on `PLAN-ERROR-WIRE-BOUNDARY-INVENTORY.md`, except the
 container patch in item 1, which needs an inventory amendment presented when
