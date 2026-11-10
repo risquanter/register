@@ -7,7 +7,8 @@ ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Pha
 Phase 0 step 0.3 and Phase 1 steps 1.1 to 1.3 landed together, at version 0.18.3.
 Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
 2.1 and 2.5 landed together, at version 0.18.5. Phase 2 step 2.2 landed at
-version 0.18.6, and step 2.3 at version 0.18.7. Phase 2 step 2.4 is next. The
+version 0.18.6, step 2.3 at version 0.18.7, and step 2.4 at version 0.18.8.
+Phase 2 waits on its BATS suite A run. The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -492,7 +493,6 @@ The database classifies once, from a code (rows 12, 52 to 54):
 ```scala
 // WorkspaceStorePostgres.scala
 private def classify(err: Throwable): Failure
-private def parseInterval(value: String, field: FieldName): IO[Failure, Duration]
 
 object DurationString:
   def parseInterval(value: String, location: ErrorLocation): Either[NonEmptyList[ValidationError], Duration]
@@ -503,9 +503,13 @@ unique-violation state, on the seed-entity constraint is row 11's `Rejected` at
 `Client`; `23505` on another constraint is `Conflict` at `Peer(Database)` with
 `(Whole, ConflictKind.Rejected())`; a connection failure is `Unanswered` at
 `Database` with the `OutageMode` the exception class decides, carrying
-`PeerMessage(err.getMessage)`. Whether the driver exposes the constraint name is
-confirmed when the step opens the file; if not, the step classifies on the state
-alone and keeps the constraint distinction at the one call site that needs it.
+`PeerMessage(err.getMessage)`. The Postgres driver exposes the constraint name,
+through `PSQLException.getServerErrorMessage.getConstraint`. Row 11's value needs
+the requested id, which `classify` does not hold. So `classify` reads the state
+alone, and the one call site that inserts a requested id maps a violation of
+`workspaces_seed_entity_id_key` to row 11's value. `toRecord` reads each interval
+through `DurationString.parseInterval` directly, because its refusals accumulate
+with the other columns', so no effectful interval parse exists.
 `toRecord`'s seed-entity refusal and the two interval parses are `Rejected` at
 `Peer(Database)`, located at `Field(Workspace, SeedEntityId | Ttl | IdleTimeout)`.
 
@@ -728,7 +732,7 @@ and `Field(ExistingNode(id), …)`; `TreeLoadFailure` and the join at
 `RiskTreeServiceLive.scala` line 96 go, and the merge guard of row 22 reads the
 same list into its `Conflict`'s diagnostics. `ScenarioMergeService` line 113
 reports `StoredNodeKindDiffers`. Grep: `TreeLoadFailure`, `TreeLoadProblem`,
-`requestField(` outside `common`'s request path. Test:
+and no stored-value decoder reporting at `requestField(`. Test:
 `RiskTreeRepositoryIrminSpec` pins that a stored leaf written with two bad
 fields fails with `Rejected` at `Peer(Store)` carrying both, each at
 `ExistingNode` of that node; that a stored leaf with a bad probability is a

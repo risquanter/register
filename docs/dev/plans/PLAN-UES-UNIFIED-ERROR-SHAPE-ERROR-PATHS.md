@@ -300,7 +300,7 @@ defect answered by `DefectCatchAllInterceptor`. Row 1 is parked and not mapped.
 | 42 | `Rejected` | `Peer(Store)` | `(Whole, WrongFormat(Ulid))` | the listed segment | 500; Service |
 | 43 | `Rejected` | `Peer(Store)` | `(Field(Tree(treeId), RootId), Required)` and the other `meta` fields | — | 500; Service |
 | 44 | `Rejected` | `Peer(Store)` | `(Field(ExistingNode(nodeId), Probability), OutOfRange(ClosedUnitInterval))` | — | 500; Service |
-| 45 | `Rejected` | `Peer(Store)` | `(Field(Mitigation(mid), Spec), Unreadable(Json))` | — | 500; Service |
+| 45 | `Rejected` | `Peer(Store)` | `(Whole, Unreadable(Json))` for text that is not the raw form's JSON, which includes a spec that does not decode; a refused field at `Field(Mitigation(mid), f)` | — | 500; Service |
 | 46 | `Rejected` | `Peer(Store)` | `RiskTree.fromNodes`'s list, tree-own fields at `Field(Tree(treeId), f)` | — | 500; Service |
 | 47 | `Rejected` | `Peer(Store)` | `(Field(ExistingNode(id), Id), FieldProblem.<node kind differs between merge sides> NEW)` | — | 500; Service |
 | 48 a | `NotFound` | `Peer(Store)` | `(Field(ExistingNode(id), Id), NotFoundKind.<listed value absent> NEW)` | storage path | 500; Service |
