@@ -39,7 +39,6 @@ object WireErrorSpec extends ZIOSpecDefault:
   private val commit: CommitHash    = CommitHash.fromString("0123456789abcdef0123456789abcdef01234567").toOption.get
   private val otherCommit: CommitHash = CommitHash.fromString("89abcdef0123456789abcdef0123456789abcdef").toOption.get
   private val scenario              = ScenarioName.fromString("feature-1").toOption.get
-  private val branch                = BranchRef.fromString("main").toOption.get
   private val trace                 = TelemetryPlaceholders.UnlinkedTrace
 
   /** A ULID is 26 characters of Crockford base32, which is the shape every
@@ -229,9 +228,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             // Capability absent
             ScenariosNotSupported("in-memory")                     -> "NotSupported",
             // Faults
-            BranchAlreadyExists(branch)                            -> "InternalFault",
-            BranchHeadStale(branch, commit)                        -> "InternalFault",
-            IrminMergeConflict("conflict")                         -> "InternalFault",
             SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault",
             FolModelValidationFailure(List("x"))                   -> "InternalFault",
             FolEvaluationFailure("x", "bind")                      -> "InternalFault"
@@ -240,7 +236,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 25)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 22)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope

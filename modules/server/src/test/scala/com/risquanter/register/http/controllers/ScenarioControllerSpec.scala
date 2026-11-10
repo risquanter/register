@@ -14,12 +14,12 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, MergeStagingRef, SafeName, ScenarioName, StoreBranch, TreeId, WorkspaceId, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, Failure, FieldName, IrminError}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, Failure, FieldName}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioListResponse, ScenarioResponse, TreeLabel, TreeWriteKind, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, safeId, treeId, unsafeGet}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
-import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
+import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath, IrminWriteOutcome}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory}
 import com.risquanter.register.services.{ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
@@ -61,31 +61,34 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
     private def toBranch(branch: StoreBranch, headOpt: Option[CommitHash]): IrminBranch =
       IrminBranch(branch, headOpt.map(h => IrminCommit(h, h, Nil, info)))
 
-    override def branches: IO[IrminError, List[StoreBranch]] = state.get.map(_.keys.toList.map(storeBranch))
+    override def branches: IO[Failure, List[StoreBranch]] = state.get.map(_.keys.toList.map(storeBranch))
 
-    override def mainBranch: IO[IrminError, Option[IrminBranch]] =
+    override def mainBranch: IO[Failure, Option[IrminBranch]] =
       state.get.map(m => Some(toBranch(BranchRef.Main, m.get("main"))))
 
-    override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
+    override def getBranch(branch: StoreBranch): IO[Failure, Option[IrminBranch]] =
       state.get.map(m => m.get(branch.name).map(h => toBranch(branch, Some(h))))
 
-    override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit] =
+    override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[Failure, IrminWriteOutcome] =
       state.modify { m =>
-        if m.contains(branch.name) then (false, m)
-        else (true, m + (branch.name -> at))
-      }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchAlreadyExists(branch)))
+        m.get(branch.name) match
+          case Some(head) => (IrminWriteOutcome.Refused(Some(head)), m)
+          case None       => (IrminWriteOutcome.Applied, m + (branch.name -> at))
+      }
 
-    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError, Unit] =
+    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[Failure, IrminWriteOutcome] =
       state.modify { m =>
-        if m.get(branch.name).contains(currentHead) then (true, m - branch.name)
-        else (false, m)
-      }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, currentHead)))
+        m.get(branch.name) match
+          case Some(head) if head == currentHead => (IrminWriteOutcome.Applied, m - branch.name)
+          case head                              => (IrminWriteOutcome.Refused(head), m)
+      }
 
-    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit] =
+    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[Failure, IrminWriteOutcome] =
       state.modify { m =>
-        if m.get(branch.name).contains(expectedHead) then (true, m + (branch.name -> to))
-        else (false, m)
-      }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, expectedHead)))
+        m.get(branch.name) match
+          case Some(head) if head == expectedHead => (IrminWriteOutcome.Applied, m + (branch.name -> to))
+          case head                               => (IrminWriteOutcome.Refused(head), m)
+      }
 
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
     override def set(path: IrminPath, value: String, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))

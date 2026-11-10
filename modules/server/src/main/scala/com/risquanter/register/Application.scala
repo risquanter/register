@@ -9,7 +9,7 @@ import sttp.model.HeaderNames
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
-import com.risquanter.register.domain.errors.{Failure, IrminError, RequestHeaderName}
+import com.risquanter.register.domain.errors.RequestHeaderName
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
@@ -53,10 +53,7 @@ object Application extends ZIOAppDefault {
                     // The gate reports readiness of the process, not of a
                     // request, so its channel is `Throwable`. A domain error
                     // leaving the domain is converted here, where it crosses.
-                    probe          = client.healthCheck.mapError {
-                                       case e: IrminError => RuntimeException(e.logMessage)
-                                       case f: Failure    => RuntimeException(f.logMessage)
-                                     },
+                    probe          = client.healthCheck.mapError(f => RuntimeException(f.logMessage)),
                     attemptTimeout = cfg.healthCheckAttemptTimeout,
                     budget         = cfg.healthCheckBudget
                   )

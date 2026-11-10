@@ -46,7 +46,7 @@ final class IrminClientLive private (
       case BranchRef.Main => ""
       case named          => s" [branch=${named.name}]"
 
-  override def get(path: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, Option[String]] =
+  override def get(path: IrminPath, branch: BranchRef = BranchRef.Main): IO[Failure, Option[String]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET: ${path.value}${branchLog(branch)}")
       response <- executeQuery[GetValueResponse](IrminQueries.getValue(path, branch))
@@ -54,15 +54,15 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin GET result: ${value.map(_.take(50))}")
     yield value
 
-  override def set(path: IrminPath, value: String, message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, IrminCommit] =
+  override def set(path: IrminPath, value: String, message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[Failure, IrminCommit] =
     setOn(path, value, message, branch)
 
-  override def set(path: IrminPath, value: String, message: CommitMessage, staging: MergeStagingRef): IO[IrminError | Failure, IrminCommit] =
+  override def set(path: IrminPath, value: String, message: CommitMessage, staging: MergeStagingRef): IO[Failure, IrminCommit] =
     setOn(path, value, message, staging)
 
   /** The single `set` mutation both overloads issue. Private, so the branch
     * types each overload accepts stay the public contract. */
-  private def setOn(path: IrminPath, value: String, message: CommitMessage, branch: StoreBranch): IO[IrminError | Failure, IrminCommit] =
+  private def setOn(path: IrminPath, value: String, message: CommitMessage, branch: StoreBranch): IO[Failure, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin SET: ${path.value} (${value.length} bytes)${branchLog(branch)}")
       query     = IrminQueries.setValue(path, value, message, defaultAuthor, branch)
@@ -71,7 +71,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin SET committed: ${commit.hash.value.take(12)}")
     yield commit
 
-  override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, IrminCommit] =
+  override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[Failure, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin SET_TREE: ${path.value} (${entries.size} entries)${branchLog(branch)}")
       query     = IrminQueries.setTree(path, entries, message, defaultAuthor, branch)
@@ -82,7 +82,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin SET_TREE committed: ${commit.hash.value.take(12)}")
     yield commit
 
-  override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, IrminCommit] =
+  override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[Failure, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin REMOVE: ${path.value}${branchLog(branch)}")
       query     = IrminQueries.removeValue(path, message, defaultAuthor, branch)
@@ -91,7 +91,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin REMOVE committed: ${commit.hash.value.take(12)}")
     yield commit
 
-  override def branches: IO[IrminError | Failure, List[StoreBranch]] =
+  override def branches: IO[Failure, List[StoreBranch]] =
     for
       _        <- ZIO.logDebug("Irmin LIST BRANCHES")
       response <- executeQuery[BranchesResponse](IrminQueries.listBranches)
@@ -99,13 +99,13 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin branches: ${listed.map(_.name).mkString(", ")}")
     yield listed
 
-  override def mainBranch: IO[IrminError | Failure, Option[IrminBranch]] =
+  override def mainBranch: IO[Failure, Option[IrminBranch]] =
     branchInfo(BranchRef.Main)
 
-  override def getBranch(branch: StoreBranch): IO[IrminError | Failure, Option[IrminBranch]] =
+  override def getBranch(branch: StoreBranch): IO[Failure, Option[IrminBranch]] =
     branchInfo(branch)
 
-  private def branchInfo(branch: StoreBranch): IO[IrminError | Failure, Option[IrminBranch]] =
+  private def branchInfo(branch: StoreBranch): IO[Failure, Option[IrminBranch]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET BRANCH${branchLog(branch)}")
       response <- executeQuery[MainBranchResponse](IrminQueries.getBranchInfo(branch))
@@ -114,27 +114,28 @@ final class IrminClientLive private (
                   )
     yield info
 
-  override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage): IO[IrminError | Failure, IrminCommit] =
+  override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage): IO[Failure, IrminMergeOutcome] =
     for
       _        <- ZIO.logInfo(s"Irmin MERGE: ${from.value.take(12)} → ${into.name}")
       query     = IrminQueries.mergeWithCommit(from, into, message, defaultAuthor)
       response <- executeQuery[MergeCommitResponse](query)
-      commit   <- response.data.flatMap(_.merge_with_commit) match
-                    case Some(c) => refineCommit(c)
+      outcome  <- response.data.flatMap(_.merge_with_commit) match
+                    case Some(c) => refineCommit(c).map(IrminMergeOutcome.Merged(_))
                     case None    =>
                       // The patched irmin-graphql resolver reports a refused
                       // merge as a GraphQL error prefixed "merge conflict: "
-                      // (containers/builders/patches/); discriminate it from
-                      // other GraphQL failures of the same mutation here so
-                      // callers get a typed conflict.
+                      // (containers/builders/patches/), which tells it apart
+                      // from the mutation's other GraphQL failures.
                       val (messages, _) = collectGraphQl(response.errors)
                       messages.find(_.startsWith(MergeConflictPrefix)) match
-                        case Some(m) => ZIO.fail(IrminMergeConflict(m.stripPrefix(MergeConflictPrefix)))
+                        case Some(m) => ZIO.succeed(IrminMergeOutcome.Conflicted(m.stripPrefix(MergeConflictPrefix)))
                         case None    => ZIO.fail(graphQlFailure(response.errors))
-      _        <- ZIO.logInfo(s"Irmin MERGE committed: ${commit.hash.value.take(12)}")
-    yield commit
+      _        <- outcome match
+                    case IrminMergeOutcome.Merged(commit)     => ZIO.logInfo(s"Irmin MERGE committed: ${commit.hash.value.take(12)}")
+                    case IrminMergeOutcome.Conflicted(reason) => ZIO.logInfo(s"Irmin MERGE refused: $reason")
+    yield outcome
 
-  override def revert(commit: CommitHash, branch: BranchRef): IO[IrminError | Failure, IrminCommit] =
+  override def revert(commit: CommitHash, branch: BranchRef): IO[Failure, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin REVERT to ${commit.value.take(12)}${branchLog(branch)}")
       response <- executeQuery[RevertResponse](IrminQueries.revert(commit, branch))
@@ -144,44 +145,38 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin REVERT new head: ${newHead.hash.value.take(12)}")
     yield newHead
 
-  override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError | Failure, Unit] =
-    for
-      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH: ${branch.name} at ${at.value.take(12)}")
-      query     = IrminQueries.testAndSetBranch(branch, test = None, set = Some(at))
-      response <- executeQuery[TestAndSetBranchResponse](query)
-      applied  <- extractCasResult(response)
-      _        <- ZIO.fail(BranchAlreadyExists(branch)).unless(applied)
-      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH ${branch.name}: applied")
-    yield ()
+  override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[Failure, IrminWriteOutcome] =
+    ZIO.logInfo(s"Irmin CREATE BRANCH: ${branch.name} at ${at.value.take(12)}") *>
+      testAndSet(branch, test = None, set = Some(at))
 
-  override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError | Failure, Unit] =
-    for
-      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH: ${branch.name} at ${currentHead.value.take(12)}")
-      query     = IrminQueries.testAndSetBranch(branch, test = Some(currentHead), set = None)
-      response <- executeQuery[TestAndSetBranchResponse](query)
-      applied  <- extractCasResult(response)
-      _        <- ZIO.fail(BranchHeadStale(branch, currentHead)).unless(applied)
-      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH ${branch.name}: applied")
-    yield ()
+  override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[Failure, IrminWriteOutcome] =
+    ZIO.logInfo(s"Irmin DELETE BRANCH: ${branch.name} at ${currentHead.value.take(12)}") *>
+      testAndSet(branch, test = Some(currentHead), set = None)
 
-  override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError | Failure, Unit] =
-    for
-      _        <- ZIO.logInfo(s"Irmin MOVE BRANCH: ${branch.name} ${expectedHead.value.take(12)} -> ${to.value.take(12)}")
-      query     = IrminQueries.testAndSetBranch(branch, test = Some(expectedHead), set = Some(to))
-      response <- executeQuery[TestAndSetBranchResponse](query)
-      applied  <- extractCasResult(response)
-      _        <- ZIO.fail(BranchHeadStale(branch, expectedHead)).unless(applied)
-      _        <- ZIO.logInfo(s"Irmin MOVE BRANCH ${branch.name}: applied")
-    yield ()
+  override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[Failure, IrminWriteOutcome] =
+    ZIO.logInfo(s"Irmin MOVE BRANCH: ${branch.name} ${expectedHead.value.take(12)} -> ${to.value.take(12)}") *>
+      testAndSet(branch, test = Some(expectedHead), set = Some(to))
 
-  override def getCommit(hash: CommitHash): IO[IrminError | Failure, Option[IrminCommit]] =
+  /** One `test_and_set_branch` and what it did. Irmin answers only whether the
+    * write applied, so a refusal reads the branch's head with a second call;
+    * that head may have moved again since, and is reported for diagnosis. */
+  private def testAndSet(branch: StoreBranch, test: Option[CommitHash], set: Option[CommitHash]): IO[Failure, IrminWriteOutcome] =
+    for
+      response <- executeQuery[TestAndSetBranchResponse](IrminQueries.testAndSetBranch(branch, test, set))
+      applied  <- extractCasResult(response)
+      outcome  <- if applied then ZIO.succeed(IrminWriteOutcome.Applied)
+                  else branchInfo(branch).map(info => IrminWriteOutcome.Refused(info.flatMap(_.head).map(_.hash)))
+      _        <- ZIO.logInfo(s"Irmin TEST_AND_SET ${branch.name}: $outcome")
+    yield outcome
+
+  override def getCommit(hash: CommitHash): IO[Failure, Option[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET COMMIT: ${hash.value.take(12)}")
       response <- executeQuery[CommitQueryResponse](IrminQueries.getCommit(hash))
       commit   <- ZIO.foreach(response.data.flatMap(_.commit))(refineCommit)
     yield commit
 
-  override def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError | Failure, Option[String]] =
+  override def getAtCommit(commit: CommitHash, path: IrminPath): IO[Failure, Option[String]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET@${commit.value.take(12)}: ${path.value}")
       response <- executeQuery[CommitTreeGetResponse](IrminQueries.getValueAtCommit(commit, path))
@@ -189,7 +184,7 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin GET@commit result: ${value.map(_.take(50))}")
     yield value
 
-  override def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError | Failure, List[IrminSegment]] =
+  override def listAtCommit(commit: CommitHash, path: IrminPath): IO[Failure, List[IrminSegment]] =
     for
       _        <- ZIO.logDebug(s"Irmin LIST@${commit.value.take(12)}: ${path.value}")
       response <- executeQuery[CommitTreeListResponse](IrminQueries.listTreeAtCommit(commit, path))
@@ -197,26 +192,26 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin LIST@commit result (${paths.size}): ${paths.map(_.value).mkString(", ")}")
     yield paths
 
-  override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, List[IrminCommit]] =
+  override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[Failure, List[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin HISTORY: ${path.value} (n=$n)${branchLog(branch)}")
       response <- executeQuery[HistoryResponse](IrminQueries.getHistory(path, n, branch))
       commits  <- ZIO.foreach(response.data.flatMap(_.main).map(_.last_modified).getOrElse(Nil))(refineCommit)
     yield commits
 
-  override def lca(branch: BranchRef, commit: CommitHash): IO[IrminError | Failure, List[IrminCommit]] =
+  override def lca(branch: BranchRef, commit: CommitHash): IO[Failure, List[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin LCA: ${commit.value.take(12)}${branchLog(branch)}")
       response <- executeQuery[LcaResponse](IrminQueries.lca(branch, commit))
       commits  <- ZIO.foreach(response.data.flatMap(_.main).map(_.lcas).getOrElse(Nil))(refineCommit)
     yield commits
 
-  override def healthCheck: IO[IrminError | Failure, Unit] =
+  override def healthCheck: IO[Failure, Unit] =
     // Typed error carries the real cause (connection refused, HTTP status, parse
     // failure) through the readiness gate's retries to the final failure (ADR-031).
     executeQuery[BranchesResponse](IrminQueries.listBranches).unit
 
-  override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, List[IrminSegment]] =
+  override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main): IO[Failure, List[IrminSegment]] =
     for
       _        <- ZIO.logDebug(s"Irmin LIST: ${prefix.value}${branchLog(branch)}")
       response <- executeQuery[ListTreeResponse](IrminQueries.listTree(prefix, branch))
@@ -281,17 +276,17 @@ final class IrminClientLive private (
     val (messages, path) = collectGraphQl(errors)
     outage(OutageMode.Protocol, Diagnostic.PeerMessage(messages.mkString("; ")) :: path.map(Diagnostic.GraphQlPath(_)).toList)
 
-  private def extractCommit(response: SetValueResponse): IO[IrminError | Failure, IrminCommit] =
+  private def extractCommit(response: SetValueResponse): IO[Failure, IrminCommit] =
     response.data.flatMap(_.set) match
       case Some(c) => refineCommit(c)
       case None    => failWithError(response.errors)
 
-  private def extractRemoveCommit(response: RemoveValueResponse): IO[IrminError | Failure, IrminCommit] =
+  private def extractRemoveCommit(response: RemoveValueResponse): IO[Failure, IrminCommit] =
     response.data.flatMap(_.remove) match
       case Some(c) => refineCommit(c)
       case None    => failWithError(response.errors)
 
-  private def extractCasResult(response: TestAndSetBranchResponse): IO[IrminError | Failure, Boolean] =
+  private def extractCasResult(response: TestAndSetBranchResponse): IO[Failure, Boolean] =
     response.data.flatMap(_.test_and_set_branch) match
       case Some(applied) => ZIO.succeed(applied)
       case None          => ZIO.fail(graphQlFailure(response.errors))
@@ -314,10 +309,10 @@ final class IrminClientLive private (
           case Some(errs) if errs.nonEmpty => failWithListError(errors)
           case _                           => ZIO.succeed(List.empty)
 
-  private def extractList(prefix: IrminPath, response: ListTreeResponse): IO[IrminError | Failure, List[IrminSegment]] =
+  private def extractList(prefix: IrminPath, response: ListTreeResponse): IO[Failure, List[IrminSegment]] =
     childPaths(prefix, response.data.flatMap(_.main).flatMap(_.tree.get_tree).map(_.list), response.errors)
 
-  private def extractListAtCommit(prefix: IrminPath, response: CommitTreeListResponse): IO[IrminError | Failure, List[IrminSegment]] =
+  private def extractListAtCommit(prefix: IrminPath, response: CommitTreeListResponse): IO[Failure, List[IrminSegment]] =
     childPaths(prefix, response.data.flatMap(_.commit).flatMap(_.tree.get_tree).map(_.list), response.errors)
 
   /** Refines a commit where Irmin's answer arrives (ADR-039). A hash that is

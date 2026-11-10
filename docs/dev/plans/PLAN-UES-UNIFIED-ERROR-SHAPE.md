@@ -8,7 +8,9 @@ Phase 0 step 0.3 and Phase 1 steps 1.1 to 1.3 landed together, at version 0.18.3
 Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
 2.1 and 2.5 landed together, at version 0.18.5. Phase 2 step 2.2 landed at
 version 0.18.6, step 2.3 at version 0.18.7, and step 2.4 at version 0.18.8.
-Phase 2 waits on its BATS suite A run. The
+BATS suite A passed at version 0.18.8, which closes Phase 2. Phase 3 step 3.1
+landed at version 0.18.9, with `IrminWriteOutcome.Refused` carrying an optional
+head (§3.5). The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -431,8 +433,9 @@ The zone has no default, so a new site cannot be written without choosing one.
   * means for its own request (UES-D-4). */
 enum IrminWriteOutcome:
   case Applied
-  /** The branch's head at the moment of the refusal. */
-  case Refused(head: CommitHash)
+  /** The branch's head, read just after the refusal. `None` when the branch
+    * has no head. */
+  case Refused(head: Option[CommitHash])
 
 /** What a merge did. */
 enum IrminMergeOutcome:
@@ -445,6 +448,15 @@ The family: the Irmin client's models in `infra/irmin/model/`, where
 `IrminCommit`, `IrminBranch`, `IrminSegment` and `IrminPath` follow the pattern
 of an `Irmin` prefix on the thing modelled. `Conflicted.reason` is `String`
 because it is Irmin's own sentence, used only as `Diagnostic.PeerMessage`.
+
+`Refused.head` is an `Option` because Irmin's `test_and_set_branch` answers only
+whether the write applied, so the client reads the head with a second call, and
+a refused delete of a branch that has since been deleted finds no head. This
+matches `Diagnostic.ActualHead(hash: Option[CommitHash])`, which the head feeds.
+Amended 2026-11-10 at the step 3.1 echo; the version approved on 2026-11-09
+typed it `CommitHash`. No existing type denotes either outcome:
+`MergePreviewStatus` is a preview's wire answer and `ScopeOutcome` a
+mitigation's resolved targets.
 
 ```scala
 // IrminClient.scala, Phase 3

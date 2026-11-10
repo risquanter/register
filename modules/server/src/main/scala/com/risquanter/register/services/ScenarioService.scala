@@ -56,10 +56,9 @@ trait ScenarioService:
     * @param source What to fork from — main, an existing scenario, or a
     *               specific commit (fork-from-history). Required; no default.
     * @return The new scenario's branch reference
-    * @see BranchAlreadyExists translated to `DataConflict` — a name collision.
-    *      `BranchHeadStale` cannot occur here: the compare-and-set on
+    * @see DataConflict — the name is taken. The compare-and-set on
     *      `createBranchAt` guards the new branch's name, never the source's
-    *      staleness — forking is by commit hash, so it is immune to the source
+    *      staleness: forking is by commit hash, so it is immune to the source
     *      changing mid-fork.
     */
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
@@ -77,7 +76,7 @@ trait ScenarioService:
     *                     required, not resolved internally, so the
     *                     compare-and-set guards the caller's whole
     *                     interaction, not just this call
-    * @see BranchHeadStale translated to `ScenarioHeadStale` — concurrent modification
+    * @see ScenarioHeadStale — the head is no longer `expectedHead` (concurrent modification)
     */
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
     (using Checked[Authority]): IO[AppError | Failure, Unit]

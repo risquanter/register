@@ -6,7 +6,7 @@ import zio.prelude.{NonEmptyList, Validation}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, SafeId, WorkspaceId, BranchRef, CommitHash, Revision, ValidationUtil}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, IrminError,
+  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem,
   PeerZone, TreeAbsentAtRevision, TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.NotFoundKind
@@ -122,7 +122,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     * replacing the whole subtree. An omitted mitigation is deleted by the same
     * subtree-replace that omits it, exactly as for nodes. The tree holds its
     * root among its nodes by construction, so the write has nothing to check. */
-  private def writeTree(base: IrminPath, meta: TreeMetadata, tree: RiskTree, message: CommitMessage, branch: BranchRef): IO[IrminError | Failure, Unit] =
+  private def writeTree(base: IrminPath, meta: TreeMetadata, tree: RiskTree, message: CommitMessage, branch: BranchRef): IO[Failure, Unit] =
     val entries =
       IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Meta(meta.id)), meta.toJson) ::
         tree.nodes.toList.map(node => IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Node(meta.id, node.id)), RiskTreeRepositoryIrmin.encodeStoredNode(node))) :::

@@ -2,13 +2,10 @@ package com.risquanter.register.infra.irmin
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import zio.prelude.NonEmptyList
 import com.risquanter.register.configs.IrminConfig
-import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
-import com.risquanter.register.domain.errors.{
-  BranchAlreadyExists, BranchHeadStale, Core, ErrorLocation, Failure, OutageMode, PeerZone
-}
+import com.risquanter.register.infra.irmin.model.{IrminMergeOutcome, IrminPath, IrminTreeEntry, IrminWriteOutcome}
+import com.risquanter.register.domain.errors.{Core, ErrorLocation, Failure, OutageMode, PeerZone}
 import com.risquanter.register.domain.data.iron.{BranchRef, PositiveInt, Url, WorkspaceId}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.testcontainers.IrminCompose
@@ -145,7 +142,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       )
     },
 
-    // ---- Branch operations (milestone 2b, DD-1/DD-2) ----
+    // ---- Branch operations ----
 
     test("set/get on a named branch is isolated from main") {
       for
@@ -176,7 +173,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       )
     },
 
-    // ---- CAS branch create/delete (Phase B, DD-5, A9 fact 2/3) ----
+    // ---- Compare-and-set branch create/delete, and merge outcomes ----
 
     test("createBranchAt forks main's content, unlike a bare first write (A9 fact 3)") {
       for
@@ -188,14 +185,17 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       yield assertTrue(onBranch.contains("\"main-value\""))
     },
 
-    test("createBranchAt fails with BranchAlreadyExists on a name collision") {
+    test("createBranchAt on an existing branch is Refused with that branch's head") {
       for
         testPath <- uniquePath("cas-collision")
         branch   <- freshBranch
         mainHead <- IrminClient.set(testPath, "\"v\"", msg("main write"))
-        _        <- IrminClient.createBranchAt(branch, mainHead.hash)
-        exit     <- IrminClient.createBranchAt(branch, mainHead.hash).exit
-      yield assert(exit)(fails(isSubtype[BranchAlreadyExists](anything)))
+        first    <- IrminClient.createBranchAt(branch, mainHead.hash)
+        second   <- IrminClient.createBranchAt(branch, mainHead.hash)
+      yield assertTrue(
+        first == IrminWriteOutcome.Applied,
+        second == IrminWriteOutcome.Refused(Some(mainHead.hash))
+      )
     },
 
     test("deleteBranch removes the pointer; the commit remains resolvable by hash (A9 fact 5)") {
@@ -212,14 +212,28 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       )
     },
 
-    test("deleteBranch fails with BranchHeadStale when the expected head is out of date") {
+    test("deleteBranch with an out-of-date head is Refused with the actual head, and deletes nothing") {
       for
         testPath <- uniquePath("cas-stale-delete")
         branch   <- freshBranch
         c1       <- IrminClient.set(testPath, "\"v1\"", msg("branch write v1"), branch)
-        _        <- IrminClient.set(testPath, "\"v2\"", msg("branch write v2"), branch)
-        exit     <- IrminClient.deleteBranch(branch, c1.hash).exit
-      yield assert(exit)(fails(isSubtype[BranchHeadStale](anything)))
+        c2       <- IrminClient.set(testPath, "\"v2\"", msg("branch write v2"), branch)
+        outcome  <- IrminClient.deleteBranch(branch, c1.hash)
+        listed   <- IrminClient.branches
+      yield assertTrue(
+        outcome == IrminWriteOutcome.Refused(Some(c2.hash)),
+        listed.contains(branch)
+      )
+    },
+
+    test("deleteBranch on a branch with no head is Refused with no head") {
+      for
+        testPath <- uniquePath("cas-delete-absent")
+        branch   <- freshBranch
+        c1       <- IrminClient.set(testPath, "\"v1\"", msg("branch write v1"), branch)
+        _        <- IrminClient.deleteBranch(branch, c1.hash)
+        outcome  <- IrminClient.deleteBranch(branch, c1.hash)
+      yield assertTrue(outcome == IrminWriteOutcome.Refused(None))
     },
 
     test("mergeCommit folds a branch commit into main") {
@@ -227,9 +241,30 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         testPath <- uniquePath("merge-test")
         branch   <- freshBranch
         written  <- IrminClient.set(testPath, "\"merged-value\"", msg("branch write"), branch)
-        _        <- IrminClient.mergeCommit(written.hash, BranchRef.Main, msg("merge branch into main"))
+        outcome  <- IrminClient.mergeCommit(written.hash, BranchRef.Main, msg("merge branch into main"))
         onMain   <- IrminClient.get(testPath)
-      yield assertTrue(onMain.contains("\"merged-value\""))
+      yield assertTrue(
+        outcome match
+          case IrminMergeOutcome.Merged(_)     => true
+          case IrminMergeOutcome.Conflicted(_) => false,
+        onMain.contains("\"merged-value\"")
+      )
+    },
+
+    test("mergeCommit of conflicting commits is Conflicted") {
+      for
+        testPath <- uniquePath("merge-conflict")
+        branch   <- freshBranch
+        base     <- IrminClient.set(testPath, "\"v0\"", msg("base write"))
+        _        <- IrminClient.createBranchAt(branch, base.hash)
+        scenHead <- IrminClient.set(testPath, "\"scenario-value\"", msg("scenario edit"), branch)
+        _        <- IrminClient.set(testPath, "\"main-value\"", msg("main edit"))
+        outcome  <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge conflicting"))
+      yield assertTrue(
+        outcome match
+          case IrminMergeOutcome.Conflicted(_) => true
+          case IrminMergeOutcome.Merged(_)     => false
+      )
     },
 
     test("getCommit finds a commit by hash; revert restores an earlier state") {
@@ -264,7 +299,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       )
     },
 
-    // ---- set_tree (DD-7: one commit per write action) ----
+    // ---- set_tree: one commit per write action ----
 
     test("setTree writes several entries atomically in ONE commit") {
       for

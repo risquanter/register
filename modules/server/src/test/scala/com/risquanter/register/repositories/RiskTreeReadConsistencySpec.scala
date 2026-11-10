@@ -10,7 +10,7 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
 import com.risquanter.register.domain.errors.{
-  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, IrminError, PeerZone,
+  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
   TrustZone, ValueRange
 }
 import com.risquanter.register.http.errors.NotFoundKind
@@ -121,7 +121,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       store: Map[CommitHash, Map[IrminPath, String]]
   ) extends IrminClient:
 
-    override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
+    override def getBranch(branch: StoreBranch): IO[Failure,Option[IrminBranch]] =
       for
         _    <- branchCalls.update(_ + 1)
         head <- headRef.get
@@ -130,11 +130,11 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         IrminBranch(branch, Some(IrminCommit(h, h, Nil, emptyInfo)))
       )
 
-    override def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, Option[String]] =
+    override def getAtCommit(commit: CommitHash, path: IrminPath): IO[Failure,Option[String]] =
       queriedCommits.update(_ + commit) *>
         ZIO.succeed(store.getOrElse(commit, Map.empty).get(path))
 
-    override def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, List[IrminSegment]] =
+    override def listAtCommit(commit: CommitHash, path: IrminPath): IO[Failure,List[IrminSegment]] =
       queriedCommits.update(_ + commit) *> ZIO.succeed(
         store.getOrElse(commit, Map.empty).keySet.toList
           .flatMap(childUnder(path, _))

@@ -3,9 +3,9 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash, MergeStagingRef, StoreBranch}
-import com.risquanter.register.domain.errors.{AppError, Failure, DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, ValidationError, BranchAlreadyExists, BranchHeadStale}
+import com.risquanter.register.domain.errors.{AppError, Failure, DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, ValidationError}
 import com.risquanter.register.infra.irmin.IrminClient
-import com.risquanter.register.infra.irmin.model.IrminBranch
+import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminWriteOutcome}
 
 /** Irmin-backed `ScenarioService`.
   *
@@ -14,11 +14,10 @@ import com.risquanter.register.infra.irmin.model.IrminBranch
   * once at the boundary), so composing them into a `BranchRef` can never fail —
   * a failure there is an invariant violation (`ZIO.die`), not a domain error.
   *
-  * Compare-and-set errors from `IrminClient` are translated into domain errors
-  * here rather than left to reach the wire as raw `IrminError`s, so a
-  * `BranchAlreadyExists` or `BranchHeadStale` arriving at the projection means
-  * this translation was skipped. A name collision becomes `DataConflict` and a
-  * moved head becomes `ScenarioHeadStale`.
+  * A refused compare-and-set is an outcome `IrminClient` returns, and this
+  * service decides what it means: a refused create is a name collision,
+  * `DataConflict`, and a refused delete is a moved head, `ScenarioHeadStale`.
+  * The match on the outcome is exhaustive, so a refusal cannot go untranslated.
   */
 final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
@@ -27,9 +26,10 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     for
       branch     <- scenarioBranch(wsId, name)
       sourceHead <- resolveSourceHead(wsId, source)
-      _          <- irmin.createBranchAt(branch, sourceHead).catchSome { case BranchAlreadyExists(_) =>
-                      ZIO.fail(DataConflict(s"Scenario '${name.value}' already exists"))
-                    }
+      outcome    <- irmin.createBranchAt(branch, sourceHead)
+      _          <- outcome match
+                      case IrminWriteOutcome.Applied    => ZIO.unit
+                      case IrminWriteOutcome.Refused(_) => ZIO.fail(DataConflict(s"Scenario '${name.value}' already exists"))
     yield branch
 
   override def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError | Failure, List[ScenarioSummary]] =
@@ -43,11 +43,10 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     (using Checked[Authority]): IO[AppError | Failure, Unit] =
     for
       branch <- scenarioBranch(wsId, name)
-      _      <- irmin.deleteBranch(branch, expectedHead).catchSome { case BranchHeadStale(_, expected) =>
-                  irmin.getBranch(branch).orElseSucceed(None).flatMap { maybeBranch =>
-                    ZIO.fail(ScenarioHeadStale(name, expected, maybeBranch.flatMap(_.head).map(_.hash)))
-                  }
-                }
+      outcome <- irmin.deleteBranch(branch, expectedHead)
+      _       <- outcome match
+                   case IrminWriteOutcome.Applied       => ZIO.unit
+                   case IrminWriteOutcome.Refused(head) => ZIO.fail(ScenarioHeadStale(name, expectedHead, head))
     yield ()
 
   // ── source resolution ────────────────────────────────────────────────────

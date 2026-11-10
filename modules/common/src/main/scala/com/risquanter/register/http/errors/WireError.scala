@@ -199,13 +199,7 @@ object WireError:
       // Capability absent
       case ScenariosNotSupported(_)            => WireError.NotSupported(Capability.Scenarios, t)
 
-      // Faults. The three compare-and-set outcomes are translated into domain
-      // errors by the scenario service before they reach here; these arms are the
-      // net if that translation is ever skipped, and a client can act on none of
-      // them.
-      case BranchAlreadyExists(_)              => WireError.InternalFault(t)
-      case BranchHeadStale(_, _)               => WireError.InternalFault(t)
-      case IrminMergeConflict(_)               => WireError.InternalFault(t)
+      // Faults: a client can act on none of them.
       case SimulationFailure(_, _)             => WireError.InternalFault(t)
       case FolModelValidationFailure(_)        => WireError.InternalFault(t)
       case FolEvaluationFailure(_, _)          => WireError.InternalFault(t)

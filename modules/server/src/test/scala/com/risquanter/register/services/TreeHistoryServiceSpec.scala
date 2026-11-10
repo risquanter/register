@@ -7,7 +7,7 @@ import java.time.Instant
 import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, ScenarioName, StoreBranch, WorkspaceId}
-import com.risquanter.register.domain.errors.{AppError, Core, ErrorLocation, Failure, IrminError, OutageMode, PeerZone}
+import com.risquanter.register.domain.errors.{AppError, Core, ErrorLocation, Failure, OutageMode, PeerZone}
 import com.risquanter.register.http.responses.{HistoryOperation, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminPath, IrminTreeEntry}
@@ -33,7 +33,7 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
     * commits of `log`, oldest first, and records the `n` it was asked for, or
     * fails with `outage` when one is given. */
   private final class FakeHistoryIrmin(log: List[IrminCommit], asked: Ref[List[Int]], outage: Option[Failure]) extends IrminClient:
-    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, List[IrminCommit]] =
+    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[Failure, List[IrminCommit]] =
       outage.fold(asked.update(_ :+ (n: Int)).as(log.takeRight(n)))(ZIO.fail(_))
 
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
@@ -42,7 +42,7 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
     override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def branches = ZIO.die(new NotImplementedError("unused by this spec"))
-    override def mainBranch: IO[IrminError | Failure, Option[IrminBranch]] = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def mainBranch: IO[Failure, Option[IrminBranch]] = ZIO.die(new NotImplementedError("unused by this spec"))
     override def getBranch(branch: StoreBranch) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))

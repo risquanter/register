@@ -9,15 +9,15 @@ import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, PositiveInt, Revision, SafeId, SafeName, TreeId, ValidationUtil}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, Failure, BranchAlreadyExists, BranchHeadStale, ErrorLocation, ErrorSubject, FieldName, FieldProblem,
-  IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, PeerZone, TrustZone,
+  AppError, Core, Diagnostic, Failure, ErrorLocation, ErrorSubject, FieldName, FieldProblem,
+  MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, PeerZone, TrustZone,
   ValidationFailed, ValidationError
 }
 import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
-import com.risquanter.register.infra.irmin.model.IrminSegment
+import com.risquanter.register.infra.irmin.model.{IrminMergeOutcome, IrminSegment, IrminWriteOutcome}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.repositories.model.TreeMetadata
 
@@ -146,8 +146,8 @@ object ConflictFields:
   * empty. The merge joins the two commits the scan compared, so a write on
   * either branch after the scan cannot reach it. The patched Irmin backend
   * (see `IrminClient.mergeCommit`) is the backstop for a conflict the
-  * pre-check did not name: the merge itself fails typed (`IrminMergeConflict`),
-  * which is mapped to the domain `MergeConflict` here.
+  * pre-check did not name: the merge itself returns `Conflicted`, which is
+  * mapped to the domain `MergeConflict` here.
   *
   * The pre-check compares full persisted contents byte-for-byte between main,
   * the scenario, and their lowest common ancestor — the storage relation of
@@ -264,8 +264,10 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     val staging        = MergeStagingRef.forScenario(wsId, name)
     for
       head    <- ZIO.acquireReleaseWith(
-                   irmin.createBranchAt(staging, mainBefore)
-                     .catchSome { case BranchAlreadyExists(_) => ZIO.fail(MergeAlreadyRunning(name)) }
+                   irmin.createBranchAt(staging, mainBefore).flatMap {
+                     case IrminWriteOutcome.Applied    => ZIO.unit
+                     case IrminWriteOutcome.Refused(_) => ZIO.fail(MergeAlreadyRunning(name))
+                   }
                  )(_ =>
                    // Best effort: the staging branch is unreachable once main
                    // holds the merge, and a leftover one only blocks the next
@@ -279,19 +281,19 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                                  ZIO.foreachDiscard(comparison.versions.onScenario)(contents =>
                                    irmin.set(WorkspaceStoragePaths.of(wsId, comparison.path), contents, prepareMessage, staging))
                                }
-                     merge  <- irmin.mergeCommit(scenarioHead, staging, mergedMessage)
-                                 .catchSome { case IrminMergeConflict(_) =>
-                                   ZIO.fail(MergeConflict(name, MergeRefusal.BranchesConflict()))
-                                 }
+                     merge  <- irmin.mergeCommit(scenarioHead, staging, mergedMessage).flatMap {
+                                 case IrminMergeOutcome.Merged(commit) => ZIO.succeed(commit)
+                                 case IrminMergeOutcome.Conflicted(_)  => ZIO.fail(MergeConflict(name, MergeRefusal.BranchesConflict()))
+                               }
                      last   <- ZIO.foldLeft(metadataToWrite)(merge) { case (_, (comparison, merged)) =>
                                  irmin.set(WorkspaceStoragePaths.of(wsId, comparison.path), merged.toJson, mergedMessage, staging)
                                }
                      staged  = last.hash
                      _      <- guardStagedState(wsId, name, staged)
-                     _      <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged)
-                                 .catchSome { case BranchHeadStale(_, _) =>
-                                   ZIO.fail(MergeTargetMoved(name))
-                                 }
+                     _      <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged).flatMap {
+                                 case IrminWriteOutcome.Applied    => ZIO.unit
+                                 case IrminWriteOutcome.Refused(_) => ZIO.fail(MergeTargetMoved(name))
+                               }
                    yield staged
                  }
     yield head

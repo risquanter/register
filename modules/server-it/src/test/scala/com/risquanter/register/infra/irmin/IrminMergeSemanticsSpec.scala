@@ -2,8 +2,8 @@ package com.risquanter.register.infra.irmin
 
 import zio.*
 import zio.test.*
-import com.risquanter.register.infra.irmin.model.{IrminCommit, IrminPath}
-import com.risquanter.register.domain.errors.{Failure, IrminError, IrminMergeConflict}
+import com.risquanter.register.infra.irmin.model.{IrminCommit, IrminMergeOutcome, IrminPath}
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, WorkspaceId}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.testcontainers.IrminCompose
@@ -19,8 +19,8 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
   *
   *  1. Paths edited on only one side since the fork merge cleanly (per-path
   *     auto-resolution, ADR-007-appendix §4).
-  *  2. The same path edited to DIFFERENT bytes on both sides is refused as
-  *     `IrminMergeConflict` — the patched-image contract (regression gate
+  *  2. The same path edited to DIFFERENT bytes on both sides is refused, which
+  *     the client returns as `Conflicted` — the patched-image contract (regression gate
   *     for the local irmin-graphql patch) — leaving main untouched.
   *  3. A merge into an unmoved main fast-forwards to the merged commit, and
   *     still does after a refused merge.
@@ -53,7 +53,16 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
   /** Write an initial value on main, fork a fresh branch at that commit.
     * Returns the branch and the fork-point commit (the merge base).
     */
-  private def forkAt(path: IrminPath, baseValue: String): ZIO[IrminClient, IrminError | Failure, (BranchRef, CommitHash)] =
+  /** Merge `from` into `into` where the fixture expects Irmin to apply it,
+    * returning the resulting commit. A refusal here is a broken fixture, not
+    * an outcome under test. */
+  private def mergeApplied(from: CommitHash, into: BranchRef, message: CommitMessage): ZIO[IrminClient, Failure, IrminCommit] =
+    IrminClient.mergeCommit(from, into, message).flatMap {
+      case IrminMergeOutcome.Merged(commit)     => ZIO.succeed(commit)
+      case IrminMergeOutcome.Conflicted(reason) => ZIO.dieMessage(s"fixture merge refused: $reason")
+    }
+
+  private def forkAt(path: IrminPath, baseValue: String): ZIO[IrminClient, Failure, (BranchRef, CommitHash)] =
     for
       branch   <- freshBranch
       baseHead <- IrminClient.set(path, baseValue, msg("base write"))
@@ -63,12 +72,12 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
 
   /** Edit `path` on a fresh fork of main and merge that edit back while main
     * has not moved, returning the edit's commit and the merge's result. */
-  private def fastForward(label: String): ZIO[IrminClient, IrminError | Failure, (IrminCommit, IrminCommit)] =
+  private def fastForward(label: String): ZIO[IrminClient, Failure, (IrminCommit, IrminCommit)] =
     for
       path        <- uniquePath(label)
       (branch, _) <- forkAt(path, "\"v0\"")
       edit        <- IrminClient.set(path, "\"scenario-only\"", msg("scenario edit"), branch)
-      merged      <- IrminClient.mergeCommit(edit.hash, BranchRef.Main, msg("merge ff"))
+      merged      <- mergeApplied(edit.hash, BranchRef.Main, msg("merge ff"))
     yield (edit, merged)
 
   override def spec = suite("IrminMergeSemanticsSpec")(
@@ -81,7 +90,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         _            <- IrminClient.set(pathB, "\"b0\"", msg("base write b"))
         branchHead   <- IrminClient.set(pathA, "\"a-scenario\"", msg("scenario edits a"), branch)
         mainHead     <- IrminClient.set(pathB, "\"b-main\"", msg("main edits b"))
-        mergeCommit  <- IrminClient.mergeCommit(branchHead.hash, BranchRef.Main, msg("merge disjoint"))
+        mergeCommit  <- mergeApplied(branchHead.hash, BranchRef.Main, msg("merge disjoint"))
         a            <- IrminClient.get(pathA)
         b            <- IrminClient.get(pathB)
       yield assertTrue(
@@ -91,27 +100,26 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
       )
     },
 
-    test("a conflicting merge fails typed (IrminMergeConflict) and leaves main untouched") {
+    test("a conflicting merge returns Conflicted and leaves main untouched") {
       // Regression gate for the local irmin-graphql patch
       // (containers/builders/patches/): upstream's `merge_with_commit`
       // resolver reports a conflict as an unprefixed GraphQL error; the
       // patched image prefixes it with "merge conflict: ", which
-      // IrminClientLive raises as IrminMergeConflict. This test failing with an
+      // IrminClientLive returns as Conflicted. This test failing with an
       // `Unanswered` at the store means the running image is unpatched or the patch
-      // no longer applies — do not weaken it; rebuild the image
-      // (VERSION-UPGRADE-PROTOCOL, opam section).
+      // no longer applies — do not weaken it; rebuild the image.
       for
         path        <- uniquePath("conflict")
         (branch, _) <- forkAt(path, "\"v0\"")
         scenHead    <- IrminClient.set(path, "\"scenario-value\"", msg("scenario edit"), branch)
         mainHead    <- IrminClient.set(path, "\"main-value\"", msg("main edit"))
-        result      <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge conflicting")).either
+        result      <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge conflicting"))
         headAfter   <- IrminClient.mainBranch.map(_.flatMap(_.head))
         onMain      <- IrminClient.get(path)
       yield assertTrue(
         result match
-          case Left(IrminMergeConflict(_)) => true
-          case _                           => false,
+          case IrminMergeOutcome.Conflicted(_) => true
+          case IrminMergeOutcome.Merged(_)     => false,
         headAfter.map(_.hash).contains(mainHead.hash),
         onMain.contains("\"main-value\"")
       )
@@ -129,9 +137,14 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         (branch, _) <- forkAt(path, "\"v0\"")
         scenHead    <- IrminClient.set(path, "\"scenario-value\"", msg("scenario edit"), branch)
         _           <- IrminClient.set(path, "\"main-value\"", msg("main edit"))
-        refused     <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge conflicting")).either
+        refused     <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge conflicting"))
         (edit, merged) <- fastForward("ff-after-refusal-edit")
-      yield assertTrue(refused.isLeft, merged.hash == edit.hash)
+      yield assertTrue(
+        refused match
+          case IrminMergeOutcome.Conflicted(_) => true
+          case IrminMergeOutcome.Merged(_)     => false,
+        merged.hash == edit.hash
+      )
     },
 
     test("same path edited to identical bytes on both sides merges cleanly") {
@@ -140,7 +153,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         (branch, _) <- forkAt(path, "\"v0\"")
         scenHead    <- IrminClient.set(path, "\"agreed\"", msg("scenario edit"), branch)
         _           <- IrminClient.set(path, "\"agreed\"", msg("main edit to same bytes"))
-        _           <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge equal bytes"))
+        _           <- mergeApplied(scenHead.hash, BranchRef.Main, msg("merge equal bytes"))
         onMain      <- IrminClient.get(path)
       yield assertTrue(onMain.contains("\"agreed\""))
     },

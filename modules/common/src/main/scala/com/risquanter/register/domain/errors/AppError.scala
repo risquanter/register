@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import java.time.{Duration, Instant}
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{CommitHash, Revision, ScenarioName, StoreBranch, TreeId, ValidationMessages, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{CommitHash, Revision, ScenarioName, TreeId, ValidationMessages, WorkspaceId}
 import vql.error.{BindErrorDetail, QueryError}
 
 /** Who a failure is attributable to, which decides the level its log line is
@@ -16,10 +16,8 @@ import vql.error.{BindErrorDetail, QueryError}
   *
   * The distinction is drawn on the internal failure rather than on the wire
   * case, because the wire is deliberately coarser: several failures share one
-  * wire case, and they do not share an attribution. `WireError.InternalFault`
-  * carries both `SimulationFailure`, which is this service's own, and
-  * `BranchAlreadyExists`, which is a caller's. Reading the level from the wire
-  * case would give one level to both.
+  * wire case, and they need not share an attribution. Reading the level from
+  * the wire case would give one level to all of them.
   */
 enum FailureOrigin:
   case Caller
@@ -59,7 +57,6 @@ sealed trait AppError:
   def logAnnotations: Map[String, String] = Map.empty
 
 sealed trait DomainError extends AppError
-sealed trait IrminError extends AppError
 
 /** One refusal: where it is and what it is.
   *
@@ -215,51 +212,6 @@ case class TreeAbsentAtRevision(wsId: WorkspaceId, treeId: TreeId, rev: Revision
   )
 }
 
-// ============================================================================
-// Infrastructure Errors (ADR-010: Error Handling Strategy)
-// ============================================================================
-
-/** Compare-and-set branch-create rejected: `test_and_set_branch`
-  * with `test: null` failed because the branch already has a head. Not a
-  * transport failure — Irmin answered correctly, the precondition (branch must
-  * not yet exist) just didn't hold. Framed in IrminClient's own vocabulary
-  * (branch), not scenario vocabulary: whether this means "scenario name taken"
-  * is a judgment ScenarioService makes one layer up, the same way `IrminMergeConflict`
-  * is translated into the domain-level `MergeConflict` below, not inside IrminClient.
-  * Non-retriable as-is.
-  *
-  * Carries either branch kind, because the client builds it from whichever
-  * branch it was asked to create. Which situation it means differs by kind, and
-  * each caller translates it accordingly: a scenario branch means the name is
-  * taken (`DataConflict`), a staging branch means a merge of that scenario is
-  * already running (`MergeAlreadyRunning`). */
-case class BranchAlreadyExists(branch: StoreBranch) extends IrminError {
-  override def logMessage: String = s"Branch already exists: ${branch.name}"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
-/** Compare-and-set branch-delete rejected: `test_and_set_branch`
-  * with `test: expectedHead` failed because the branch's actual head no longer
-  * matches — concurrent modification since it was last read. Non-retriable
-  * without re-reading the branch's current state first. Carries either branch
-  * kind, for the reason given on `BranchAlreadyExists`. */
-case class BranchHeadStale(branch: StoreBranch, expectedHead: CommitHash) extends IrminError {
-  override def logMessage: String = s"Branch ${branch.name} head is not ${expectedHead.value}"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
-/** A merge refused by the (patched) Irmin backend: the merged commit and the
-  * target branch hold conflicting values for at least one path, so no merge
-  * commit was created and the target branch's head is unchanged. Raised only
-  * by `IrminClient.mergeCommit`, which recognises the patched resolver's
-  * `"merge conflict: "` error prefix. `reason` is Irmin's conflict
-  * description with that prefix stripped. Not retriable as-is: the two sides
-  * must first be brought into byte agreement (ADR-032). */
-case class IrminMergeConflict(reason: String) extends IrminError {
-  override def logMessage: String = s"Irmin merge conflict: $reason"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
 /** A tree write refused because the branch head is not the commit the client
   * read, so the submitted body was composed against a tree that has since
   * changed.
@@ -320,8 +272,8 @@ case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends DomainE
 }
 
 /** Scenario delete/duplicate rejected — the branch's head no longer matches
-  * what the caller last observed (concurrent modification). Domain-level
-  * translation of `BranchHeadStale`. Names the scenario for the same reason as
+  * what the caller last observed (concurrent modification), built from a
+  * refused compare-and-set. Names the scenario for the same reason as
   * `MergeConflict` (ADR-036): a stale head is always a scenario's, so main is
   * not a reachable value. `actual` is `None` when the scenario no longer
   * exists at all.
