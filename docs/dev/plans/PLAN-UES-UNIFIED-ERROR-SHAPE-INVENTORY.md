@@ -101,3 +101,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
 - modules/server/src/main/scala/com/risquanter/register/infra/irmin/CommitMessage.scala
 - modules/server/src/main/scala/com/risquanter/register/infra/persistence/QuillMappings.scala
+- modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala

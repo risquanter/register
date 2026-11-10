@@ -6,7 +6,8 @@ Plan code `UES`. Decisions in this document are labelled `UES-D-<n>`.
 ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Phase 0 steps 0.1 and 0.2 landed, at versions 0.18.1 and 0.18.2.
 Phase 0 step 0.3 and Phase 1 steps 1.1 to 1.3 landed together, at version 0.18.3.
 Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
-2.1 and 2.5 landed together, at version 0.18.5. Phase 2 step 2.2 is next. The
+2.1 and 2.5 landed together, at version 0.18.5. Phase 2 step 2.2 landed at
+version 0.18.6. Phase 2 step 2.3 is next. The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -720,9 +721,8 @@ foreign name.
 
 2.2 Rows 42 to 47 and 38. The five `decodeValidated` functions and
 `decodeStoredNode` of §3.6; `ErrorSubject.Tree` used by `RiskTree.fromNodes`
-and `TreeMetadata.decodeValidated`; the three `create` defaults removed; the
-browser's tree builder at `TreeBuilderState.scala` line 124 reads `Tree(id)`.
-The repository's listing accumulates the failed trees' refusals into one
+and `TreeMetadata.decodeValidated`; the three `create` defaults removed. The
+browser's tree builder keeps its own subjects, per UES-D-5. The repository's listing accumulates the failed trees' refusals into one
 `Rejected` at `Peer(Store)` whose elements are located at `Field(Tree(treeId), …)`
 and `Field(ExistingNode(id), …)`; `TreeLoadFailure` and the join at
 `RiskTreeServiceLive.scala` line 96 go, and the merge guard of row 22 reads the
@@ -735,7 +735,6 @@ fields fails with `Rejected` at `Peer(Store)` carrying both, each at
 leaf's refusal; that a listing holding that tree fails with the accumulated list
 naming the tree at `Tree(treeId)`. `ScenarioMergeServiceSpec` pins a refused
 stored node in a merge preview as `Rejected` at `Peer(Store)`.
-`TreeBuilderStateSpec` pins the builder's subject.
 
 2.3 Row 48. 48a to 48c and 48e become `NotFound` at `Peer(Store)` with the four
 new kinds and `StoragePath` where the record names it. 48d: `writeTree` takes
@@ -1035,8 +1034,19 @@ translation reachable as a 500 at INFO.
 `ErrorSubject.Tree(treeId)` is added. `RiskTree.fromNodes` reports its tree-own
 fields there for a request and for a stored tree alike; `RiskLeaf.create`,
 `RiskPortfolio.create` and `createFromStrings` lose their `ErrorSubject.Request`
-default; the browser's tree builder reads `Tree(id)`. Ruled in EWB as its
-decision 74, form A1, and restated here because it is not yet implemented.
+default. Ruled in EWB as its decision 74, form A1, and restated here because
+it is not yet implemented.
+
+The browser's tree builder is outside this decision, ruled 2026-11-10. It keeps
+its own subjects and is not aligned with the server's locations. The builder's
+checks are a client-side aid that lets a user of the official tools submit
+well-formed data, and it marks a refused input through its own signals. The
+server's validation is the defensive layer, and its messages are written for a
+caller using the interface directly. Neither side is relaxed or reshaped to
+match the other. The earlier clause "the browser's tree builder reads
+`Tree(id)`" is withdrawn. A new tree has no `TreeId` in the browser, because the
+server assigns one on create. The server also reports a tree's name at the
+request rather than at `Tree(id)`.
 
 ### UES-D-6 — the SpiceDB border is in scope — RULED 2026-11-09
 
