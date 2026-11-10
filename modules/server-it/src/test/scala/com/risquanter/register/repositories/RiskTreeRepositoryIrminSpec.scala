@@ -11,6 +11,7 @@ import com.risquanter.register.domain.errors.{
   Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, OutageMode, PeerZone, TrustZone, ValueRange
 }
 import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
@@ -376,11 +377,51 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
               Diagnostic.TreeRef(tid)
             ))
           )
+      },
+
+      test("a tree whose nodes are stored and whose metadata is not fails the read as MetadataAbsent at the tree") {
+        val tid = treeId("tree-meta-absent")
+        for
+          repo  <- ZIO.service[RiskTreeRepository]
+          irmin <- ZIO.service[IrminClient]
+          _     <- repo.create(absentWs, sampleTree(tid, "Meta Absent"), BranchRef.Main)
+          _     <- irmin.remove(storedPath(tid, "meta"), CommitMessage.TreeWritten(absentWs, tid, TreeWriteKind.Update), BranchRef.Main)
+          exit  <- repo.getById(absentWs, tid, Revision.Head(BranchRef.Main)).exit
+        yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
+          TrustZone.Peer(PeerZone.Store),
+          NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(tid), FieldName.Id) -> NotFoundKind.MetadataAbsent()),
+          Nil
+        )))))
+      },
+
+      test("a tree whose metadata is stored and whose nodes are not fails the read as NodesAbsent at the tree") {
+        val tid = treeId("tree-nodes-absent")
+        for
+          repo  <- ZIO.service[RiskTreeRepository]
+          irmin <- ZIO.service[IrminClient]
+          _     <- repo.create(absentWs, sampleTree(tid, "Nodes Absent"), BranchRef.Main)
+          _     <- ZIO.foreachDiscard(List("root", "leaf-1", "leaf-2"))(node =>
+                     irmin.remove(storedPath(tid, s"nodes/${nodeId(node).value}"),
+                       CommitMessage.TreeWritten(absentWs, tid, TreeWriteKind.Update), BranchRef.Main))
+          exit  <- repo.getById(absentWs, tid, Revision.Head(BranchRef.Main)).exit
+        yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
+          TrustZone.Peer(PeerZone.Store),
+          NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(tid), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
+          Nil
+        )))))
       }
     ).provideLayerShared(irminLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
 
   /** The workspace the store-refusal tests write into. */
   private val refusalWs: WorkspaceId = WorkspaceId(safeId("test-irmin-refusals"))
+
+  /** The workspace the absent-content tests write into, apart from the
+    * refusal tests so their listing sees only the trees they refused. */
+  private val absentWs: WorkspaceId = WorkspaceId(safeId("test-irmin-absent"))
+
+  /** A path under one tree of `absentWs`. */
+  private def storedPath(tid: TreeId, within: String): IrminPath =
+    IrminPath.unsafeFrom(s"workspaces/${absentWs.value}/risk-trees/${tid.value}/$within")
 
   /** Rewrite leaf-1 of `tid` in place with a probability above one, and with a
     * blank name when `refuseName` holds. */

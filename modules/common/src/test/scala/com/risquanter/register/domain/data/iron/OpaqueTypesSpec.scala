@@ -307,7 +307,13 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
       test("a merge's staging branch reads as a staging reference") {
         val wsId = WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
         val name = ScenarioName.fromString("draft-v1").toOption.get
-        val staging = MergeStagingRef.forScenario(wsId, name).toOption.get
+        val staging = MergeStagingRef.forScenario(wsId, name)
+        assertTrue(StoreBranch.fromString(staging.toBranchRef, ErrorLocation.Whole) == Right(staging))
+      },
+      test("the staging branch of the longest scenario name satisfies its constraint") {
+        val wsId = WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
+        val name = ScenarioName.fromString("a" * 64).toOption.get
+        val staging = MergeStagingRef.forScenario(wsId, name)
         assertTrue(StoreBranch.fromString(staging.toBranchRef, ErrorLocation.Whole) == Right(staging))
       },
       test("a name this service gives no branch is refused as a branch name, at the given location") {

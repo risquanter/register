@@ -6,8 +6,8 @@ import zio.prelude.{NonEmptyList, Validation}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, SafeId, WorkspaceId, BranchRef, CommitHash, Revision, ValidationUtil}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, PeerZone,
-  RepositoryFailure, TreeAbsentAtRevision, TrustZone, ValidationError
+  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, IrminError,
+  PeerZone, TreeAbsentAtRevision, TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.TreeWriteKind
@@ -31,7 +31,6 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError | Failure,RiskTree] =
     val basePath = WorkspaceStoragePaths.treeRoot(wsId, riskTree.id)
     for
-      _   <- ensureRootPresent(riskTree.rootId, riskTree.nodes)
       now <- Clock.instant
       meta = TreeMetadata(
                id = riskTree.id,
@@ -42,7 +41,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
                createdAt = now,
                updatedAt = now
              )
-      _   <- writeTree(basePath, meta, riskTree.nodes, riskTree.mitigations, treeWriteMessage(wsId, riskTree.id, TreeWriteKind.Create), branch)
+      _   <- writeTree(basePath, meta, riskTree, treeWriteMessage(wsId, riskTree.id, TreeWriteKind.Create), branch)
     yield riskTree
 
   override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError | Failure,RiskTree] =
@@ -50,7 +49,6 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     for
       existing    <- getTreeWithMeta(wsId, id, branch)
       updatedTree  = op(existing.tree)
-      _           <- ensureRootPresent(updatedTree.rootId, updatedTree.nodes)
       now         <- Clock.instant
       updatedMeta  = existing.meta.copy(
                        name = updatedTree.name,
@@ -59,7 +57,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
                        schemaVersion = TreeMetadata.CurrentSchemaVersion,
                        updatedAt = now
                      )
-      _           <- writeTree(basePath, updatedMeta, updatedTree.nodes, updatedTree.mitigations, treeWriteMessage(wsId, id, TreeWriteKind.Update), branch)
+      _           <- writeTree(basePath, updatedMeta, updatedTree, treeWriteMessage(wsId, id, TreeWriteKind.Update), branch)
     yield updatedTree
 
   override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError | Failure,RiskTree] =
@@ -83,7 +81,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         for
           now         <- Clock.instant
           revertedMeta = existing.meta.copy(updatedAt = now, schemaVersion = TreeMetadata.CurrentSchemaVersion)
-          _           <- writeTree(basePath, revertedMeta, existing.tree.nodes, existing.tree.mitigations, treeWriteMessage(wsId, id, TreeWriteKind.Revert), branch)
+          _           <- writeTree(basePath, revertedMeta, existing.tree, treeWriteMessage(wsId, id, TreeWriteKind.Revert), branch)
         yield existing.tree
     }
 
@@ -120,30 +118,44 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   // Helpers
   // ----------------------------------------------------------------------------
 
-  /** One atomic commit: meta + every node + every mitigation, replacing the
-    * whole subtree. An omitted mitigation is deleted by the same
-    * subtree-replace that omits it, exactly as for nodes. */
-  private def writeTree(base: IrminPath, meta: TreeMetadata, nodes: Seq[RiskNode],
-                        mitigations: Seq[Mitigation], message: CommitMessage, branch: BranchRef): IO[AppError | Failure,Unit] =
+  /** One atomic commit: meta + every node + every mitigation of `tree`,
+    * replacing the whole subtree. An omitted mitigation is deleted by the same
+    * subtree-replace that omits it, exactly as for nodes. The tree holds its
+    * root among its nodes by construction, so the write has nothing to check. */
+  private def writeTree(base: IrminPath, meta: TreeMetadata, tree: RiskTree, message: CommitMessage, branch: BranchRef): IO[IrminError | Failure, Unit] =
     val entries =
       IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Meta(meta.id)), meta.toJson) ::
-        nodes.toList.map(node => IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Node(meta.id, node.id)), RiskTreeRepositoryIrmin.encodeStoredNode(node))) :::
-        mitigations.toList.map(m => IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Mitigation(meta.id, m.id)), m.toJson))
+        tree.nodes.toList.map(node => IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Node(meta.id, node.id)), RiskTreeRepositoryIrmin.encodeStoredNode(node))) :::
+        tree.mitigations.toList.map(m => IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Mitigation(meta.id, m.id)), m.toJson))
     irmin.setTree(base, entries, message, branch).unit
 
   /** The value at every path under `prefix`, with the segment it was listed
-    * under. A listed path the store does not hold a value at is a storage
-    * failure. */
-  private def readValuesAt(prefix: IrminPath, at: CommitHash): IO[AppError | Failure, List[(IrminSegment, String)]] =
+    * under. A listed path the store holds no value at is absent content,
+    * located at the identifier its segment names through `subject`. */
+  private def readValuesAt(
+    prefix:  IrminPath,
+    at:      CommitHash,
+    subject: SafeId.SafeId => ErrorSubject
+  ): IO[AppError | Failure, List[(IrminSegment, String)]] =
     irmin.listAtCommit(at, prefix).flatMap(children =>
       ZIO.foreach(children) { child =>
         val fullPath = prefix / child
         irmin.getAtCommit(at, fullPath).flatMap {
           case Some(json) => ZIO.succeed(child -> json)
-          case None       => ZIO.fail(RepositoryFailure(s"Missing value at ${fullPath.value}"))
+          case None       => ZIO.fail(listedValueAbsent(child, fullPath, subject))
         }
       }
     )
+
+  /** A listed path with no value, located at the identifier its segment names.
+    * A segment that is not an identifier is refused itself, as content this
+    * code did not write. */
+  private def listedValueAbsent(segment: IrminSegment, path: IrminPath, subject: SafeId.SafeId => ErrorSubject): Failure =
+    ValidationUtil.refineId(segment.value, ErrorLocation.Whole) match
+      case Right(id) =>
+        storeAbsence(ErrorLocation.Field(subject(id), FieldName.Id), NotFoundKind.StoredValueAbsent(), List(Diagnostic.StoragePath(path)))
+      case Left(errors) =>
+        storeRefusal(NonEmptyList(errors.head, errors.tail*), List(Diagnostic.RawValue(segment.value)))
 
   /** The `meta` value, the nodes and the mitigations of one tree decoded, every
     * refusal across all three accumulated. A node or mitigation is reported at
@@ -179,10 +191,11 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
   /** The tree rebuilt through the smart constructor, so every tree invariant
     * (structure, rootId, seedVarId distinctness, high-water >= max, mitigation
-    * id/name uniqueness and count bound) also holds on load. */
+    * id/name uniqueness and count bound) also holds on load. A tree with
+    * metadata and no nodes is absent content. */
   private def rebuildTree(meta: TreeMetadata, nodes: Seq[RiskNode], mitigations: Seq[Mitigation]): IO[AppError | Failure, RiskTree] =
     if nodes.isEmpty then
-      ZIO.fail(RepositoryFailure(s"No nodes found for tree ${meta.id}"))
+      ZIO.fail(storeAbsence(ErrorLocation.Field(ErrorSubject.Tree(meta.id), FieldName.Nodes), NotFoundKind.NodesAbsent(), Nil))
     else
       ZIO.fromEither(
         RiskTree
@@ -226,19 +239,19 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       maybeMetaJson <- irmin.getAtCommit(at, metaPath)
       maybeMeta <- maybeMetaJson match
         case None =>
-          irmin.listAtCommit(at, nodePrefix).flatMap { children =>
-            if children.nonEmpty then ZIO.fail(RepositoryFailure(s"Metadata missing for tree $id but nodes exist"))
-            else ZIO.succeed(None)
+          irmin.listAtCommit(at, nodePrefix).flatMap {
+            case Nil => ZIO.succeed(None)
+            case _   => ZIO.fail(storeAbsence(ErrorLocation.Field(ErrorSubject.Tree(id), FieldName.Id), NotFoundKind.MetadataAbsent(), Nil))
           }
         case Some(json) => ZIO.succeed(Some(json))
       result <- maybeMeta match
         case None => ZIO.succeed(None)
         case Some(metaJson) =>
           for
-            nodes       <- readValuesAt(nodePrefix, at)
+            nodes       <- readValuesAt(nodePrefix, at, segmentId => ErrorSubject.ExistingNode(NodeId(segmentId)))
             // Mitigations may legitimately be empty (a tree with no mitigations),
             // so — unlike nodes — there is no non-empty guard on them.
-            mitigations <- readValuesAt(mitPrefix, at)
+            mitigations <- readValuesAt(mitPrefix, at, segmentId => ErrorSubject.Mitigation(MitigationId(segmentId)))
             decoded     <- ZIO.fromEither(decodeStored(id, metaJson, nodes, mitigations).toEither)
                              .mapError(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), Nil))
             (meta, ns, ms) = decoded
@@ -251,10 +264,6 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       case Some(value) => ZIO.succeed(value)
       case None        => ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
     }
-
-  private def ensureRootPresent(rootId: NodeId, nodes: Seq[RiskNode]): IO[AppError | Failure,Unit] =
-    if nodes.exists(_.id == rootId) then ZIO.unit
-    else ZIO.fail(RepositoryFailure(s"Root ${rootId.value} not found in provided nodes"))
 
   private def treeWriteMessage(wsId: WorkspaceId, treeId: TreeId, kind: TreeWriteKind): CommitMessage =
     CommitMessage.TreeWritten(wsId, treeId, kind)
@@ -285,11 +294,11 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
   /** A listed tree whose commit holds neither its metadata nor any node. */
   private def listedTreeEmpty(treeId: TreeId): Failure =
-    Failure.NotFound(Core(
-      TrustZone.Peer(PeerZone.Store),
-      NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeId), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
-      Nil
-    ))
+    storeAbsence(ErrorLocation.Field(ErrorSubject.Tree(treeId), FieldName.Nodes), NotFoundKind.NodesAbsent(), Nil)
+
+  /** Content the store's own layout says it holds and the store does not. */
+  private def storeAbsence(location: ErrorLocation, kind: NotFoundKind, diagnostics: List[Diagnostic]): Failure =
+    Failure.NotFound(Core(TrustZone.Peer(PeerZone.Store), NonEmptyList(location -> kind), diagnostics))
 
   /** Content the store returned that this service refuses (ADR-039). */
   private def storeRefusal(errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =

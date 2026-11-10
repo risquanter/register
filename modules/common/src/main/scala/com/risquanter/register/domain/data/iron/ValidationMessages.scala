@@ -181,7 +181,6 @@ object ValidationMessages:
     case ValueFormat.CommitHash           => "Commit hash is invalid (expected 40 lowercase hexadecimal characters)"
     case ValueFormat.ContentHash          => "Content hash is invalid (expected 64 lowercase hexadecimal characters)"
     case ValueFormat.BranchName           => "Branch name is invalid"
-    case ValueFormat.StagingBranchName    => "Merge staging branch name is invalid"
     case ValueFormat.DistributionTypeName => "Distribution type must be 'Metalog' or 'Lognormal'"
     case ValueFormat.ScenarioNameStart    => "Scenario name must start with a letter or digit"
     case ValueFormat.StoreSegment         => "Storage path segment is invalid"

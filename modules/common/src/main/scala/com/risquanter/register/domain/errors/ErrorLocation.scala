@@ -397,7 +397,7 @@ object Alphabet:
 @jsonDiscriminator(TagField)
 enum ValueFormat:
   case Ulid, WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, SecureUrl, ExternalToken, TraceId
-  case CommitHash, ContentHash, BranchName, StagingBranchName, DistributionTypeName
+  case CommitHash, ContentHash, BranchName, DistributionTypeName
 
   /** One segment of an Irmin storage path. */
   case StoreSegment

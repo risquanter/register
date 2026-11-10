@@ -10,7 +10,7 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
 import com.risquanter.register.domain.errors.{
-  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, IrminError, PeerZone, RepositoryFailure,
+  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, IrminError, PeerZone,
   TrustZone, ValueRange
 }
 import com.risquanter.register.http.errors.NotFoundKind
@@ -203,14 +203,32 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       yield assertTrue(result.isEmpty)
     },
 
-    test("getById fails with RepositoryFailure when meta is absent but nodes exist at the resolved commit") {
+    test("getById fails as MetadataAbsent at the tree when meta is absent but nodes exist at the resolved commit") {
       val treeC1 = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
       for
         setup             <- scripted(Some(headC1), advanceTo = None,
                                store = Map(headC1 -> storeWithoutMeta(treeC1)))
         (repo, _, _)       = setup
         exit              <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).exit
-      yield assert(exit)(fails(isSubtype[RepositoryFailure](anything)))
+      yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
+        TrustZone.Peer(PeerZone.Store),
+        NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Id) -> NotFoundKind.MetadataAbsent()),
+        Nil
+      )))))
+    },
+
+    test("getById fails as NodesAbsent at the tree when meta is stored and no node is") {
+      val treeC1 = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
+      val metaOnly = Map(WorkspaceStoragePaths.treeMeta(wsId, treeIdF) -> metaOf(treeC1).toJson)
+      for
+        setup             <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> metaOnly))
+        (repo, _, _)       = setup
+        exit              <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).exit
+      yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
+        TrustZone.Peer(PeerZone.Store),
+        NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
+        Nil
+      )))))
     },
 
     test("getAllForWorkspace resolves ONE head for the whole listing and every read is pinned to it") {
@@ -231,14 +249,13 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     },
 
     // ADR-036 confines WorkspaceId to the server: it must never reach a
-    // client-visible surface. The failure for a listed value the store does not
-    // hold embeds it, because its text carries the full Irmin path built from
-    // WorkspaceStoragePaths.treeNodes(wsId, treeId). That failure answers the
-    // opaque fault, so the text reaches only the log. A node listed by
-    // listAtCommit but absent from getAtCommit at the SAME pinned commit should
-    // not happen under normal operation (Irmin's content at a fixed commit is
-    // immutable), but nothing in the type system rules it out.
-    test("the listing failure for a listed node whose value is missing embeds the WorkspaceId") {
+    // client-visible surface. The storage path of a listed value the store does
+    // not hold embeds it, so the path travels only as a diagnostic, which
+    // reaches the log and never the wire. A node listed by listAtCommit but
+    // absent from getAtCommit at the SAME pinned commit should not happen under
+    // normal operation (Irmin's content at a fixed commit is immutable), but
+    // nothing in the type system rules it out.
+    test("a listed node whose value is missing fails the listing as StoredValueAbsent at that node, its path a diagnostic") {
       val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
       val leafPath = WorkspaceStoragePaths.of(wsId, TreePath.Node(treeIdF, leaf1Id))
       // listAtCommit lists leaf1Id as a child because this phantom key lies
@@ -250,12 +267,14 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> tornStore))
         (repo, _, _) = setup
         exit        <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main)).exit
-      yield
-        val reason = exit.causeOption.flatMap(_.failureOption).collect { case RepositoryFailure(r) => r }
-        assertTrue(
-          reason.exists(_.contains(wsId.value)),
-          reason.exists(_.startsWith("Missing value at"))
-        )
+      yield assertTrue(
+        exit.causeOption.flatMap(_.failureOption).contains(Failure.NotFound(Core(
+          TrustZone.Peer(PeerZone.Store),
+          NonEmptyList(ErrorLocation.Field(ErrorSubject.ExistingNode(leaf1Id), FieldName.Id) -> NotFoundKind.StoredValueAbsent()),
+          List(Diagnostic.StoragePath(leafPath))
+        ))),
+        leafPath.value.contains(wsId.value)
+      )
     },
 
     test("a listed tree with neither metadata nor nodes fails the listing as NodesAbsent at the tree") {

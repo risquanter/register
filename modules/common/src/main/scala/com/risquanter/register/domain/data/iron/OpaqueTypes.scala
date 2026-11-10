@@ -638,23 +638,14 @@ object MergeStagingRef:
     * same scenario while one is in flight collides on the branch name and is
     * refused by `createBranchAt` instead of running alongside the first.
     *
-    * Both inputs are refined at their own boundaries, so the composition
-    * cannot fail refinement in practice; a `Left` here is an unreachable
-    * invariant violation rather than a domain error, the same as
-    * `BranchRef.scenario`.
+    * The composition satisfies the constraint by construction. The prefix is
+    * fixed, a `WorkspaceId` lowercased is 26 characters of `[0-9a-z]`, and a
+    * `ScenarioName` is already a valid segment of at most 64 characters, so
+    * the result has both segments in shape and at most 105 characters against
+    * the limit of 160.
     */
-  def forScenario(
-    wsId: WorkspaceId,
-    name: ScenarioName.ScenarioName
-  ): Either[List[ValidationError], MergeStagingRef] =
-    s"${prefix(wsId)}${name.value}"
-      .refineEither[MergeStagingRefConstraint]
-      .left
-      .map(_ => List(ValidationError(
-        ErrorLocation.requestField(FieldName.Branch),
-        FieldProblem.WrongFormat(ValueFormat.StagingBranchName)
-      )))
-      .map(MergeStagingRef(_))
+  def forScenario(wsId: WorkspaceId, name: ScenarioName.ScenarioName): MergeStagingRef =
+    MergeStagingRef(s"${prefix(wsId)}${name.value}".assume[MergeStagingRefConstraint])
 
 /** Which branch a request or view targets — the single internal spelling of
   * "main vs. a named scenario" on both sides of the wire, so internally main

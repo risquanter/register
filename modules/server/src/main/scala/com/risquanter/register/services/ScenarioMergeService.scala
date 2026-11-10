@@ -10,9 +10,10 @@ import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, Risk
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, PositiveInt, Revision, SafeId, SafeName, TreeId, ValidationUtil}
 import com.risquanter.register.domain.errors.{
   AppError, Core, Diagnostic, Failure, BranchAlreadyExists, BranchHeadStale, ErrorLocation, ErrorSubject, FieldName, FieldProblem,
-  IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, PeerZone, RepositoryFailure, TrustZone,
+  IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, PeerZone, TrustZone,
   ValidationFailed, ValidationError
 }
+import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -218,11 +219,15 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       // only be created at a commit that already exists and a branch head never
       // moves backwards, so main always holds one by the time a merge into it
       // runs. An absent head therefore means the store no longer holds what it
-      // held, which is a storage failure the caller sees as one rather than a
+      // held, and is reported as the store's absent content rather than as a
       // defect.
       mainBefore   <- result.mainHead match
                         case Some(head) => ZIO.succeed(head)
-                        case None       => ZIO.fail(RepositoryFailure("main has no head"))
+                        case None       => ZIO.fail(Failure.NotFound(Core(
+                                             TrustZone.Peer(PeerZone.Store),
+                                             NonEmptyList(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
+                                             Nil
+                                           )))
       newHead      <- mergeOnStaging(wsId, name, scenarioHead, mainBefore, result.metadataToWrite)
     yield newHead
 
@@ -256,10 +261,8 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   ): IO[AppError | Failure, CommitHash] =
     val prepareMessage = CommitMessage.MergePrepared(wsId, name)
     val mergedMessage  = CommitMessage.ScenarioMerged(wsId, name)
+    val staging        = MergeStagingRef.forScenario(wsId, name)
     for
-      staging <- ZIO.fromEither(MergeStagingRef.forScenario(wsId, name))
-                   .orElseFail(RepositoryFailure(
-                     s"staging branch for workspace ${wsId.value} + scenario '${name.value}' failed refinement"))
       head    <- ZIO.acquireReleaseWith(
                    irmin.createBranchAt(staging, mainBefore)
                      .catchSome { case BranchAlreadyExists(_) => ZIO.fail(MergeAlreadyRunning(name)) }

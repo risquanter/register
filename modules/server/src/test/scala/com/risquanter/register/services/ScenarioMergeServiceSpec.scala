@@ -15,9 +15,10 @@ import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, Bran
 import com.risquanter.register.repositories.model.TreeMetadata
 import com.risquanter.register.domain.errors.{
   AppError, BranchAlreadyExists, BranchHeadStale, Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem,
-  IrminError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, OutageMode, PeerZone, RepositoryFailure,
+  IrminError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, OutageMode, PeerZone,
   TrustZone, ValueFormat
 }
+import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -755,7 +756,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             val merged = seen.collect { case o if o.startsWith("merge:") => o.stripPrefix("merge:").takeWhile(_ != '-') }
             assertTrue(merged == List(scenarioHead.value))
         },
-        test("no head on main fails RepositoryFailure — the store lost what it held") {
+        test("no head on main fails as BranchHeadAbsent at the store — the store lost what it held") {
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
@@ -767,14 +768,14 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             exit   <- svc.merge(ws("ws-guard-nohead"), name("draft-v1")).exit
             calls  <- resets.get
           yield
-            val failure = exit.causeOption.flatMap(_.failureOption)
             assertTrue(
               // a typed failure on the error channel, not a defect: the caller
               // sees the same opaque 500 as any other storage failure
-              failure.exists {
-                case RepositoryFailure(reason) => reason == "main has no head"
-                case _                         => false
-              },
+              exit.causeOption.flatMap(_.failureOption).contains(Failure.NotFound(Core(
+                TrustZone.Peer(PeerZone.Store),
+                NonEmptyList(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
+                Nil
+              ))),
               calls.isEmpty
             )
         }
