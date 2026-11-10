@@ -679,7 +679,7 @@ tests/bats/run-suites.sh C A
 ```
 
 `tests/bats/run-suites.sh` takes the suites to run, `A`, `B` and `C`, in the
-order given. It stops at the first failure, including a failed image build, so a
+order given, and `all` runs every suite as `C B A`. It stops at the first failure, including a failed image build, so a
 suite never starts with an image missing. That matters because a missing image
 makes the suite's own `docker compose up` build it while the stack starts.
 

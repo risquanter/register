@@ -4,6 +4,10 @@
 #
 #   tests/bats/run-suites.sh A          suite A only
 #   tests/bats/run-suites.sh C A B      suites C, A and B, in that order
+#   tests/bats/run-suites.sh all        every suite: C, then B, then A
+#
+# `all` runs the in-memory gate first because it is the quickest to fail, and
+# the standalone Irmin image before the full stack that runs on it.
 #
 # It stops at the first failure, including a failed image build, so a suite
 # never starts with an image missing. A missing image would make the suite's
@@ -13,17 +17,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+SUITE_A=tests/bats/suite-a-full-prod.bats
+SUITE_B=tests/bats/suite-b-irmin-prod.bats
+SUITE_C=tests/bats/suite-c-in-memory.bats
+
 suites=()
 for arg in "$@"; do
   case "$arg" in
-    A) suites+=(tests/bats/suite-a-full-prod.bats) ;;
-    B) suites+=(tests/bats/suite-b-irmin-prod.bats) ;;
-    C) suites+=(tests/bats/suite-c-in-memory.bats) ;;
-    *) echo "unknown argument: $arg (expected A, B or C)" >&2; exit 2 ;;
+    A)   suites+=("$SUITE_A") ;;
+    B)   suites+=("$SUITE_B") ;;
+    C)   suites+=("$SUITE_C") ;;
+    all) suites+=("$SUITE_C" "$SUITE_B" "$SUITE_A") ;;
+    *)   echo "unknown argument: $arg (expected A, B, C or all)" >&2; exit 2 ;;
   esac
 done
 if [ "${#suites[@]}" -eq 0 ]; then
-  echo "name at least one suite: A, B or C" >&2
+  echo "name at least one suite: A, B, C or all" >&2
   exit 2
 fi
 
