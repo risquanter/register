@@ -191,7 +191,7 @@ times the message size.
 Irmin records a commit that changes nothing when `allow_empty` is true.
 `Store.update` skips a write only `if same_tree s.tree new_tree && (not
 allow_empty) && s.head <> None`. The GraphQL `info` input accepts `allow_empty`.
-`IrminInfoInput` in register does not pass it today.
+The `info` input `IrminQueries` writes does not pass it today.
 
 ## 4. Decisions ruled
 
@@ -317,7 +317,7 @@ None. The glossary has no entries for branches, scenarios, commits or history
    this document. The files the design reaches are `CommitMessage.scala`,
    `TreeHistoryService.scala`, `ScenarioServiceLive.scala`,
    `ScenarioMergeService.scala`, `IrminClient.scala`, `IrminClientLive.scala`,
-   `IrminQueries.scala`, the `IrminInfoInput` model, `TreeHistoryResponse.scala`
+   `IrminQueries.scala`, which writes the `info` input, `TreeHistoryResponse.scala`
    if open decision 4 adds `Fork`, and their tests.
 3. **ADR alignment.** The two amendments in §7, written out.
 4. **Open decisions.** §6, all five.
