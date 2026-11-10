@@ -13,7 +13,6 @@ import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.auth.{Authority, AuthorizationServiceNoOp, BootstrapProvisionerNoOp, Checked, TestChecked, UserContextExtractor}
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, TreeId}
-import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, ScenarioService, ScenarioSummary}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
@@ -78,9 +77,9 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         treeDeleted     <- Ref.make(List.empty[TreeId])
         scenarioDeleted <- Ref.make(List.empty[ScenarioName.ScenarioName])
         name             = scenarioName("stress-2026")
-        treeSvc          = CascadeTestStubs.riskTreeService((_, id) =>
+        treeSvc          = CascadeTestStubs.riskTreeService((wsId, id) =>
                               treeDeleted.update(_ :+ id) *>
-                              ZIO.fail(RepositoryFailure("gone")))
+                              ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
@@ -105,9 +104,9 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         treeDeleted     <- Ref.make(List.empty[TreeId])
         scenarioDeleted <- Ref.make(List.empty[ScenarioName.ScenarioName])
         name             = scenarioName("stress-2026")
-        treeSvc          = CascadeTestStubs.riskTreeService((_, id) =>
+        treeSvc          = CascadeTestStubs.riskTreeService((wsId, id) =>
                               treeDeleted.update(_ :+ id) *>
-                              ZIO.fail(RepositoryFailure("gone")))
+                              ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)

@@ -9,7 +9,6 @@ import java.time.Duration
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, ScenarioService, ScenarioServiceNotSupported, ScenarioSummary}
 import com.risquanter.register.domain.data.iron.{TreeId, ScenarioName, CommitHash}
-import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, BootstrapProvisionerNoOp, Checked, TestChecked}
 
@@ -165,10 +164,10 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           store            <- WorkspaceStoreLive.make(reaperTestConfig)
           deleted          <- Promise.make[Nothing, Unit]
           deletedRef       <- Ref.make(List.empty[TreeId])
-          svc               = CascadeTestStubs.riskTreeService((_, id) =>
+          svc               = CascadeTestStubs.riskTreeService((wsId, id) =>
                                deletedRef.update(_ :+ id) *>
                                deleted.succeed(()).unit *>
-                               ZIO.fail(RepositoryFailure(s"RiskTree ${id.toSafeId} not found")))
+                               ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
           key              <- store.create(None)
           treeId           <- IdGenerators.nextTreeId
           _                <- store.addTree(key, treeId)
@@ -198,10 +197,10 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           // always called after the reaper fiber has finished its cycle.
           allDeleted       <- Promise.make[Nothing, Unit]
           deletedRef       <- Ref.make(List.empty[TreeId])
-          svc               = CascadeTestStubs.riskTreeService((_, id) =>
+          svc               = CascadeTestStubs.riskTreeService((wsId, id) =>
                                deletedRef.updateAndGet(_ :+ id).flatMap { updated =>
                                  allDeleted.succeed(()).when(updated.size >= 3).unit
-                               } *> ZIO.fail(RepositoryFailure(s"RiskTree ${id.toSafeId} not found")))
+                               } *> ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
           // Workspace 1 with 2 trees
           key1             <- store.create(None)
           ids1             <- IdGenerators.batch(2).map(_.map(TreeId(_)))

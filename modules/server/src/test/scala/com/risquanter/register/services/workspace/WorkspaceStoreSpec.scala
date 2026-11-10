@@ -9,7 +9,11 @@ import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId, SeedEntityId}
-import com.risquanter.register.domain.errors.{FieldProblem, TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{
+  Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, TreeNotInWorkspace, TrustZone, ValidationError,
+  ValidationFailed, ValidationErrorCode, ValueRange, WorkspaceExpired, WorkspaceNotFound
+}
+import zio.prelude.NonEmptyList
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
@@ -273,5 +277,21 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         key   <- store.create(None)
         ws    <- store.resolve(key)
       yield assertTrue(ws.seedEntityId.value == 11L)
+    },
+
+    test("an assignment past the generator's eight-digit entity bound is this service's refusal") {
+      for
+        store <- mkStore
+        last  <- ZIO.fromEither(SeedEntityId.fromLong(99999999L)).orDieWith(e => new AssertionError(e.toString))
+        _     <- store.create(Some(last))
+        exit  <- store.create(None).exit
+      yield assert(exit)(fails(equalTo(Failure.rejected(
+        TrustZone.Service,
+        NonEmptyList(ValidationError(
+          ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
+          FieldProblem.OutOfRange(ValueRange.SeedEntityId)
+        )),
+        List(Diagnostic.RawValue("100000000"))
+      ))))
     }
   )

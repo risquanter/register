@@ -6,11 +6,10 @@ import zio.test.Assertion.*
 import zio.prelude.NonEmptyList
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision, Url}
+import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision, Url}
 import com.risquanter.register.domain.errors.{
   Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, OutageMode, PeerZone, TrustZone, ValueRange
 }
-import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive}

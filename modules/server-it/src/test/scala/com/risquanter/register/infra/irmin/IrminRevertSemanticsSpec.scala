@@ -5,7 +5,6 @@ import zio.test.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, RiskLeaf}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision}
 import com.risquanter.register.domain.errors.ErrorSubject
-import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.testcontainers.IrminCompose

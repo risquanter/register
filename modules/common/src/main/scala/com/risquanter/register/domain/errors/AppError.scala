@@ -17,7 +17,7 @@ import vql.error.{BindErrorDetail, QueryError}
   * The distinction is drawn on the internal failure rather than on the wire
   * case, because the wire is deliberately coarser: several failures share one
   * wire case, and they do not share an attribution. `WireError.InternalFault`
-  * carries both `RepositoryFailure`, which is this service's own, and
+  * carries both `SimulationFailure`, which is this service's own, and
   * `BranchAlreadyExists`, which is a caller's. Reading the level from the wire
   * case would give one level to both.
   */
@@ -93,11 +93,6 @@ case class ValidationFailed(errors: List[ValidationError]) extends DomainError {
   override def logMessage: String = errors.map(ValidationError.describe).mkString("; ")
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
-
-/** Repository operation failure */
-case class RepositoryFailure(reason: String) extends DomainError:
-  override def logMessage: String = reason
-  override def origin: FailureOrigin = FailureOrigin.Service
 
 /** Simulation execution failure - wraps underlying cause with context */
 case class SimulationFailure(simulationId: String, cause: Throwable) extends DomainError {
@@ -341,7 +336,7 @@ case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: Comm
 /** Scenarios are unavailable in this deployment (repository.type=in-memory has no
   * Irmin to hold branches). A deliberate, expected condition — not a server
   * malfunction — so it gets its own type, which projects onto `NotSupported`
-  * and answers 501 rather than `RepositoryFailure`'s 500. The reason stays in
+  * and answers 501 rather than an internal fault's 500. The reason stays in
   * the server's log: the wire case names the condition, and the browser
   * composes what a user reads from that case. `ScenarioServiceNotSupported`
   * fails every method with this.
@@ -380,7 +375,7 @@ case class AuthForbidden(
 /** Errors originating from vql-engine interaction or query preconditions.
   * The `Fol` prefix identifies types mapped from `vql.error.QueryError`
   * (the library's error algebra); the `Failure` suffix follows the
-  * `RepositoryFailure` / `SimulationFailure` naming convention.
+  * `SimulationFailure` naming convention.
   *
   * @see ADR-028 §4 — Query Validation Before Evaluation
   */

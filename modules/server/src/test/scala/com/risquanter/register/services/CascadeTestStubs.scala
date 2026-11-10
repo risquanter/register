@@ -4,7 +4,7 @@ import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, NodeId, Probability, ScenarioName, SeedEntityId, TreeId, WorkspaceId, Revision}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskTree}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure}
+import com.risquanter.register.domain.errors.{AppError, TreeAbsentAtRevision}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 
 /** Minimal `RiskTreeService`/`ScenarioService` test doubles shared by every spec
@@ -37,12 +37,16 @@ object CascadeTestStubs:
 
   /** `delete` always fails — simulates a tree that was already manually deleted.
     *
-    * The failure is `RepositoryFailure`, which is what both repository backends
-    * report for a tree that is not there, so the cascade sees the same value it
-    * would see in production.
+    * The failure is `TreeAbsentAtRevision`, which is what both repository
+    * backends report for a tree that is not there, so the cascade sees the same
+    * value it would see in production.
     */
   def noOpRiskTreeService: RiskTreeService =
-    riskTreeService((_, id) => ZIO.fail(RepositoryFailure(s"RiskTree ${id.toSafeId} not found")))
+    riskTreeService((wsId, id) => ZIO.fail(treeAlreadyGone(wsId, id)))
+
+  /** What deleting a tree that is not there fails with, on either backend. */
+  def treeAlreadyGone(wsId: WorkspaceId, id: TreeId): AppError =
+    TreeAbsentAtRevision(wsId, id, Revision.Head(BranchRef.Main))
 
   def scenarioService(
     onList: WorkspaceId => IO[AppError, List[ScenarioSummary]],

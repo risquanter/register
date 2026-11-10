@@ -1,6 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 import io.github.iltotore.iron.*
 
@@ -14,7 +15,7 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, Content
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, RepositoryFailure,
+  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
   TrustZone, ValidationError, ValidationErrorCode, ValidationFailed
 }
 import com.risquanter.register.telemetry.TelemetryLive
@@ -233,8 +234,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
       ZIO.succeed(revertedTree)
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
-      if headReadFails then ZIO.fail(RepositoryFailure("duplicate node name(s): Restored Leaf"))
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]] =
+      if headReadFails then ZIO.fail(Failure.rejected(
+        TrustZone.Peer(PeerZone.Store),
+        NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.DuplicateNodeName(SafeName.fromString("Restored Leaf").toOption.get, 2.refineUnsafe))),
+        Nil
+      ))
       else ZIO.succeed(Some((revertedTree, CascadeTestStubs.stubCommit)))
 
     override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))

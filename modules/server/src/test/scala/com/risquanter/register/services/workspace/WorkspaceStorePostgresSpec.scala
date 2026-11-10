@@ -13,8 +13,11 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
-import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId}
-import com.risquanter.register.domain.errors.{Core, ErrorLocation, Failure, FieldProblem, OutageMode, PeerZone, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId, WorkspaceId}
+import com.risquanter.register.domain.errors.{
+  Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, OutageMode, PeerZone, TrustZone,
+  ValidationError, ValidationFailed, WorkspaceExpired, WorkspaceNotFound
+}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -30,8 +33,28 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
     maxTreesPerWorkspace = 1
   )
 
-  private val storeLayer: ZLayer[Scope, Throwable, WorkspaceStore] =
-    ZLayer.succeed(storeConfig) ++ quillLayer >>> WorkspaceStorePostgres.layer
+  /** The store, and the database it runs on for the tests that write a row the
+    * store would not. */
+  private val storeLayer: ZLayer[Scope, Throwable, WorkspaceStore & DataSource] =
+    dataSourceLayer >>> (
+      ZLayer.environment[DataSource] ++
+        ((ZLayer.succeed(storeConfig) ++ Quill.Postgres.fromNamingStrategy(SnakeCase)) >>> WorkspaceStorePostgres.layer)
+    )
+
+  /** Rewrites one workspace's lifetime to one month, which Postgres renders as
+    * `1 mon`, a form the store does not read. */
+  private def storeMonthLongTtl(id: WorkspaceId): RIO[DataSource, Unit] =
+    ZIO.serviceWithZIO[DataSource](ds => ZIO.attemptBlocking {
+      val conn = ds.getConnection()
+      try
+        val stmt = conn.prepareStatement("UPDATE workspaces SET ttl = interval '1 month' WHERE id = ?")
+        try
+          stmt.setString(1, id.value)
+          stmt.executeUpdate()
+          ()
+        finally stmt.close()
+      finally conn.close()
+    })
 
   /** Port 1 is reserved by IANA and has no listener here, so every connection
     * attempt is refused. */
@@ -161,15 +184,31 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       yield assertTrue(ws.seedEntityId.value == 900042L)
     },
 
-    test("duplicate provided seedEntityId is rejected with DUPLICATE_VALUE") {
+    test("a seedEntityId another workspace holds is the caller's refusal, read from the database's unique violation") {
       for
         store <- ZIO.service[WorkspaceStore]
         id    <- ZIO.fromEither(SeedEntityId.fromLong(900007L)).orDieWith(e => new AssertionError(e.toString))
         _     <- store.create(Some(id))
         exit  <- store.create(Some(id)).exit
-      yield assert(exit)(fails(isSubtype[ValidationFailed](
-        hasField("errors", _.errors.map(e => FieldProblem.code(e.problem)), contains(ValidationErrorCode.DUPLICATE_VALUE))
-      )))
+      yield assert(exit)(fails(equalTo(Failure.rejected(
+        TrustZone.Client,
+        NonEmptyList(ValidationError(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id))),
+        Nil
+      ))))
+    },
+
+    test("a row whose lifetime is in an interval form the store does not read is refused at the database") {
+      for
+        store <- ZIO.service[WorkspaceStore]
+        key   <- store.create(None)
+        ws    <- store.resolve(key)
+        _     <- storeMonthLongTtl(ws.id)
+        exit  <- store.resolve(key).exit
+      yield assert(exit)(fails(equalTo(Failure.Rejected(Core(
+        TrustZone.Peer(PeerZone.Database),
+        NonEmptyList(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Ttl) -> FieldProblem.Unreadable(ExpectedInput.Interval)),
+        List(Diagnostic.RawValue("1 mon"))
+      )))))
     },
 
     test("a database that refuses the connection is an outage at the database") {

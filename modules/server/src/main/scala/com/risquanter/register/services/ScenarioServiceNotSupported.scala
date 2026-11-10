@@ -10,9 +10,8 @@ import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported}
   * The in-memory `RiskTreeRepository` has no Irmin, so no branches exist to
   * create/list/delete. Every method fails with `ScenariosNotSupported` (501) —
   * a distinct, typed, expected condition, not a silently-empty list or a
-  * generic 500 (which `RepositoryFailure` would give and would also scrub the
-  * reason from the response — wrong here, since the reason is exactly what
-  * the caller needs).
+  * generic 500, which would scrub the reason from the response the caller
+  * needs.
   */
 object ScenarioServiceNotSupported extends ScenarioService:
   private val reason = "Scenarios require the Irmin backend (repository.type=irmin)"

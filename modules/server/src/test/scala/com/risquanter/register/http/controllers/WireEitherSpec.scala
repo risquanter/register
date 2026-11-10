@@ -23,7 +23,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, TraceId, WorkspaceId}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, OutageMode, PeerZone, RepositoryFailure,
+  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, OutageMode, PeerZone, SimulationFailure,
   TrustZone, ValidationError, WorkspaceExpired
 }
 import com.risquanter.register.http.RequestSpanInterceptor
@@ -60,14 +60,14 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
   private given SttpMonadError[Task] = new RIOMonadError[Any]
 
   /** The projection reads nothing from the failure's content, so any `AppError`
-    * exercises it; this one is the cheapest to construct. */
-  private val failure: AppError = RepositoryFailure("a failure for the boundary to project")
+    * exercises it. */
+  private val failure: AppError = SimulationFailure("boundary", new RuntimeException("a failure for the boundary to project"))
 
   private val failing: IO[AppError, Nothing] = ZIO.fail(failure)
 
   /** A service-caused failure used by the level test alone. Its message is its
     * own, so the line this test reads can only be the line this test wrote. */
-  private val serviceFailure: AppError = RepositoryFailure("a service failure for the level test")
+  private val serviceFailure: AppError = SimulationFailure("level", new RuntimeException("a service failure for the level test"))
 
   /** An unreachable authorization service.
     *

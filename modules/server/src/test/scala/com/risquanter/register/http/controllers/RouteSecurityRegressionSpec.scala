@@ -2,7 +2,6 @@ package com.risquanter.register.http.controllers
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService}
@@ -13,9 +12,8 @@ import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure}
+import com.risquanter.register.domain.errors.{AppError, TreeAbsentAtRevision}
 import com.risquanter.register.telemetry.TelemetryLive
-import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
 
 /** Failsafe regression tests: old unscoped `/risk-trees/{id}/...` paths
@@ -37,11 +35,11 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
   private val stubRepo = new RiskTreeRepository:
     override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.succeed(t)
     override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
-      ZIO.fail(RepositoryFailure("stub"))
+      ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
     override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] =
-      ZIO.fail(RepositoryFailure("stub"))
+      ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
     override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
-      ZIO.fail(RepositoryFailure("stub"))
+      ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.At(toCommit)))
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] = ZIO.succeed(None)
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] = ZIO.succeed(Nil)
 

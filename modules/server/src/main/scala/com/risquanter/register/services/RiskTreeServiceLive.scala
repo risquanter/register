@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeAbsentAtRevision, SimulationFailure, AppError, Failure, TrustZone}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, TreeAbsentAtRevision, SimulationFailure, AppError, Failure, TrustZone}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
@@ -152,13 +152,6 @@ class RiskTreeServiceLive private (
           errorType = errorType,
           errorCode = FieldProblem.code(primaryError.problem).code,
           errorField = Some(ErrorLocation.describe(primaryError.location))
-        )
-
-      case RepositoryFailure(_) =>
-        ErrorContext(
-          errorType = errorType,
-          errorCode = RiskTreeServiceLive.ErrorCodes.Repository,
-          errorField = None
         )
 
       case SimulationFailure(_, _) =>
@@ -496,8 +489,8 @@ object RiskTreeServiceLive {
     * 
     * Used to enrich metric attributes with error details for better observability.
     * 
-    * @param errorType High-level error category (ValidationFailed, RepositoryFailure, etc.)
-    * @param errorCode Specific error code (REQUIRED_FIELD, INVALID_RANGE, REPOSITORY_ERROR, etc.)
+    * @param errorType High-level error category (ValidationFailed, Rejected, etc.)
+    * @param errorCode Specific error code (REQUIRED_FIELD, INVALID_RANGE, SIMULATION_ERROR, etc.)
     * @param errorField Optional field name that caused the error (for validation errors)
     */
   private case class ErrorContext(
@@ -524,7 +517,6 @@ object RiskTreeServiceLive {
     * names. Contracts with the metrics dashboards.
     */
   private object ErrorCodes {
-    val Repository: String      = "REPOSITORY_ERROR"
     val Simulation: String      = "SIMULATION_ERROR"
     val Unknown: String         = "UNKNOWN_ERROR"
     val SimulationField: String = "simulation"

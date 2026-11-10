@@ -1,11 +1,15 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
+import zio.prelude.NonEmptyList
 import java.time.Instant
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, RepositoryFailure, ValidationFailed, ValidationError, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{
+  AppError, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, TrustZone, ValidationFailed, ValidationError,
+  ValueRange, WorkspaceExpired, WorkspaceNotFound
+}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.util.IdGenerators
 
@@ -64,7 +68,7 @@ final class WorkspaceStoreLive private (
     * workspace holds v, and the counter is bumped past v. Assignment and
     * uniqueness check are atomic in a single Ref.modify.
     */
-  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
+  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError | Failure, WorkspaceKeySecret] =
     for
       key <- WorkspaceKeyCrypto.generate
       sid <- IdGenerators.nextId.orDie
@@ -99,7 +103,7 @@ final class WorkspaceStoreLive private (
   private def resolveSeedEntityId(
     state: WorkspaceStoreLive.State,
     provided: Option[SeedEntityId.SeedEntityId]
-  ): Either[AppError, (SeedEntityId.SeedEntityId, Long)] =
+  ): Either[AppError | Failure, (SeedEntityId.SeedEntityId, Long)] =
     provided match
       case Some(id) =>
         if state.byHash.values.exists(_.seedEntityId.value == id.value) then
@@ -110,9 +114,19 @@ final class WorkspaceStoreLive private (
       case None =>
         SeedEntityId.fromLong(state.nextSeedEntityId) match
           case Right(id) => Right((id, state.nextSeedEntityId + 1))
-          case Left(_) => Left(RepositoryFailure(
-            s"seedEntityId assignment space exhausted at ${state.nextSeedEntityId}"
-          ))
+          case Left(_)   => Left(seedEntityIdsExhausted(state.nextSeedEntityId))
+
+  /** The counter has passed the generator's eight-digit entity bound, so this
+    * service cannot build an instance for a new workspace. */
+  private def seedEntityIdsExhausted(counter: Long): Failure =
+    Failure.rejected(
+      TrustZone.Service,
+      NonEmptyList(ValidationError(
+        ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
+        FieldProblem.OutOfRange(ValueRange.SeedEntityId)
+      )),
+      List(Diagnostic.RawValue(counter.toString))
+    )
 
   /** Associate a tree with a workspace, refusing one beyond the tree ceiling.
     *

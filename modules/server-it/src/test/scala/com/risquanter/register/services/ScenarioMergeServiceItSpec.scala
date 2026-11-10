@@ -4,6 +4,7 @@ import zio.*
 import zio.json.*
 import zio.test.*
 import zio.test.Assertion.*
+import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -13,7 +14,10 @@ import com.risquanter.register.domain.data.{
   AbsoluteReplacement
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, MergeStagingRef, SafeName, StoreBranch, TreeId, NodeId, MitigationId}
-import com.risquanter.register.domain.errors.{AppError, ErrorSubject, Failure, FieldName, MergeConflict, RepositoryFailure, ValidationFailed}
+import com.risquanter.register.domain.errors.{
+  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, MergeConflict, PeerZone, TrustZone, ValidationFailed
+}
+import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -169,7 +173,11 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
 
   private def mainHeadHash: ZIO[IrminClient, AppError | Failure, CommitHash] =
     IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
-      .someOrFail(RepositoryFailure("main has no head"))
+      .someOrFail(Failure.NotFound(Core(
+        TrustZone.Peer(PeerZone.Store),
+        NonEmptyList(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
+        Nil
+      )))
 
   /** Seed a workspace with one real stored tree on main, then fork a scenario
     * from main's head. Returns the workspace, the scenario branch, and the
