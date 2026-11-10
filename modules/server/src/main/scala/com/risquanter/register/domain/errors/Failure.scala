@@ -5,8 +5,8 @@ import java.time.Duration
 import zio.prelude.NonEmptyList
 
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.ValidationMessages
-import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind}
+import com.risquanter.register.domain.data.iron.{TraceId, ValidationMessages}
+import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, RejectionDetail, TreeScope, WireError}
 
 /** The fields every failure carries. `Z` is the zone type a variant admits and
   * `P` the problem type its list holds; a variant fixes both and adds nothing.
@@ -46,6 +46,18 @@ enum Failure:
   case Expired     (core: Core[TrustZone.Client.type,      ExpiryDetail])
   case NotSupported(core: Core[TrustZone.Environment.type, Capability])
 
+  /** Project this failure onto the wire: one-way and total over `(variant,
+    * zone)`.
+    *
+    * A value from the `Client` zone answers its own wire case. So does an outage
+    * from any peer, a missing capability, and a denial decided by the mesh or the
+    * authorization service, because each is the answer the caller acts on. Every
+    * other pair is content a peer returned or this service's own, and answers
+    * the opaque fault. The zone and the diagnostics are dropped on every arm and
+    * the trace is added.
+    */
+  def toWire(trace: TraceId, scope: TreeScope): WireError = Failure.project(this, trace, scope)
+
 object Failure:
   extension (f: Failure)
     /** The zone, widened from each variant's `Z`. */
@@ -78,6 +90,65 @@ object Failure:
   /** The one way a `Validation` becomes a failure. */
   def rejected(zone: TrustZone, errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =
     Rejected(Core(zone, errors.map(e => (e.location, e.problem)), diagnostics))
+
+  private def project(f: Failure, t: TraceId, scope: TreeScope): WireError = f match
+    case Rejected(c) => c.zone match
+      case TrustZone.Client => rejectedOnWire(c.errors, t, scope)
+      case TrustZone.Environment | TrustZone.MeshHeader | TrustZone.Peer(_) | TrustZone.Service =>
+        WireError.InternalFault(t)
+
+    case NotFound(c) => c.zone match
+      case TrustZone.Client => WireError.NotFound(problemOf(c), t)
+      case TrustZone.Environment | TrustZone.MeshHeader | TrustZone.Peer(_) | TrustZone.Service =>
+        WireError.InternalFault(t)
+
+    case Conflict(c) => c.zone match
+      case TrustZone.Client => WireError.Conflict(problemOf(c), t)
+      case TrustZone.Environment | TrustZone.MeshHeader | TrustZone.Peer(_) | TrustZone.Service =>
+        WireError.InternalFault(t)
+
+    // The mesh's missing identity header and the authorization service's
+    // refusal are values the caller did not produce, and still the answer the
+    // caller must act on.
+    case AccessDenied(c) => c.zone match
+      case TrustZone.Client | TrustZone.MeshHeader | TrustZone.Peer(PeerZone.Authorization) =>
+        WireError.AccessDenied(t)
+      case TrustZone.Environment | TrustZone.Peer(PeerZone.Store) | TrustZone.Peer(PeerZone.Database) |
+           TrustZone.Service =>
+        WireError.InternalFault(t)
+
+    case Unanswered(_)   => WireError.DependencyUnavailable(t)
+
+    case Expired(c) =>
+      val detail = problemOf(c)
+      WireError.WorkspaceExpired(detail.cause, detail.lifetime, detail.idleLimit, t)
+
+    case NotSupported(c) => WireError.NotSupported(problemOf(c), t)
+
+  /** A refusal of the caller's content names its tree; one with no tree in scope
+    * names none. A refusal that is one refused query keeps the engine's
+    * structure, and a query runs only on a route carrying a tree, so a query
+    * refusal with no tree in scope is this service's defect and answers the
+    * opaque fault. */
+  private def rejectedOnWire(
+    errors: NonEmptyList[(ErrorLocation, FieldProblem)],
+    t:      TraceId,
+    scope:  TreeScope
+  ): WireError =
+    val asList = errors.toList.map((location, problem) => ValidationError(location, problem))
+    (errors.toList, scope) match
+      case (List((_, FieldProblem.Query(problem))), TreeScope.InTree(tree)) =>
+        WireError.ValidationRejected(tree, RejectionDetail.Query(problem), t)
+      case (List((_, FieldProblem.Query(_))), TreeScope.NoTree) =>
+        WireError.InternalFault(t)
+      case (_, TreeScope.InTree(tree)) =>
+        WireError.ValidationRejected(tree, RejectionDetail.Fields(asList), t)
+      case (_, TreeScope.NoTree) =>
+        WireError.RequestRejected(asList, t)
+
+  /** The problem half of the first entry, which is what a wire case naming one
+    * problem carries. */
+  private def problemOf[Z, P](core: Core[Z, P]): P = core.errors.head._2
 
   /** The log key the zone is recorded under, a contract with the log pipeline. */
   private val ZoneKey = "trust_zone"

@@ -3,7 +3,7 @@
 Plan code `UES`. Decisions in this document are labelled `UES-D-<n>`.
 
 **Status.** Written 2026-11-09 at version 0.17.2. `UES-D-1` to `UES-D-15` are
-ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Phase 0 step 0.1 landed at version 0.18.1. The user
+ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Phase 0 steps 0.1 and 0.2 landed, at versions 0.18.1 and 0.18.2. The user
 creates `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`; until it
 exists and the token names this document, no gated edit is authorized.
 

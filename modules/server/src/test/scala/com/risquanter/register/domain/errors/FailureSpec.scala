@@ -11,17 +11,22 @@ import zio.test.*
 import com.risquanter.register.auth.{Permission, ResourceRef, ResourceType}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{
-  BranchChoice, CommitHash, NodeId, Revision, ScenarioName, TreeId, UserId, ValidationMessages, WorkspaceId
+  BranchChoice, CommitHash, NodeId, Revision, ScenarioName, TelemetryPlaceholders, TreeId, UserId,
+  ValidationMessages, WorkspaceId
 }
-import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, QueryProblem}
+import com.risquanter.register.http.errors.{
+  Capability, ConflictKind, NotFoundKind, QueryProblem, RejectionDetail, TreeScope, WireError
+}
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.testutil.TestHelpers.safeId
 
 /** The values derived from a failure's fields: its zone, the log level its zone
-  * decides, the log line and the log line's structured fields.
+  * decides, the log line, the log line's structured fields, and the wire case.
   *
   * Each is derived once from the shape rather than declared per case, so these
-  * tests pin the derivation over every zone and every variant. The last suite
+  * tests pin the derivation over every zone and every variant. The compiler
+  * makes a missing arm of the projection an error; the `toWire` suite pins
+  * which wire case each `(variant, zone)` pair reaches. The last suite
   * pins the two variants whose zone type admits one zone only, which the
   * compiler enforces and a test can only show by asking it.
   */
@@ -173,6 +178,72 @@ object FailureSpec extends ZIOSpecDefault:
       },
       test("a tree subject names the tree") {
         assertTrue(ErrorLocation.describe(ErrorLocation.Field(ErrorSubject.Tree(treeId), FieldName.RootId)) == s"tree ${treeId.value}.RootId")
+      }
+    ),
+    suite("toWire")(
+      test("every (variant, zone) pair reaches the wire case assigned to it") {
+        val t = TelemetryPlaceholders.UnlinkedTrace
+        val opaque = WireError.InternalFault(t)
+        def at[P](zone: TrustZone, problem: P): Core[TrustZone, P] = Core(zone, one(problem), Nil)
+        val expiry = ExpiryDetail(ExpiryCause.Lifetime, Duration.ofHours(72), Duration.ofMinutes(30))
+
+        val rejectedRows = everyZone.map(z =>
+          Failure.Rejected(at(z, FieldProblem.Required)) -> (z match
+            case TrustZone.Client => WireError.RequestRejected(List(ValidationError(ErrorLocation.Whole, FieldProblem.Required)), t)
+            case _                => opaque))
+        val notFoundRows = everyZone.map(z =>
+          Failure.NotFound(at(z, NotFoundKind.Unknown())) -> (z match
+            case TrustZone.Client => WireError.NotFound(NotFoundKind.Unknown(), t)
+            case _                => opaque))
+        val conflictRows = everyZone.map(z =>
+          Failure.Conflict(at(z, ConflictKind.Rejected())) -> (z match
+            case TrustZone.Client => WireError.Conflict(ConflictKind.Rejected(), t)
+            case _                => opaque))
+        val deniedRows = everyZone.map(z =>
+          Failure.AccessDenied(at(z, DenialKind.PermissionNotHeld)) -> (z match
+            case TrustZone.Client | TrustZone.MeshHeader | TrustZone.Peer(PeerZone.Authorization) => WireError.AccessDenied(t)
+            case _                                                                               => opaque))
+        val outageRows = PeerZone.values.toList.map(p =>
+          Failure.Unanswered(Core(p, one(OutageMode.Protocol), Nil)) -> WireError.DependencyUnavailable(t))
+        val fixedZoneRows = List(
+          Failure.Expired(Core(TrustZone.Client, one(expiry), Nil)) ->
+            WireError.WorkspaceExpired(ExpiryCause.Lifetime, Duration.ofHours(72), Duration.ofMinutes(30), t),
+          Failure.NotSupported(Core(TrustZone.Environment, one(Capability.PinnedReads), Nil)) ->
+            WireError.NotSupported(Capability.PinnedReads, t)
+        )
+
+        val rows: List[(Failure, WireError)] =
+          rejectedRows ++ notFoundRows ++ conflictRows ++ deniedRows ++ outageRows ++ fixedZoneRows
+        assertTrue(rows.forall((failure, wire) => failure.toWire(t, TreeScope.NoTree) == wire))
+      },
+      test("a refusal of the caller's content names the tree in scope, and passes every entry through") {
+        val t       = TelemetryPlaceholders.UnlinkedTrace
+        val second  = ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Probability), FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval))
+        val failure = Failure.rejected(TrustZone.Client, NonEmptyList(nameRequired, second), List(Diagnostic.TreeRef(treeId)))
+        assertTrue(
+          failure.toWire(t, TreeScope.InTree(treeId)) ==
+            WireError.ValidationRejected(treeId, RejectionDetail.Fields(List(nameRequired, second)), t),
+          failure.toWire(t, TreeScope.NoTree) == WireError.RequestRejected(List(nameRequired, second), t)
+        )
+      },
+      test("one refused query keeps the engine's structure on its tree") {
+        val t       = TelemetryPlaceholders.UnlinkedTrace
+        val problem = QueryProblem.Unparseable("unexpected token", Some(7))
+        val failure = Failure.Rejected(Core(TrustZone.Client, one(FieldProblem.Query(problem)), Nil))
+        assertTrue(failure.toWire(t, TreeScope.InTree(treeId)) == WireError.ValidationRejected(treeId, RejectionDetail.Query(problem), t))
+      },
+      test("a refused query with no tree in scope is this service's defect") {
+        val t       = TelemetryPlaceholders.UnlinkedTrace
+        val failure = Failure.Rejected(Core(TrustZone.Client, one(FieldProblem.Query(QueryProblem.NotQuantifiable("n"))), Nil))
+        assertTrue(failure.toWire(t, TreeScope.NoTree) == WireError.InternalFault(t))
+      },
+      test("a wire case naming one problem carries the first entry's") {
+        val t       = TelemetryPlaceholders.UnlinkedTrace
+        val failure = Failure.Conflict(Core(
+          TrustZone.Client,
+          NonEmptyList((ErrorLocation.Whole, ConflictKind.StaleVersion()), (ErrorLocation.Whole, ConflictKind.Rejected())),
+          Nil))
+        assertTrue(failure.toWire(t, TreeScope.NoTree) == WireError.Conflict(ConflictKind.StaleVersion(), t))
       }
     ),
     suite("rejected")(
