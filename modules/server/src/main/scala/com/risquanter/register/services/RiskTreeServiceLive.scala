@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, SimulationFailure, AppError}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, SimulationFailure, AppError, Failure, TrustZone}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
@@ -39,13 +39,13 @@ class RiskTreeServiceLive private (
   /** Fetch tree by id, with the commit it resolved to. Every caller runs after
     * the controller has confirmed the workspace holds the tree, so an empty
     * read means the revision lacks it. */
-  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[AppError,(RiskTree, CommitHash)] =
+  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[AppError | Failure,(RiskTree, CommitHash)] =
     repo.getById(wsId, treeId, rev).someOrFail(TreeAbsentAtRevision(wsId, treeId, rev))
 
   /** Fetch tree, its resolved commit, and the node together. Fails with
     * `TreeAbsentAtRevision` when the revision lacks the tree, and with
     * `ValidationFailed` when the tree lacks the node. */
-  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): IO[AppError,(RiskTree, CommitHash, RiskNode)] =
+  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): IO[AppError | Failure,(RiskTree, CommitHash, RiskNode)] =
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
@@ -56,7 +56,7 @@ class RiskTreeServiceLive private (
     * default), fail with aggregated validation errors when any node is missing;
     * with `omitAbsent = true`, absent nodes are simply not in the returned map
     * (the point-in-time read path — a node may not exist at an earlier commit). */
-  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): IO[AppError,(RiskTree, CommitHash, Map[NodeId, RiskNode])] =
+  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): IO[AppError | Failure,(RiskTree, CommitHash, Map[NodeId, RiskNode])] =
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
@@ -65,7 +65,7 @@ class RiskTreeServiceLive private (
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, commit, nodes)
 
-  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId]): IO[AppError,Unit] =
+  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId]): IO[AppError | Failure,Unit] =
     collectAllTrees(wsId, branch).flatMap { trees =>
       val candidates = trees.filterNot(t => excludeId.contains(t.id))
 
@@ -85,7 +85,7 @@ class RiskTreeServiceLive private (
 
   // Trees at the head of the branch being written; uniqueness (tree ID and
   // name) is checked against exactly this set.
-  private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): IO[AppError,List[RiskTree]] =
+  private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): IO[AppError | Failure,List[RiskTree]] =
     repo.getAllForWorkspace(wsId, Revision.Head(branch)).flatMap { results =>
       val (errs, trees) = results.foldLeft((List.empty[TreeLoadFailure], List.empty[RiskTree])) {
         case ((es, ts), Left(err))  => (err :: es, ts)
@@ -138,12 +138,20 @@ class RiskTreeServiceLive private (
   /** Structured error context for metrics, from the failure that occurred.
     *
     * `error_type` is the failure's case name in every arm. The code and the
-    * field come from the first validation entry for a `ValidationFailed`, and
-    * are fixed per case otherwise.
+    * field come from the first refusal for a `Rejected` or a `ValidationFailed`,
+    * and are fixed per case otherwise.
     */
-  private def extractErrorContext(error: AppError): ErrorContext =
+  private def extractErrorContext(error: AppError | Failure): ErrorContext =
     val errorType = error.getClass.getSimpleName
     error match {
+      case Failure.Rejected(core) =>
+        val (location, problem) = core.errors.head
+        ErrorContext(
+          errorType = errorType,
+          errorCode = FieldProblem.code(problem).code,
+          errorField = Some(ErrorLocation.describe(location))
+        )
+
       case ValidationFailed(errors) =>
         val primaryError = errors.headOption.getOrElse(
           ValidationError(ErrorLocation.Whole, FieldProblem.Unspecified)
@@ -188,7 +196,7 @@ class RiskTreeServiceLive private (
     * @param operation The operation — its label is the span name and the metric label
     * @param body Effect to execute within the span (may call `tracing.setAttribute`)
     */
-  private def traced[A](operation: Operation)(body: IO[AppError,A]): IO[AppError,A] =
+  private def traced[A](operation: Operation)(body: IO[AppError | Failure,A]): IO[AppError | Failure,A] =
     tracing.span(operation.label, SpanKind.INTERNAL)(body).tapBoth(
       error => recordOperation(operation, success = false, Some(extractErrorContext(error))),
       _ => recordOperation(operation, success = true, None)
@@ -199,7 +207,7 @@ class RiskTreeServiceLive private (
     * Identifier generation failing is a broken invariant, not a request
     * outcome, so it dies rather than entering the error channel.
     */
-  private def allocateIds(count: Int): IO[AppError, List[SafeId.SafeId]] =
+  private def allocateIds(count: Int): IO[AppError | Failure, List[SafeId.SafeId]] =
     IdGenerators.batch(count).orDie
 
   /** Deterministic generator for RiskTreeRequests based on a pre-allocated pool. */
@@ -233,7 +241,7 @@ class RiskTreeServiceLive private (
     leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
     rootName: SafeName.SafeName,
     seedVarIdByLeafName: Map[SafeName.SafeName, SeedVarId.SeedVarId]
-  ): IO[AppError,(Seq[RiskNode], NodeId)] = ZIO.attempt {
+  ): IO[AppError | Failure,(Seq[RiskNode], NodeId)] = ZIO.attempt {
     val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap
     val childrenByParent: Map[RiskTreeRequests.ParentRef, List[SafeName.SafeName]] =
       nodesByName.values.groupBy(_.parent).view.mapValues(_.toList.map(_.name)).toMap
@@ -291,12 +299,12 @@ class RiskTreeServiceLive private (
         errors.map(ValidationError.describe).mkString("; ")))
 
   // Config CRUD - only persist, no execution
-  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] = {
+  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree] = {
     val operation = for {
       // Identifier generation failing is a broken invariant, as in `allocateIds`.
       treeId <- IdGenerators.nextTreeId.orDie
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
-      resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
+      resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation(TrustZone.Client)
       _ <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch, excludeId = None)
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(leafNamesOf(resolved.nodes), resolved.providedSeedVarIds, highWater = 0L))
@@ -311,7 +319,7 @@ class RiskTreeServiceLive private (
         // A tree is created from its node definition alone; mitigations are
         // attached afterwards, never at creation.
         mitigations = Nil
-      ).toZIOValidation
+      ).toZIOValidation(TrustZone.Client)
       persisted <- repo.create(wsId, riskTree, branch)
     } yield persisted
 
@@ -321,11 +329,11 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] = {
+  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree] = {
     val operation = for {
       (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
-      resolved <- RiskTreeUpdateRequest.resolve(req, oldTree.index, idGeneratorFrom(ids)).toZIOValidation
+      resolved <- RiskTreeUpdateRequest.resolve(req, oldTree.index, idGeneratorFrom(ids)).toZIOValidation(TrustZone.Client)
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
       allLeafOccurrenceAndShape = resolved.existingLeafOccurrenceAndShape ++ resolved.addedLeafOccurrenceAndShape
@@ -360,7 +368,7 @@ class RiskTreeServiceLive private (
         // it. The repository writes the whole subtree in one commit, so
         // anything not passed here is deleted from the store.
         mitigations = oldTree.mitigations
-      ).toZIOValidation
+      ).toZIOValidation(TrustZone.Client)
       updated <- repo.update(wsId, id, _ => riskTree, branch)
       tag     <- clientBranch(wsId, branch)
       _ <- invalidationHandler.handleMutation(oldTree, updated, tag)
@@ -372,7 +380,7 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure,RiskTree] =
     repo.delete(wsId, id, branch)
       .tap(tree => clientBranch(wsId, branch).flatMap(invalidationHandler.handleTreeDeletion(tree, _)))
       .tapBoth(
@@ -380,7 +388,7 @@ class RiskTreeServiceLive private (
       _ => recordOperation(Operation.Delete, success = true, None)
     )
 
-  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[AppError,RiskTree] = {
+  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure,RiskTree] = {
     val operation = for {
       // The head state feeds the change notification and nothing else, so a
       // failure to read it must not stop the revert. A stored tree that breaks
@@ -391,9 +399,11 @@ class RiskTreeServiceLive private (
       // indistinguishable here and only the log tells them apart.
       oldTree  <- repo.getById(wsId, id, Revision.Head(branch))
                     .catchAll(error =>
+                      val cause = error match
+                        case e: AppError => e.logMessage
+                        case f: Failure  => f.logMessage
                       ZIO.logWarning(
-                        s"revert of tree ${id.value}: head read failed, notifying the whole tree instead: " +
-                        s"${error.logMessage}"
+                        s"revert of tree ${id.value}: head read failed, notifying the whole tree instead: $cause"
                       ).as(None))
       reverted <- repo.revert(wsId, id, toCommit, branch)
       tag      <- clientBranch(wsId, branch)
@@ -410,7 +420,7 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[AppError,Option[(RiskTree, CommitHash)]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[AppError | Failure,Option[(RiskTree, CommitHash)]] =
     repo.getById(wsId, id, rev).tapBoth(
       error => recordOperation(Operation.GetById, success = false, Some(extractErrorContext(error))),
       _ => recordOperation(Operation.GetById, success = true, None)
@@ -420,7 +430,7 @@ class RiskTreeServiceLive private (
   // LEC Query APIs (ADR-015)
   // ========================================
 
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError,Probability] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError | Failure,Probability] =
     traced(Operation.ProbOfExceedance) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -441,7 +451,7 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[AppError,Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[AppError | Failure,Map[NodeId, LECNodeCurve]] =
     traced(Operation.GetLECCurvesMulti) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)

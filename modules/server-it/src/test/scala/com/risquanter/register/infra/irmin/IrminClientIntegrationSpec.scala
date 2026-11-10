@@ -3,9 +3,13 @@ package com.risquanter.register.infra.irmin
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
+import zio.prelude.NonEmptyList
+import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
-import com.risquanter.register.domain.errors.{BranchAlreadyExists, BranchHeadStale}
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, WorkspaceId}
+import com.risquanter.register.domain.errors.{
+  BranchAlreadyExists, BranchHeadStale, Core, ErrorLocation, Failure, OutageMode, PeerZone
+}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, Url, WorkspaceId}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
@@ -36,6 +40,22 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       for
         _ <- IrminClient.healthCheck
       yield assertCompletes
+    },
+
+    test("a store that refuses the connection fails with an outage at the store") {
+      // Port 1 is reserved and nothing listens on it, so the connection is refused.
+      val deadConfig = IrminConfig(
+        url                          = Url.fromString("http://localhost:1").toOption.get,
+        conflictScanFetchParallelism = positiveInt(1)
+      )
+      ZIO.scoped {
+        (ZLayer.succeed(deadConfig) >>> IrminClientLive.layer).build
+          .flatMap(_.get[IrminClient].healthCheck.either)
+      }.map {
+        case Left(Failure.Unanswered(Core(PeerZone.Store, errors, _))) =>
+          assertTrue(errors == NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused)))
+        case _ => assertTrue(false)
+      }
     },
 
     test("branches returns main branch after first commit") {

@@ -1,8 +1,6 @@
 package com.risquanter.register.domain.errors
 
 import java.time.{Duration, Instant}
-import scala.concurrent.duration.Duration as ScalaDuration
-import sttp.model.StatusCode
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{CommitHash, Revision, ScenarioName, StoreBranch, TreeId, ValidationMessages, WorkspaceId}
@@ -240,37 +238,12 @@ case class TreeAbsentAtRevision(wsId: WorkspaceId, treeId: TreeId, rev: Revision
 // Infrastructure Errors (ADR-010: Error Handling Strategy)
 // ============================================================================
 
-/** External service (Irmin) is unavailable - transient, retriable */
-case class IrminUnavailable(reason: String) extends IrminError {
-  override def logMessage: String = s"Irmin service unavailable: $reason"
-  override def origin: FailureOrigin = FailureOrigin.Service
-}
-
-/** Irmin HTTP-layer error (non-503) */
-case class IrminHttpError(status: StatusCode, body: String) extends IrminError {
-  override def logMessage: String = s"HTTP ${status.code}: $body"
-  override def origin: FailureOrigin = FailureOrigin.Service
-}
-
-/** GraphQL error surface from Irmin */
-case class IrminGraphQLError(messages: List[String], path: Option[List[String]]) extends IrminError {
-  override def logMessage: String = messages.mkString("; ")
-  override def origin: FailureOrigin = FailureOrigin.Service
-  def fieldPath: String = path.filter(_.nonEmpty).map(_.mkString(".")).getOrElse("graphql")
-}
-
-/** Network operation timed out - transient, retriable */
-case class NetworkTimeout(operation: String, duration: ScalaDuration) extends IrminError {
-  override def logMessage: String = s"Network timeout after ${duration.toMillis}ms during: $operation"
-  override def origin: FailureOrigin = FailureOrigin.Service
-}
-
 /** Compare-and-set branch-create rejected: `test_and_set_branch`
   * with `test: null` failed because the branch already has a head. Not a
   * transport failure — Irmin answered correctly, the precondition (branch must
   * not yet exist) just didn't hold. Framed in IrminClient's own vocabulary
   * (branch), not scenario vocabulary: whether this means "scenario name taken"
-  * is a judgment ScenarioService makes one layer up, the same way `IrminGraphQLError`
+  * is a judgment ScenarioService makes one layer up, the same way `IrminMergeConflict`
   * is translated into the domain-level `MergeConflict` below, not inside IrminClient.
   * Non-retriable as-is.
   *
@@ -413,21 +386,6 @@ case class AuthForbidden(
   override def logMessage: String =
     s"Access denied: user=$userId permission=$permission resource=$resourceType:$resourceId"
   override def origin: FailureOrigin = FailureOrigin.Caller
-
-/** SpiceDB unreachable, timed out, or returned an unexpected response.
-  *
-  * The request fails closed: no authorization decision was obtained, so none is
-  * assumed. It projects onto `WireError.DependencyUnavailable`, the same answer
-  * any other dependency outage produces, so the caller is told a service did
-  * not answer rather than that their access was refused — and which dependency
-  * it was stays internal (ADR-035 §2).
-  *
-  * @see ADR-024: Fail-Closed by Default
-  */
-case class AuthServiceUnavailable(reason: String, cause: Option[Throwable]) extends AuthError:
-  override def logMessage: String = s"Authorization service unavailable: $reason"
-
-  override def origin: FailureOrigin = FailureOrigin.Service
 
 // ============================================================================
 // FOL Query Errors (ADR-028: Vague Quantifier Query Evaluation)

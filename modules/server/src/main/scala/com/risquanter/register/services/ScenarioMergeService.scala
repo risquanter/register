@@ -7,7 +7,7 @@ import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, PositiveInt, Revision, SafeName, TreeId, ValidationUtil}
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, FieldProblem, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, TreeLoadProblem, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, Failure, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, FieldProblem, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, TreeLoadProblem, ValidationFailed, ValidationError}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -163,7 +163,7 @@ trait ScenarioMergeService:
     * than a failure.
     */
   def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Authority]): IO[AppError, MergePreviewStatus]
+    (using Checked[Authority]): IO[AppError | Failure, MergePreviewStatus]
 
   /** Merge the scenario into main via Irmin's native three-way merge.
     *
@@ -173,12 +173,12 @@ trait ScenarioMergeService:
     * @see ValidationFailed NOT_FOUND — the scenario does not exist
     */
   def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Authority]): IO[AppError, CommitHash]
+    (using Checked[Authority]): IO[AppError | Failure, CommitHash]
 
 final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepository, fetchParallelism: PositiveInt) extends ScenarioMergeService:
 
   override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Authority]): IO[AppError, MergePreviewStatus] =
+    (using Checked[Authority]): IO[AppError | Failure, MergePreviewStatus] =
     for
       branch    <- ScenarioBranchOps.scenarioBranch(wsId, name)
       maybeHead <- irmin.getBranch(branch).map(_.flatMap(_.head))
@@ -195,7 +195,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     yield result
 
   override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
-    (using Checked[Authority]): IO[AppError, CommitHash] =
+    (using Checked[Authority]): IO[AppError | Failure, CommitHash] =
     for
       branch       <- ScenarioBranchOps.scenarioBranch(wsId, name)
       maybeHead    <- irmin.getBranch(branch).map(_.flatMap(_.head))
@@ -248,7 +248,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     scenarioHead: CommitHash,
     mainBefore: CommitHash,
     metadataToWrite: List[(PathComparison, TreeMetadata)]
-  ): IO[AppError, CommitHash] =
+  ): IO[AppError | Failure, CommitHash] =
     val prepareMessage = CommitMessage.MergePrepared(wsId, name)
     val mergedMessage  = CommitMessage.ScenarioMerged(wsId, name)
     for
@@ -309,7 +309,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     wsId: WorkspaceId,
     scenario: ScenarioName.ScenarioName,
     staged: CommitHash
-  ): IO[AppError, Unit] =
+  ): IO[AppError | Failure, Unit] =
     repo.getAllForWorkspace(wsId, Revision.At(staged)).flatMap { loaded =>
       loaded.collect { case Left(failure) => failure } match
         case Nil      => ZIO.unit
@@ -373,7 +373,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * branches fork linearly from a single commit, so multiple LCAs do
     * not arise through this application's own writes.
     */
-  private def scan(wsId: WorkspaceId, branch: BranchRef, scenarioHead: CommitHash, at: Instant): IO[AppError, MergeScan] =
+  private def scan(wsId: WorkspaceId, branch: BranchRef, scenarioHead: CommitHash, at: Instant): IO[AppError | Failure, MergeScan] =
     irmin.mainBranch.map(_.flatMap(_.head)).flatMap {
       case None => ZIO.succeed(MergeScan(None, Nil, Map.empty, Nil))
       case Some(mainCommit) =>
@@ -405,7 +405,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * once and read for the tree's names and for the `meta` merge. Only trees
     * with a conflicting path are named by an entry, so only those are
     * decoded. */
-  private def treeMetadata(comparisons: List[PathComparison], trees: Set[TreeId]): IO[AppError, Map[TreeId, Versions[TreeMetadata]]] =
+  private def treeMetadata(comparisons: List[PathComparison], trees: Set[TreeId]): IO[AppError | Failure, Map[TreeId, Versions[TreeMetadata]]] =
     ZIO.foreach(comparisons.collect { case PathComparison(TreePath.Meta(treeId), versions) if trees(treeId) => (treeId, versions) }) {
       (treeId, versions) =>
         decodeVersions(versions, s"meta of tree ${treeId.value}")(_.fromJson[TreeMetadata]).map(treeId -> _)
@@ -418,7 +418,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     comparison: PathComparison,
     metas: Map[TreeId, Versions[TreeMetadata]],
     at: Instant
-  ): IO[AppError, Either[MergeConflictEntry, (PathComparison, TreeMetadata)]] =
+  ): IO[AppError | Failure, Either[MergeConflictEntry, (PathComparison, TreeMetadata)]] =
     val treeMeta = metas.getOrElse(comparison.path.treeId, Versions(None, None, None))
     val label    = TreeLabel(comparison.path.treeId, treeMeta.map(_.name))
     comparison.path match
@@ -468,7 +468,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   /** The three Irmin contents decoded, or a `RepositoryFailure` naming what
     * failed to decode. The description names tree, node and mitigation
     * identifiers only, never a storage path, which embeds the `WorkspaceId`. */
-  private def decodeVersions[A](versions: Versions[String], what: String)(decode: String => Either[String, A]): IO[AppError, Versions[A]] =
+  private def decodeVersions[A](versions: Versions[String], what: String)(decode: String => Either[String, A]): IO[AppError | Failure, Versions[A]] =
     ZIO.fromEither(versions.traverse(decode)).mapError(err => RepositoryFailure(s"Decode $what: $err"))
 
   /** Fetch, for every candidate path, the contents at main's head and at the
@@ -478,7 +478,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * node set are both derived from these three, so they are fetched once and
     * kept.
     */
-  private def comparePaths(wsId: WorkspaceId, mainHead: CommitHash, scenarioHead: CommitHash, base: CommitHash): IO[AppError, List[PathComparison]] =
+  private def comparePaths(wsId: WorkspaceId, mainHead: CommitHash, scenarioHead: CommitHash, base: CommitHash): IO[AppError | Failure, List[PathComparison]] =
     for
       paths       <- candidatePaths(wsId, mainHead, scenarioHead)
       comparisons <- ZIO.withParallelism(fetchParallelism) {
@@ -508,7 +508,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * disagree. This one reports the names rather than failing, because a merge
     * preview describes what a merge would do.
     */
-  private def duplicateNodeNames(comparisons: List[PathComparison]): IO[AppError, Map[TreeId, List[SafeName.SafeName]]] =
+  private def duplicateNodeNames(comparisons: List[PathComparison]): IO[AppError | Failure, Map[TreeId, List[SafeName.SafeName]]] =
     val nodeValues = comparisons.flatMap { c =>
       Option.unless(MergeConflictRule.isConflict(c.versions))((c.path, MergeConflictRule.merged(c.versions))).collect {
         case (TreePath.Node(treeId, nodeId), Some(json)) => (treeId, nodeId, json)
@@ -534,12 +534,12 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * at the base but deleted on both branches need no entry: both sides agree
     * (absent = absent), which is never a conflict.
     */
-  private def candidatePaths(wsId: WorkspaceId, mainHead: CommitHash, scenarioHead: CommitHash): IO[AppError, Set[TreePath]] =
+  private def candidatePaths(wsId: WorkspaceId, mainHead: CommitHash, scenarioHead: CommitHash): IO[AppError | Failure, Set[TreePath]] =
     pathsOn(wsId, mainHead).zipPar(pathsOn(wsId, scenarioHead)).map(_ ++ _)
 
   /** Every path of the workspace's trees as of one commit, with the
     * identifiers Irmin lists refined where they arrive (ADR-039). */
-  private def pathsOn(wsId: WorkspaceId, at: CommitHash): IO[AppError, Set[TreePath]] =
+  private def pathsOn(wsId: WorkspaceId, at: CommitHash): IO[AppError | Failure, Set[TreePath]] =
     for
       listedTrees <- irmin.listAtCommit(at, WorkspaceStoragePaths.treesRoot(wsId))
       perTree     <- ZIO.foreach(listedTrees) { listedTree =>
@@ -559,7 +559,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   /** One identifier Irmin listed, refined, or a `RepositoryFailure`: this
     * server writes only refined identifiers, so one that does not refine means
     * the store holds what this code did not write. */
-  private def refineListed[A](segment: IrminSegment, what: String)(refine: String => Either[List[ValidationError], A]): IO[AppError, A] =
+  private def refineListed[A](segment: IrminSegment, what: String)(refine: String => Either[List[ValidationError], A]): IO[AppError | Failure, A] =
     ZIO.fromEither(refine(segment.value)).mapError(errs =>
       RepositoryFailure(s"Listed $what '${segment.value}' does not refine: ${errs.map(ValidationError.describe).mkString("; ")}"))
 

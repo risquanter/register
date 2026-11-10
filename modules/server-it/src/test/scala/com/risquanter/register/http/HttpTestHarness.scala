@@ -12,6 +12,7 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.configs.*
+import com.risquanter.register.domain.errors.{Failure, IrminError}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.support.TestSafeUrls
@@ -57,12 +58,15 @@ object HttpTestHarness:
 
   private val defaultWorkspaceConfig = WorkspaceConfig(cascadeDeleteParallelism = TestConfigs.cascadeDeleteParallelism)
 
+  /** The request body cap, 8 MiB, as `application.conf` sets `maxRequestBytes`. */
+  private val defaultMaxRequestBytes = 8388608
+
   final case class HarnessConfig(
     simulation: SimulationConfig = defaultSimulationConfig,
     telemetry: TelemetryConfig = defaultTelemetryConfig,
     cors: CorsConfig = defaultCorsConfig,
     workspace: WorkspaceConfig = defaultWorkspaceConfig,
-    maxRequestBytes: Int = 8388608
+    maxRequestBytes: Int = defaultMaxRequestBytes
   )
 
   /** Full test backend: the tree repository plus the two scenario services.
@@ -223,7 +227,10 @@ object HttpTestHarness:
                       // The gate reports readiness of the process, not of a
                       // request, so its channel is `Throwable`. A domain error
                       // leaving the domain is converted here, where it crosses.
-                      probe          = client.healthCheck.mapError(e => RuntimeException(e.logMessage)),
+                      probe          = client.healthCheck.mapError {
+                                         case e: IrminError => RuntimeException(e.logMessage)
+                                         case f: Failure    => RuntimeException(f.logMessage)
+                                       },
                       attemptTimeout = cfg.healthCheckAttemptTimeout,
                       budget         = cfg.healthCheckBudget
                     )

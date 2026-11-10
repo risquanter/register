@@ -1,7 +1,6 @@
 package com.risquanter.register.http.errors
 
 import java.time.{Duration as JDuration, Instant}
-import scala.concurrent.duration.*
 
 import zio.json.*
 import zio.test.*
@@ -195,7 +194,7 @@ object WireErrorSpec extends ZIOSpecDefault:
         }
       ),
       suite("fromAppError maps every internal leaf type")(
-        test("each of the 32 leaves reaches the case assigned to it") {
+        test("each leaf reaches the case assigned to it") {
           val mapping: List[(AppError, String)] = List(
             // Rejected request. Read with no tree in scope, so the content
             // failures answer at the request level; the suite below reads the
@@ -229,12 +228,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             SimulationNotCached(treeId)                            -> "Conflict",
             // Capability absent
             ScenariosNotSupported("in-memory")                     -> "NotSupported",
-            // Dependency did not answer
-            IrminUnavailable("down")                               -> "DependencyUnavailable",
-            NetworkTimeout("read", 5.seconds)                      -> "DependencyUnavailable",
-            IrminHttpError(StatusCode.BadGateway, "body")          -> "DependencyUnavailable",
-            IrminGraphQLError(List("boom"), None)                  -> "DependencyUnavailable",
-            AuthServiceUnavailable("down", None)                   -> "DependencyUnavailable",
             // Faults
             BranchAlreadyExists(branch)                            -> "InternalFault",
             BranchHeadStale(branch, commit)                        -> "InternalFault",
@@ -249,7 +242,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 32)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 27)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope
@@ -353,20 +346,6 @@ object WireErrorSpec extends ZIOSpecDefault:
           val encoded = List(explicit, forbidden).map {
             case denied: WireError.AccessDenied => denied.toJson
             case other                          => throw MatchError(other)
-          }
-          assertTrue(encoded.distinct.size == 1)
-        },
-        // An unreachable authorization service answers as a dependency outage,
-        // so what a caller sees must not say which dependency failed. If it
-        // were distinguishable from an Irmin outage, the answer would disclose
-        // that the authorization stack is the part that is down.
-        test("an authorization outage is indistinguishable from any other dependency outage") {
-          val authDown  = WireError.fromAppError(AuthServiceUnavailable("SpiceDB unreachable", None), trace, TreeScope.NoTree)
-          val storeDown = WireError.fromAppError(IrminUnavailable("connection refused"), trace, TreeScope.NoTree)
-
-          val encoded = List(authDown, storeDown).map {
-            case down: WireError.DependencyUnavailable => down.toJson
-            case other                                 => throw MatchError(other)
           }
           assertTrue(encoded.distinct.size == 1)
         },

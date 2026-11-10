@@ -5,7 +5,7 @@ import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{AppError, Failure, TreeLoadFailure}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.* // For .assert extension method
@@ -21,10 +21,10 @@ import sttp.tapir.{Codec, CodecFormat, DecodeResult}
 object RiskTreeControllerSpec extends ZIOSpecDefault {
   private given Checked[Authority] = TestChecked.value
 
-  // Service accessor pattern. The error type is `AppError` rather than
+  // Service accessor pattern. The error type is `AppError | Failure` rather than
   // `Throwable` because that is what the service declares; a helper widened to
   // `Throwable` would hide which failures a call can actually produce.
-  private def service[A](f: RiskTreeService => IO[AppError, A]): ZIO[RiskTreeService, AppError, A] =
+  private def service[A](f: RiskTreeService => IO[AppError | Failure, A]): ZIO[RiskTreeService, AppError | Failure, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   // Stub repository factory - creates fresh instance per test

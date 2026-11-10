@@ -5,7 +5,7 @@ import zio.test.*
 
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl, TreeId, UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthForbidden, AuthServiceUnavailable, ErrorLocation}
+import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, Core, ErrorLocation, Failure, OutageMode, PeerZone}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.SpiceDbCompose
 import com.risquanter.register.auth.ResourceRef.asResource
@@ -48,6 +48,12 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
       AuthorizationServiceSpiceDB.liveLayer,
       BootstrapProvisionerSpiceDB.liveLayer
     )
+
+  /** How SpiceDB failed to answer, when a call failed as an outage at the
+    * authorization zone; `None` for any other outcome. */
+  private def outageModeOf[A](outcome: Either[AuthError | Failure, A]): Option[OutageMode] = outcome match
+    case Left(Failure.Unanswered(Core(PeerZone.Authorization, errors, _))) => Some(errors.head._2)
+    case _                                                                => None
 
   // ─── Isolated-config helper ─────────────────────────────────────────────────
 
@@ -107,8 +113,8 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
       ).map(_ => assertCompletes)
     },
 
-    // ── T-S5: SpiceDB unreachable returns AuthServiceUnavailable ────────────
-    test("T-S5 — unreachable SpiceDB returns AuthServiceUnavailable (fail-closed)") {
+    // ── T-S5: SpiceDB unreachable is a refused connection ───────────────────
+    test("T-S5 — unreachable SpiceDB is an outage with a refused connection (fail-closed)") {
       val deadConfig = SpiceDbConfig(
         url            = MeshServiceUrl.fromString("http://localhost:1").toOption.get,
         token          = SpiceDbToken.fromString("any-token", ErrorLocation.Whole).toOption.get,
@@ -119,14 +125,11 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
         scopedAuthzWith(deadConfig).flatMap(
           _.check(alice, Permission.ViewWorkspace, ws1.asResource).either
         )
-      }.map {
-        case Left(_: AuthServiceUnavailable) => assertCompletes
-        case other                           => assertTrue(false)
-      }
+      }.map(outcome => assertTrue(outageModeOf(outcome).contains(OutageMode.ConnectionRefused)))
     },
 
-    // ── T-S6: Invalid token returns AuthServiceUnavailable (fail-closed) ────
-    test("T-S6 — wrong bearer token returns AuthServiceUnavailable (4xx maps to unavailable)") {
+    // ── T-S6: Invalid token is an outage with SpiceDB's status (fail-closed) ─
+    test("T-S6 — wrong bearer token is an outage with status 401 (any non-2xx is an outage)") {
       ZIO.service[SpiceDbCompose.Resource].flatMap { res =>
         val wrongTokenConfig = SpiceDbConfig(
           url            = MeshServiceUrl.fromString(res.baseUrl).toOption.get,
@@ -139,12 +142,14 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
             _.check(alice, Permission.ViewWorkspace, ws1.asResource).either
           )
         }
-      }.map {
-        // SpiceDB returns 401 for the wrong preshared key.
-        // The adapter maps any non-2xx to AuthServiceUnavailable (fail-closed §L2.2).
-        case Left(_: AuthServiceUnavailable) => assertCompletes
-        case other                           => assertTrue(false)
-      }
+      }.map(outcome =>
+        // SpiceDB refuses the wrong preshared key with a non-2xx status (400 on
+        // the image this suite runs), and the adapter answers any non-2xx as an
+        // outage carrying that status (fail-closed).
+        assertTrue(outageModeOf(outcome).exists {
+          case OutageMode.Status(_) => true
+          case _                    => false
+        }))
     },
 
     // ── T-S7: listAccessible returns both workspace IDs for alice ────────────

@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.json.*
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AppError, AuthError, AuthForbidden, AuthServiceUnavailable}
+import com.risquanter.register.domain.errors.{AppError, AuthError, AuthForbidden}
 
 /** Tests for the auth identity types.
   *
@@ -174,27 +174,8 @@ object AuthTypesSpec extends ZIOSpecDefault:
         )
         assertTrue(err.logMessage == s"Access denied: user=$validUuid permission=design_write resource=risk_tree:01ARZ3NDEKTSV4RRFFQ69G5FAV")
       },
-      test("AuthServiceUnavailable logMessage includes reason") {
-        val err = AuthServiceUnavailable("connection refused", None)
-        assertTrue(err.logMessage == "Authorization service unavailable: connection refused")
-      },
-      test("AuthServiceUnavailable holds the cause it was given") {
-        val cause = RuntimeException("timeout")
-        val err   = AuthServiceUnavailable("timeout", Some(cause))
-        // Reference identity, not equality: RuntimeException does not override
-        // equals, and the assertion is that the same instance is carried.
-        assertTrue(err.cause.exists(_.eq(cause)))
-      },
-      test("AuthServiceUnavailable carries no cause when none is given") {
-        val err = AuthServiceUnavailable("network error", None)
-        assertTrue(err.cause.isEmpty)
-      },
       test("AuthForbidden is an AppError") {
         val err: AppError = AuthForbidden("u", "p", "r", "i")
-        assertTrue(err.isInstanceOf[AuthError])
-      },
-      test("AuthServiceUnavailable is an AppError") {
-        val err: AppError = AuthServiceUnavailable("reason", None)
         assertTrue(err.isInstanceOf[AuthError])
       }
     )

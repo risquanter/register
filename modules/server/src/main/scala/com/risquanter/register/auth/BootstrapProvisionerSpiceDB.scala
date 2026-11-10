@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import com.risquanter.register.configs.SpiceDbConfig
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, AuthServiceUnavailable}
+import com.risquanter.register.domain.errors.{AuthError, Failure, OutageMode}
 
 // ─── SpiceDB WriteRelationships request types (file-private) ─────────────────
 // SpiceDbObjectRef / SpiceDbSubjectRef and their encoders are shared with
@@ -41,10 +41,11 @@ private given JsonEncoder[SpiceDbWriteRequest] = DeriveJsonEncoder.gen
   * account's write scope is limited to `owner_user`/`owner_team` relations on
   * `workspace` definitions — it cannot write arbitrary access grants.
   *
-  * Fail-closed on all transport and SpiceDB-side errors: any failure mode maps
-  * to [[AuthServiceUnavailable]] (never [[com.risquanter.register.domain.errors.AuthForbidden]] —
-  * a rejected write means service-account misconfiguration, not a user-level
-  * denial), which fails the enclosing bootstrap request.
+  * Fail-closed on all transport and SpiceDB-side errors: any failure mode is
+  * an `Unanswered` at the authorization zone (never
+  * [[com.risquanter.register.domain.errors.AuthForbidden]] — a rejected write
+  * means service-account misconfiguration, not a user-level denial), which
+  * fails the enclosing bootstrap request.
   *
   * @see ADR-024 §7 — resource lifecycle write clarification
   */
@@ -61,7 +62,7 @@ final class BootstrapProvisionerSpiceDB private (
   override def recordOwnership(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
-  ): IO[AuthError, Unit] =
+  ): IO[AuthError | Failure, Unit] =
     for
       outcome <- sendWriteRequest(userId, workspaceId).either
       _       <- logWriteResult(userId, workspaceId, outcome)
@@ -71,7 +72,7 @@ final class BootstrapProvisionerSpiceDB private (
   private def sendWriteRequest(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
-  ): IO[AuthError, Unit] =
+  ): IO[Failure, Unit] =
     val body = SpiceDbWriteRequest(
       updates = List(
         SpiceDbRelationshipUpdate(
@@ -92,18 +93,13 @@ final class BootstrapProvisionerSpiceDB private (
       .response(asStringAlways)
       .readTimeout(timeout)
       .send(backend)
-      .mapError(e =>
-        AuthServiceUnavailable(s"SpiceDB ownership write failed: ${e.getMessage}", Some(e))
-      )
+      .mapError(e => authorizationOutage(OutageMode.ConnectionRefused, peerMessage(e)))
       .flatMap { response =>
         // Success body ({"writtenAt":{"token":"..."}}) is intentionally ignored:
         // the app never does write-then-check (pure PEP; consistency is a
         // check-side config concern — see SpiceDbConsistency).
         if response.code.isSuccess then ZIO.unit
-        else
-          ZIO.fail(AuthServiceUnavailable(
-            s"SpiceDB ownership write returned HTTP ${response.code.code}", None
-          ))
+        else ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
       }
 
   // user.value — explicit PII opt-in; ownership writes are audit-relevant
@@ -111,12 +107,11 @@ final class BootstrapProvisionerSpiceDB private (
   private def logWriteResult(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId,
-    outcome:     Either[AuthError, Unit]
+    outcome:     Either[Failure, Unit]
   ): UIO[Unit] =
     val resultStr = outcome match
-      case Right(_)                        => "written"
-      case Left(e: AuthServiceUnavailable) => s"error reason=${e.reason}"
-      case Left(_)                         => "error"
+      case Right(_) => "written"
+      case Left(f)  => s"error reason=${f.logMessage}"
     ZIO.logInfo(
       s"authz.recordOwnership user=${userId.value} workspace=${workspaceId.value} " +
       s"relation=${BootstrapProvisionerSpiceDB.OwnerRelation} result=$resultStr"

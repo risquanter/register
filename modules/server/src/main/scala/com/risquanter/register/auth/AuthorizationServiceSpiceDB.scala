@@ -3,6 +3,7 @@ package com.risquanter.register.auth
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
+import zio.prelude.NonEmptyList
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.{Meter, Counter, Histogram}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
@@ -14,7 +15,9 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency}
 import com.risquanter.register.domain.data.iron.{UserId, SafeId}
-import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, AuthServiceUnavailable}
+import com.risquanter.register.domain.errors.{
+  AuthError, AuthForbidden, Core, Diagnostic, ErrorLocation, Failure, OutageMode, PeerZone
+}
 
 // ─── SpiceDB REST API request/response types (package-private) ───────────────
 // Top-level `private` = visible within the `auth` package only — not part of any
@@ -53,14 +56,24 @@ private given JsonDecoder[SpiceDbLookupResultItem] = DeriveJsonDecoder.gen
 private case class SpiceDbLookupResponseLine(result: Option[SpiceDbLookupResultItem], error: Option[Json])
 private given JsonDecoder[SpiceDbLookupResponseLine] = DeriveJsonDecoder.gen
 
+/** SpiceDB did not answer, in the given way. Shared by every SpiceDB adapter
+  * in this package: no authorization decision was obtained, so the request
+  * fails closed as a dependency outage. */
+private def authorizationOutage(mode: OutageMode, diagnostics: List[Diagnostic]): Failure =
+  Failure.Unanswered(Core(PeerZone.Authorization, NonEmptyList((ErrorLocation.Whole, mode)), diagnostics))
+
+/** A transport exception's own text, for the log, when it has one. */
+private def peerMessage(e: Throwable): List[Diagnostic] =
+  Option(e.getMessage).map(Diagnostic.PeerMessage(_)).toList
+
 // ─── Live SpiceDB HTTP adapter ───────────────────────────────────────────────
 
 /** Live SpiceDB HTTP adapter for the authorization service.
   *
   * Implements AuthorizationService by calling SpiceDB's REST API (v1).
-  * Fail-closed on all transport and SpiceDB-side errors: any failure mode maps
-  * to AuthServiceUnavailable, which the wire projection answers as a dependency
-  * outage. No authorization decision was obtained, so none is assumed, and the
+  * Fail-closed on all transport and SpiceDB-side errors: any failure mode is
+  * an `Unanswered` at the authorization zone, which the wire projection answers
+  * as a dependency outage. No authorization decision was obtained, so none is assumed, and the
   * caller is told a service did not answer rather than that access was refused.
   *
   * Only `check()` and `listAccessible()` are implemented. This service
@@ -95,7 +108,7 @@ final class AuthorizationServiceSpiceDB private (
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef
-  ): IO[AuthError, Checked[P]] =
+  ): IO[AuthError | Failure, Checked[P]] =
     tracing.span("spicedb.check", SpanKind.CLIENT) {
       for
         // No userId in trace attributes — avoid PII in trace backends that
@@ -124,7 +137,7 @@ final class AuthorizationServiceSpiceDB private (
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef
-  ): IO[AuthError, Checked[P]] =
+  ): IO[AuthError | Failure, Checked[P]] =
     val body = SpiceDbCheckRequest(
       resource    = SpiceDbObjectRef(resource.resourceType.zedType, resource.resourceId.value),
       permission  = permission.zedName,
@@ -139,9 +152,7 @@ final class AuthorizationServiceSpiceDB private (
       .response(asStringAlways)
       .readTimeout(timeout)
       .send(backend)
-      .mapError(e =>
-        AuthServiceUnavailable(s"SpiceDB check request failed: ${e.getMessage}", Some(e))
-      )
+      .mapError(e => authorizationOutage(OutageMode.ConnectionRefused, peerMessage(e)))
       .flatMap { response =>
         if response.code.isSuccess then
           response.body.fromJson[SpiceDbCheckResponse] match
@@ -157,13 +168,9 @@ final class AuthorizationServiceSpiceDB private (
                 resourceId   = resource.resourceId.value
               ))
             case Left(parseErr) =>
-              ZIO.fail(AuthServiceUnavailable(
-                s"SpiceDB check response parse error: $parseErr", None
-              ))
+              ZIO.fail(authorizationOutage(OutageMode.Protocol, List(Diagnostic.PeerMessage(parseErr))))
         else
-          ZIO.fail(AuthServiceUnavailable(
-            s"SpiceDB check returned HTTP ${response.code.code}", None
-          ))
+          ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
       }
 
   // ─── listAccessible() ─────────────────────────────────────────────────────
@@ -171,13 +178,14 @@ final class AuthorizationServiceSpiceDB private (
   // Intentionally uninstrumented: telemetry (span, authz.check.* metrics,
   // audit log) is scoped to check() only — the
   // per-request allow/deny enforcement decision. listAccessible is a listing
-  // convenience whose result is shown to the user; failures surface as
-  // AuthServiceUnavailable and are visible in ordinary request logs/traces.
+  // convenience whose result is shown to the user; failures surface as an
+  // `Unanswered` at the authorization zone and are visible in ordinary request
+  // logs/traces.
   override def listAccessible(
     user:         UserId.Authenticated,
     resourceType: ResourceType,
     permission:   Permission
-  ): IO[AuthError, List[ResourceId]] =
+  ): IO[AuthError | Failure, List[ResourceId]] =
     val body = SpiceDbLookupRequest(
       resourceObjectType = resourceType.zedType,
       permission         = permission.zedName,
@@ -192,17 +200,13 @@ final class AuthorizationServiceSpiceDB private (
       .response(asStringAlways)
       .readTimeout(timeout)
       .send(backend)
-      .mapError(e =>
-        AuthServiceUnavailable(s"SpiceDB lookup request failed: ${e.getMessage}", Some(e))
-      )
+      .mapError(e => authorizationOutage(OutageMode.ConnectionRefused, peerMessage(e)))
       .flatMap { response =>
         if response.code.isSuccess then
           ZIO.fromEither(parseLookupResponseLines(response.body))
-            .mapError(msg => AuthServiceUnavailable(s"SpiceDB lookup response error: $msg", None))
+            .mapError(msg => authorizationOutage(OutageMode.Protocol, List(Diagnostic.PeerMessage(msg))))
         else
-          ZIO.fail(AuthServiceUnavailable(
-            s"SpiceDB lookup returned HTTP ${response.code.code}", None
-          ))
+          ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
       }
 
   // SpiceDB LookupResources API streams newline-delimited JSON objects.
@@ -234,15 +238,15 @@ final class AuthorizationServiceSpiceDB private (
   // ─── Telemetry ────────────────────────────────────────────────────────────
 
   private def recordCheckMetrics[P <: Permission, A](
-    outcome:    Either[AuthError, A],
+    outcome:    Either[AuthError | Failure, A],
     permission: P,
     resource:   ResourceRef,
     latencyMs:  Double
   ): UIO[Unit] =
     val resultLabel = outcome match
-      case Right(_)                        => "allowed"
-      case Left(_: AuthForbidden)          => "denied"
-      case Left(_: AuthServiceUnavailable) => "error"
+      case Right(_)               => "allowed"
+      case Left(_: AuthForbidden) => "denied"
+      case Left(_: Failure)       => "error"
     val attrs = Attributes(
       Attribute.string("result",        resultLabel),
       Attribute.string("permission",    permission.zedName),
@@ -254,13 +258,13 @@ final class AuthorizationServiceSpiceDB private (
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef,
-    outcome:    Either[AuthError, A],
+    outcome:    Either[AuthError | Failure, A],
     latencyMs:  Long
   ): UIO[Unit] =
     val resultStr = outcome match
-      case Right(_)                         => "allowed"
-      case Left(_: AuthForbidden)           => "denied"
-      case Left(e: AuthServiceUnavailable)  => s"error reason=${e.reason}"
+      case Right(_)               => "allowed"
+      case Left(_: AuthForbidden) => "denied"
+      case Left(f: Failure)       => s"error reason=${f.logMessage}"
     // user.value — explicit PII opt-in; this is the designated audit log context.
     // user.toString would produce UserId(***) — PII is redacted for general logs.
     ZIO.logInfo(

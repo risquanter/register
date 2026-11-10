@@ -237,6 +237,16 @@ object FailureSpec extends ZIOSpecDefault:
         val failure = Failure.Rejected(Core(TrustZone.Client, one(FieldProblem.Query(QueryProblem.NotQuantifiable("n"))), Nil))
         assertTrue(failure.toWire(t, TreeScope.NoTree) == WireError.InternalFault(t))
       },
+      // An unreachable authorization service answers as a dependency outage, so
+      // what a caller sees must not say which dependency failed. If it were
+      // distinguishable from a store outage, the answer would disclose that the
+      // authorization stack is the part that is down.
+      test("an authorization outage is indistinguishable on the wire from a store outage") {
+        val t         = TelemetryPlaceholders.UnlinkedTrace
+        val authDown  = Failure.Unanswered(Core(PeerZone.Authorization, one(OutageMode.ConnectionRefused), Nil))
+        val storeDown = Failure.Unanswered(Core(PeerZone.Store, one(OutageMode.Status(StatusCode.ServiceUnavailable)), Nil))
+        assertTrue(authDown.toWire(t, TreeScope.NoTree) == storeDown.toWire(t, TreeScope.NoTree))
+      },
       test("a wire case naming one problem carries the first entry's") {
         val t       = TelemetryPlaceholders.UnlinkedTrace
         val failure = Failure.Conflict(Core(

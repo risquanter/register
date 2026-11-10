@@ -5,7 +5,8 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision, Url}
+import com.risquanter.register.domain.errors.{Core, Failure, OutageMode, PeerZone}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
@@ -123,6 +124,22 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
 
   override def spec =
     suite("RiskTreeRepositoryIrminSpec")(
+      test("a read whose store does not answer fails with that outage, not with a repository failure") {
+        // Port 1 is reserved and nothing listens on it, so the connection is refused.
+        val deadConfig = IrminConfig(
+          url                          = Url.fromString("http://localhost:1").toOption.get,
+          conflictScanFetchParallelism = positiveInt(1)
+        )
+        ZIO.scoped {
+          (ZLayer.succeed(deadConfig) >>> IrminClientLive.layer >>> RiskTreeRepositoryIrmin.layer).build
+            .flatMap(_.get[RiskTreeRepository].getById(wsId, treeId("unanswered"), Revision.Head(BranchRef.Main)).either)
+        }.map {
+          case Left(Failure.Unanswered(Core(PeerZone.Store, errors, _))) =>
+            assertTrue(errors.head._2 == OutageMode.ConnectionRefused)
+          case _ => assertTrue(false)
+        }
+      },
+
       test("create and get roundtrip with metadata") {
         for
           repo   <- ZIO.service[RiskTreeRepository]

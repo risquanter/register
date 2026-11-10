@@ -1,12 +1,13 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 import java.time.Instant
 import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, ScenarioName, StoreBranch, WorkspaceId}
-import com.risquanter.register.domain.errors.{AppError, IrminError}
+import com.risquanter.register.domain.errors.{AppError, Core, ErrorLocation, Failure, IrminError, OutageMode, PeerZone}
 import com.risquanter.register.http.responses.{HistoryOperation, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminPath, IrminTreeEntry}
@@ -28,10 +29,11 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
   private def limit(n: Int): PositiveInt = n.refineUnsafe
 
   /** Irmin for the history read only: `getHistory` answers the newest `n`
-    * commits of `log`, oldest first, and records the `n` it was asked for. */
-  private final class FakeHistoryIrmin(log: List[IrminCommit], asked: Ref[List[Int]]) extends IrminClient:
-    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminCommit]] =
-      asked.update(_ :+ (n: Int)).as(log.takeRight(n))
+    * commits of `log`, oldest first, and records the `n` it was asked for, or
+    * fails with `outage` when one is given. */
+  private final class FakeHistoryIrmin(log: List[IrminCommit], asked: Ref[List[Int]], outage: Option[Failure]) extends IrminClient:
+    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, List[IrminCommit]] =
+      outage.fold(asked.update(_ :+ (n: Int)).as(log.takeRight(n)))(ZIO.fail(_))
 
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def set(path: IrminPath, value: String, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
@@ -39,7 +41,7 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
     override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def branches = ZIO.die(new NotImplementedError("unused by this spec"))
-    override def mainBranch: IO[IrminError, Option[IrminBranch]] = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def mainBranch: IO[IrminError | Failure, Option[IrminBranch]] = ZIO.die(new NotImplementedError("unused by this spec"))
     override def getBranch(branch: StoreBranch) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))
@@ -65,10 +67,10 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
     commitWith('a', CommitMessage.ScenarioMerged(ws, scenario))
   )
 
-  private def history(n: Int): IO[AppError, (List[HistoryOperation], List[Int])] =
+  private def history(n: Int): IO[AppError | Failure, (List[HistoryOperation], List[Int])] =
     for
       asked   <- Ref.make(List.empty[Int])
-      entries <- TreeHistoryServiceLive(FakeHistoryIrmin(log, asked))
+      entries <- TreeHistoryServiceLive(FakeHistoryIrmin(log, asked, None))
                    .history(ws, tree, BranchRef.Main, limit(n))
       seen    <- asked.get
     yield (entries.map(_.operation), seen)
@@ -92,6 +94,15 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
             asked == List(4)
           )
         }
+      },
+      test("a store that does not answer fails the read with that value, not with a repository failure") {
+        val outage: Failure =
+          Failure.Unanswered(Core(PeerZone.Store, NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused)), Nil))
+        for
+          asked <- Ref.make(List.empty[Int])
+          exit  <- TreeHistoryServiceLive(FakeHistoryIrmin(log, asked, Some(outage)))
+                     .history(ws, tree, BranchRef.Main, limit(10)).exit
+        yield assertTrue(exit == Exit.fail(outage))
       },
       test("the number of commits asked for saturates instead of overflowing") {
         assertTrue(TreeHistoryServiceLive.requested(limit(Int.MaxValue)) == limit(Int.MaxValue))

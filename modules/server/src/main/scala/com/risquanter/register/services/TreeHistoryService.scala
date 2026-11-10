@@ -6,7 +6,7 @@ import io.github.iltotore.iron.constraint.numeric.Greater
 import java.time.{DateTimeException, Instant}
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt, CommitHash}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, IrminError, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, Failure, RepositoryFailure, ValidationError}
 import com.risquanter.register.http.responses.TreeHistoryEntry
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.IrminCommit
@@ -18,12 +18,12 @@ import com.risquanter.register.infra.irmin.model.IrminCommit
   */
 trait TreeHistoryService:
   def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-    (using Checked[Authority]): IO[AppError, List[TreeHistoryEntry]]
+    (using Checked[Authority]): IO[AppError | Failure, List[TreeHistoryEntry]]
 
 final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryService:
 
   override def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-    (using Checked[Authority]): IO[AppError, List[TreeHistoryEntry]] =
+    (using Checked[Authority]): IO[AppError | Failure, List[TreeHistoryEntry]] =
     // History is read from the tree's meta contents: every write (create,
     // update, revert, and a merge's final write) rewrites meta with a fresh
     // updatedAt, so its last_modified log is the tree's full commit history.
@@ -33,7 +33,7 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
     // merge commit appears twice. The entries are the newest `limit` distinct
     // commits the history shows, oldest first.
     val path = WorkspaceStoragePaths.treeMeta(wsId, treeId)
-    handleIrmin(irmin.getHistory(path, TreeHistoryServiceLive.requested(limit), branch))
+    irmin.getHistory(path, TreeHistoryServiceLive.requested(limit), branch)
       .flatMap(commits => ZIO.foreach(commits.distinctBy(_.hash))(toEntry))
       .map(_.flatten.takeRight(limit))
 
@@ -49,16 +49,13 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
             hash => Some(TreeHistoryEntry(hash, operation, TreeHistoryServiceLive.toIso(commit.info.date)))
           )
 
-  private def handleIrmin[A](effect: IO[IrminError, A]): IO[AppError, A] =
-    effect.mapError(err => RepositoryFailure(err.logMessage))
-
 object TreeHistoryService:
   /** In-memory backend variant: there is no persistent commit log, so history
     * is always empty, and the history interface is disabled on that backend
     * anyway. A read with no data, not an error, unlike scenario operations. */
   val empty: TreeHistoryService = new TreeHistoryService:
     def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
-      (using Checked[Authority]): IO[AppError, List[TreeHistoryEntry]] =
+      (using Checked[Authority]): IO[AppError | Failure, List[TreeHistoryEntry]] =
       ZIO.succeed(Nil)
 
 object TreeHistoryServiceLive:

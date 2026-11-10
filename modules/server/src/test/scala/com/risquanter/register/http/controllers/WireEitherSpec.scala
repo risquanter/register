@@ -2,6 +2,7 @@ package com.risquanter.register.http.controllers
 
 import zio.*
 import zio.json.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
@@ -21,7 +22,10 @@ import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, TraceId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AppError, AuthServiceUnavailable, RepositoryFailure, WorkspaceExpired}
+import com.risquanter.register.domain.errors.{
+  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, OutageMode, PeerZone, RepositoryFailure,
+  TrustZone, ValidationError, WorkspaceExpired
+}
 import com.risquanter.register.http.RequestSpanInterceptor
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.{TreeScope, WireError}
@@ -73,8 +77,8 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
     * this failure is the service's own. The level is read from the internal
     * failure, which does.
     */
-  private val authOutage: AppError =
-    AuthServiceUnavailable("the authorization service did not answer", None)
+  private val authOutage: Failure =
+    Failure.Unanswered(Core(PeerZone.Authorization, NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused)), Nil))
 
   private val wsId: WorkspaceId =
     WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
@@ -86,9 +90,22 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
   private val expired: AppError =
     WorkspaceExpired(wsId, JDuration.ofHours(72), JDuration.ofHours(1), ExpiryCause.Inactivity, Instant.EPOCH)
 
+  /** A refusal of the caller's content, in the failure shape. Its message names
+    * its own field, so the line a test reads can only be the line it wrote. */
+  private def rejectedAt(zone: TrustZone, field: FieldName): Failure =
+    Failure.rejected(zone, NonEmptyList(ValidationError(ErrorLocation.requestField(field), FieldProblem.Required)), Nil)
+
+  private val clientRefusal: Failure = rejectedAt(TrustZone.Client, FieldName.Email)
+  private val storeRefusal: Failure  = rejectedAt(TrustZone.Peer(PeerZone.Store), FieldName.Url)
+
+  /** The log message of either failure type. */
+  private def messageOf(error: AppError | Failure): String = error match
+    case e: AppError => e.logMessage
+    case f: Failure  => f.logMessage
+
   /** The wire failure the boundary projects `error` onto. This is also where a
     * test reads the trace the response would carry. */
-  private def wireFailure(error: AppError)(using Tracing): UIO[Option[WireError]] =
+  private def wireFailure(error: AppError | Failure)(using Tracing): UIO[Option[WireError]] =
     ZIO.fail(error).wireEither(TreeScope.NoTree).map(_.left.toOption)
 
   /** The boundary's log line for `error` under `trace`, or `None` if it wrote
@@ -99,9 +116,9 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
     * test wrote therefore cannot answer for this one, whichever way the test
     * framework scopes the logger it collects from.
     */
-  private def lineFor(error: AppError, trace: Option[TraceId]): UIO[Option[ZTestLogger.LogEntry]] =
+  private def lineFor(error: AppError | Failure, trace: Option[TraceId]): UIO[Option[ZTestLogger.LogEntry]] =
     ZTestLogger.logOutput.map(_.find { entry =>
-      entry.message() == error.logMessage &&
+      entry.message() == messageOf(error) &&
       trace.exists(t => entry.annotations.get("trace_id").contains(t.value))
     })
 
@@ -242,6 +259,46 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
             line.exists(_.annotations.contains("expired_at")),
             // The same identifier the caller received, so the two can be joined.
             line.flatMap(_.annotations.get("trace_id")).contains(context.getTraceId)
+          )
+        }
+      }
+    },
+
+    test("a client refusal in the failure shape is logged at INFO with its zone, and answers its own case") {
+      ZIO.serviceWithZIO[Tracing] { tracing =>
+        given Tracing = tracing
+
+        tracing.span(SpanName, SpanKind.SERVER) {
+          for
+            projected <- wireFailure(clientRefusal)
+            line      <- lineFor(clientRefusal, projected.map(_.trace))
+          yield assertTrue(
+            line.map(_.logLevel).contains(LogLevel.Info),
+            line.flatMap(_.annotations.get("trust_zone")).contains("client"),
+            projected.exists {
+              case WireError.RequestRejected(_, _) => true
+              case _                               => false
+            }
+          )
+        }
+      }
+    },
+
+    test("a refusal of a peer's content is logged at WARN with its zone, and answers the opaque fault") {
+      ZIO.serviceWithZIO[Tracing] { tracing =>
+        given Tracing = tracing
+
+        tracing.span(SpanName, SpanKind.SERVER) {
+          for
+            projected <- wireFailure(storeRefusal)
+            line      <- lineFor(storeRefusal, projected.map(_.trace))
+          yield assertTrue(
+            line.map(_.logLevel).contains(LogLevel.Warning),
+            line.flatMap(_.annotations.get("trust_zone")).contains("peer.store"),
+            projected.exists {
+              case WireError.InternalFault(_) => true
+              case _                          => false
+            }
           )
         }
       }

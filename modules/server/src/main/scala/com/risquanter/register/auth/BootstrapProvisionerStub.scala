@@ -2,7 +2,7 @@ package com.risquanter.register.auth
 
 import zio.{IO, Ref, UIO, ZIO, ZLayer}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, AuthServiceUnavailable}
+import com.risquanter.register.domain.errors.{AuthError, Failure, OutageMode}
 
 /** Recording stub for unit tests.
   *
@@ -25,8 +25,8 @@ final class BootstrapProvisionerStub private (
   def recordOwnership(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
-  ): IO[AuthError, Unit] =
-    if shouldFail then ZIO.fail(AuthServiceUnavailable("SpiceDB unavailable (stub)", None))
+  ): IO[AuthError | Failure, Unit] =
+    if shouldFail then ZIO.fail(authorizationOutage(OutageMode.ConnectionRefused, Nil))
     else callsRef.update(_ :+ (userId, workspaceId))
 
   def bootstrapToken(): UIO[Checked[LifecycleMarker.Bootstrap.type]] =
@@ -42,7 +42,7 @@ object BootstrapProvisionerStub:
     Ref.make(List.empty[(UserId.Authenticated, WorkspaceId)])
       .map(new BootstrapProvisionerStub(_, false))
 
-  /** Failing stub — `recordOwnership` always returns `AuthServiceUnavailable`. */
+  /** Failing stub — `recordOwnership` always fails as SpiceDB not answering. */
   val makeFailing: UIO[BootstrapProvisionerStub] =
     Ref.make(List.empty[(UserId.Authenticated, WorkspaceId)])
       .map(new BootstrapProvisionerStub(_, true))

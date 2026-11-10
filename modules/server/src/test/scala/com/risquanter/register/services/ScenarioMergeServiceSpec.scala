@@ -4,6 +4,7 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import zio.json.*
+import zio.prelude.NonEmptyList
 
 import java.time.Instant
 import io.github.iltotore.iron.*
@@ -12,7 +13,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, FieldName, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
+import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, Core, ErrorLocation, Failure, FieldName, IrminError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, OutageMode, PeerZone, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -123,11 +124,11 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     onMain: Map[TreePath, String],
     onScenario: Map[TreePath, String],
     atBase: Map[TreePath, String],
-    mergeResult: IO[IrminError, IrminCommit],
+    mergeResult: IO[IrminError | Failure, IrminCommit],
     publishCalls: Ref[List[(CommitHash, CommitHash)]],
-    publishResult: IO[IrminError, Unit],
+    publishResult: IO[IrminError | Failure, Unit],
     mainHeadPresent: Boolean = true,
-    createResult: IO[IrminError, Unit] = ZIO.unit,
+    createResult: IO[IrminError | Failure, Unit] = ZIO.unit,
     branchOps: Option[Ref[List[String]]],
     stagingSets: Option[Ref[List[(IrminPath, String, CommitMessage)]]],
     mainMovesTo: List[CommitHash] = Nil
@@ -155,7 +156,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     private def record(op: String): UIO[Unit] =
       ZIO.foreachDiscard(branchOps)(_.update(_ :+ op))
 
-    override def mainBranch: IO[IrminError, Option[IrminBranch]] =
+    override def mainBranch: IO[IrminError | Failure, Option[IrminBranch]] =
       ZIO.succeed {
         val head = (mainHead :: mainMovesTo).applyOrElse(mainReads.getAndIncrement(), _ => mainMovesTo.lastOption.getOrElse(mainHead))
         Option.when(mainHeadPresent)(branchOf("main", head))
@@ -164,30 +165,30 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     /** Answers for the scenario branch and for the staging branch alike: the
       * service reads the first for its head and the second only to find the
       * head its cleanup deletes with. */
-    override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
+    override def getBranch(branch: StoreBranch): IO[IrminError | Failure, Option[IrminBranch]] =
       ZIO.succeed(Some(branchOf(branch.name, scenarioHead)))
 
-    override def lca(branch: BranchRef, c: CommitHash): IO[IrminError, List[IrminCommit]] =
+    override def lca(branch: BranchRef, c: CommitHash): IO[IrminError | Failure, List[IrminCommit]] =
       ZIO.succeed(List(commit(base)))
 
-    override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit] =
+    override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError | Failure, Unit] =
       record(s"create:${branch.name}") *> createResult
 
-    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError, Unit] =
+    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError | Failure, Unit] =
       record(s"delete:${branch.name}")
 
     /** The merge target is the staging branch, so this models merging into it
       * rather than into main. Records the merged commit's hash and the target. */
-    override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage): IO[IrminError, IrminCommit] =
+    override def mergeCommit(from: CommitHash, into: StoreBranch, message: CommitMessage): IO[IrminError | Failure, IrminCommit] =
       record(s"merge:${from.value}->${into.name}") *> mergeResult
 
-    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit] =
+    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError | Failure, Unit] =
       publishCalls.update(_ :+ (expectedHead, to)) *> publishResult
 
-    override def getAtCommit(c: CommitHash, path: IrminPath): IO[IrminError, Option[String]] =
+    override def getAtCommit(c: CommitHash, path: IrminPath): IO[IrminError | Failure, Option[String]] =
       ZIO.succeed(sideAt(c).map((p, v) => WorkspaceStoragePaths.of(wsId, p) -> v).get(path))
 
-    override def listAtCommit(c: CommitHash, prefix: IrminPath): IO[IrminError, List[IrminSegment]] =
+    override def listAtCommit(c: CommitHash, prefix: IrminPath): IO[IrminError | Failure, List[IrminSegment]] =
       ZIO.succeed(
         sideAt(c).keySet.toList
           .flatMap(p => childUnder(prefix, WorkspaceStoragePaths.of(wsId, p)))
@@ -202,7 +203,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     /** Records the path, contents and message of each write to the staging
       * branch, and answers with a commit of its own so the merge's head is the
       * last write. */
-    override def set(path: IrminPath, value: String, message: CommitMessage, staging: MergeStagingRef): IO[IrminError, IrminCommit] =
+    override def set(path: IrminPath, value: String, message: CommitMessage, staging: MergeStagingRef): IO[IrminError | Failure, IrminCommit] =
       ZIO.foreachDiscard(stagingSets)(_.update(_ :+ (path, value, message))).as(commit(hash('e')))
     override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
@@ -240,7 +241,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
   /** The error-mapping fixture: base equals main's head, so the scan
     * short-circuits and no path is read.
     */
-  private def service(mergeResult: IO[IrminError, IrminCommit]): UIO[ScenarioMergeService] =
+  private def service(mergeResult: IO[IrminError | Failure, IrminCommit]): UIO[ScenarioMergeService] =
     for
       resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
       revs   <- Ref.make(List.empty[Revision])
@@ -258,10 +259,12 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             .flatMap(_.merge(ws("ws-conflict"), name("draft-v1")).exit)
             .map(exit => assert(exit)(fails(isSubtype[MergeConflict](anything))))
         },
-        test("an unrelated Irmin failure passes through untranslated") {
-          service(ZIO.fail(IrminGraphQLError(List("boom"), None)))
+        test("a store that does not answer passes through untranslated") {
+          val outage: Failure =
+            Failure.Unanswered(Core(PeerZone.Store, NonEmptyList((ErrorLocation.Whole, OutageMode.Protocol)), Nil))
+          service(ZIO.fail(outage))
             .flatMap(_.merge(ws("ws-other-error"), name("draft-v1")).exit)
-            .map(exit => assert(exit)(fails(isSubtype[IrminGraphQLError](anything))))
+            .map(exit => assert(exit)(fails(equalTo(outage))))
         },
         test("a successful merge returns the merge commit's head") {
           service(ZIO.succeed(commit(hash('c'))))

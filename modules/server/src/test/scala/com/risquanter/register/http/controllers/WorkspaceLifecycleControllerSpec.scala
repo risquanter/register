@@ -198,8 +198,8 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       )
     },
 
-    // The stub fails with `AuthServiceUnavailable`, which is an outage of the
-    // authorization service rather than a refusal, so the caller is told a
+    // The stub fails with an `Unanswered` at the authorization zone, which is an
+    // outage of the authorization service rather than a refusal, so the caller is told a
     // dependency did not answer and the request still fails closed.
     test("recordOwnership failure propagates as a dependency outage") {
       for

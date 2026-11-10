@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt}
-import com.risquanter.register.domain.errors.{AppError, ScenariosNotSupported, ScenarioHeadStale}
+import com.risquanter.register.domain.errors.{AppError, Failure, ScenariosNotSupported, ScenarioHeadStale}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
 /** What a new scenario forks from. A create always
@@ -63,12 +63,12 @@ trait ScenarioService:
     *      changing mid-fork.
     */
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Authority]): IO[AppError, BranchRef]
+    (using Checked[Authority]): IO[AppError | Failure, BranchRef]
 
   /** List a workspace's scenarios, where ownership is a branch-name prefix
     * filter. Never includes `main` — main is not a scenario.
     */
-  def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError, List[ScenarioSummary]]
+  def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError | Failure, List[ScenarioSummary]]
 
   /** Delete a scenario via compare-and-set. Only removes the branch
     * pointer — commits remain reachable by hash, so forks survive.
@@ -80,18 +80,18 @@ trait ScenarioService:
     * @see BranchHeadStale translated to `ScenarioHeadStale` — concurrent modification
     */
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Authority]): IO[AppError, Unit]
+    (using Checked[Authority]): IO[AppError | Failure, Unit]
 
 object ScenarioService:
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Authority]): ZIO[ScenarioService, AppError, BranchRef] =
+    (using Checked[Authority]): ZIO[ScenarioService, AppError | Failure, BranchRef] =
     ZIO.serviceWithZIO[ScenarioService](_.create(wsId, name, source))
 
-  def list(wsId: WorkspaceId)(using Checked[Authority]): ZIO[ScenarioService, AppError, List[ScenarioSummary]] =
+  def list(wsId: WorkspaceId)(using Checked[Authority]): ZIO[ScenarioService, AppError | Failure, List[ScenarioSummary]] =
     ZIO.serviceWithZIO[ScenarioService](_.list(wsId))
 
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Authority]): ZIO[ScenarioService, AppError, Unit] =
+    (using Checked[Authority]): ZIO[ScenarioService, AppError | Failure, Unit] =
     ZIO.serviceWithZIO[ScenarioService](_.delete(wsId, name, expectedHead))
 
   /** Best-effort cascade deletion — lists a workspace's scenarios, then deletes
@@ -120,7 +120,7 @@ object ScenarioService:
     */
   extension (self: ScenarioService)
     def cascadeDeleteScenarios(wsId: WorkspaceId, parallelism: PositiveInt)(using Checked[Authority]): UIO[Unit] =
-      def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[AppError, Unit] =
+      def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[AppError | Failure, Unit] =
         self.delete(wsId, s.name, s.head).catchSome { case _: ScenarioHeadStale =>
           self.list(wsId).flatMap { fresh =>
             fresh.find(_.name == s.name) match
@@ -131,12 +131,17 @@ object ScenarioService:
       self.list(wsId)
         .tapError {
           case _: ScenariosNotSupported => ZIO.unit
-          case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.logMessage}")
+          case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${messageOf(e)}")
         }
         .flatMap(scenarios => ZIO.withParallelism(parallelism) {
           ZIO.foreachParDiscard(scenarios)(s =>
             deleteWithFreshHeadRetry(s)
-              .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.logMessage}"))
+              .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${messageOf(e)}"))
               .ignore)
         })
         .ignore
+
+  /** The log text of either failure type. */
+  private def messageOf(error: AppError | Failure): String = error match
+    case e: AppError => e.logMessage
+    case f: Failure  => f.logMessage

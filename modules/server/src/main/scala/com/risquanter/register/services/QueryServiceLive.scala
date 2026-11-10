@@ -7,7 +7,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
-import com.risquanter.register.domain.errors.{AppError, TreeAbsentAtRevision}
+import com.risquanter.register.domain.errors.{AppError, Failure, TreeAbsentAtRevision}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.common.ValuationBasis
@@ -38,7 +38,7 @@ class QueryServiceLive private (
 ) extends QueryService:
 
   /** Wrap body in an OTel span. */
-  private def traced[A](name: String)(body: IO[AppError, A]): IO[AppError, A] =
+  private def traced[A](name: String)(body: IO[AppError | Failure, A]): IO[AppError | Failure, A] =
     tracing.span(s"QueryService.$name", SpanKind.INTERNAL)(body)
 
   /** Alarm-on-bypass: log node and mitigation names that collided with reserved
@@ -70,7 +70,7 @@ class QueryServiceLive private (
       )
     ).unit
 
-  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): IO[AppError, QueryResponse] =
+  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, QueryResponse] =
     traced("evaluate") {
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)

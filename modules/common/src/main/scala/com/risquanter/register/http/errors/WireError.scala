@@ -119,12 +119,12 @@ object WireError:
     *
     * Every arm binds what it keeps and writes `_` only for what it deliberately
     * gives up, so the full set of drops is readable in one screen. The match is
-    * on the 32 leaf types rather than on the four sub-traits, so
+    * on the leaf types rather than on the sub-traits, so
     * `-Wconf:msg=match may not be exhaustive:error` makes a new error type a
     * compile error here until an arm is written for it.
     */
   def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError =
-    // A short local name, so the 32 arms below stay one line each and their
+    // A short local name, so the arms below stay one line each and their
     // wire cases line up. The trace is not a field of the error: it is read
     // from the active span at the boundary that calls this, which is the only
     // place an effect exists to read it. `scope` arrives the same way and for
@@ -198,17 +198,6 @@ object WireError:
 
       // Capability absent
       case ScenariosNotSupported(_)            => WireError.NotSupported(Capability.Scenarios, t)
-
-      // Dependency did not answer. An unreachable authorization service is one
-      // of these rather than a denial: the request still fails closed, and the
-      // caller is told a service did not answer instead of that their access
-      // was refused. Which dependency it was stays internal (ADR-035 §2), so
-      // this answer is the same one any other outage produces.
-      case IrminUnavailable(_)                 => WireError.DependencyUnavailable(t)
-      case AuthServiceUnavailable(_, _)        => WireError.DependencyUnavailable(t)
-      case NetworkTimeout(_, _)                => WireError.DependencyUnavailable(t)
-      case IrminHttpError(_, _)                => WireError.DependencyUnavailable(t)
-      case IrminGraphQLError(_, _)             => WireError.DependencyUnavailable(t)
 
       // Faults. The three compare-and-set outcomes are translated into domain
       // errors by the scenario service before they reach here; these arms are the

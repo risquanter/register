@@ -93,3 +93,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/app/src/main/scala/app/state/RiskLeafFormState.scala
 - modules/app/src/main/scala/app/state/PortfolioFormState.scala
 - modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala

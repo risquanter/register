@@ -14,8 +14,8 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, Content
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
-  AppError, ErrorLocation, FieldName, FieldProblem, RepositoryFailure, TreeLoadFailure,
-  ValidationError, ValidationErrorCode, ValidationFailed
+  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, RepositoryFailure, TreeLoadFailure,
+  TrustZone, ValidationError, ValidationErrorCode, ValidationFailed
 }
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.*
@@ -30,11 +30,19 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   // TestChecked provides the Checked[Authority] proof required by protected service methods.
   private given Checked[Authority] = TestChecked.value
 
-  // Concise service accessor pattern. The error type is `AppError` because that
-  // is what the service declares; widening it to `Throwable` here would hide
-  // which failures a call can produce.
-  private def service[A](f: RiskTreeService => IO[AppError, A]): ZIO[RiskTreeService, AppError, A] =
+  // Concise service accessor pattern. The error type is `AppError | Failure`
+  // because that is what the service declares; widening it to `Throwable` here
+  // would hide which failures a call can produce.
+  private def service[A](f: RiskTreeService => IO[AppError | Failure, A]): ZIO[RiskTreeService, AppError | Failure, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
+
+  /** The refusals of a `Rejected` from the client, as the validation errors
+    * they were built from, or `None` for any other failure. */
+  private def clientRefusals(error: AppError | Failure): Option[List[ValidationError]] =
+    error match
+      case Failure.Rejected(Core(TrustZone.Client, errors, _)) =>
+        Some(errors.toList.map((location, problem) => ValidationError(location, problem)))
+      case _ => None
 
   // Stub repository factory - creates fresh instance per test.
   // Keyed by (WorkspaceId, BranchRef, TreeId): writes land on the branch they
@@ -175,7 +183,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   /** Attach mitigations to an already-stored tree. No request can do this — the
     * request DTOs carry no mitigation field — so writing through the repository
     * is the only way to reach the state an update has to preserve. */
-  private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): IO[AppError, RiskTree] =
+  private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): IO[AppError | Failure, RiskTree] =
     repo.update(
       stubWsId,
       tree.id,
@@ -304,7 +312,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       case ErrorLocation.Field(_, actual) => actual == field
       case _                              => false
 
-  private def isDuplicateName(exit: Exit[AppError, Any]): Boolean =
+  private def isDuplicateName(exit: Exit[AppError | Failure, Any]): Boolean =
     exit match
       case Exit.Failure(cause) =>
         cause.failureOption.exists {
@@ -381,10 +389,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val invalidRequest = validRequest.copy(name = "")
         val program = service(_.create(stubWsId, invalidRequest, BranchRef.Main)).flip
 
-        program.assert {
-          case ValidationFailed(errors) => errors.exists(mentions(FieldName.Name))
-          case _                        => false
-        }
+        program.assert(clientRefusals(_).exists(_.exists(mentions(FieldName.Name))))
       },
 
       test("create fails with invalid probability") {
@@ -393,10 +398,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         )
         val program = service(_.create(stubWsId, invalidRequest, BranchRef.Main)).flip
 
-        program.assert {
-          case ValidationFailed(errors) => errors.exists(mentions(FieldName.Probability))
-          case _ => false
-        }
+        program.assert(clientRefusals(_).exists(_.exists(mentions(FieldName.Probability))))
       },
 
       test("getById returns risk tree when exists, and reports the repository's commit unchanged") {
@@ -667,14 +669,10 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         } yield exit
         program.assert {
           case Exit.Failure(cause) =>
-            cause.failureOption.exists {
-              case ValidationFailed(errors) =>
-                errors.exists(e =>
-                  e.problem match
-                    case FieldProblem.SeedVarIdInUse(_, _) => true
-                    case _                                 => false)
-              case _ => false
-            }
+            cause.failureOption.flatMap(clientRefusals).exists(_.exists(e =>
+              e.problem match
+                case FieldProblem.SeedVarIdInUse(_, _) => true
+                case _                                 => false))
           case Exit.Success(_) => false
         }
       },
@@ -698,10 +696,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         program.assert { case (created, exit, after) =>
           val refused = exit match
             case Exit.Failure(cause) =>
-              cause.failureOption.exists {
-                case ValidationFailed(errors) => errors.exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE)
-                case _                        => false
-              }
+              cause.failureOption.flatMap(clientRefusals)
+                .exists(_.exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE))
             case Exit.Success(_) => false
           refused && after.map(_._1).contains(created)
         }

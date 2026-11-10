@@ -5,7 +5,7 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.UserContextExtractor
-import com.risquanter.register.domain.errors.ErrorSubject
+import com.risquanter.register.domain.errors.{ErrorSubject, TrustZone}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.http.endpoints.DistributionPreviewEndpoints
 import com.risquanter.register.services.DistributionPreviewService
@@ -47,7 +47,7 @@ class DistributionPreviewController private (
       case (maybeUserId, req) =>
         (for
           _      <- userCtx.extract(maybeUserId)
-          result <- req.toShape(ErrorSubject.Request).toZIOValidation
+          result <- req.toShape(ErrorSubject.Request).toZIOValidation(TrustZone.Client)
                       .flatMap(previewService.preview)
         yield result).wireEither(TreeScope.NoTree)
     }

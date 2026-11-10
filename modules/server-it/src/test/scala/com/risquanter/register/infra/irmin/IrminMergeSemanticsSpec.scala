@@ -3,7 +3,7 @@ package com.risquanter.register.infra.irmin
 import zio.*
 import zio.test.*
 import com.risquanter.register.infra.irmin.model.{IrminCommit, IrminPath}
-import com.risquanter.register.domain.errors.{IrminError, IrminMergeConflict}
+import com.risquanter.register.domain.errors.{Failure, IrminError, IrminMergeConflict}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, WorkspaceId}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.testcontainers.IrminCompose
@@ -53,7 +53,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
   /** Write an initial value on main, fork a fresh branch at that commit.
     * Returns the branch and the fork-point commit (the merge base).
     */
-  private def forkAt(path: IrminPath, baseValue: String): ZIO[IrminClient, IrminError, (BranchRef, CommitHash)] =
+  private def forkAt(path: IrminPath, baseValue: String): ZIO[IrminClient, IrminError | Failure, (BranchRef, CommitHash)] =
     for
       branch   <- freshBranch
       baseHead <- IrminClient.set(path, baseValue, msg("base write"))
@@ -63,7 +63,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
 
   /** Edit `path` on a fresh fork of main and merge that edit back while main
     * has not moved, returning the edit's commit and the merge's result. */
-  private def fastForward(label: String): ZIO[IrminClient, IrminError, (IrminCommit, IrminCommit)] =
+  private def fastForward(label: String): ZIO[IrminClient, IrminError | Failure, (IrminCommit, IrminCommit)] =
     for
       path        <- uniquePath(label)
       (branch, _) <- forkAt(path, "\"v0\"")
@@ -96,8 +96,8 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
       // (containers/builders/patches/): upstream's `merge_with_commit`
       // resolver reports a conflict as an unprefixed GraphQL error; the
       // patched image prefixes it with "merge conflict: ", which
-      // IrminClientLive raises as IrminMergeConflict. This test failing with
-      // IrminGraphQLError means the running image is unpatched or the patch
+      // IrminClientLive raises as IrminMergeConflict. This test failing with an
+      // `Unanswered` at the store means the running image is unpatched or the patch
       // no longer applies — do not weaken it; rebuild the image
       // (VERSION-UPGRADE-PROTOCOL, opam section).
       for

@@ -13,7 +13,7 @@ import com.risquanter.register.domain.data.{
   AbsoluteReplacement
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, SafeName, TreeId, NodeId, MitigationId}
-import com.risquanter.register.domain.errors.{AppError, FieldName, MergeConflict, RepositoryFailure, ValidationFailed}
+import com.risquanter.register.domain.errors.{AppError, Failure, FieldName, MergeConflict, RepositoryFailure, ValidationFailed}
 import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -162,7 +162,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
   private def writeMit(wsId: WorkspaceId, mit: MitigationId, label: String, likelihood: Double, branch: BranchRef = BranchRef.Main) =
     IrminClient.set(mitPath(wsId, mit), mitigation(mit, label, likelihood).toJson, blobMessage(wsId), branch)
 
-  private def mainHeadHash: ZIO[IrminClient, AppError, String] =
+  private def mainHeadHash: ZIO[IrminClient, AppError | Failure, String] =
     IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
       .someOrFail(RepositoryFailure("main has no head"))
 

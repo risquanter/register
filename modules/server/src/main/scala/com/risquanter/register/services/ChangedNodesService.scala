@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, NodeId, ContentHash, Revision}
-import com.risquanter.register.domain.errors.AppError
+import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.http.responses.{ChangedNodesStatus, NodeChangeEntry, NodeChangeStatus}
 import com.risquanter.register.services.cache.ContentHashIndex
 
@@ -45,7 +45,7 @@ trait ChangedNodesService:
     treeId: TreeId,
     a:      Revision,
     b:      Revision
-  )(using Checked[Authority]): IO[AppError, ChangedNodesStatus]
+  )(using Checked[Authority]): IO[AppError | Failure, ChangedNodesStatus]
 
 final case class ChangedNodesServiceLive(riskTreeService: RiskTreeService) extends ChangedNodesService:
 
@@ -54,7 +54,7 @@ final case class ChangedNodesServiceLive(riskTreeService: RiskTreeService) exten
     treeId: TreeId,
     a:      Revision,
     b:      Revision
-  )(using Checked[Authority]): IO[AppError, ChangedNodesStatus] =
+  )(using Checked[Authority]): IO[AppError | Failure, ChangedNodesStatus] =
     // The two sides' trees are independent fetches (no shared state) — zipPar
     // avoids paying getById's Irmin round-trip cost twice, sequentially.
     riskTreeService.getById(wsId, treeId, a)

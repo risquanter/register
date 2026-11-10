@@ -9,7 +9,7 @@ import sttp.monad.MonadError
 import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl, UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthServiceUnavailable, ErrorLocation}
+import com.risquanter.register.domain.errors.{AuthError, Core, ErrorLocation, Failure, OutageMode, PeerZone}
 
 /** Unit tests for the BootstrapProvisionerSpiceDB WriteRelationships adapter.
   *
@@ -17,8 +17,7 @@ import com.risquanter.register.domain.errors.{AuthServiceUnavailable, ErrorLocat
   * responses in isolation — tests request construction and response-mapping
   * logic only. Mirrors the AuthorizationServiceSpiceDBSpec conventions.
   *
-  * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md §D — BootstrapProvisioner design
-  * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md §T-S10 — server-it read-back counterpart
+  * @see ADR-024 §7 — resource lifecycle writes
   */
 object BootstrapProvisionerSpiceDBSpec extends ZIOSpecDefault:
 
@@ -72,6 +71,13 @@ object BootstrapProvisionerSpiceDBSpec extends ZIOSpecDefault:
       }
       .thenRespond(Response("""{"writtenAt":{"token":"test-zed-token"}}""", StatusCode.Ok))
 
+  /** Whether the write failed as SpiceDB not answering, in the given way. */
+  private def failsAsOutage(outcome: Either[AuthError | Failure, Unit], mode: OutageMode): TestResult =
+    assertTrue(outcome.left.toOption.exists {
+      case Failure.Unanswered(Core(PeerZone.Authorization, errors, _)) => errors.head._2 == mode
+      case _                                                          => false
+    })
+
   private def provisionerLayer(stub: SttpBackend[Task, Any]): ZLayer[Any, Nothing, BootstrapProvisioner] =
     ZLayer.make[BootstrapProvisioner](
       BootstrapProvisionerSpiceDB.layer,
@@ -89,31 +95,22 @@ object BootstrapProvisionerSpiceDBSpec extends ZIOSpecDefault:
       ).map(_ => assertCompletes)
     }.provide(provisionerLayer(matchingStub)),
 
-    test("HTTP 4xx (bad token / schema mismatch) maps to AuthServiceUnavailable (fail-closed)") {
+    test("HTTP 4xx (bad token / schema mismatch) is an outage with that status (fail-closed)") {
       ZIO.serviceWithZIO[BootstrapProvisioner](
         _.recordOwnership(alice, ws1)
-      ).either.map {
-        case Left(_: AuthServiceUnavailable) => assertCompletes
-        case other                           => assertTrue(false)
-      }
+      ).either.map(failsAsOutage(_, OutageMode.Status(StatusCode.Unauthorized)))
     }.provide(provisionerLayer(stubWith("""{"code":16,"message":"UNAUTHENTICATED"}""", code = 401))),
 
-    test("HTTP 5xx maps to AuthServiceUnavailable (fail-closed)") {
+    test("HTTP 5xx is an outage with that status (fail-closed)") {
       ZIO.serviceWithZIO[BootstrapProvisioner](
         _.recordOwnership(alice, ws1)
-      ).either.map {
-        case Left(_: AuthServiceUnavailable) => assertCompletes
-        case other                           => assertTrue(false)
-      }
+      ).either.map(failsAsOutage(_, OutageMode.Status(StatusCode.BadGateway)))
     }.provide(provisionerLayer(stubWith("""upstream connect error""", code = 502))),
 
-    test("network failure maps to AuthServiceUnavailable (fail-closed)") {
+    test("network failure is a refused connection (fail-closed)") {
       ZIO.serviceWithZIO[BootstrapProvisioner](
         _.recordOwnership(alice, ws1)
-      ).either.map {
-        case Left(_: AuthServiceUnavailable) => assertCompletes
-        case other                           => assertTrue(false)
-      }
+      ).either.map(failsAsOutage(_, OutageMode.ConnectionRefused))
     }.provide(provisionerLayer(stubFailing(new RuntimeException("connection refused")))),
 
     test("bootstrapToken and systemMaintenanceToken make no SpiceDB call") {
