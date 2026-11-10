@@ -1,13 +1,17 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 import zio.test.Assertion.*
 
 import java.time.Instant
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
-import com.risquanter.register.domain.errors.{DataConflict, ErrorLocation, Failure, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed}
+import com.risquanter.register.domain.errors.{
+  Core, Diagnostic, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, TrustZone, ValidationFailed
+}
+import com.risquanter.register.http.errors.ConflictKind
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath, IrminWriteOutcome}
@@ -15,7 +19,7 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
 
 /** Unit tests for `ScenarioServiceLive` against an in-memory `IrminClient` fake —
   * no Docker/live Irmin required. Covers create/list/delete happy paths, both
-  * refused compare-and-set outcomes (DataConflict, ScenarioHeadStale), the ForkOf-not-found
+  * refused compare-and-set outcomes as the caller's `Conflict`, the ForkOf-not-found
   * and empty-main paths, and that `list` excludes both `main` and other workspaces.
   */
 object ScenarioServiceLiveSpec extends ZIOSpecDefault:
@@ -96,6 +100,17 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
   private def makeService(initial: Map[String, CommitHash] = Map.empty): UIO[ScenarioService] =
     Ref.make(initial).map(state => new ScenarioServiceLive(FakeIrminClient(state)))
 
+  /** The conflict a refused compare-and-set answers the caller with. */
+  private def conflict(location: ErrorLocation, kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(location -> kind), diagnostics))
+
+  /** The stale-head conflict a delete expecting `expected` answers when the head is `actual`. */
+  private def staleHead(scenario: String, expected: CommitHash, actual: Option[CommitHash]): Failure =
+    conflict(
+      ErrorLocation.Header(RequestHeaderName.IfMatch),
+      ConflictKind.ScenarioHeadStale(name(scenario)),
+      List(Diagnostic.ExpectedHead(expected), Diagnostic.ActualHead(actual)))
+
   override def spec: Spec[TestEnvironment & Scope, Any] =
     suite("ScenarioServiceLive")(
       test("create from main forks main's current head") {
@@ -138,13 +153,14 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         yield assert(exit)(fails(isSubtype[ValidationFailed](anything)))
       },
 
-      test("create fails with DataConflict on a name collision") {
+      test("create fails with the caller's Conflict at the name on a name collision") {
         val wsId = ws("ws-collide")
         val existingBranch = s"scenarios.${wsId.value.toLowerCase}.draft-v1"
         for
           svc  <- makeService(Map("main" -> hash('a'), existingBranch -> hash('a')))
           exit <- svc.create(wsId, name("draft-v1"), ScenarioSource.Main).exit
-        yield assert(exit)(fails(isSubtype[DataConflict](anything)))
+        yield assertTrue(exit.causeOption.flatMap(_.failureOption) ==
+          Some(conflict(ErrorLocation.requestField(FieldName.Name), ConflictKind.Rejected(), Nil)))
       },
 
       test("list excludes main and other workspaces' scenarios") {
@@ -178,29 +194,23 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         yield assertTrue(fetched.isEmpty)
       },
 
-      test("delete fails with ScenarioHeadStale(actual = Some) when the head moved") {
+      test("delete fails with the stale-head Conflict carrying both heads when the head moved") {
         val wsId = ws("ws-stale")
         val branch = s"scenarios.${wsId.value.toLowerCase}.draft-v1"
         for
           svc  <- makeService(Map("main" -> hash('a'), branch -> hash('c')))
           exit <- svc.delete(wsId, name("draft-v1"), hash('b')).exit
-        yield assert(exit)(fails(isSubtype[ScenarioHeadStale](anything))) &&
-          assertTrue(exit.causeOption.flatMap(_.failureOption) match
-            case Some(ScenarioHeadStale(_, expected, actual)) => expected == hash('b') && actual == Some(hash('c'))
-            case _                                             => false
-          )
+        yield assertTrue(exit.causeOption.flatMap(_.failureOption) ==
+          Some(staleHead("draft-v1", hash('b'), Some(hash('c')))))
       },
 
-      test("delete fails with ScenarioHeadStale(actual = None) when the scenario no longer exists") {
+      test("delete fails with the stale-head Conflict and no actual head when the scenario no longer exists") {
         val wsId = ws("ws-gone")
         for
           svc  <- makeService(Map("main" -> hash('a')))
           exit <- svc.delete(wsId, name("draft-v1"), hash('b')).exit
-        yield assert(exit)(fails(isSubtype[ScenarioHeadStale](anything))) &&
-          assertTrue(exit.causeOption.flatMap(_.failureOption) match
-            case Some(ScenarioHeadStale(_, _, actual)) => actual == None
-            case _                                      => false
-          )
+        yield assertTrue(exit.causeOption.flatMap(_.failureOption) ==
+          Some(staleHead("draft-v1", hash('b'), None)))
       },
 
       test("create AtCommit forks a commit reachable from main") {

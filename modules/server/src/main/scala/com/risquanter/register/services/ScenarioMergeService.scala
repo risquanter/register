@@ -10,10 +10,9 @@ import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, Risk
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, PositiveInt, Revision, SafeId, SafeName, TreeId, ValidationUtil}
 import com.risquanter.register.domain.errors.{
   AppError, Core, Diagnostic, Failure, ErrorLocation, ErrorSubject, FieldName, FieldProblem,
-  MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, PeerZone, TrustZone,
-  ValidationFailed, ValidationError
+  MergeConflict, MergeRefusal, PeerZone, TrustZone, ValidationFailed, ValidationError
 }
-import com.risquanter.register.http.errors.NotFoundKind
+import com.risquanter.register.http.errors.{ConflictKind, NotFoundKind}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -266,7 +265,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       head    <- ZIO.acquireReleaseWith(
                    irmin.createBranchAt(staging, mainBefore).flatMap {
                      case IrminWriteOutcome.Applied    => ZIO.unit
-                     case IrminWriteOutcome.Refused(_) => ZIO.fail(MergeAlreadyRunning(name))
+                     case IrminWriteOutcome.Refused(_) => ZIO.fail(scenarioConflict(ConflictKind.MergeAlreadyRunning(name)))
                    }
                  )(_ =>
                    // Best effort: the staging branch is unreachable once main
@@ -292,7 +291,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                      _      <- guardStagedState(wsId, name, staged)
                      _      <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged).flatMap {
                                  case IrminWriteOutcome.Applied    => ZIO.unit
-                                 case IrminWriteOutcome.Refused(_) => ZIO.fail(MergeTargetMoved(name))
+                                 case IrminWriteOutcome.Refused(_) => ZIO.fail(scenarioConflict(ConflictKind.MergeTargetMoved(name)))
                                }
                    yield staged
                  }
@@ -483,6 +482,11 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   /** Content the store returned that this service refuses (ADR-039). */
   private def storeRefusal(errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =
     Failure.rejected(TrustZone.Peer(PeerZone.Store), errors, diagnostics)
+
+  /** A refused write on the scenario's merge as the caller's conflict, located at
+    * the scenario the request names. */
+  private def scenarioConflict(kind: ConflictKind): Failure =
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(ErrorLocation.requestField(FieldName.Scenario) -> kind), Nil))
 
   /** Fetch, for every candidate path, the contents at main's head and at the
     * scenario's head as the scan observed them, and at the merge base. Every

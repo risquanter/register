@@ -15,10 +15,9 @@ import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, Bran
 import com.risquanter.register.repositories.model.TreeMetadata
 import com.risquanter.register.domain.errors.{
   AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem,
-  MergeAlreadyRunning, MergeConflict, MergeTargetMoved, OutageMode, PeerZone,
-  TrustZone, ValueFormat
+  MergeConflict, OutageMode, PeerZone, TrustZone, ValueFormat
 }
-import com.risquanter.register.http.errors.NotFoundKind
+import com.risquanter.register.http.errors.{ConflictKind, NotFoundKind}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -61,6 +60,10 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
 
   /** A compare-and-set Irmin applied. */
   private val applied: UIO[IrminWriteOutcome] = ZIO.succeed(IrminWriteOutcome.Applied)
+
+  /** The caller's conflict a refused write on a scenario's merge answers. */
+  private def scenarioConflict(kind: ConflictKind): Failure =
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(ErrorLocation.requestField(FieldName.Scenario) -> kind), Nil))
 
   // ── stored blobs ─────────────────────────────────────────────────────────
   // A node is stored as its concrete type's own JSON (RiskTreeRepositoryIrmin
@@ -653,7 +656,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             calls.isEmpty
           )
         },
-        test("a commit landing on main during the merge fails MergeTargetMoved and publishes nothing") {
+        test("a commit landing on main during the merge fails with the MergeTargetMoved conflict and publishes nothing") {
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
@@ -665,16 +668,15 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                       )
             exit   <- svc.merge(ws("ws-publish-stale"), name("draft-v1")).exit
             calls  <- resets.get
-          yield
-            val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeTargetMoved => m }
-            assertTrue(
-              failure.exists(_.scenario.value == "draft-v1"),
-              // the publish was attempted against the head the scan compared
-              // against, and refused
-              calls == List((hash('a'), hash('c')))
-            )
+          yield assertTrue(
+            exit.causeOption.flatMap(_.failureOption) ==
+              Some(scenarioConflict(ConflictKind.MergeTargetMoved(name("draft-v1")))),
+            // the publish was attempted against the head the scan compared
+            // against, and refused
+            calls == List((hash('a'), hash('c')))
+          )
         },
-        test("a save on main after the scan makes the publish check against the scanned head, so it fails MergeTargetMoved") {
+        test("a save on main after the scan makes the publish check against the scanned head, so it fails with the MergeTargetMoved conflict") {
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
@@ -687,16 +689,15 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                       )
             exit   <- svc.merge(ws("ws-main-moved"), name("draft-v1")).exit
             calls  <- resets.get
-          yield
-            val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeTargetMoved => m }
-            assertTrue(
-              failure.exists(_.scenario.value == "draft-v1"),
-              // main reads as 'd' after the scan, and the publish still expects
-              // 'a', the head the scan compared against
-              calls == List((hash('a'), hash('c')))
-            )
+          yield assertTrue(
+            exit.causeOption.flatMap(_.failureOption) ==
+              Some(scenarioConflict(ConflictKind.MergeTargetMoved(name("draft-v1")))),
+            // main reads as 'd' after the scan, and the publish still expects
+            // 'a', the head the scan compared against
+            calls == List((hash('a'), hash('c')))
+          )
         },
-        test("a merge already running on the same scenario fails MergeAlreadyRunning") {
+        test("a merge already running on the same scenario fails with the MergeAlreadyRunning conflict") {
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
@@ -708,12 +709,11 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                       )
             exit   <- svc.merge(ws("ws-merge-busy"), name("draft-v1")).exit
             calls  <- resets.get
-          yield
-            val failure = exit.causeOption.flatMap(_.failureOption).collect { case m: MergeAlreadyRunning => m }
-            assertTrue(
-              failure.exists(_.scenario.value == "draft-v1"),
-              calls.isEmpty
-            )
+          yield assertTrue(
+            exit.causeOption.flatMap(_.failureOption) ==
+              Some(scenarioConflict(ConflictKind.MergeAlreadyRunning(name("draft-v1")))),
+            calls.isEmpty
+          )
         },
         test("the staging branch is created before the merge and removed after it, on both outcomes") {
           def run(repoResult: Either[Failure, List[RiskTree]]) =

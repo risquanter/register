@@ -4,7 +4,7 @@ import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, NodeId, Probability, ScenarioName, SeedEntityId, TreeId, WorkspaceId, Revision}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskTree}
-import com.risquanter.register.domain.errors.{AppError, TreeAbsentAtRevision}
+import com.risquanter.register.domain.errors.{AppError, Failure, TreeAbsentAtRevision}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 
 /** Minimal `RiskTreeService`/`ScenarioService` test doubles shared by every spec
@@ -50,8 +50,8 @@ object CascadeTestStubs:
 
   def scenarioService(
     onList: WorkspaceId => IO[AppError, List[ScenarioSummary]],
-    onDelete: (WorkspaceId, ScenarioName.ScenarioName, CommitHash) => IO[AppError, Unit]
+    onDelete: (WorkspaceId, ScenarioName.ScenarioName, CommitHash) => IO[AppError | Failure, Unit]
   ): ScenarioService = new ScenarioService:
     def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)(using Checked[Authority]): IO[AppError, BranchRef] = ZIO.die(new UnsupportedOperationException)
     def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError, List[ScenarioSummary]] = onList(wsId)
-    def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)(using Checked[Authority]): IO[AppError, Unit] = onDelete(wsId, name, expectedHead)
+    def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)(using Checked[Authority]): IO[AppError | Failure, Unit] = onDelete(wsId, name, expectedHead)

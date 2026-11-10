@@ -34,8 +34,8 @@ import java.time.Instant
   * against a fake `IrminClient` — this spec exercises what's new at the HTTP
   * boundary instead: the `ScenarioName`/`CommitHash` Tapir codecs added for
   * this item, the `If-Match` CAS transport (RFC 7232 quoting), request/
-  * response JSON shapes, and that `ScenarioHeadStale`/`DataConflict` surface
-  * with the right status codes through `ErrorResponse`.
+  * response JSON shapes, and that a stale head and a name collision answer
+  * 409 through the wire boundary.
   */
 object ScenarioControllerSpec extends ZIOSpecDefault:
 

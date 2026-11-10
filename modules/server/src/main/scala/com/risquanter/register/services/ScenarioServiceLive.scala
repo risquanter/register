@@ -1,9 +1,14 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.NonEmptyList
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash, MergeStagingRef, StoreBranch}
-import com.risquanter.register.domain.errors.{AppError, Failure, DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{
+  AppError, Core, Diagnostic, Failure, ErrorLocation, FieldName, FieldProblem, RequestHeaderName, TrustZone,
+  ValidationFailed, ValidationError
+}
+import com.risquanter.register.http.errors.ConflictKind
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminWriteOutcome}
 
@@ -15,9 +20,9 @@ import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminWriteOutcome
   * a failure there is an invariant violation (`ZIO.die`), not a domain error.
   *
   * A refused compare-and-set is an outcome `IrminClient` returns, and this
-  * service decides what it means: a refused create is a name collision,
-  * `DataConflict`, and a refused delete is a moved head, `ScenarioHeadStale`.
-  * The match on the outcome is exhaustive, so a refusal cannot go untranslated.
+  * service decides what it means: a refused create is a name collision, and a
+  * refused delete is a moved head. Both are the caller's `Conflict`. The match
+  * on the outcome is exhaustive, so a refusal cannot go untranslated.
   */
 final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
@@ -29,7 +34,8 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
       outcome    <- irmin.createBranchAt(branch, sourceHead)
       _          <- outcome match
                       case IrminWriteOutcome.Applied    => ZIO.unit
-                      case IrminWriteOutcome.Refused(_) => ZIO.fail(DataConflict(s"Scenario '${name.value}' already exists"))
+                      case IrminWriteOutcome.Refused(_) =>
+                        ZIO.fail(callerConflict(ErrorLocation.requestField(FieldName.Name), ConflictKind.Rejected(), Nil))
     yield branch
 
   override def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError | Failure, List[ScenarioSummary]] =
@@ -46,8 +52,16 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
       outcome <- irmin.deleteBranch(branch, expectedHead)
       _       <- outcome match
                    case IrminWriteOutcome.Applied       => ZIO.unit
-                   case IrminWriteOutcome.Refused(head) => ZIO.fail(ScenarioHeadStale(name, expectedHead, head))
+                   case IrminWriteOutcome.Refused(head) =>
+                     ZIO.fail(callerConflict(
+                       ErrorLocation.Header(RequestHeaderName.IfMatch),
+                       ConflictKind.ScenarioHeadStale(name),
+                       List(Diagnostic.ExpectedHead(expectedHead), Diagnostic.ActualHead(head))))
     yield ()
+
+  /** A refused compare-and-set as the caller's conflict. */
+  private def callerConflict(location: ErrorLocation, kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(location -> kind), diagnostics))
 
   // ── source resolution ────────────────────────────────────────────────────
 

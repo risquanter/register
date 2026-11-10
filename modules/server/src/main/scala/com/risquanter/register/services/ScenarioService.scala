@@ -3,7 +3,8 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt}
-import com.risquanter.register.domain.errors.{AppError, Failure, ScenariosNotSupported, ScenarioHeadStale}
+import com.risquanter.register.domain.errors.{AppError, Core, Failure, ScenariosNotSupported}
+import com.risquanter.register.http.errors.ConflictKind
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
 /** What a new scenario forks from. A create always
@@ -56,7 +57,7 @@ trait ScenarioService:
     * @param source What to fork from — main, an existing scenario, or a
     *               specific commit (fork-from-history). Required; no default.
     * @return The new scenario's branch reference
-    * @see DataConflict — the name is taken. The compare-and-set on
+    * @see Failure.Conflict with `ConflictKind.Rejected` — the name is taken. The compare-and-set on
     *      `createBranchAt` guards the new branch's name, never the source's
     *      staleness: forking is by commit hash, so it is immune to the source
     *      changing mid-fork.
@@ -76,7 +77,8 @@ trait ScenarioService:
     *                     required, not resolved internally, so the
     *                     compare-and-set guards the caller's whole
     *                     interaction, not just this call
-    * @see ScenarioHeadStale — the head is no longer `expectedHead` (concurrent modification)
+    * @see Failure.Conflict with `ConflictKind.ScenarioHeadStale` — the head is no longer
+    *      `expectedHead` (concurrent modification)
     */
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
     (using Checked[Authority]): IO[AppError | Failure, Unit]
@@ -98,7 +100,7 @@ object ScenarioService:
     * `list` call), swallowing individual failures (a stale head race, or a
     * backend that doesn't support scenarios at all).
     *
-    * A `ScenarioHeadStale` failure (the branch moved between `list` and this
+    * A stale-head conflict (the branch moved between `list` and this
     * `delete` — e.g. a write still in flight when workspace teardown started)
     * is retried exactly once against a freshly re-resolved head, rather than
     * being swallowed immediately: cascade-delete exists specifically to avoid
@@ -120,7 +122,7 @@ object ScenarioService:
   extension (self: ScenarioService)
     def cascadeDeleteScenarios(wsId: WorkspaceId, parallelism: PositiveInt)(using Checked[Authority]): UIO[Unit] =
       def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[AppError | Failure, Unit] =
-        self.delete(wsId, s.name, s.head).catchSome { case _: ScenarioHeadStale =>
+        self.delete(wsId, s.name, s.head).catchSome { case StaleHead() =>
           self.list(wsId).flatMap { fresh =>
             fresh.find(_.name == s.name) match
               case Some(refreshed) => self.delete(wsId, refreshed.name, refreshed.head)
@@ -139,6 +141,16 @@ object ScenarioService:
               .ignore)
         })
         .ignore
+
+  /** Matches the conflict a delete answers when the scenario's head moved. */
+  private object StaleHead:
+    def unapply(error: AppError | Failure): Boolean = error match
+      case Failure.Conflict(Core(_, errors, _)) =>
+        errors.exists {
+          case (_, ConflictKind.ScenarioHeadStale(_)) => true
+          case _                                      => false
+        }
+      case _ => false
 
   /** The log text of either failure type. */
   private def messageOf(error: AppError | Failure): String = error match

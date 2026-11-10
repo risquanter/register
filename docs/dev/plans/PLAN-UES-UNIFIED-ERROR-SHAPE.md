@@ -10,7 +10,7 @@ Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
 version 0.18.6, step 2.3 at version 0.18.7, and step 2.4 at version 0.18.8.
 BATS suite A passed at version 0.18.8, which closes Phase 2. Phase 3 step 3.1
 landed at version 0.18.9, with `IrminWriteOutcome.Refused` carrying an optional
-head (§3.5). The
+head (§3.5). Step 3.2 landed at version 0.18.10. The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -1276,8 +1276,10 @@ names the two failures as `Unanswered` and `Rejected`, amended 2026-11-10.
 `docs/user/TERMINOLOGY.md` §8.1 defines a trust boundary as "the line a value
 may not cross without being checked". No entry is made stale. One entry is
 missing: the plan's shape carries the side of a boundary a value came from, and
-the glossary has no term for it. The note, for approval before the glossary is
-edited:
+the glossary has no term for it. The user approved the note on 2026-11-10 and
+asked for the zones to be listed with it; §8.1 now carries the paragraph, the
+list of zones and peers as `TrustZone` and `PeerZone` declare them, and the
+rule for refused content by zone. The note as approved:
 
 ```
 TERMINOLOGY NOTE — approval needed before the glossary is edited

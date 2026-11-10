@@ -188,12 +188,8 @@ object WireError:
       case AuthForbidden(_, _, _, _)           => WireError.AccessDenied(t)
 
       // Conflicts
-      case DataConflict(_)                     => WireError.Conflict(ConflictKind.Rejected(), t)
       case VersionConflict(_, _, _)            => WireError.Conflict(ConflictKind.StaleVersion(), t)
       case MergeConflict(scenario, refusal)    => WireError.Conflict(ConflictKind.MergeRefused(scenario, refusal), t)
-      case MergeAlreadyRunning(scenario)       => WireError.Conflict(ConflictKind.MergeAlreadyRunning(scenario), t)
-      case MergeTargetMoved(scenario)          => WireError.Conflict(ConflictKind.MergeTargetMoved(scenario), t)
-      case ScenarioHeadStale(scenario, _, _)   => WireError.Conflict(ConflictKind.ScenarioHeadStale(scenario), t)
       case SimulationNotCached(treeId)         => WireError.Conflict(ConflictKind.SimulationRequired(treeId), t)
 
       // Capability absent

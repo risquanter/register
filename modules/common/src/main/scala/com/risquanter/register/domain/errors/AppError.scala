@@ -97,11 +97,6 @@ case class SimulationFailure(simulationId: String, cause: Throwable) extends Dom
   override def origin: FailureOrigin = FailureOrigin.Service
 }
 
-/** Data conflict (e.g., duplicate key) */
-case class DataConflict(reason: String) extends DomainError:
-  override def logMessage: String = reason
-  override def origin: FailureOrigin = FailureOrigin.Caller
-
 /** Authorization failure for disabled/forbidden operations */
 case class AccessDenied(reason: String) extends DomainError:
   override def logMessage: String = reason
@@ -240,48 +235,6 @@ case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitH
 case class MergeConflict(scenario: ScenarioName.ScenarioName, refusal: MergeRefusal) extends DomainError {
   override def logMessage: String =
     s"Merge conflict on scenario ${scenario.value}: ${MergeRefusal.describe(refusal)}"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
-/** A merge of this scenario is already running.
-  *
-  * A merge assembles on a staging branch named from the scenario, so a second
-  * concurrent merge of the same scenario collides on that name and is refused
-  * here rather than running alongside the first. Nothing was written. Retriable
-  * once the first merge finishes.
-  */
-case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends DomainError {
-  override def logMessage: String =
-    s"A merge of scenario ${scenario.value} is already running"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
-/** Main changed while this merge was being assembled, so the merge was not
-  * published.
-  *
-  * The merge is assembled on a staging branch and published to main with one
-  * compare-and-set against the head read before it started. A commit landing on
-  * main in between makes that publish fail, which is what stops the merge from
-  * absorbing the commit and then discarding it. Main is untouched; re-run the
-  * preview and retry.
-  */
-case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends DomainError {
-  override def logMessage: String =
-    s"Main changed while merging scenario ${scenario.value}; re-run the preview and retry"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
-/** Scenario delete/duplicate rejected — the branch's head no longer matches
-  * what the caller last observed (concurrent modification), built from a
-  * refused compare-and-set. Names the scenario for the same reason as
-  * `MergeConflict` (ADR-036): a stale head is always a scenario's, so main is
-  * not a reachable value. `actual` is `None` when the scenario no longer
-  * exists at all.
-  */
-case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash, actual: Option[CommitHash]) extends DomainError {
-  override def logMessage: String =
-    s"Scenario ${scenario.value} head is not ${expected.value}" +
-    actual.fold(" (scenario no longer exists)")(a => s" (currently ${a.value})")
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 
