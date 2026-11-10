@@ -4,8 +4,8 @@ package com.risquanter.register.domain.errors
   *
   * Not a wire type: a `ValidationError` carries a `FieldProblem`, which names
   * the refusal exactly, and `FieldProblem.code` derives one of these from it.
-  * The cases `FieldProblem.code` never produces classify the merge, query,
-  * access and concurrency failures that are not field refusals.
+  * The cases `FieldProblem.code` never produces classify the merge, access
+  * and concurrency failures that are not field refusals.
   */
 enum ValidationErrorCode(val code: String, val description: String):
   case REQUIRED_FIELD extends ValidationErrorCode("REQUIRED_FIELD", "Required field is missing or empty")
