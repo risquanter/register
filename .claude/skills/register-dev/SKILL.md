@@ -668,21 +668,22 @@ labels). It is a mandatory pre-step, not just crash recovery.
 docker build -f containers/dev/Dockerfile.bats-runner \
   -t local/bats-runner:1.11 containers/dev/
 
-# All suites share one invocation — only the .bats file changes.
-run_bats() {
-  docker run --rm --userns=host --network host \
-    --group-add "$(stat -c '%g' /var/run/docker.sock)" \
-    -e HOME=/tmp \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" \
-    -w "$(pwd)" \
-    local/bats-runner:1.11 "$1"
-}
-
-run_bats tests/bats/suite-c-in-memory.bats   # Suite C — in-memory, quickest; run after any code change
-run_bats tests/bats/suite-a-full-prod.bats   # Suite A — E2E with Irmin persistence
-run_bats tests/bats/suite-b-irmin-prod.bats  # Suite B — standalone Irmin image
+# The two application images, one at a time (the reason is in the next section),
+# then each suite as one pasteable line, with the stack cleared before it.
+docker compose build --progress=plain register-server 2>&1 | tee /tmp/register-server-build.log | grep -E "Peak RSS|error|Error"
+docker compose --profile frontend build frontend
+docker compose -p register down -v --remove-orphans 2>/dev/null || true
+docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-c-in-memory.bats
+docker compose -p register down -v --remove-orphans 2>/dev/null || true
+docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-a-full-prod.bats
+docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-b-irmin-prod.bats
 ```
+
+Suite C is the in-memory gate and runs after any code change. Suite A is the
+end-to-end run with Irmin persistence. Suite B exercises the standalone Irmin
+image and is needed only when that image changed. The commands are presented to
+the user as written above, one `docker run` line per suite, never wrapped in a
+shell function.
 
 ### Build the application images before suites A and C, one at a time
 
@@ -703,16 +704,11 @@ mechanism is memory, not CPU:
   `--memory 512m` still saw `memory.max=max` and all 32 CPUs. No host-side flag
   bounds a build, so the only levers are fewer builds at once and more swap.
 
-So build the two images yourself, one after the other, before the suites. The
-suites then build nothing. Run nothing else that compiles while the builds run,
-including sbt in another terminal and the integration tier. The native-image
-step still uses every core; what is given up is only the overlap of the two
-builds.
-
-```bash
-docker compose build --progress=plain register-server 2>&1 | tee /tmp/register-server-build.log | grep -E "Peak RSS|error|Error"
-docker compose --profile frontend build frontend
-```
+So build the two images yourself, one after the other, before the suites, which
+is what the first two lines of the block above do. The suites then build
+nothing. Run nothing else that compiles while the builds run, including sbt in
+another terminal and the integration tier. The native-image step still uses
+every core; what is given up is only the overlap of the two builds.
 
 `--progress=plain` is what makes native-image's `Peak RSS` summary line visible;
 it is the measurement the figures above come from. Swap on the development VM

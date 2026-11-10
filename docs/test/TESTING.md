@@ -382,19 +382,19 @@ because commit history needs the Irmin backend; the demo pairs live in suite C.
 
 ### Prerequisites
 
-1. **Build production images** (from the project root):
+1. **Build production images** (from the project root). The server and frontend
+   images are built one after the other, never together: each build runs a JVM
+   whose default heap is a quarter of the machine, and two at once have frozen
+   the development host. Run nothing else that compiles while they run.
 
 ```bash
-# Server (GraalVM native)
-docker build -f Dockerfile.native -t local/register-server:<version> .
-
-# Frontend (nginx)
-docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:<version> .
+# Server (GraalVM native), then frontend (nginx) — one at a time
+docker compose build --progress=plain register-server 2>&1 | tee /tmp/register-server-build.log | grep -E "Peak RSS|error|Error"
+docker compose --profile frontend build frontend
 
 # Irmin builder + prod (needed for suites A and B)
-docker build -f containers/prod/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11-p2 containers/prod/
+docker build -f containers/builders/Dockerfile.irmin-builder \
+  -t local/irmin-builder:3.11-p2 containers/builders/
 docker build -f containers/prod/Dockerfile.irmin-prod \
   -t local/irmin-prod:3.11-p2 containers/prod/
 ```
@@ -411,22 +411,22 @@ docker build -f containers/dev/Dockerfile.bats-runner \
 
 ### Running the Suites
 
-All suites are invoked the same way — only the `.bats` file changes:
+Each suite is one `docker run` line, and only the `.bats` file changes. Suites A
+and C share the fixed `register` compose project, so the stack is cleared before
+each of them. The clear purges the `register_pg-data` volume and reaps any
+container carrying the register compose labels.
 
 ```bash
-run_bats() {
-  docker run --rm --userns=host --network host \
-    --group-add "$(stat -c '%g' /var/run/docker.sock)" \
-    -e HOME=/tmp \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" \
-    -w "$(pwd)" \
-    local/bats-runner:1.11 "$1"
-}
+# Suite C — quickest, no Irmin dependency (start here)
+docker compose -p register down -v --remove-orphans 2>/dev/null || true
+docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-c-in-memory.bats
 
-run_bats tests/bats/suite-c-in-memory.bats   # Suite C — quickest, no Irmin dependency (start here)
-run_bats tests/bats/suite-a-full-prod.bats   # Suite A — E2E with Irmin persistence (REGISTER_REPOSITORY_TYPE=irmin)
-run_bats tests/bats/suite-b-irmin-prod.bats  # Suite B — standalone Irmin image validation
+# Suite A — E2E with Irmin persistence (REGISTER_REPOSITORY_TYPE=irmin)
+docker compose -p register down -v --remove-orphans 2>/dev/null || true
+docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-a-full-prod.bats
+
+# Suite B — standalone Irmin image validation
+docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-b-irmin-prod.bats
 ```
 
 Why each flag — the runner drives the **host's** Docker daemon from inside a
