@@ -36,15 +36,30 @@ enum WireError:
   case DependencyUnavailable(trace: TraceId)
   case InternalFault(trace: TraceId)
 
-object WireError:
-  def fromAppError(e: AppError, trace: TraceId, scope: TreeScope): WireError = e match
-    case ValidationFailed(errors) => rejected(RejectionDetail.Fields(errors), errors)  // by scope
-    // … one arm per AppError case
+enum Failure:
+  def toWire(trace: TraceId, scope: TreeScope): WireError = Failure.project(this, trace, scope)
+
+  // Failure.project: one arm per variant, and inside it one per zone
+  case Rejected(c) => c.zone match
+    case TrustZone.Client => rejectedOnWire(c.errors, t, scope)   // by scope
+    case TrustZone.Environment | TrustZone.MeshHeader | TrustZone.Peer(_) | TrustZone.Service =>
+      WireError.InternalFault(t)
 ```
 
+The projection is total over `(variant, zone)`. A value from the `Client` zone
+answers its own wire case, and so do an outage, a missing capability and a
+denial the mesh or the authorization service decided. Every other pair is
+content a peer returned or this service's own, and answers `InternalFault`. The
+zone and the diagnostics are dropped on every arm, so neither can reach a client.
+
 The projection is one-way: no case carries an internal type, and nothing decodes
-a `WireError` back into an `AppError`. `-Wconf:msg=match may not be exhaustive:error`
-in `scalacOptions` makes a new `AppError` case without an arm a **compile error**.
+a `WireError` back into a `Failure`. No arm is a wildcard, and
+`-Wconf:msg=match may not be exhaustive:error` in `scalacOptions` makes a new
+variant or a new zone without an arm a **compile error**.
+
+The leaves of the `AppError` sealed trait that have not moved onto `Failure`
+project through `WireError.fromAppError`, which is exhaustive over them under
+the same compiler option.
 
 ### 2. Every Declared Status Is a Declared Case
 
@@ -71,7 +86,7 @@ def wireEither(scope: TreeScope)(using Tracing): ZIO[R, Nothing, Either[WireErro
     .map(Right(_))
     .catchAll(error =>
       ActiveTrace.id.flatMap(trace =>
-        logProjectedFailure(error, trace).as(Left(WireError.fromAppError(error, trace, scope)))
+        logProjectedFailure(error, trace).as(Left(projectOntoWire(error, trace, scope)))
       )
     )
 ```
@@ -88,7 +103,7 @@ rather than merely quiet.
 `getMessage` behind any text. Each error's `logMessage` is logged server-side
 (ADR-002) and never serialised.
 
-- `RepositoryFailure(reason)` — `reason` is an internal diagnostic; the wire case is `InternalFault`, which carries a trace and nothing else
+- A `Rejected` at `Peer(Store)` keeps the refused text as `Diagnostic.RawValue`, which reaches the log only; the wire case is `InternalFault`, which carries a trace and nothing else
 - A credential in any message prints its redacted `toString` (`WorkspaceKeySecret(***)`, ADR-022 R3), never the raw value
 - A client-visible message names only client-safe values
 
@@ -211,7 +226,8 @@ ValuedEndpointOutput(BaseEndpoint.internalFaultOut, WireError.InternalFault(trac
 
 | Location | Pattern |
 |----------|---------|
-| `WireError.fromAppError` | One-way projection, exhaustive over `AppError` |
+| `Failure.toWire` | One-way projection, total over `(variant, zone)` |
+| `WireError.fromAppError` | One-way projection, exhaustive over the remaining `AppError` leaves |
 | `BaseEndpoint` `oneOf` | One declared variant per wire case, each at its own status |
 | `WireEither.wireEither` | The single projection point, and the only reader of the trace for a controller failure |
 | `WireDecodeFailureHandler` | A rejected input answers `RequestRejected` with the status the input decides |
