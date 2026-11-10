@@ -835,6 +835,32 @@ log file, because a log is read by people and tools the service never talks to:
 operators, a log shipper, a dashboard. That difference is what makes the two
 kinds below behave differently.
 
+The region on either side of a boundary is a **trust zone**. A value's zone is
+the side it came from: the client, the deployment's environment, the mesh, a
+peer this service calls, or this service itself. Every failure the service
+records names the zone of the value that failed, and that zone is what decides
+whether the failure is the caller's to fix.
+
+The zones are these:
+
+- **Client** — the caller, through its request's body, path, headers and query.
+- **Environment** — the deployment: its configuration, and the capabilities of
+  the storage it was set up with. A value here is the operator's, not the
+  caller's.
+- **Mesh header** — the service mesh, through the identity claim it forwards
+  in a request header.
+- **Peer** — a service this one calls and reads answers from. There are three:
+  the **store**, which holds trees and their history; the **database**, which
+  holds workspace records; and the **authorization service**, which answers
+  whether a user holds a permission.
+- **Service** — this service's own computation over values already checked.
+
+Take a value refused because its content is wrong. If it came from the client,
+it is the caller's to fix, and the answer says what was refused. If it came from
+any other zone, it is content this service did not expect from a peer, or a
+fault of its own. The caller is then told only that the service failed, and the
+detail goes to the server's log.
+
 ### 8.2 Secret
 
 A **secret** is a value where holding it *is* permission. The workspace key is
