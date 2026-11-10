@@ -1,15 +1,20 @@
 package com.risquanter.register.services.workspace
 
 import java.time.Duration
+import javax.sql.DataSource
 import io.github.iltotore.iron.autoRefine
+import io.getquill.SnakeCase
+import io.getquill.jdbczio.Quill
+import org.postgresql.ds.PGSimpleDataSource
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId}
-import com.risquanter.register.domain.errors.{FieldProblem, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{Core, ErrorLocation, Failure, FieldProblem, OutageMode, PeerZone, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -27,6 +32,19 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
 
   private val storeLayer: ZLayer[Scope, Throwable, WorkspaceStore] =
     ZLayer.succeed(storeConfig) ++ quillLayer >>> WorkspaceStorePostgres.layer
+
+  /** Port 1 is reserved by IANA and has no listener here, so every connection
+    * attempt is refused. */
+  private val UnreachablePort = 1
+
+  private val unreachableStoreLayer: ZLayer[Any, Nothing, WorkspaceStore] =
+    val ds = new PGSimpleDataSource()
+    ds.setServerNames(Array("localhost"))
+    ds.setPortNumbers(Array(UnreachablePort))
+    ds.setDatabaseName("register")
+    ZLayer.succeed(storeConfig) ++
+      (ZLayer.succeed[DataSource](ds) >>> Quill.Postgres.fromNamingStrategy(SnakeCase)) >>>
+      WorkspaceStorePostgres.layer
 
   override def spec = suite("WorkspaceStorePostgres")(
     test("create + resolve succeeds") {
@@ -152,6 +170,16 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       yield assert(exit)(fails(isSubtype[ValidationFailed](
         hasField("errors", _.errors.map(e => FieldProblem.code(e.problem)), contains(ValidationErrorCode.DUPLICATE_VALUE))
       )))
+    },
+
+    test("a database that refuses the connection is an outage at the database") {
+      ZIO.serviceWithZIO[WorkspaceStore](_.create(None).either)
+        .provideLayer(unreachableStoreLayer)
+        .map(outcome => assertTrue(outcome match
+          case Left(Failure.Unanswered(Core(PeerZone.Database, errors, _))) =>
+            errors == NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused))
+          case _ => false
+        ))
     },
 
     test("assignment after a provided value skips past it, bumping the sequence") {

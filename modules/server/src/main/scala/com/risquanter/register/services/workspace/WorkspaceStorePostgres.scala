@@ -1,6 +1,8 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
+import zio.prelude.NonEmptyList
+import java.sql.SQLException
 import java.time.{Duration, Instant, OffsetDateTime, ZoneOffset}
 import io.getquill.*
 import io.getquill.jdbczio.Quill
@@ -9,9 +11,9 @@ import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, RepositoryFailure, ValidationFailed, ValidationError, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, OutageMode, PeerZone, RepositoryFailure, ValidationFailed, ValidationError, WorkspaceExpired, WorkspaceNotFound}
 import com.risquanter.register.infra.persistence.QuillMappings.given
-import com.risquanter.register.services.workspace.WorkspaceStorePostgres.{DurationString, WorkspaceRow, WorkspaceTreeRow}
+import com.risquanter.register.services.workspace.WorkspaceStorePostgres.{ConnectionExceptionClass, DurationString, UniqueViolation, WorkspaceRow, WorkspaceTreeRow}
 import com.risquanter.register.util.IdGenerators
 
 final class WorkspaceStorePostgres private (
@@ -44,7 +46,7 @@ final class WorkspaceStorePostgres private (
     * race-free (mapped to ValidationFailed), and the sequence is bumped past v
     * so later assignments cannot collide.
     */
-  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
+  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError | Failure, WorkspaceKeySecret] =
     for
       key <- WorkspaceKeyCrypto.generate
       sid <- IdGenerators.nextId.orDie
@@ -65,7 +67,7 @@ final class WorkspaceStorePostgres private (
                      """.as[Action[Long]]
                    }
                  )
-               ).unit.orDieWith(asDefect)
+               ).unit
              case Some(entityId) =>
                db(
                  run(
@@ -76,18 +78,17 @@ final class WorkspaceStorePostgres private (
                      """.as[Action[Long]]
                    }
                  )
-               ).unit.catchAll {
+               ).unit.catchSome {
                  case RepositoryFailure(reason) if reason.contains("seed_entity_id") =>
                    ZIO.fail(ValidationFailed(List(ValidationError(
                      ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
                      FieldProblem.SeedEntityIdInUse(entityId)))))
-                 case other => ZIO.die(asDefect(other))
-               } *> bumpSeedEntitySequence(entityId.value).orDieWith(asDefect)
+               } *> bumpSeedEntitySequence(entityId.value)
       _ <- logSecurity(WorkspaceStore.SecurityEvent.Created, WorkspaceStore.WorkspaceIdKey -> id.value)("Workspace created")
     yield key
 
   /** Advance the assignment sequence past a provided value (never backwards). */
-  private def bumpSeedEntitySequence(value: Long): IO[AppError, Unit] =
+  private def bumpSeedEntitySequence(value: Long): IO[AppError | Failure, Unit] =
     db(
       run(
         quote {
@@ -105,9 +106,9 @@ final class WorkspaceStorePostgres private (
     * `workspaces` row. The rows being counted do not exist yet, so the lock has
     * to be on the parent; it serialises concurrent associations for this
     * workspace. The refusal travels as a `Left` so the transaction commits,
-    * keeping the typed error out of `db`'s mapping to `RepositoryFailure`.
+    * keeping the typed error out of `db`'s classification of driver failures.
     */
-  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit] =
+  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit] =
     for
       ws     <- resolveInternal(key)
       now    <- Clock.instant
@@ -135,7 +136,7 @@ final class WorkspaceStorePostgres private (
         run(query[WorkspaceTreeRow].insertValue(lift(WorkspaceTreeRow(wsId, treeId, toOffsetDateTime(now)))))
           .as(Right(()): Either[AppError, Unit])
 
-  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit] =
+  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(
@@ -147,18 +148,18 @@ final class WorkspaceStorePostgres private (
             ).unit
     yield ()
 
-  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]] =
+  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
   /** Refuse a creation that would exceed the tree ceiling, before the tree is
     * written.
     */
-  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit] =
+  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit] =
     resolveInternal(key).flatMap(ws =>
       ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
     )
 
-  override def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
+  override def resolve(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
     for
       ws  <- loadWorkspaceByKey(key)
       now <- Clock.instant
@@ -171,10 +172,10 @@ final class WorkspaceStorePostgres private (
             ).unit
     yield ws.touch(now)
 
-  override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean] =
+  override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
 
-  override def evictExpired: IO[AppError, List[WorkspaceRecord]] =
+  override def evictExpired: IO[AppError | Failure, List[WorkspaceRecord]] =
     for
       rows    <- db(run(query[WorkspaceRow]))
       now     <- Clock.instant
@@ -191,14 +192,14 @@ final class WorkspaceStorePostgres private (
                  )
     yield doomed
 
-  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit] =
+  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(run(query[WorkspaceRow].filter(_.id == lift(ws.id)).delete)).unit
       _  <- logSecurity(WorkspaceStore.SecurityEvent.Deleted, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace deleted")
     yield ()
 
-  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, WorkspaceKeySecret] =
+  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, WorkspaceKeySecret] =
     for
       ws     <- resolveInternal(key)
       newKey <- WorkspaceKeyCrypto.generate
@@ -217,10 +218,10 @@ final class WorkspaceStorePostgres private (
       _      <- logSecurity(WorkspaceStore.SecurityEvent.Rotated, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace key rotated")
     yield newKey
 
-  private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
+  private def resolveInternal(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
     loadWorkspaceByKey(key)
 
-  private def loadWorkspaceByKey(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
+  private def loadWorkspaceByKey(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
     for
       row <- loadWorkspaceRowByHash(key)
       ws  <- toRecord(row)
@@ -231,12 +232,12 @@ final class WorkspaceStorePostgres private (
                ZIO.fail(WorkspaceExpired(ws.id, ws.ttl, ws.idleTimeout, e.cause, e.at)))
     yield ws
 
-  private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError, WorkspaceRow] =
+  private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRow] =
     db(run(query[WorkspaceRow].filter(_.keyHash == lift(WorkspaceKeyCrypto.hash(key))))).flatMap(rows =>
       ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFound())
     )
 
-  private def loadTrees(workspaceId: WorkspaceId): IO[AppError, Set[TreeId]] =
+  private def loadTrees(workspaceId: WorkspaceId): IO[AppError | Failure, Set[TreeId]] =
     db(
       run(
         query[WorkspaceTreeRow]
@@ -245,7 +246,7 @@ final class WorkspaceStorePostgres private (
       )
     ).map(_.toSet)
 
-  private def toRecord(row: WorkspaceRow): IO[AppError, WorkspaceRecord] =
+  private def toRecord(row: WorkspaceRow): IO[AppError | Failure, WorkspaceRecord] =
     for
       trees       <- loadTrees(row.id)
       ttl         <- parseInterval(row.ttl)
@@ -264,16 +265,38 @@ final class WorkspaceStorePostgres private (
       seedEntityId = entityId
     )
 
-  private def db[A](effect: Task[A]): IO[AppError, A] =
-    effect.mapError(err => RepositoryFailure(Option(err.getMessage).getOrElse(err.toString)))
-
-  /** Convert a failure this store treats as unrecoverable into a defect.
-    *
-    * A domain error is not a `Throwable`, so it cannot itself become one. The
-    * text survives and the type does not, which is what dying means: nothing
-    * downstream is meant to match on it.
+  /** Runs a driver call. A unique violation is a `RepositoryFailure` carrying
+    * the driver's message, which names the constraint; every other driver
+    * failure is classified.
     */
-  private def asDefect(e: AppError): Throwable = RuntimeException(e.logMessage)
+  private def db[A](effect: Task[A]): IO[AppError | Failure, A] =
+    effect.mapError(err =>
+      sqlState(err) match
+        case Some(UniqueViolation) => RepositoryFailure(messageOf(err))
+        case _                     => classify(err)
+    )
+
+  /** A driver failure the database's answer does not explain is the database
+    * not answering. A connection-exception state is a refused or dropped
+    * connection. Any other failure is an answer outside the protocol's shape.
+    */
+  private def classify(err: Throwable): Failure =
+    val mode = sqlState(err) match
+      case Some(state) if state.startsWith(ConnectionExceptionClass) => OutageMode.ConnectionRefused
+      case _                                                         => OutageMode.Protocol
+    Failure.Unanswered(Core(
+      PeerZone.Database,
+      NonEmptyList((ErrorLocation.Whole, mode)),
+      List(Diagnostic.PeerMessage(messageOf(err)))
+    ))
+
+  /** The SQL state a JDBC driver attaches to its failure, when it attaches one. */
+  private def sqlState(err: Throwable): Option[String] = err match
+    case e: SQLException => Option(e.getSQLState)
+    case _               => None
+
+  private def messageOf(err: Throwable): String =
+    Option(err.getMessage).getOrElse(err.toString)
 
   /** Structured security event log with arbitrary key-value annotations. */
   private def logSecurity(event: WorkspaceStore.SecurityEvent, fields: (String, String)*)(msg: String): UIO[Unit] =
@@ -282,7 +305,7 @@ final class WorkspaceStorePostgres private (
       ZIO.logAnnotate(k, v)(effect)
     }
 
-  private def parseInterval(value: String): IO[AppError, Duration] =
+  private def parseInterval(value: String): IO[AppError | Failure, Duration] =
     ZIO
       .fromEither(DurationString.parseInterval(value))
       .mapError(err => RepositoryFailure(err))
@@ -294,6 +317,13 @@ final class WorkspaceStorePostgres private (
     DurationString.renderInterval(duration)
 
 object WorkspaceStorePostgres:
+  /** The SQL standard's state for a unique-constraint violation. */
+  private val UniqueViolation: String = "23505"
+
+  /** The SQL standard's state class for a connection exception: the database
+    * was not reached, or the connection dropped. */
+  private val ConnectionExceptionClass: String = "08"
+
   private final case class WorkspaceRow(
     id: WorkspaceId,
     keyHash: WorkspaceKeyHash,

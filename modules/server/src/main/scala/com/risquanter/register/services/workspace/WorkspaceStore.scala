@@ -4,7 +4,7 @@ import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, WorkspaceKeySecret, TreeId, SeedEntityId}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, TreeNotInWorkspace, ValidationError, ValidationFailed}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, TreeNotInWorkspace, ValidationError, ValidationFailed}
 
 /** Workspace lifecycle service — association/token index.
   *
@@ -16,8 +16,9 @@ import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubj
   * - `delete()` and `rotate()` give revocation and key rotation
   * - `resolve()` updates lastAccessedAt on success
   * - `resolve()` applies both timeouts, absolute and idle
-  * - every error variant encodes to one opaque 404, so a caller cannot tell
-  *   which of them it was
+  * - every refusal of a key or a tree encodes to one opaque 404, so a caller
+  *   cannot tell which of them it was
+  * - a backing store that does not answer fails with `Failure.Unanswered`
   * - implementations look up in constant time (`Map.get`, or an indexed query)
   */
 trait WorkspaceStore:
@@ -32,7 +33,7 @@ trait WorkspaceStore:
     *
     * Logs a creation event.
     */
-  def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret]
+  def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError | Failure, WorkspaceKeySecret]
 
   /** Associate a tree with a workspace. Fails if the workspace is expired or not
     * found, or already holds the configured maximum number of trees.
@@ -40,13 +41,13 @@ trait WorkspaceStore:
     *
     * Implementations resolve, check and write atomically.
     */
-  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit]
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit]
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op. */
-  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError, Unit]
+  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit]
 
   /** List all tree IDs in a workspace. Fails if expired or not found. */
-  def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]]
+  def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, List[TreeId]]
 
   /** Resolve a workspace. Fails with WorkspaceExpired or WorkspaceNotFound.
     * Implements dual timeout: absolute (createdAt + ttl) AND idle (lastAccessedAt + idleTimeout).
@@ -54,7 +55,7 @@ trait WorkspaceStore:
     * encode to one constant response at the HTTP layer, so neither is
     * distinguishable by a caller.
     */
-  def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord]
+  def resolve(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord]
 
   /** Fails when the workspace already holds the configured maximum number of
     * trees, before any tree is written.
@@ -65,21 +66,21 @@ trait WorkspaceStore:
     * `resolveTreeWorkspace`, and skipped by the reaper's cascade. A caller that
     * creates a tree checks here first.
     */
-  def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit]
+  def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit]
 
   /** Resolve a workspace, verify tree membership, and return the workspace.
     *
     * Fails with `TreeNotInWorkspace` when the tree does not belong to the
     * resolved workspace.
     */
-  def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, WorkspaceRecord] =
+  def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, WorkspaceRecord] =
     for
       ws <- resolve(key)
       _  <- ZIO.unless(ws.trees.contains(treeId))(ZIO.fail(TreeNotInWorkspace(ws.id, treeId)))
     yield ws
 
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
-  def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean]
+  def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, Boolean]
 
   /** Resolve workspace + verify tree ownership.
     *
@@ -87,7 +88,7 @@ trait WorkspaceStore:
     * `TreeNotInWorkspace` when the tree does not belong to the workspace,
     * which encodes to the same opaque 404 as a missing workspace.
     */
-  def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
+  def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, Unit] =
     resolveTreeWorkspace(key, treeId).unit
 
   /** Evict all expired workspaces (absolute + idle). Returns evicted entries.
@@ -102,19 +103,19 @@ trait WorkspaceStore:
     * Fails rather than dying when the backing store is unreachable, so the
     * reaper can log and retry on its next tick instead of its fiber ending.
     */
-  def evictExpired: IO[AppError, List[WorkspaceRecord]]
+  def evictExpired: IO[AppError | Failure, List[WorkspaceRecord]]
 
   /** Hard delete. Removes workspace from the store. Tree cascade-deletion is
     * orchestrated by the controller. Logs a deletion event.
     */
-  def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, Unit]
+  def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit]
 
   /** Atomic rotation. Generates new key, transfers all tree associations,
     * instantly invalidates old key. No grace period — old key is immediately
     * dead, new key is immediately live.
     * Returns new key. Logs a rotation event.
     */
-  def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, WorkspaceKeySecret]
+  def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, WorkspaceKeySecret]
 
 object WorkspaceStore:
   /** The security events every store implementation logs, carried under the
@@ -135,13 +136,13 @@ object WorkspaceStore:
   val EvictedCountKey: String = "evicted_count"
 
   // Accessor methods for ZIO service pattern
-  def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
+  def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): ZIO[WorkspaceStore, AppError | Failure, WorkspaceKeySecret] =
     ZIO.serviceWithZIO[WorkspaceStore](_.create(seedEntityId))
 
-  def resolve(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
+  def resolve(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError | Failure, WorkspaceRecord] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolve(key))
 
-  def checkTreeCapacity(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
+  def checkTreeCapacity(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError | Failure, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.checkTreeCapacity(key))
 
   /** The refusal a workspace already holding `limit` trees produces. A value
@@ -165,29 +166,29 @@ object WorkspaceStore:
     if ws.trees.contains(treeId) then Right(())
     else treeCapacityForNew(ws, limit)
 
-  def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
+  def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError | Failure, WorkspaceRecord] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolveTreeWorkspace(key, treeId))
 
-  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError | Failure, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.addTree(key, treeId))
 
-  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
+  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError | Failure, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.removeTree(key, treeId))
 
-  def listTrees(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, List[TreeId]] =
+  def listTrees(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError | Failure, List[TreeId]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.listTrees(key))
 
-  def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Boolean] =
+  def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError | Failure, Boolean] =
     ZIO.serviceWithZIO[WorkspaceStore](_.belongsTo(key, treeId))
 
-  def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
+  def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError | Failure, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolveTree(key, treeId))
 
-  def evictExpired: ZIO[WorkspaceStore, AppError, List[WorkspaceRecord]] =
+  def evictExpired: ZIO[WorkspaceStore, AppError | Failure, List[WorkspaceRecord]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)
 
-  def delete(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, Unit] =
+  def delete(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError | Failure, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.delete(key))
 
-  def rotate(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
+  def rotate(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError | Failure, WorkspaceKeySecret] =
     ZIO.serviceWithZIO[WorkspaceStore](_.rotate(key))

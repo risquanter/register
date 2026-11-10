@@ -5,7 +5,8 @@ Plan code `UES`. Decisions in this document are labelled `UES-D-<n>`.
 **Status.** Written 2026-11-09 at version 0.17.2. `UES-D-1` to `UES-D-15` are
 ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Phase 0 steps 0.1 and 0.2 landed, at versions 0.18.1 and 0.18.2.
 Phase 0 step 0.3 and Phase 1 steps 1.1 to 1.3 landed together, at version 0.18.3.
-Phase 1 step 1.4 is next. The file inventory is
+Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 step 2.1
+is next. The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
 The supporting record `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-ERROR-PATHS.md`
@@ -860,7 +861,12 @@ Acceptance: compile, the four tiers, BATS suites A and C.
 6.1 `AppError`, `DomainError`, `SimulationFailure` and `FailureOrigin`'s per-leaf
 declarations are deleted; `FailureOrigin` stays as the derived two-case enum.
 `WireError.fromAppError` is deleted and `Failure.toWire` is the projection.
-`WireEither` and every signature narrow to `Failure`. `TreeScope.scala` and
+`WireEither` and every signature narrow to `Failure`. The narrowing collapses
+each match on `AppError | Failure` that only reads the log text to `logMessage`
+on `Failure`, so no function is added for it. Those matches are in
+`Application.scala`, `RiskTreeService.scala`, `RiskTreeServiceLive.scala`,
+`ScenarioService.scala`, `WorkspaceReaper.scala`, `HttpTestHarness.scala` and
+`ScenarioControllerSpec.scala` (ruled 2026-11-10). `TreeScope.scala` and
 `QueryRequest.scala` comments that name `AppError` are rewritten. Grep:
 `AppError`, `fromAppError`, `DomainError`. Test: `WireErrorSpec`'s old exhaustive
 assertion is deleted and `FailureSpec`'s Phase 0.2 one is the exhaustive assertion.

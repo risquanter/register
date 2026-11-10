@@ -14,7 +14,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, MergeStagingRef, SafeName, ScenarioName, StoreBranch, TreeId, WorkspaceId, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, FieldName, IrminError}
+import com.risquanter.register.domain.errors.{AppError, Failure, FieldName, IrminError}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioListResponse, ScenarioResponse, TreeLabel, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
@@ -107,7 +107,10 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       workspaceStore <- ZIO.service[WorkspaceStore].provide(TestConfigs.workspaceLayer >>> WorkspaceStoreLive.layer)
       // `create` fails with an `AppError`, which is not a `Throwable`, so the
       // conversion to a defect is explicit. A failure here is a broken fixture.
-      wsKey          <- workspaceStore.create(None).orDieWith(e => RuntimeException(e.logMessage))
+      wsKey          <- workspaceStore.create(None).orDieWith {
+                          case e: AppError => RuntimeException(e.logMessage)
+                          case f: Failure  => RuntimeException(f.logMessage)
+                        }
       // The post-merge guard reads trees back through a repository. This spec
       // injects its own merge service in every case that exercises a merge, so
       // the fallback only has to be a real repository, not a configured one.

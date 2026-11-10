@@ -3,6 +3,7 @@ package com.risquanter.register.services.workspace
 import zio.*
 import com.risquanter.register.auth.{BootstrapProvisioner, Checked, LifecycleMarker}
 import com.risquanter.register.configs.WorkspaceConfig
+import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
 
 /** Background daemon that periodically evicts expired workspaces.
@@ -23,23 +24,15 @@ import com.risquanter.register.services.{CascadeDelete, RiskTreeService, Scenari
   * — graceful shutdown with zero manual fiber management.
   *
   * == Cascade deletion ==
-  * When workspaces expire, their associated trees must be cascade-deleted to prevent
-  * orphans. The reaper calls `RiskTreeService.delete` for each tree in the evicted
-  * workspace, which triggers the full pipeline: repo delete → cache evict → SSE notify.
-  * This mirrors `WorkspaceLifecycleController.deleteWorkspace`'s cascade pattern. Tree deletion
-  * failures are ignored (best-effort) — a tree may already have been manually deleted.
-  *
-  * Scenario branches (`scenarios.<wsId>.*`) are cascade-deleted
-  * the same way via `ScenarioService.cascadeDeleteScenarios` (best-effort, same
-  * single source of truth reused by `WorkspaceLifecycleController.deleteWorkspace`
-  * and `evictExpired`). Without this, an expired workspace's scenario branches
-  * would never be reclaimed — they'd survive in Irmin forever, unreachable by any
-  * workspace key. On the in-memory backend, listing scenarios fails with
-  * `ScenariosNotSupported`; that failure is swallowed the same as any other
-  * best-effort cascade failure (nothing to clean up).
+  * An evicted workspace's trees and scenario branches (`scenarios.<wsId>.*`) are
+  * deleted through `CascadeDelete.workspace`, the same composition
+  * `WorkspaceLifecycleController.deleteWorkspace` uses. Without it they would stay
+  * in Irmin, unreachable by any workspace key. The cascade is best-effort and
+  * swallows each deletion's failure. A tree may already have been deleted, and on
+  * the in-memory backend listing scenarios fails with `ScenariosNotSupported`.
   *
   * == Enterprise no-op ==
-  * When both `ttl` and `idleTimeout` are zero or negative, `Workspace.isExpired`
+  * When both `ttl` and `idleTimeout` are zero or negative, `WorkspaceRecord.isExpired`
   * can never return `true`, so the reaper loop would be pure waste. The layer
   * detects this and skips the fiber entirely.
   */
@@ -67,7 +60,7 @@ object WorkspaceReaper:
 
   /** Enterprise no-op: both TTL and idleTimeout must be zero/negative.
     *
-    * Mirrors `Workspace.isExpired` semantics — that method fires on *either*
+    * Mirrors `WorkspaceRecord.isExpired` semantics — that method fires on *either*
     * absolute or idle timeout, so the reaper is only truly a no-op when both
     * are disabled.
     */
@@ -76,11 +69,7 @@ object WorkspaceReaper:
       (config.idleTimeout.isZero || config.idleTimeout.isNegative)
 
   /** Reap loop: evict expired workspaces, then cascade-delete their trees and
-    * scenario branches.
-    *
-    * Best-effort cascade: each `treeService.delete(id).ignore` and each
-    * `scenarioService.delete(...).ignore` swallows failures (the tree/scenario
-    * may already be gone). This matches `WorkspaceLifecycleController.deleteWorkspace`.
+    * scenario branches through `CascadeDelete.workspace`.
     */
   private def reapLoop(
     store: WorkspaceStore,
@@ -101,7 +90,10 @@ object WorkspaceReaper:
       yield ()
     // A failed cycle costs one interval, so it is logged and the loop carries
     // on. Ending the fiber would stop every later eviction with no symptom.
-    val survivingCycle = cycle.catchAll(error =>
-      ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: ${error.logMessage}")
-    )
+    val survivingCycle = cycle.catchAll { error =>
+      val message = error match
+        case e: AppError => e.logMessage
+        case f: Failure  => f.logMessage
+      ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: $message")
+    }
     (ZIO.sleep(zio.Duration.fromJava(config.reaperInterval)) *> survivingCycle).forever
