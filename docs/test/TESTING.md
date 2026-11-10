@@ -422,11 +422,6 @@ It stops at the first failure. A failed image build stops it too, because a
 suite started without its image would build that image inside its own
 `docker compose up`, while the rest of the stack starts.
 
-Before building, it lists every other running JVM, and every running container
-outside the `register` stack, and refuses to start while any is up. Examples are
-an editor's language server, an sbt server, or a local Kubernetes cluster. Stop
-them and run it again, or pass `--force` to run anyway.
-
 The script runs the lines below. Each suite is one `docker run` line, and only
 the `.bats` file changes. Suites A and C share the fixed `register` compose
 project, so the stack is cleared before each of them. The clear purges the

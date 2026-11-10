@@ -683,10 +683,6 @@ order given. It stops at the first failure, including a failed image build, so a
 suite never starts with an image missing. That matters because a missing image
 makes the suite's own `docker compose up` build it while the stack starts.
 
-Before building, it refuses to start while any other JVM or any container outside
-the `register` stack is running, and names each one: Metals, a Bloop or sbt
-server, a k3d cluster, qdrant. Stop them and run it again. `--force` runs anyway.
-
 Suite C is the in-memory gate and runs after any code change. Suite A is the
 end-to-end run with Irmin persistence. Suite B exercises the standalone Irmin
 image and is needed only when that image changed. The command is presented to the
@@ -701,15 +697,18 @@ mechanism is memory, not CPU:
 
 - The server build runs sbt and then GraalVM native-image. Each is a JVM whose
   default maximum heap is a quarter of the machine, 8.4 GB on a 31 GB host. The
-  measured peak of the native-image step is 11 GB of resident memory.
-- The frontend build runs another sbt for the Scala.js link, with the same
-  8.4 GB default. The repository's `.sbtopts`, which caps sbt at 2 GB on the
-  host, is not copied into either image.
+  measured peak of the native-image step, with no heap cap, is 11 GB of resident
+  memory.
+- The frontend build runs another sbt for the Scala.js link.
 - Metals in VS Code may hold up to 8 GB, and a stale scala-cli compile daemon
   was found holding 7.4 GB after a day and a half.
-- BuildKit on this daemon ignores a build memory cap: a probe build run with
-  `--memory 512m` still saw `memory.max=max` and all 32 CPUs. No host-side flag
-  bounds a build, so the only levers are fewer builds at once and more swap.
+- BuildKit on this daemon ignores a build container memory cap: a probe build
+  run with `--memory 512m` still saw `memory.max=max` and all 32 CPUs. So each
+  JVM inside a build is capped by its own heap flag instead. Both images copy
+  the repository's `.sbtopts`, which caps sbt at 2 GB as on the host, and
+  `nativeImageOptions` in `build.sbt` caps the native-image builder at 6 GB with
+  `-J-Xmx6g`. A build that needs more fails with an out-of-memory error rather
+  than freezing the host; raise the cap then, reading the `Peak RSS` line.
 
 So build the two images yourself, one after the other, before the suites, which
 is what `tests/bats/run-suites.sh` does first. The suites then build

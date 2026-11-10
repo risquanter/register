@@ -64,7 +64,10 @@ WORKDIR /app
 # Matches the pattern in containers/prod/Dockerfile.register-prod.
 # app/update resolves app + common.js (app.dependsOn(common.js)); first-party
 # libraries (metalog-distribution, vql-engine, hdr-rng) come from Maven Central.
+# .sbtopts caps sbt's heap as on the host, including the sbt that vite starts
+# for the Scala.js link; nothing caps a build container on this daemon.
 # --------------------------------------------------------------------------
+COPY .sbtopts .sbtopts
 COPY build.sbt build.sbt
 COPY project/ project/
 RUN sbt "app/update; commonJS/update"

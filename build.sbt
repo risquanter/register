@@ -135,6 +135,10 @@ lazy val server = (project in file("modules/server"))
     Compile / mainClass := Some("com.risquanter.register.Application"),
     nativeImageInstalled := true,
     nativeImageOptions ++= Seq(
+      // The builder JVM's heap. Nothing caps a build container on the
+      // development host's Docker daemon, so without this the builder takes
+      // its default share of the host and peaks near 11 GB resident.
+      "-J-Xmx6g",
       "--no-fallback",
       "--static",
       "--libc=musl",

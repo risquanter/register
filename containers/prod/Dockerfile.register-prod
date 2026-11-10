@@ -11,6 +11,9 @@ WORKDIR /app
 
 # Dependency layer: cached unless build definition changes.
 # Source-only edits skip this entirely (~60-90s saved).
+# .sbtopts caps sbt's heap as on the host; without it sbt takes a quarter of
+# the host's memory, since nothing caps a build container on this daemon.
+COPY .sbtopts .sbtopts
 COPY build.sbt build.sbt
 COPY project/ project/
 RUN sbt "server/update; commonJVM/update"

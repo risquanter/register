@@ -6,6 +6,7 @@
 #                              and containers/prod/Dockerfile.frontend-prod
 # --------------------------------------------------------------------------
 !build.sbt
+!.sbtopts
 !project/
 !modules/common/src/main/
 
