@@ -267,6 +267,11 @@ they run once and the user runs them: for a set of review fixes, when all of the
 are implemented and the other tiers are green; for a plan, at the end of each phase.
 The work is not done until they have run green.
 
+Whenever a BATS run is due, the report that says so carries the command verbatim,
+in a block ready to paste: `tests/bats/run-suites.sh` with the suites that are due,
+as in "BATS Smoke Tests" below. This binds in every plan, as the version bump
+command does, and a pointer to this section does not replace the block.
+
 ### Reporting test results
 
 Run tests. Report **pass or fail only**. Never report the count. Never comment on the count. Never act on the count. The count is a distraction and irrelevant to the user. The user only needs to know if the tests passed or failed. Failed test need to be investigated even if they are from earlier. A single failure is a blocker regardless of the count. The user needs to know about it and fix it before proceeding.
@@ -668,22 +673,24 @@ labels). It is a mandatory pre-step, not just crash recovery.
 docker build -f containers/dev/Dockerfile.bats-runner \
   -t local/bats-runner:1.11 containers/dev/
 
-# The two application images, one at a time (the reason is in the next section),
-# then each suite as one pasteable line, with the stack cleared before it.
-docker compose build --progress=plain register-server 2>&1 | tee /tmp/register-server-build.log | grep -E "Peak RSS|error|Error"
-docker compose --profile frontend build frontend
-docker compose -p register down -v --remove-orphans 2>/dev/null || true
-docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-c-in-memory.bats
-docker compose -p register down -v --remove-orphans 2>/dev/null || true
-docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-a-full-prod.bats
-docker run --rm --userns=host --network host --group-add "$(stat -c '%g' /var/run/docker.sock)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" -w "$(pwd)" local/bats-runner:1.11 tests/bats/suite-b-irmin-prod.bats
+# Build both application images one at a time, then run the named suites, each
+# against a cleared `register` stack. Name only the suites that are due.
+tests/bats/run-suites.sh C A
 ```
+
+`tests/bats/run-suites.sh` takes the suites to run, `A`, `B` and `C`, in the
+order given. It stops at the first failure, including a failed image build, so a
+suite never starts with an image missing. That matters because a missing image
+makes the suite's own `docker compose up` build it while the stack starts.
+
+Before building, it refuses to start while any other JVM or any container outside
+the `register` stack is running, and names each one: Metals, a Bloop or sbt
+server, a k3d cluster, qdrant. Stop them and run it again. `--force` runs anyway.
 
 Suite C is the in-memory gate and runs after any code change. Suite A is the
 end-to-end run with Irmin persistence. Suite B exercises the standalone Irmin
-image and is needed only when that image changed. The commands are presented to
-the user as written above, one `docker run` line per suite, never wrapped in a
-shell function.
+image and is needed only when that image changed. The command is presented to the
+user as the one script line, never as a shell function.
 
 ### Build the application images before suites A and C, one at a time
 
@@ -705,7 +712,7 @@ mechanism is memory, not CPU:
   bounds a build, so the only levers are fewer builds at once and more swap.
 
 So build the two images yourself, one after the other, before the suites, which
-is what the first two lines of the block above do. The suites then build
+is what `tests/bats/run-suites.sh` does first. The suites then build
 nothing. Run nothing else that compiles while the builds run, including sbt in
 another terminal and the integration tier. The native-image step still uses
 every core; what is given up is only the overlap of the two builds.

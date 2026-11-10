@@ -411,10 +411,27 @@ docker build -f containers/dev/Dockerfile.bats-runner \
 
 ### Running the Suites
 
-Each suite is one `docker run` line, and only the `.bats` file changes. Suites A
-and C share the fixed `register` compose project, so the stack is cleared before
-each of them. The clear purges the `register_pg-data` volume and reaps any
-container carrying the register compose labels.
+`tests/bats/run-suites.sh` builds the server and frontend images one after the
+other and then runs the suites you name, in the order given:
+
+```bash
+tests/bats/run-suites.sh C A
+```
+
+It stops at the first failure. A failed image build stops it too, because a
+suite started without its image would build that image inside its own
+`docker compose up`, while the rest of the stack starts.
+
+Before building, it lists every other running JVM, and every running container
+outside the `register` stack, and refuses to start while any is up. Examples are
+an editor's language server, an sbt server, or a local Kubernetes cluster. Stop
+them and run it again, or pass `--force` to run anyway.
+
+The script runs the lines below. Each suite is one `docker run` line, and only
+the `.bats` file changes. Suites A and C share the fixed `register` compose
+project, so the stack is cleared before each of them. The clear purges the
+`register_pg-data` volume and reaps any container carrying the register compose
+labels.
 
 ```bash
 # Suite C — quickest, no Irmin dependency (start here)
