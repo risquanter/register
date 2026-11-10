@@ -1,6 +1,7 @@
 package com.risquanter.register.domain.data.iron
 
 import com.risquanter.register.domain.errors.{Alphabet, ExpectedInput, FieldProblem, ValueFormat, ValueRange}
+import com.risquanter.register.http.errors.QueryProblem
 
 /** The sentence for each refusal, shared across JVM and JS.
   *
@@ -15,6 +16,7 @@ object ValidationMessages:
     // Presence and readability
     case FieldProblem.Required                 => "A value is required"
     case FieldProblem.Unreadable(expected)     => unreadable(expected)
+    case FieldProblem.Query(query)             => QueryProblem.describe(query)
     case FieldProblem.DeclaredConstraintNotMet => "The value is not valid"
 
     // The shape of one value
@@ -71,6 +73,7 @@ object ValidationMessages:
     case FieldProblem.StoredNodeIsLeaf      => "this id is a leaf of this tree; it belongs in leaves"
     case FieldProblem.StoredNodeIsPortfolio => "this id is a portfolio of this tree; it belongs in portfolios"
     case FieldProblem.StoredNodeNotInTree   => "this id is not a node of this tree; a new node goes in newPortfolios or newLeaves"
+    case FieldProblem.StoredNodeKindDiffers => "this node is a leaf on one branch and a portfolio on the other"
 
     // The index of a built tree
     case FieldProblem.ChildParentMismatch(child, declaredParent) =>
@@ -151,6 +154,8 @@ object ValidationMessages:
     case ExpectedInput.NumberList  => "Enter comma-separated numbers"
     case ExpectedInput.SingleValue => "A single value is expected"
     case ExpectedInput.Declared    => "The value could not be read"
+    case ExpectedInput.Json        => "The stored value is not valid JSON"
+    case ExpectedInput.Interval    => "The stored value is not a valid interval"
 
   private def alphabet(allowed: Alphabet): String = allowed match
     case Alphabet.NodeName     => "letters, digits, spaces, hyphens, and forward slashes"
@@ -179,6 +184,7 @@ object ValidationMessages:
     case ValueFormat.StagingBranchName    => "Merge staging branch name is invalid"
     case ValueFormat.DistributionTypeName => "Distribution type must be 'Metalog' or 'Lognormal'"
     case ValueFormat.ScenarioNameStart    => "Scenario name must start with a letter or digit"
+    case ValueFormat.StoreSegment         => "Storage path segment is invalid"
 
   /** Each bound is the one the matching refinement in `ValidationUtil` enforces.
     * The seed bounds are fixed by the HDR generator's 8-decimal-digit id budget,

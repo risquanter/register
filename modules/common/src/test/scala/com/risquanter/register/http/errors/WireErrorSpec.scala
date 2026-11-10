@@ -319,6 +319,30 @@ object WireErrorSpec extends ZIOSpecDefault:
         },
         test("an internal fault round-trips") {
           assertTrue(internalFault.toJson.fromJson[WireError.InternalFault] == Right(internalFault))
+        },
+        test("every location, field, input, format and problem case the failure shape added round-trips") {
+          val added: WireError.RequestRejected = WireError.RequestRejected(
+            List(
+              ValidationError(ErrorLocation.Field(ErrorSubject.Tree(treeId), FieldName.Ttl), FieldProblem.Unreadable(ExpectedInput.Json)),
+              ValidationError(ErrorLocation.requestField(FieldName.IdleTimeout), FieldProblem.Unreadable(ExpectedInput.Interval)),
+              ValidationError(ErrorLocation.Whole, FieldProblem.WrongFormat(ValueFormat.StoreSegment)),
+              ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable("bad syntax", Some(4)))),
+              ValidationError(ErrorLocation.Whole, FieldProblem.StoredNodeKindDiffers)
+            ),
+            trace
+          )
+          assertTrue(added.toJson.fromJson[WireError.RequestRejected] == Right(added))
+        },
+        test("every absence and capability case the failure shape added round-trips") {
+          val absences = List(
+            NotFoundKind.StoredValueAbsent(), NotFoundKind.MetadataAbsent(),
+            NotFoundKind.NodesAbsent(), NotFoundKind.BranchHeadAbsent()
+          ).map(kind => WireError.NotFound(kind, trace): WireError.NotFound)
+          val pinned: WireError.NotSupported = WireError.NotSupported(Capability.PinnedReads, trace)
+          assertTrue(
+            absences.forall(a => a.toJson.fromJson[WireError.NotFound] == Right(a)),
+            pinned.toJson.fromJson[WireError.NotSupported] == Right(pinned)
+          )
         }
       ),
       suite("indistinguishable outcomes really are identical")(

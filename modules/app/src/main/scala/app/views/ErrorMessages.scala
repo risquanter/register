@@ -196,6 +196,10 @@ object ErrorMessages:
     case NotFoundKind.Unknown()               => NotFound
     case NotFoundKind.TreeNotOnBranch(branch) => treeNotOnBranch(branch)
     case NotFoundKind.TreeNotAtCommit()       => TreeNotAtCommit
+    // The store's own absences are answered as an internal fault, so a client
+    // reading one is reading a server fault and is told so.
+    case NotFoundKind.StoredValueAbsent() | NotFoundKind.MetadataAbsent() |
+         NotFoundKind.NodesAbsent() | NotFoundKind.BranchHeadAbsent() => InternalFault
 
   def treeNotOnBranch(branch: BranchChoice): String =
     s"This tree is not on ${branchName(branch)}."
@@ -211,16 +215,12 @@ object ErrorMessages:
   def capabilityUnavailable(capability: Capability): String = capability match
     case Capability.Scenarios =>
       "Scenarios are not available in this deployment."
+    case Capability.PinnedReads =>
+      "Reading a tree at a past point in its history is not available in this deployment."
 
-  def query(problem: QueryProblem): String = problem match
-    case QueryProblem.Unparseable(message, position) =>
-      position.fold(message)(p => s"$message (at character $p)")
-    case QueryProblem.UnknownReferences(messages) =>
-      s"The query names something that is not in this tree: ${messages.mkString("; ")}"
-    case QueryProblem.TypeCheckFailed(messages) =>
-      s"The query does not type-check: ${messages.mkString("; ")}"
-    case QueryProblem.NotQuantifiable(message) =>
-      message
+  /** The query pane's sentence, which is the one the server logs: the engine's
+    * messages are written for the person who typed the query. */
+  def query(problem: QueryProblem): String = QueryProblem.describe(problem)
 
   def conflict(kind: ConflictKind): String = kind match
     case ConflictKind.Rejected()     => ConflictRejected

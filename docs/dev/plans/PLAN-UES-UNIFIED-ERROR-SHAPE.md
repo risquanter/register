@@ -3,7 +3,7 @@
 Plan code `UES`. Decisions in this document are labelled `UES-D-<n>`.
 
 **Status.** Written 2026-11-09 at version 0.17.2. `UES-D-1` to `UES-D-15` are
-ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. No phase has started. The user
+ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Phase 0 step 0.1 landed at version 0.18.1. The user
 creates `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`; until it
 exists and the token names this document, no gated edit is authorized.
 
@@ -87,9 +87,8 @@ plan's second carve-out and does not fix it in passing.
 
 ## 3. The shape
 
-The signatures below are the plan's specification. They are written for the
-placement `UES-D-13` recommends, the server module; if `UES-D-13` is ruled the
-other way the package changes and nothing else does.
+The signatures below are the plan's specification. They are placed in the
+server module, as `UES-D-13` rules.
 
 ### 3.1 `Core`, `Failure`, `TrustZone`, `PeerZone`
 
@@ -162,8 +161,7 @@ enum Failure:
 `Client.type` and `Environment.type` are the singleton types of the two cases,
 so an `Expired` cannot name a store and a `NotSupported` cannot name a caller.
 The names `Failure`, `Core`, `Service`, `Diagnostic` and `ExpiryDetail` are
-placeholders until `UES-D-14` is ruled; the plan's grep targets name the old
-leaves and are unaffected by the final names.
+final (`UES-D-14`).
 
 The family search. `TrustZone`, `PeerZone`, `Failure`, `Diagnostic`,
 `OutageMode` and `DenialKind` join the closed sets that say what a failure is,
@@ -349,9 +347,33 @@ object Failure:
 `FailureOrigin` is kept as the two-case enum that names a log level's cause,
 and it is now derived from the zone rather than declared per leaf. `logMessage`
 is one function: the variant's name, then each `(location, problem)` rendered
-by `ErrorLocation.describe` and the problem enum's own `describe`, joined by
-`"; "`. Every `describe` exists today except `OutageMode.describe` and
-`DenialKind.describe`, which are written with their enums.
+by `ErrorLocation.describe` and the problem enum's own text, joined by
+`"; "`. `FieldProblem`'s text is `ValidationMessages.render`, which exists
+today and gains an arm for `FieldProblem.Query` through `QueryProblem.describe`.
+`OutageMode.describe` and `DenialKind.describe` are written with their enums.
+The other payload enums have no server-side text today, because their only
+sentences are the browser's, in `ErrorMessages.scala`. Each gains one function
+in its companion, following `MergeRefusal.describe` in `MergeRefusal.scala`:
+
+```scala
+// http/errors/NotFoundKind.scala, in object NotFoundKind
+/** The server's own sentence for a log line. Never reaches a client. */
+def describe(kind: NotFoundKind): String
+
+// http/errors/ConflictKind.scala, in object ConflictKind
+/** The server's own sentence for a log line; `MergeRefused` delegates to
+  * `MergeRefusal.describe`. Never reaches a client. */
+def describe(kind: ConflictKind): String
+
+// http/errors/Capability.scala, in object Capability
+def describe(capability: Capability): String
+
+// http/errors/QueryProblem.scala, in object QueryProblem
+def describe(problem: QueryProblem): String
+
+// Failure.scala, in object ExpiryDetail
+def describe(detail: ExpiryDetail): String
+```
 
 ```scala
 // Failure.scala, beside WireError.fromAppError until the last phase deletes it

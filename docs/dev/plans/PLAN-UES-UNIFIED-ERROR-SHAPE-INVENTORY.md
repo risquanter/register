@@ -86,3 +86,10 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceItSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/auth/AuthorizationServiceSpiceDBItSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/ConflictKind.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/RejectionDetail.scala
+- modules/app/src/main/scala/app/views/ErrorMessages.scala
+- modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+- modules/app/src/main/scala/app/state/PortfolioFormState.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala

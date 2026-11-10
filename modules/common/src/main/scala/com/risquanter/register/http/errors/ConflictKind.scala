@@ -61,3 +61,13 @@ object ConflictKind:
   given schema: Schema[ConflictKind] =
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[ConflictKind]
+
+  /** The server's own sentence for a log line. Never reaches a client. */
+  def describe(kind: ConflictKind): String = kind match
+    case Rejected()                    => "the request conflicts with the stored state"
+    case StaleVersion()                => "the expected version is stale"
+    case MergeRefused(scenario, why)   => s"merge of scenario ${scenario.value} refused: ${MergeRefusal.describe(why)}"
+    case MergeAlreadyRunning(scenario) => s"a merge of scenario ${scenario.value} is already running"
+    case MergeTargetMoved(scenario)    => s"main moved while scenario ${scenario.value} was being merged"
+    case ScenarioHeadStale(scenario)   => s"the head of scenario ${scenario.value} is not the one expected"
+    case SimulationRequired(treeId)    => s"tree ${treeId.value} has no simulation results"

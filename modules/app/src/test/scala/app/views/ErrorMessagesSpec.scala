@@ -8,7 +8,7 @@ import app.core.{LocalProblem, RequestFailure}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode}
 import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, ScenarioName, SeedVarId, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
-import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
+import com.risquanter.register.http.errors.{Capability, NotFoundKind, RejectionDetail, WireError}
 import com.risquanter.register.http.responses.{MergeConflictEntry, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId as treeIdOf, unsafeGet}
 
@@ -53,6 +53,20 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
         assertTrue(
           sentence == ErrorMessages.TreeNotAtCommit,
           sentence != ErrorMessages.NotFound
+        )
+      },
+      test("an absence in the store reads as the server fault it is answered as") {
+        val storeAbsences = List(
+          NotFoundKind.StoredValueAbsent(), NotFoundKind.MetadataAbsent(),
+          NotFoundKind.NodesAbsent(), NotFoundKind.BranchHeadAbsent()
+        )
+        assertTrue(storeAbsences.forall(k => ErrorMessages.notFound(k) == ErrorMessages.InternalFault))
+      },
+      test("a deployment without history says pinned reads are unavailable, apart from scenarios") {
+        val pinned = ErrorMessages.wire(WireError.NotSupported(Capability.PinnedReads, trace))
+        assertTrue(
+          pinned.contains("history"),
+          pinned != ErrorMessages.capabilityUnavailable(Capability.Scenarios)
         )
       }
     )

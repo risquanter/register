@@ -1,0 +1,207 @@
+package com.risquanter.register.domain.errors
+
+import java.time.{Duration, Instant}
+
+import scala.compiletime.testing.typeChecks
+
+import sttp.model.StatusCode
+import zio.prelude.NonEmptyList
+import zio.test.*
+
+import com.risquanter.register.auth.{Permission, ResourceRef, ResourceType}
+import com.risquanter.register.domain.data.ExpiryCause
+import com.risquanter.register.domain.data.iron.{
+  BranchChoice, CommitHash, NodeId, Revision, ScenarioName, TreeId, UserId, ValidationMessages, WorkspaceId
+}
+import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, QueryProblem}
+import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.testutil.TestHelpers.safeId
+
+/** The values derived from a failure's fields: its zone, the log level its zone
+  * decides, the log line and the log line's structured fields.
+  *
+  * Each is derived once from the shape rather than declared per case, so these
+  * tests pin the derivation over every zone and every variant. The last suite
+  * pins the two variants whose zone type admits one zone only, which the
+  * compiler enforces and a test can only show by asking it.
+  */
+object FailureSpec extends ZIOSpecDefault:
+
+  private val treeId: TreeId           = TreeId(safeId("failure-spec-tree"))
+  private val nodeId: NodeId           = NodeId(safeId("failure-spec-node"))
+  private val workspaceId: WorkspaceId = WorkspaceId(safeId("failure-spec-ws"))
+  private val head: CommitHash         = CommitHash.fromString("a" * 40).toOption.get
+  private val user: UserId.Authenticated =
+    UserId.fromString("8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf").toOption.get
+
+  private val nameRequired: ValidationError =
+    ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.Required)
+
+  private def rejectedAt(zone: TrustZone): Failure =
+    Failure.rejected(zone, NonEmptyList(nameRequired), Nil)
+
+  private def one[P](problem: P): NonEmptyList[(ErrorLocation, P)] =
+    NonEmptyList((ErrorLocation.Whole, problem))
+
+  private val everyZone: List[TrustZone] = List(
+    TrustZone.Client,
+    TrustZone.Environment,
+    TrustZone.MeshHeader,
+    TrustZone.Peer(PeerZone.Store),
+    TrustZone.Peer(PeerZone.Database),
+    TrustZone.Peer(PeerZone.Authorization),
+    TrustZone.Service
+  )
+
+  /** One failure of each variant, each at a zone it admits. */
+  private val everyVariant: List[Failure] = List(
+    rejectedAt(TrustZone.Client),
+    Failure.Unanswered(Core(PeerZone.Store, one(OutageMode.ConnectionRefused), Nil)),
+    Failure.NotFound(Core(TrustZone.Peer(PeerZone.Store), one(NotFoundKind.MetadataAbsent()), Nil)),
+    Failure.Conflict(Core(TrustZone.Client, one(ConflictKind.StaleVersion()), Nil)),
+    Failure.AccessDenied(Core(TrustZone.MeshHeader, one(DenialKind.IdentityAbsent), Nil)),
+    Failure.Expired(Core(
+      TrustZone.Client,
+      one(ExpiryDetail(ExpiryCause.Inactivity, Duration.ofHours(72), Duration.ofMinutes(30))),
+      Nil)),
+    Failure.NotSupported(Core(TrustZone.Environment, one(Capability.PinnedReads), Nil))
+  )
+
+  /** One diagnostic of each case, with the log keys each must render. */
+  private val everyDiagnostic: List[(Diagnostic, Set[String])] = List(
+    Diagnostic.WorkspaceRef(workspaceId)            -> Set("workspace_id"),
+    Diagnostic.TreeRef(treeId)                      -> Set("tree_id"),
+    Diagnostic.RevisionRead(Revision.At(head))      -> Set("revision"),
+    Diagnostic.ExpiredAt(Instant.EPOCH)             -> Set("expired_at"),
+    Diagnostic.ExpectedHead(head)                   -> Set("expected_head"),
+    Diagnostic.ActualHead(None)                     -> Set("actual_head"),
+    Diagnostic.Principal(user, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId)) ->
+      Set("user", "permission", "resource_type", "resource_id"),
+    Diagnostic.StoragePath(IrminPath.unsafeFrom("risk-trees/a")) -> Set("storage_path"),
+    Diagnostic.RawValue("bad segment!")             -> Set("raw_value"),
+    Diagnostic.PeerMessage("driver said no")        -> Set("peer_message"),
+    Diagnostic.PeerBody("<html>")                   -> Set("peer_body"),
+    Diagnostic.GraphQlPath(List("main", "tree"))    -> Set("graphql_path")
+  )
+
+  def spec = suite("FailureSpec")(
+    suite("origin")(
+      test("a failure at Client is the caller's") {
+        assertTrue(rejectedAt(TrustZone.Client).origin == FailureOrigin.Caller)
+      },
+      test("a failure at every other zone is the service's") {
+        val others = everyZone.filterNot(_ == TrustZone.Client)
+        assertTrue(others.forall(z => rejectedAt(z).origin == FailureOrigin.Service))
+      },
+      test("an outage is at the peer that did not answer, and is the service's") {
+        val outage = Failure.Unanswered(Core(PeerZone.Database, one(OutageMode.Timeout(zio.Duration.fromSeconds(5))), Nil))
+        assertTrue(
+          outage.zone == TrustZone.Peer(PeerZone.Database),
+          outage.origin == FailureOrigin.Service
+        )
+      }
+    ),
+    suite("logAnnotations")(
+      test("carries trust_zone with a distinct value for every zone") {
+        val values = everyZone.map(z => rejectedAt(z).logAnnotations.get("trust_zone"))
+        assertTrue(values.forall(_.isDefined), values.distinct.size == everyZone.size)
+      },
+      test("carries every diagnostic's keys") {
+        val failure = Failure.rejected(TrustZone.Client, NonEmptyList(nameRequired), everyDiagnostic.map(_._1))
+        val keys    = failure.logAnnotations.keySet
+        assertTrue(everyDiagnostic.forall((_, expected) => expected.subsetOf(keys)))
+      },
+      test("each diagnostic renders exactly its own keys") {
+        assertTrue(everyDiagnostic.forall((d, expected) => Diagnostic.render(d).map(_._1).toSet == expected))
+      }
+    ),
+    suite("logMessage")(
+      test("renders every element of a two-element list, in order, after the variant's name") {
+        val second  = ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Probability), FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval))
+        val failure = Failure.rejected(TrustZone.Client, NonEmptyList(nameRequired, second), Nil)
+        assertTrue(failure.logMessage == s"Rejected: ${ValidationError.describe(nameRequired)}; ${ValidationError.describe(second)}")
+      },
+      test("names each variant and renders its problem through that payload's own text") {
+        val expected = List(
+          "Rejected: [request.Name] A value is required",
+          s"Unanswered: [request] ${OutageMode.describe(OutageMode.ConnectionRefused)}",
+          s"NotFound: [request] ${NotFoundKind.describe(NotFoundKind.MetadataAbsent())}",
+          s"Conflict: [request] ${ConflictKind.describe(ConflictKind.StaleVersion())}",
+          s"AccessDenied: [request] ${DenialKind.describe(DenialKind.IdentityAbsent)}",
+          "Expired: [request] the idle limit of PT30M has passed",
+          s"NotSupported: [request] ${Capability.describe(Capability.PinnedReads)}"
+        )
+        assertTrue(everyVariant.map(_.logMessage) == expected)
+      }
+    ),
+    suite("payload text")(
+      test("every case of every payload has its own sentence") {
+        val scenario = ScenarioName.fromString("draft-a").toOption.get
+        val sentences: List[List[String]] = List(
+          List(OutageMode.ConnectionRefused, OutageMode.Timeout(zio.Duration.fromSeconds(5)),
+               OutageMode.Status(StatusCode.BadGateway), OutageMode.Protocol).map(OutageMode.describe),
+          DenialKind.values.toList.map(DenialKind.describe),
+          List(NotFoundKind.Unknown(), NotFoundKind.TreeNotOnBranch(BranchChoice.Main), NotFoundKind.TreeNotAtCommit(),
+               NotFoundKind.StoredValueAbsent(), NotFoundKind.MetadataAbsent(), NotFoundKind.NodesAbsent(),
+               NotFoundKind.BranchHeadAbsent()).map(NotFoundKind.describe),
+          List(ConflictKind.Rejected(), ConflictKind.StaleVersion(),
+               ConflictKind.MergeRefused(scenario, MergeRefusal.BranchesConflict()),
+               ConflictKind.MergeAlreadyRunning(scenario), ConflictKind.MergeTargetMoved(scenario),
+               ConflictKind.ScenarioHeadStale(scenario), ConflictKind.SimulationRequired(treeId)).map(ConflictKind.describe),
+          Capability.values.toList.map(Capability.describe),
+          List(QueryProblem.Unparseable("m", Some(3)), QueryProblem.UnknownReferences(List("m")),
+               QueryProblem.TypeCheckFailed(List("m")), QueryProblem.NotQuantifiable("n")).map(QueryProblem.describe),
+          List(ExpiryDetail(ExpiryCause.Lifetime, Duration.ofHours(72), Duration.ofMinutes(30)),
+               ExpiryDetail(ExpiryCause.Inactivity, Duration.ofHours(72), Duration.ofMinutes(30))).map(ExpiryDetail.describe),
+          List(FieldProblem.Unreadable(ExpectedInput.Json), FieldProblem.Unreadable(ExpectedInput.Interval),
+               FieldProblem.WrongFormat(ValueFormat.StoreSegment), FieldProblem.StoredNodeKindDiffers,
+               FieldProblem.Query(QueryProblem.NotQuantifiable("n"))).map(ValidationMessages.render)
+        )
+        assertTrue(sentences.forall(s => s.forall(_.nonEmpty) && s.distinct.size == s.size))
+      },
+      test("a refused query carries the engine's own sentence") {
+        val problem = QueryProblem.Unparseable("unexpected token", Some(7))
+        assertTrue(ValidationMessages.render(FieldProblem.Query(problem)) == "unexpected token (at character 7)")
+      },
+      test("a refused query is classified by the engine's refusal") {
+        assertTrue(
+          FieldProblem.code(FieldProblem.Query(QueryProblem.Unparseable("m", None))) == ValidationErrorCode.PARSE_ERROR,
+          FieldProblem.code(FieldProblem.Query(QueryProblem.UnknownReferences(Nil))) == ValidationErrorCode.UNKNOWN_REFERENCE,
+          FieldProblem.code(FieldProblem.Query(QueryProblem.TypeCheckFailed(Nil))) == ValidationErrorCode.BIND_FAILED,
+          FieldProblem.code(FieldProblem.Query(QueryProblem.NotQuantifiable("n"))) == ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE
+        )
+      },
+      test("a tree subject names the tree") {
+        assertTrue(ErrorLocation.describe(ErrorLocation.Field(ErrorSubject.Tree(treeId), FieldName.RootId)) == s"tree ${treeId.value}.RootId")
+      }
+    ),
+    suite("rejected")(
+      test("keeps each refusal's location and problem, in order") {
+        val failure = Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyList(nameRequired), List(Diagnostic.TreeRef(treeId)))
+        assertTrue(failure == Failure.Rejected(Core(
+          TrustZone.Peer(PeerZone.Store),
+          NonEmptyList((nameRequired.location, nameRequired.problem)),
+          List(Diagnostic.TreeRef(treeId)))))
+      }
+    ),
+    suite("zone types")(
+      test("an expiry admits the Client zone and no other") {
+        assertTrue(
+          typeChecks("Failure.Expired(Core(TrustZone.Client, one(ExpiryDetail(ExpiryCause.Lifetime, Duration.ZERO, Duration.ZERO)), Nil))"),
+          !typeChecks("Failure.Expired(Core(TrustZone.Service, one(ExpiryDetail(ExpiryCause.Lifetime, Duration.ZERO, Duration.ZERO)), Nil))")
+        )
+      },
+      test("a missing capability admits the Environment zone and no other") {
+        assertTrue(
+          typeChecks("Failure.NotSupported(Core(TrustZone.Environment, one(Capability.Scenarios), Nil))"),
+          !typeChecks("Failure.NotSupported(Core(TrustZone.Client, one(Capability.Scenarios), Nil))")
+        )
+      },
+      test("an outage admits a peer and no other zone") {
+        assertTrue(
+          typeChecks("Failure.Unanswered(Core(PeerZone.Store, one(OutageMode.Protocol), Nil))"),
+          !typeChecks("Failure.Unanswered(Core(TrustZone.Client, one(OutageMode.Protocol), Nil))")
+        )
+      }
+    )
+  )

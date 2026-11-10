@@ -709,6 +709,7 @@ object RiskLeafFormState:
                FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
                FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |
                FieldName.Email | FieldName.Url | FieldName.TraceId |
+               FieldName.Ttl | FieldName.IdleTimeout |
                FieldName.AggregatedLoss | FieldName.MitigatedResult | FieldName.Unknown =>
             noTarget
       case ErrorLocation.Whole             => Set(RiskLeafField.FormLevel)

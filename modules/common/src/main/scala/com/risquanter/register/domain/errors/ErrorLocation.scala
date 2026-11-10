@@ -11,6 +11,7 @@ import com.risquanter.register.domain.data.iron.{
   SafeName, ScenarioName, SeedEntityId, SeedVarId, TreeId, given
 }
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
+import com.risquanter.register.http.errors.QueryProblem
 
 /** The key naming which case a value is, read by every decoder in this file and
   * published in every schema. Stated once so the two cannot disagree. */
@@ -65,6 +66,11 @@ enum ErrorSubject:
     * identifier exists yet.
     */
   case ExistingNode(nodeId: NodeId)
+
+  /** A stored or submitted tree's own fields: its root id, its mitigations
+    * list, its seed high-water mark. Carries the tree, so the refusals
+    * accumulated over a listing of several trees name their trees apart. */
+  case Tree(treeId: TreeId)
 
   /** A mitigation, or the leaf transform belonging to one. */
   case Mitigation(mitigationId: MitigationId)
@@ -147,6 +153,9 @@ enum FieldName:
 
   // Credentials, identity and configuration
   case WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, TraceId
+
+  // A workspace's two lifetimes: the absolute one and the idle one
+  case Ttl, IdleTimeout
 
   // Computed values, which no request carries
   case AggregatedLoss, MitigatedResult
@@ -236,6 +245,7 @@ object ErrorLocation:
     case ErrorSubject.DraftNode              => "draft"
     case ErrorSubject.NodeAtIndex(coll, i)   => s"submitted $coll[$i]"
     case ErrorSubject.ExistingNode(nodeId)   => s"node ${nodeId.value}"
+    case ErrorSubject.Tree(treeId)           => s"tree ${treeId.value}"
     case ErrorSubject.Mitigation(id)         => s"mitigation ${id.value}"
     case ErrorSubject.Workspace              => "workspace"
 
@@ -352,6 +362,12 @@ enum ExpectedInput:
   /** Whatever type the endpoint declares for the input. */
   case Declared
 
+  /** JSON, for a stored value whose text did not parse as JSON. */
+  case Json
+
+  /** A Postgres interval, for a stored duration whose text did not read as one. */
+  case Interval
+
 object ExpectedInput:
   given codec: JsonCodec[ExpectedInput] = DeriveJsonCodec.gen[ExpectedInput]
 
@@ -381,6 +397,9 @@ object Alphabet:
 enum ValueFormat:
   case Ulid, WorkspaceKey, WorkspaceKeyHash, UserId, Email, Url, SecureUrl, ExternalToken, TraceId
   case CommitHash, ContentHash, BranchName, StagingBranchName, DistributionTypeName
+
+  /** One segment of an Irmin storage path. */
+  case StoreSegment
 
   /** A scenario name's first character, which must be a letter or a digit. */
   case ScenarioNameStart
@@ -428,6 +447,11 @@ enum FieldProblem:
   case Required
   case Unreadable(expected: ExpectedInput)
 
+  /** The query engine refused the query text. Wraps the wire's own payload, so a
+    * refused query reaches the client as `RejectionDetail.Query` with the
+    * engine's structure intact. */
+  case Query(problem: QueryProblem)
+
   /** A validator the endpoint declares on the input refused the value, with no
     * refinement of this application's own behind it. */
   case DeclaredConstraintNotMet
@@ -469,6 +493,9 @@ enum FieldProblem:
   case StoredNodeIsLeaf
   case StoredNodeIsPortfolio
   case StoredNodeNotInTree
+
+  /** A node is a leaf on one side of a merge and a portfolio on the other. */
+  case StoredNodeKindDiffers
 
   // The index of a built tree, referenced by id
   case ChildParentMismatch(child: NodeId, declaredParent: Option[NodeId])
@@ -534,6 +561,7 @@ object FieldProblem:
   def code(problem: FieldProblem): ValidationErrorCode = problem match
     case Required                                   => ValidationErrorCode.REQUIRED_FIELD
     case Unreadable(_)                              => ValidationErrorCode.TYPE_MISMATCH
+    case Query(query)                               => queryCode(query)
     case DeclaredConstraintNotMet                   => ValidationErrorCode.INVALID_FORMAT
     case TooLong(_)                                 => ValidationErrorCode.INVALID_LENGTH
     case LengthOutOfRange(_, _)                     => ValidationErrorCode.INVALID_LENGTH
@@ -565,6 +593,7 @@ object FieldProblem:
     case StoredNodeIsLeaf                           => ValidationErrorCode.INVALID_NODE_TYPE
     case StoredNodeIsPortfolio                      => ValidationErrorCode.INVALID_NODE_TYPE
     case StoredNodeNotInTree                        => ValidationErrorCode.MISSING_REFERENCE
+    case StoredNodeKindDiffers                      => ValidationErrorCode.INVALID_NODE_TYPE
     case ChildParentMismatch(_, _)                  => ValidationErrorCode.CONSTRAINT_VIOLATION
     case ChildNotFound(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
     case ParentDoesNotListChild(_)                  => ValidationErrorCode.CONSTRAINT_VIOLATION
@@ -605,3 +634,10 @@ object FieldProblem:
     case WorkspaceHasNoContent                      => ValidationErrorCode.NOT_FOUND
     case RequiresIrminBackend                       => ValidationErrorCode.NOT_SUPPORTED
     case Unspecified                                => ValidationErrorCode.CONSTRAINT_VIOLATION
+
+  /** The query codes, one per refusal the engine reports. */
+  private def queryCode(problem: QueryProblem): ValidationErrorCode = problem match
+    case QueryProblem.Unparseable(_, _)     => ValidationErrorCode.PARSE_ERROR
+    case QueryProblem.UnknownReferences(_)  => ValidationErrorCode.UNKNOWN_REFERENCE
+    case QueryProblem.TypeCheckFailed(_)    => ValidationErrorCode.BIND_FAILED
+    case QueryProblem.NotQuantifiable(_)    => ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE

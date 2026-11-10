@@ -45,3 +45,16 @@ object QueryProblem:
   given schema: Schema[QueryProblem] =
     given Configuration = Configuration.default.withDiscriminator(TagField)
     Schema.derived[QueryProblem]
+
+  /** The sentence for a refused query: the query pane shows it, and a server
+    * log line records it. The engine's messages are written for the person who
+    * typed the query, so they are carried as they are. */
+  def describe(problem: QueryProblem): String = problem match
+    case Unparseable(message, position) =>
+      position.fold(message)(p => s"$message (at character $p)")
+    case UnknownReferences(messages) =>
+      s"The query names something that is not in this tree: ${messages.mkString("; ")}"
+    case TypeCheckFailed(messages) =>
+      s"The query does not type-check: ${messages.mkString("; ")}"
+    case NotQuantifiable(message) =>
+      message
