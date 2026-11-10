@@ -540,7 +540,7 @@ SpiceDB is the selected Layer 2 backend. This phase establishes the implementati
 
 - Deploy SpiceDB on k3s (Helm) with persistent storage — see [ADR-INFRA-010](../register-infra/docs/adr/ADR-INFRA-010.md)
 - Apply initial `.zed` schema (`workspace`, `risk_tree`, inherited permissions)
-- Implement `AuthorizationServiceSpiceDB` with `check` and `listAccessible` only — pure PEP, no tuple writes
+- Implement `AuthorizationServiceSpiceDB` with `check` only — pure PEP, no tuple writes
 - Implement `BootstrapProvisionerSpiceDB` for workspace ownership lifecycle writes — see DONE-AUTHORIZATION-IMPLEMENTATION-PLAN.md §D
 - `AuthorizationService` contains zero write operations; `BootstrapProvisioner` is scoped to bootstrap handler only (see ADR-024)
 - Implement `AuthzProvisioning` job in CI/CD (idempotent reconcile, drift detection, audit logs) — delivery via in-cluster CI runner, see [ADR-INFRA-011](../register-infra/docs/adr/ADR-INFRA-011.md)
@@ -747,12 +747,6 @@ object ResourceRef:
     def asResource: ResourceRef = ResourceRef(ResourceType.Workspace, id.toSafeId)
 ```
 
-**`ResourceId`** — return element type of `listAccessible`. Alias for `SafeId`; caller promotes to `TreeId` / `WorkspaceId` as needed.
-
-```scala
-type ResourceId = SafeId.SafeId
-```
-
 **`AuthError`** — sealed authorization error hierarchy, extending the existing `AppError` sealed trait (ADR-010). Lives in `common/.../domain/errors/AppError.scala`.
 
 ```scala
@@ -790,25 +784,16 @@ trait AuthorizationService:
   // PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
   // Connectivity failure          → AuthServiceUnavailable (answered as a dependency outage)
   // No grant() / revoke() — pure PEP; tuple writes are ops-path only ([ADR-024: App is PEP Only](./ADR-024-externalized-authorization-pep-pattern.md#1-app-is-pep-only)).
-
-  def listAccessible(
-    user:         UserId.Authenticated,
-    resourceType: ResourceType,
-    permission:   Permission
-  ): IO[AuthError, List[ResourceId]]
-  // Calls SpiceDB LookupResources API.
-  // Used for "show my workspaces" — returns IDs of all resources where the user
-  // has the given permission; no local DB join required.
 ```
 
-**Discovery — "show my workspaces" cannot be built on `listAccessible` alone.**
+**"Show my workspaces" needs a decision the lookup cannot supply.**
 
-`listAccessible` returns workspace identifiers. A workspace is opened through
-its capability URL, `/w/{key}/…`, and the server cannot produce that URL from
-an identifier: `WorkspaceRecord` stores only `keyHash`, the SHA-256 digest of a
-128-bit random key (`WorkspaceKeyCrypto.hash`). The digest is irreversible,
-which is the correct property for a stored credential and the reason this
-feature does not follow from the lookup.
+SpiceDB can list the workspaces a user may view, as workspace identifiers. A
+workspace is opened through its capability URL, `/w/{key}/…`, and the server
+cannot produce that URL from an identifier: `WorkspaceRecord` stores only
+`keyHash`, the SHA-256 digest of a 128-bit random key (`WorkspaceKeyCrypto.hash`).
+The digest is irreversible, which is the correct property for a stored
+credential and the reason this feature does not follow from a lookup.
 
 A listing could show names and dates, but nothing the user can click. So the
 feature needs a prior decision on how an identified user reaches a workspace
@@ -816,7 +801,9 @@ they own — a per-user stored reference to the key, reissuing a key on demand t
 a proven owner, or a different access path altogether. `WorkspaceId` is not a
 candidate for the wire (ADR-036 §1).
 
-Open: that decision. Until it is made, `listAccessible` has no caller.
+Open: that decision. The interface holds no lookup until it is made; when it is,
+the lookup is added returning `List[WorkspaceId]` to the server alone, as the
+input to whatever step produces what the user can click.
 
 #### SpiceDB HTTP API Mapping
 
@@ -848,18 +835,6 @@ Scala mapping table:
 | HTTP 4xx | `ZIO.fail(AuthServiceUnavailable(...))` | Config/auth error |
 | HTTP 5xx / timeout | `ZIO.fail(AuthServiceUnavailable(...))` | Fail-closed |
 | Network error | `ZIO.fail(AuthServiceUnavailable(...))` | Fail-closed |
-
-**List Accessible — POST `/v1/permissions/resources`:**
-
-```json
-{
-  "resourceObjectType": "workspace",
-  "permission":         "view_workspace",
-  "subject":            { "object": { "objectType": "user", "objectId": "..." } },
-  "consistency":        { "minimizeLatency": {} }
-}
-// Response: streamed list — collect into List[ResourceId]
-```
 
 #### ZedToken Consistency Strategy
 
@@ -963,12 +938,10 @@ object AuthorizationServiceSpiceDB:
 
 ```scala
 // Wired when register.auth.mode = "capability-only" or "identity" — no SpiceDB needed.
-// All checks pass; listAccessible returns Nil (no fine-grained filtering in those modes).
+// All checks pass.
 object AuthorizationServiceNoOp extends AuthorizationService:
   def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]] =
     ZIO.succeed(Checked[P]())   // always grants; proof produced unconditionally
-  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
-    ZIO.succeed(Nil)
 
 // For unit tests — allow/deny by explicit (user, permission, resource) set.
 // No live SpiceDB required; injected via ZLayer in test scope.
@@ -978,10 +951,6 @@ class AuthorizationServiceStub(
   def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]] =
     if allowed.contains((user, permission, resource)) then ZIO.succeed(Checked[P]())
     else ZIO.fail(AuthForbidden(user.value, permission.zedName, resource.resourceType.zedType, resource.resourceId.value))
-  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
-    ZIO.succeed(allowed.collect {
-      case (u, p, ResourceRef(rt, id)) if u == user && p == permission && rt == resourceType => id
-    }.toList)
 ```
 
 #### Adapter Boundary — gRPC Migration Path
@@ -997,7 +966,7 @@ HTTP first; gRPC only if latency profiling shows the HTTP overhead exceeds budge
 
 ### Task L2.3: Access Administration (Ops Path — Not App Logic)
 
-Access grant and revoke operations are **not implemented in the application**. The app is a pure PEP (see ADR-024): it calls `check()` and `listAccessible()` only; it never writes authorization data.
+Access grant and revoke operations are **not implemented in the application**. The app is a pure PEP (see ADR-024): it calls `check()` only; it never writes authorization data.
 
 Access administration paths:
 - **Org/team-level provisioning:** CI/CD job (K.6) — idempotent reconcile from config, Keycloak groups → SpiceDB team relations

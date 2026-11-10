@@ -78,9 +78,9 @@ final class BootstrapProvisionerSpiceDB private (
         SpiceDbRelationshipUpdate(
           operation = BootstrapProvisionerSpiceDB.TouchOperation,
           relationship = SpiceDbRelationship(
-            resource = SpiceDbObjectRef(ResourceType.Workspace.zedType, workspaceId.value),
+            resource = SpiceDbObjectRef.Resource(ResourceType.Workspace, workspaceId.toSafeId),
             relation = BootstrapProvisionerSpiceDB.OwnerRelation,
-            subject  = SpiceDbSubjectRef(`object` = SpiceDbObjectRef(BootstrapProvisionerSpiceDB.UserSubjectType, userId.value))
+            subject  = SpiceDbSubjectRef(`object` = SpiceDbObjectRef.User(userId))
           )
         )
       )
@@ -136,11 +136,6 @@ object BootstrapProvisionerSpiceDB:
     * schema in `infra/spicedb/schema.zed`.
     */
   private val OwnerRelation: String = "owner_user"
-
-  /** The Zed `definition` a user subject belongs to. Spelling fixed by the Zed
-    * schema; `AuthorizationServiceSpiceDB.userSubject` writes the same value.
-    */
-  private val UserSubjectType: String = "user"
 
   /** Layer with injectable SttpBackend — use SttpBackendStub in unit tests. */
   val layer: ZLayer[SpiceDbConfig & SttpBackend[Task, Any], Nothing, BootstrapProvisioner] =

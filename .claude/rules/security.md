@@ -37,7 +37,6 @@ trait AuthorizationService:
   def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
   // Checked[P] is bound via `given` in controller for-comprehensions.
   // Protected service methods require `using Checked[Authority]` — missing proof is a compile error.
-  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
 
 // ❌ NEVER — app never writes tuples to SpiceDB
 def grant(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]

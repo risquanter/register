@@ -14,7 +14,7 @@ import com.risquanter.register.domain.errors.{AuthError, Failure}
   * delegation request). The service account's write scope is limited to `owner_user`
   * and `owner_team` relations on workspace definitions — not arbitrary ACL grants.
   *
-  * [[AuthorizationService]] remains a pure PEP: `check()` and `listAccessible()` only.
+  * [[AuthorizationService]] remains a pure PEP: `check()` only.
   * This trait owns the single lifecycle write; all other tuple management is ops-only.
   *
   * @see ADR-024 §4 — resource lifecycle writes are not policy administration

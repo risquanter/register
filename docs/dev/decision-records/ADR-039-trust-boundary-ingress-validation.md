@@ -50,7 +50,13 @@ The server's borders:
 
 Each refines into the refined and nominal types the domain declares, using the
 same refinements the request path uses. A crossing that yields a raw primitive
-where a refined type exists has not been validated.
+where a refined type exists has not been validated. Every value that enters an
+aggregate is refined, and a value that does not refine is refused: no site
+admits a boundary value unrefined on the ground that the peer might hold
+content this service did not write. The store holds only what this service
+wrote, and the authorization service answers only about this service's own
+identifiers, so that ground never holds, and a comment claiming it cannot be
+checked.
 
 Every border is crossed in both directions, and this record governs one of them.
 What may be built into a document sent out to an external parser is ADR-029 §3.
@@ -106,17 +112,6 @@ carries the accumulated `ValidationError` list. It carries no composed sentence,
 and no caller recovers a decision from its text. The concrete error type is
 declared by the plan that implements this record.
 
-### 5. An exemption is explicit, local and recorded
-
-A boundary value may be admitted unrefined only where the record of that choice
-sits at the site: what is not refined, and why. Silence is not an exemption.
-
-```scala
-// Result ids that fail SafeId refinement are skipped: an id this service
-// cannot name is an id it cannot have granted.
-Right(SafeId.fromString(id).toOption.fold(ids)(ids :+ _))
-```
-
 ---
 
 ## Code Smells
@@ -124,11 +119,15 @@ Right(SafeId.fromString(id).toOption.fold(ids)(ids :+ _))
 ### ❌ A boundary response type declared over raw primitives
 
 ```scala
-// BAD — the store's answer enters the process untyped
-final case class TreeNode(path: String, hash: Option[String], value: Option[String])
+// BAD — the store's answer is held untyped
+final case class IrminCommit(hash: String, key: String, parents: List[String], info: IrminInfo)
 
-// GOOD — the ingress type carries the refinement
-final case class TreeNode(path: IrminPath, hash: Option[CommitHash], value: Option[String])
+// GOOD — the raw answer is one type, the refined value another, and the
+// refinement between them refuses what does not fit
+final case class IrminCommit(hash: CommitHash, key: CommitHash, parents: List[CommitHash], info: IrminInfo)
+object IrminCommit:
+  final case class Raw(hash: String, key: String, parents: List[String], info: IrminInfo.Raw)
+  def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminCommit]
 ```
 
 ### ❌ Flattening an accumulated validation at ingress
@@ -159,8 +158,9 @@ case DuplicateSeedEntityId(id) => ...
 |---|---|
 | `BaseEndpoint.authedBaseEndpoint` | Mesh claim header typed `UserId.Authenticated` at ingress |
 | `RiskTreeRepositoryIrmin.rebuildTree` | Store read routed through `RiskTree.fromNodes` |
-| `IrminClientLive.childPaths` | Store-returned names refined to `IrminPath`, failure typed |
-| `AuthorizationServiceSpiceDB.parseLookupResponseLines` | Recorded exemption: unrefinable ids skipped |
+| `IrminClientLive.childPaths` | Store-returned names refined to `IrminSegment`, failure typed |
+| `IrminClientLive.refineCommit`, `refineBranch` | Store-returned commits and branch names refined to `IrminCommit` and `StoreBranch`, failure typed |
+| `AuthorizationServiceSpiceDB.refineAnswer` | Authorization answer refined to `Permissionship`; a body or a spelling outside the protocol is refused |
 | `WorkspaceStorePostgres.toRecord` | Database row refined to domain types on load |
 
 ---

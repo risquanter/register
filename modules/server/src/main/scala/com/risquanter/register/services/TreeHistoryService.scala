@@ -3,18 +3,16 @@ package com.risquanter.register.services
 import zio.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.Greater
-import java.time.{DateTimeException, Instant}
 import com.risquanter.register.auth.{Authority, Checked}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt, CommitHash}
-import com.risquanter.register.domain.errors.{AppError, Failure, RepositoryFailure, ValidationError}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt}
+import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.http.responses.TreeHistoryEntry
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.IrminCommit
 
-/** Per-tree commit history on a branch. Returns typed entries; the raw
-  * commit message (which embeds the WorkspaceId) and author never leave the
-  * service — only the `HistoryOperation`, the commit hash, and the timestamp
-  * cross the boundary.
+/** Per-tree commit history on a branch. Returns typed entries; the commit
+  * message (which embeds the WorkspaceId) never leaves the service — only the
+  * `HistoryOperation`, the commit hash, and the timestamp cross the boundary.
   */
 trait TreeHistoryService:
   def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
@@ -34,20 +32,13 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
     // commits the history shows, oldest first.
     val path = WorkspaceStoragePaths.treeMeta(wsId, treeId)
     irmin.getHistory(path, TreeHistoryServiceLive.requested(limit), branch)
-      .flatMap(commits => ZIO.foreach(commits.distinctBy(_.hash))(toEntry))
-      .map(_.flatten.takeRight(limit))
+      .map(commits => commits.distinctBy(_.hash).flatMap(toEntry).takeRight(limit))
 
   /** The entry for one commit, or `None` for a commit the history does not
     * show: a merge's preparation write is part of the merge commit after it. */
-  private def toEntry(commit: IrminCommit): IO[AppError, Option[TreeHistoryEntry]] =
-    CommitMessage.historyOperation(CommitMessage.parse(commit.info.message)) match
-      case None => ZIO.none
-      case Some(operation) =>
-        ZIO.fromEither(CommitHash.fromString(commit.hash))
-          .mapBoth(
-            errs => RepositoryFailure(s"Invalid commit hash in history: ${errs.map(ValidationError.describe).mkString("; ")}"),
-            hash => Some(TreeHistoryEntry(hash, operation, TreeHistoryServiceLive.toIso(commit.info.date)))
-          )
+  private def toEntry(commit: IrminCommit): Option[TreeHistoryEntry] =
+    CommitMessage.historyOperation(commit.info.message).map(operation =>
+      TreeHistoryEntry(commit.hash, operation, commit.info.date.toString))
 
 object TreeHistoryService:
   /** In-memory backend variant: there is no persistent commit log, so history
@@ -73,13 +64,3 @@ object TreeHistoryServiceLive:
     */
   private[services] def requested(limit: PositiveInt): PositiveInt =
     (limit.toLong * 2).min(Int.MaxValue.toLong).toInt.refineOption[Greater[0]].getOrElse(limit)
-
-  /** Irmin renders the commit date as an epoch-seconds string; normalize to
-    * ISO-8601. If it is already non-numeric (a future Irmin change) or outside
-    * `Instant`'s range, pass it through unchanged rather than failing the
-    * whole history read. */
-  def toIso(date: String): String =
-    date.trim.toLongOption.fold(date) { epoch =>
-      try Instant.ofEpochSecond(epoch).toString
-      catch case _: DateTimeException => date
-    }

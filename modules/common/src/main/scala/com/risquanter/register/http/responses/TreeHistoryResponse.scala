@@ -24,14 +24,12 @@ object TreeWriteKind:
 
 /** The kind of write a history entry shows. A tree write is one case holding
   * its kind, so each write is named once. The server derives it from the
-  * commit message, which embeds the `WorkspaceId` and never leaves the server;
-  * a message the server did not write is `Other`.
+  * commit message, which embeds the `WorkspaceId` and never leaves the server.
   */
 @jsonDiscriminator(HistoryOperation.TagField)
 enum HistoryOperation:
   case TreeWrite(write: TreeWriteKind)
   case Merge()
-  case Other()
 
 object HistoryOperation:
   /** The key naming which case a payload states. Read by this coproduct's

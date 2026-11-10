@@ -65,12 +65,13 @@ object IrminQueries:
 
   /** The `tree { get_tree(path) { list { … } } }` selection shared by the
     * branch-scoped [[listTree]] and commit-scoped [[listTreeAtCommit]] queries.
-    * GraphQL ignores the surrounding whitespace, so a compact single line keeps
-    * the two queries identical apart from their root selector — the listing
-    * shape lives in exactly one place. */
+    * Only each node's path is selected, because a listing is read for the child
+    * names alone. GraphQL ignores the surrounding whitespace, so a compact
+    * single line keeps the two queries identical apart from their root
+    * selector — the listing shape lives in exactly one place. */
   private def listSelection(path: IrminPath): String =
     val pathPart = if path.value.isEmpty then "" else s"""(path: "${path.value}")"""
-    s"tree { get_tree$pathPart { list { ... on Contents { path hash value } ... on Tree { path hash } } } }"
+    s"tree { get_tree$pathPart { list { ... on Contents { path } ... on Tree { path } } } }"
 
   /**
     * Query to list contents at a path in the tree.
@@ -115,7 +116,6 @@ object IrminQueries:
     |    parents
     |    info {
     |      date
-    |      author
     |      message
     |    }
     |  }
@@ -157,7 +157,6 @@ object IrminQueries:
     |    parents
     |    info {
     |      date
-    |      author
     |      message
     |    }
     |  }
@@ -189,7 +188,6 @@ object IrminQueries:
     |    parents
     |    info {
     |      date
-    |      author
     |      message
     |    }
     |  }
@@ -213,7 +211,6 @@ object IrminQueries:
     |      parents
     |      info {
     |        date
-    |        author
     |        message
     |      }
     |    }
@@ -249,7 +246,6 @@ object IrminQueries:
     |    parents
     |    info {
     |      date
-    |      author
     |      message
     |    }
     |  }
@@ -273,7 +269,6 @@ object IrminQueries:
     |    parents
     |    info {
     |      date
-    |      author
     |      message
     |    }
     |  }
@@ -346,7 +341,6 @@ object IrminQueries:
     |    parents
     |    info {
     |      date
-    |      author
     |      message
     |    }
     |  }
@@ -370,7 +364,6 @@ object IrminQueries:
     |      parents
     |      info {
     |        date
-    |        author
     |        message
     |      }
     |    }
@@ -395,7 +388,6 @@ object IrminQueries:
     |      parents
     |      info {
     |        date
-    |        author
     |        message
     |      }
     |    }

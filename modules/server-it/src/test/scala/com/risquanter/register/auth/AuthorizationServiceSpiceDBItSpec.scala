@@ -10,7 +10,8 @@ import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.SpiceDbCompose
 import com.risquanter.register.auth.ResourceRef.asResource
 
-/** Integration tests for the SpiceDB HTTP adapter (T-S1 through T-S10).
+/** Integration tests for the SpiceDB HTTP adapter (T-S1 through T-S6 and T-S9,
+  * T-S10).
   *
   * Requires Docker + docker compose CLI. SpiceDB is started automatically via
   * [[SpiceDbCompose]] and torn down after the suite.
@@ -68,7 +69,7 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
 
   // ─── Test suite ─────────────────────────────────────────────────────────────
 
-  def spec = suite("AuthorizationServiceSpiceDB — integration (T-S1 through T-S10)")(
+  def spec = suite("AuthorizationServiceSpiceDB — integration")(
 
     // ── T-S1: Allowed check returns Checked[P] ──────────────────────────────
     test("T-S1 — allowed check succeeds (owner_user → view_workspace)") {
@@ -150,28 +151,6 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
           case OutageMode.Status(_) => true
           case _                    => false
         }))
-    },
-
-    // ── T-S7: listAccessible returns both workspace IDs for alice ────────────
-    test("T-S7 — listAccessible returns all workspaces where alice has view_workspace") {
-      ZIO.serviceWithZIO[AuthorizationService](
-        _.listAccessible(alice, ResourceType.Workspace, Permission.ViewWorkspace)
-      ).map { ids =>
-        val idStrings = ids.map(_.value.toString).toSet
-        assertTrue(
-          idStrings.contains(SpiceDbCompose.ws1Id),
-          idStrings.contains(SpiceDbCompose.ws2Id)
-        )
-      }
-    },
-
-    // ── T-S8: listAccessible returns Nil for user with no relationships ───────
-    test("T-S8 — listAccessible returns Nil for bob (no relationships)") {
-      ZIO.serviceWithZIO[AuthorizationService](
-        _.listAccessible(bob, ResourceType.Workspace, Permission.ViewWorkspace)
-      ).map { ids =>
-        assertTrue(ids.isEmpty)
-      }
     },
 
     // ── T-S9: Anonymous sentinel UUID has no permissions ─────────────────────

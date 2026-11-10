@@ -57,7 +57,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
     for
       branch   <- freshBranch
       baseHead <- IrminClient.set(path, baseValue, msg("base write"))
-      base      = commitHash(baseHead.hash)
+      base      = baseHead.hash
       _        <- IrminClient.createBranchAt(branch, base)
     yield (branch, base)
 
@@ -68,7 +68,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
       path        <- uniquePath(label)
       (branch, _) <- forkAt(path, "\"v0\"")
       edit        <- IrminClient.set(path, "\"scenario-only\"", msg("scenario edit"), branch)
-      merged      <- IrminClient.mergeCommit(commitHash(edit.hash), BranchRef.Main, msg("merge ff"))
+      merged      <- IrminClient.mergeCommit(edit.hash, BranchRef.Main, msg("merge ff"))
     yield (edit, merged)
 
   override def spec = suite("IrminMergeSemanticsSpec")(
@@ -81,7 +81,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         _            <- IrminClient.set(pathB, "\"b0\"", msg("base write b"))
         branchHead   <- IrminClient.set(pathA, "\"a-scenario\"", msg("scenario edits a"), branch)
         mainHead     <- IrminClient.set(pathB, "\"b-main\"", msg("main edits b"))
-        mergeCommit  <- IrminClient.mergeCommit(commitHash(branchHead.hash), BranchRef.Main, msg("merge disjoint"))
+        mergeCommit  <- IrminClient.mergeCommit(branchHead.hash, BranchRef.Main, msg("merge disjoint"))
         a            <- IrminClient.get(pathA)
         b            <- IrminClient.get(pathB)
       yield assertTrue(
@@ -105,7 +105,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         (branch, _) <- forkAt(path, "\"v0\"")
         scenHead    <- IrminClient.set(path, "\"scenario-value\"", msg("scenario edit"), branch)
         mainHead    <- IrminClient.set(path, "\"main-value\"", msg("main edit"))
-        result      <- IrminClient.mergeCommit(commitHash(scenHead.hash), BranchRef.Main, msg("merge conflicting")).either
+        result      <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge conflicting")).either
         headAfter   <- IrminClient.mainBranch.map(_.flatMap(_.head))
         onMain      <- IrminClient.get(path)
       yield assertTrue(
@@ -129,7 +129,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         (branch, _) <- forkAt(path, "\"v0\"")
         scenHead    <- IrminClient.set(path, "\"scenario-value\"", msg("scenario edit"), branch)
         _           <- IrminClient.set(path, "\"main-value\"", msg("main edit"))
-        refused     <- IrminClient.mergeCommit(commitHash(scenHead.hash), BranchRef.Main, msg("merge conflicting")).either
+        refused     <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge conflicting")).either
         (edit, merged) <- fastForward("ff-after-refusal-edit")
       yield assertTrue(refused.isLeft, merged.hash == edit.hash)
     },
@@ -140,7 +140,7 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         (branch, _) <- forkAt(path, "\"v0\"")
         scenHead    <- IrminClient.set(path, "\"agreed\"", msg("scenario edit"), branch)
         _           <- IrminClient.set(path, "\"agreed\"", msg("main edit to same bytes"))
-        _           <- IrminClient.mergeCommit(commitHash(scenHead.hash), BranchRef.Main, msg("merge equal bytes"))
+        _           <- IrminClient.mergeCommit(scenHead.hash, BranchRef.Main, msg("merge equal bytes"))
         onMain      <- IrminClient.get(path)
       yield assertTrue(onMain.contains("\"agreed\""))
     },
@@ -167,8 +167,8 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
         (branch, base) <- forkAt(path, "\"v0\"")
         branchHead     <- IrminClient.set(path, "\"diverged\"", msg("scenario edit"), branch)
         _              <- IrminClient.set(path, "\"main-moved\"", msg("main edit"))
-        lcas           <- IrminClient.lca(BranchRef.Main, commitHash(branchHead.hash))
-      yield assertTrue(lcas.map(_.hash) == List(base.value))
+        lcas           <- IrminClient.lca(BranchRef.Main, branchHead.hash)
+      yield assertTrue(lcas.map(_.hash) == List(base))
     }
 
   ).provideLayerShared(testLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
@@ -182,6 +182,3 @@ object IrminMergeSemanticsSpec extends ZIOSpecDefault:
 
   private def unsafeBranch(s: String): BranchRef =
     BranchRef.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
-
-  private def commitHash(s: String): CommitHash =
-    CommitHash.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)

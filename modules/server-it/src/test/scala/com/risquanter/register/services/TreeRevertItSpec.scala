@@ -91,7 +91,7 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           irmin   <- ZIO.service[IrminClient]
           _       <- repo.create(wsId, v1, BranchRef.Main)
           histC   <- irmin.getHistory(WorkspaceStoragePaths.treeMeta(wsId, tid), positiveInt(20), BranchRef.Main)
-          c1Hash  <- ZIO.fromEither(CommitHash.fromString(histC.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
+          c1Hash   = histC.head.hash
           _       <- repo.update(wsId, tid, _ => treeV2(v1), BranchRef.Main)
           histU   <- irmin.getHistory(WorkspaceStoragePaths.treeMeta(wsId, tid), positiveInt(20), BranchRef.Main)
           reverted <- repo.revert(wsId, tid, c1Hash, BranchRef.Main)
@@ -106,7 +106,7 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           histR.size == histU.size + 1,
           // the newest commit is the revert — last_modified gives no list-order
           // guarantee, so "newest" is read from the branch head, not list position
-          headAfter.exists(_.info.message.endsWith(":revert")),
+          headAfter.exists(_.info.message == CommitMessage.TreeWritten(wsId, tid, TreeWriteKind.Revert)),
           // non-destructive: every pre-revert commit is still present in history
           histU.map(_.hash).toSet.subsetOf(histR.map(_.hash).toSet)
         )
@@ -125,7 +125,7 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           irmin    <- ZIO.service[IrminClient]
           _        <- repo.create(wsId, v1, BranchRef.Main)
           hist     <- irmin.getHistory(WorkspaceStoragePaths.treeMeta(wsId, tid), positiveInt(20), BranchRef.Main)
-          goodHash <- ZIO.fromEither(CommitHash.fromString(hist.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
+          goodHash  = hist.head.hash
           // Written one blob at a time, the way a merge writes, so no
           // whole-set check runs and the invalid state lands.
           _        <- irmin.set(

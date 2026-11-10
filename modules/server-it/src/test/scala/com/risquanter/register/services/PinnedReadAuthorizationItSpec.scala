@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, RiskLeaf}
-import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, BranchRef, Revision}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
@@ -44,8 +44,7 @@ object PinnedReadAuthorizationItSpec extends ZIOSpecDefault:
           // physically contains B's subtree.
           _      <- repo.create(wsB, treeB, BranchRef.Main)
           cbOpt  <- irmin.getBranch(BranchRef.Main).map(_.flatMap(_.head).map(_.hash))
-          cb     <- ZIO.fromOption(cbOpt).orElseFail(new RuntimeException("main has no head after B's write"))
-          cbHash <- ZIO.fromEither(CommitHash.fromString(cb)).mapError(e => new RuntimeException(e.mkString(", ")))
+          cbHash <- ZIO.fromOption(cbOpt).orElseFail(new RuntimeException("main has no head after B's write"))
           // B, reading its own tree pinned to that commit, sees it.
           bOwn   <- repo.getById(wsB, tB, Revision.At(cbHash)).map(_.map(_._1))
           // A, reading the SAME commit and the SAME treeId but scoped to A's paths,

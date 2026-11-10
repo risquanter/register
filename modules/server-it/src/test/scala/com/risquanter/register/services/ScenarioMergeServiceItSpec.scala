@@ -12,7 +12,7 @@ import com.risquanter.register.domain.data.{
   MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
   AbsoluteReplacement
 }
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, SafeName, TreeId, NodeId, MitigationId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, MergeStagingRef, SafeName, StoreBranch, TreeId, NodeId, MitigationId}
 import com.risquanter.register.domain.errors.{AppError, Failure, FieldName, MergeConflict, RepositoryFailure, ValidationFailed}
 import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
@@ -162,7 +162,12 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
   private def writeMit(wsId: WorkspaceId, mit: MitigationId, label: String, likelihood: Double, branch: BranchRef = BranchRef.Main) =
     IrminClient.set(mitPath(wsId, mit), mitigation(mit, label, likelihood).toJson, blobMessage(wsId), branch)
 
-  private def mainHeadHash: ZIO[IrminClient, AppError | Failure, String] =
+  /** Whether a listed branch is a merge's staging branch. */
+  private def isStaging(branch: StoreBranch): Boolean = branch match
+    case _: MergeStagingRef => true
+    case _: BranchRef       => false
+
+  private def mainHeadHash: ZIO[IrminClient, AppError | Failure, CommitHash] =
     IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
       .someOrFail(RepositoryFailure("main has no head"))
 
@@ -175,10 +180,8 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     for
       repo     <- ZIO.service[RiskTreeRepository]
       _        <- repo.create(wsId, seededTree(mits*), BranchRef.Main)
-      mainHash <- mainHeadHash
+      head     <- mainHeadHash
       branch    = branchOf(wsId, scenario)
-      head     <- ZIO.fromEither(CommitHash.fromString(mainHash))
-                    .mapError(e => new IllegalStateException(e.mkString(";")))
       _        <- IrminClient.createBranchAt(branch, head)
     yield (wsId, branch, head)
 
@@ -198,7 +201,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         b         <- IrminClient.get(nodePath(wsId, nodeB))
       yield assertTrue(
         previewed == MergePreviewStatus.Clean(),
-        mainHead.contains(merged.value),
+        mainHead.contains(merged),
         // each side's edit survives: the scenario's probability on A, main's on B
         a.exists(_.contains("0.45")),
         b.exists(_.contains("0.55"))
@@ -289,7 +292,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         n         <- IrminClient.get(mitPath(wsId, mitN))
       yield assertTrue(
         previewed == MergePreviewStatus.Clean(),
-        mainHead.contains(merged.value),
+        mainHead.contains(merged),
         m.exists(_.contains("0.15")),
         n.exists(_.contains("0.16"))
       )
@@ -333,7 +336,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       yield assertTrue(
         conflicted match { case MergePreviewStatus.Conflicts(_) => true; case _ => false },
         resolved == MergePreviewStatus.Clean(),
-        mainHead.contains(merged.value),
+        mainHead.contains(merged),
         a.exists(_.contains("0.65"))
       )
     },
@@ -393,7 +396,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
           after == before,
           // and the staging branch is gone, so the next merge of this scenario
           // is not refused as already running
-          !remaining.exists(_.startsWith("merge-staging."))
+          !remaining.exists(isStaging)
         )
     },
 
@@ -408,9 +411,9 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         after     <- mainHeadHash
         remaining <- IrminClient.branches
       yield assertTrue(
-        after.contains(head.value),
+        after == head,
         after != before,
-        !remaining.exists(_.startsWith("merge-staging."))
+        !remaining.exists(isStaging)
       )
     },
 

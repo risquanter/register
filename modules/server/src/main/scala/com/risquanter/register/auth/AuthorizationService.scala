@@ -1,6 +1,7 @@
 package com.risquanter.register.auth
 
 import zio.IO
+import zio.json.JsonEncoder
 import com.risquanter.register.domain.data.iron.{UserId, SafeId, TreeId, WorkspaceId}
 import com.risquanter.register.domain.errors.{AuthError, Failure}
 
@@ -26,6 +27,10 @@ enum Permission(val zedName: String) extends Authority:
   case ViewTeam            extends Permission("view_team")
   case ManageTeam          extends Permission("manage_team")
 
+object Permission:
+  /** A SpiceDB request names a permission by its Zed spelling. */
+  given JsonEncoder[Permission] = JsonEncoder[String].contramap(_.zedName)
+
 /** A proof produced without consulting SpiceDB.
   *
   * `Bootstrap` covers workspace creation, where no resource exists yet to check.
@@ -46,6 +51,10 @@ enum ResourceType(val zedType: String):
   case Workspace    extends ResourceType("workspace")
   case RiskTree     extends ResourceType("risk_tree")
 
+object ResourceType:
+  /** A SpiceDB request names a resource's definition by its Zed spelling. */
+  given JsonEncoder[ResourceType] = JsonEncoder[String].contramap(_.zedType)
+
 /** Typed resource reference for check() calls.
   * resourceId reuses SafeId (ULID) since all app resources are identified by ULIDs.
   */
@@ -59,11 +68,6 @@ object ResourceRef:
   extension (id: WorkspaceId)
     /** Construct a Workspace resource reference from a WorkspaceId. */
     def asResource: ResourceRef = ResourceRef(ResourceType.Workspace, id.toSafeId)
-
-/** Stable identifier type returned by listAccessible.
-  * Callers promote to TreeId / WorkspaceId as needed.
-  */
-type ResourceId = SafeId.SafeId
 
 /** Compile-time proof that AuthorizationService.check() was called and succeeded,
   * or that a lifecycle token was issued.
@@ -87,9 +91,9 @@ object Checked:
 
 /** Authorization service — pure Policy Enforcement Point (PEP).
   *
-  * Callers call check() and listAccessible() only. This service never writes
-  * authorization data (no grant/revoke/tuple writes) — all tuple management
-  * is handled via the CI/CD provisioning job.
+  * Callers call check() only. This service never writes authorization data
+  * (no grant/revoke/tuple writes) — all tuple management is handled via the
+  * CI/CD provisioning job.
   *
   * @see ADR-024: Externalized Authorization / PEP Pattern
   */
@@ -101,6 +105,7 @@ trait AuthorizationService:
     * - PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
     * - Connectivity / timeout        → `Unanswered` at the authorization zone
     *   (answered as a dependency outage)
+    * - An answer outside the protocol → `Rejected` at the authorization zone
     *
     * @see ADR-024: Fail-Closed by Default
     */
@@ -109,14 +114,3 @@ trait AuthorizationService:
     permission: P,
     resource:   ResourceRef
   ): IO[AuthError | Failure, Checked[P]]
-
-  /** List all resource IDs of `resourceType` where `user` has `permission`.
-    *
-    * Calls SpiceDB LookupResources API.
-    * Used for "show my workspaces" queries — no local DB join required.
-    */
-  def listAccessible(
-    user:         UserId.Authenticated,
-    resourceType: ResourceType,
-    permission:   Permission
-  ): IO[AuthError | Failure, List[ResourceId]]

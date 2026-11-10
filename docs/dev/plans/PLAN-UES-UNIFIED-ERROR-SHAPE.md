@@ -5,8 +5,9 @@ Plan code `UES`. Decisions in this document are labelled `UES-D-<n>`.
 **Status.** Written 2026-11-09 at version 0.17.2. `UES-D-1` to `UES-D-15` are
 ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Phase 0 steps 0.1 and 0.2 landed, at versions 0.18.1 and 0.18.2.
 Phase 0 step 0.3 and Phase 1 steps 1.1 to 1.3 landed together, at version 0.18.3.
-Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 step 2.1
-is next. The file inventory is
+Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
+2.1 and 2.5 landed together, at version 0.18.5. Phase 2 step 2.2 is next. The
+file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
 The supporting record `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-ERROR-PATHS.md`
@@ -71,6 +72,13 @@ gone, when it narrows to `IO[Failure, A]`. Scala 3 union types make the
 widening a one-token change per signature and the compiler lists every site
 (`UES-D-10`). The last phase deletes `AppError`, and the final grep target is
 that name.
+
+**What enters an aggregate is refined.** Every value a step reads back from a
+store or a peer is refined to the type the domain declares for it before it is
+held, and a value that does not refine is a `Rejected` at that peer's zone. No
+step admits a raw primitive on the ground that the peer might hold content this
+service did not write: the store holds only what this service wrote, and the
+authorization service answers only about this service's own identifiers.
 
 **Acceptance per step.** The touched modules compile. `commonJVM/test`,
 `server/test`, `app/test` and `serverIt/test` are green. A grep for the step's
@@ -500,46 +508,98 @@ alone and keeps the constraint distinction at the one call site that needs it.
 `toRecord`'s seed-entity refusal and the two interval parses are `Rejected` at
 `Peer(Database)`, located at `Field(Workspace, SeedEntityId | Ttl | IdleTimeout)`.
 
-The Irmin client refines what Irmin returns (rows 37, 39 to 41):
+The Irmin client refines everything Irmin returns (rows 37, 39 to 41):
 
 ```scala
 // infra/irmin/model/IrminCommit.scala
+final case class IrminInfo(date: Instant, message: CommitMessage)
+object IrminInfo:
+  final case class Raw(date: String, message: String)
+  object Raw:
+    given JsonCodec[Raw] = DeriveJsonCodec.gen[Raw]
+  def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminInfo]
+
 final case class IrminCommit(hash: CommitHash, key: CommitHash, parents: List[CommitHash], info: IrminInfo)
 object IrminCommit:
-  final case class Raw(hash: String, key: String, parents: List[String], info: IrminInfo)
+  final case class Raw(hash: String, key: String, parents: List[String], info: IrminInfo.Raw)
   object Raw:
     given JsonCodec[Raw] = DeriveJsonCodec.gen[Raw]
   def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminCommit]
 
+final case class IrminBranch(name: StoreBranch, head: Option[IrminCommit])
+
 // infra/irmin/model/IrminPath.scala
 object IrminSegment:
   def from(text: String): Either[NonEmptyList[ValidationError], IrminSegment]
+
+// infra/irmin/CommitMessage.scala
+object CommitMessage:
+  def parse(message: String): Either[NonEmptyList[ValidationError], CommitMessage]
+  def historyOperation(message: CommitMessage): Option[HistoryOperation]
+
+// domain/data/iron/OpaqueTypes.scala
+object StoreBranch:
+  def fromString(s: String, location: ErrorLocation): Either[List[ValidationError], StoreBranch]
+
+// infra/irmin/IrminClient.scala
+def branches: IO[IrminError | Failure, List[StoreBranch]]
 ```
 
 Every GraphQL response class that holds a commit holds `IrminCommit.Raw`, and
-the client refines on arrival, failing with `Rejected` at `Peer(Store)` with
-`(Whole, WrongFormat(ValueFormat.CommitHash))` and `RawValue(hash)`. `childPaths`
-fails the same way with `WrongFormat(ValueFormat.StoreSegment)`. The repository's
+the client refines on arrival, failing with `Rejected` at `Peer(Store)` and
+`RawValue(hash)`, `RawValue(message)`: a hash with
+`(Whole, WrongFormat(ValueFormat.CommitHash))`; a date that is not a whole
+number with `(Whole, Unreadable(ExpectedInput.WholeNumber))`, and one outside an
+`Instant`'s range with `(Whole, Unreadable(ExpectedInput.Declared))`; a message
+that is not one of the three shapes this service writes with
+`(Whole, Unreadable(ExpectedInput.Declared))`, and one whose identifier segments
+do not refine with those segments' own refusals. `ExpectedInput.Declared`'s
+sentence widens to "whatever type the reader declares for the value", so it
+covers a decoder as well as an endpoint. `childPaths` fails the same way with
+`WrongFormat(ValueFormat.StoreSegment)`, and a listed branch name that is not
+main, a scenario branch or a merge's staging branch fails with
+`WrongFormat(ValueFormat.BranchName)` and `RawValue(name)`. The queries select
+neither `author` nor a listing's `hash` and `value`, because nothing reads them,
+and `IrminContents` and `IrminInfoInput` go with them. The repository's
 `resolveHead`, `TreeHistoryServiceLive.toEntry` and `ScenarioBranchOps` lose
-their late `CommitHash.fromString` and the `ZIO.die` at `ScenarioBranchOps.scala`
-lines 29 to 35 goes (row 41). `IrminBranch.name` and `IrminClient.branches` stay
-`String`: the store may hold branches this service did not create, so refining
-the listing to `BranchRef` would reject a foreign branch instead of ignoring it.
-That is the exemption ADR-039 §5 requires to be recorded, and the comment at the
-site records it.
+their late `CommitHash.fromString`, `toEntry` loses its `toIso` and reads the
+refined instant, and the `ZIO.die` at `ScenarioBranchOps.scala` lines 29 to 35
+goes (row 41). `HistoryOperation.Other` goes: a commit whose message this
+service did not write is refused where it is read, so no entry is ever built
+for one. `IrminClient.get` keeps `Option[String]`, because the stored bytes'
+parse is the domain decoder the caller runs on them in the same step.
 
 The SpiceDB response parse refuses content (row 32, `UES-D-6`):
 
 ```scala
 // auth/AuthorizationService.scala
 def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[Failure, Checked[P]]
-def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[Failure, List[ResourceId]]
+
+// auth/AuthorizationServiceSpiceDB.scala
+private enum SpiceDbObjectRef:
+  case Resource(resourceType: ResourceType, id: SafeId.SafeId)
+  case User(id: UserId.Authenticated)
+private case class SpiceDbCheckRequest(resource: SpiceDbObjectRef, permission: Permission, subject: SpiceDbSubjectRef, consistency: Json)
+private enum Permissionship(val wire: String):
+  case Unspecified, NoPermission, HasPermission, ConditionalPermission
+private case class SpiceDbCheckResponse(permissionship: String)
 ```
 
-An unparseable body is `Rejected` at `Peer(Authorization)` with
-`(Whole, Unreadable(ExpectedInput.Json))` and `PeerMessage(parse text)`. The skip
-of listed ids that fail refinement stays, as the ADR-039 §5 exemption already
-recorded at the site.
+A request names its resource by `ResourceType` and `SafeId`, and its subject by
+`UserId.Authenticated`; the encoders write the Zed spellings, which are the
+declared-spelling case of ADR-037 §2. SpiceDB's object id is one of this
+application's own identifiers on the way out and never arrives on the way in,
+so no type for SpiceDB's own id grammar exists. The response's permissionship
+is refined to the `Permissionship` enum, whose four spellings the SpiceDB v1
+API fixes. An unparseable body is `Rejected` at `Peer(Authorization)` with
+`(Whole, Unreadable(ExpectedInput.Json))` and `PeerMessage(parse text)`; a
+permissionship outside the four is `Rejected` there with
+`(Whole, Unreadable(ExpectedInput.Declared))` and `RawValue(text)`. Any answer
+but `HasPermission` is `AuthForbidden`, because this service evaluates no
+caveats. `listAccessible` and `ResourceId` go: the lookup had no caller, and
+its one planned consumer, a listing of the workspaces a user owns, waits on a
+Layer 1 decision the authorization plan records. When that decision is ruled
+the lookup returns `List[WorkspaceId]`, server-side only.
 
 The distribution fit moves to the write (row 56, `UES-D-8`):
 
@@ -643,11 +703,20 @@ Rows 12, 32, 38 to 48 and 53 to 55. Old leaves deleted: `RepositoryFailure`,
 `TreeLoadFailure`, `TreeLoadProblem`. This phase is EWB Phase 7's steps 2 to 6
 under the new shape.
 
-2.1 Rows 39 to 41. `IrminCommit.Raw` and `refine` of §3.6; `resolveHead`,
-`toEntry` and `ScenarioBranchOps` read the refined hash. The `ZIO.die` goes.
-Test: `IrminClientIntegrationSpec` pins a refined `CommitHash` on a read commit;
-a unit test of `IrminCommit.refine` pins a wrong-length hash as
-`WrongFormat(ValueFormat.CommitHash)`.
+2.1 Rows 39 to 41. `IrminCommit.Raw`, `IrminInfo.Raw`, both `refine`s,
+`CommitMessage.parse`, `StoreBranch.fromString` and `IrminBranch.name` of §3.6;
+`resolveHead`, `toEntry` and `ScenarioBranchOps` read the refined hash, `toEntry`
+reads the refined message and instant, `ScenarioServiceLive.scenarioNameOf` reads
+the refined branch. The `ZIO.die`, `toIso`, `HistoryOperation.Other`,
+`IrminContents` and `IrminInfoInput` go. Test: `IrminClientIntegrationSpec` pins
+a refined `CommitHash`, message and instant on a read commit and `BranchRef.Main`
+in the listing; `IrminCommitSpec` pins a wrong-length hash as
+`WrongFormat(ValueFormat.CommitHash)`, a date that is not a whole number, one
+outside an instant's range, and the accumulation across hash, date and message;
+`CommitMessageSpec` pins a foreign message, an unrefinable segment and a
+segment spelled otherwise than `render` spells it; `OpaqueTypesSpec` pins
+`StoreBranch.fromString` on main, a scenario branch, a staging branch and a
+foreign name.
 
 2.2 Rows 42 to 47 and 38. The five `decodeValidated` functions and
 `decodeStoredNode` of §3.6; `ErrorSubject.Tree` used by `RiskTree.fromNodes`
@@ -678,7 +747,12 @@ directly, so the refinement of a composition of two refined values goes. Test:
 `NotFound` with their kinds.
 
 2.4 Rows 12, 53 to 55. `classify`'s `23505` branches, `toRecord` and the two
-`parseInterval` forms of §3.6. Row 55a: `WorkspaceStoreLive` line 113 builds
+`parseInterval` forms of §3.6. The row types `WorkspaceRow` and
+`WorkspaceTreeRow` carry their identifier and key-hash columns as `String`, so
+that `QuillMappings` keeps its encoders only and a column whose text does not
+refine is one of `toRecord`'s accumulated refusals, `Rejected` at
+`Peer(Database)`, rather than an exception the mapping throws into the outage
+channel. Row 55a: `WorkspaceStoreLive` line 113 builds
 `Rejected` at `Service`, `(Field(Workspace, SeedEntityId), OutOfRange(ValueRange.SeedEntityId))`,
 `RawValue(counter)`. Row 55b: `RiskTreeRepositoryInMemory` line 32 builds row 4's
 value at `Client`. Row 55c: line 52 builds `NotSupported`, `(Header(Branch), Capability.Scenarios)`.
@@ -688,8 +762,12 @@ two workspaces with one `seedEntityId` yield row 11's `Rejected` at `Client`; a
 row whose interval text does not parse fails with `Rejected` at `Peer(Database)`
 at `Field(Workspace, Ttl)`. `WorkspaceStoreSpec` pins row 55a.
 
-2.5 Row 32. The SpiceDB parse arms of §3.6. Test: `AuthorizationServiceSpiceDBSpec`
-pins an unparseable check response as `Rejected` at `Peer(Authorization)`.
+2.5 Row 32. The SpiceDB request records, `Permissionship` and the parse arms of
+§3.6; `listAccessible` and `ResourceId` go, with their unit and integration
+tests. Test: `AuthorizationServiceSpiceDBSpec` pins an unparseable check
+response as `Rejected` at `Peer(Authorization)` with `Unreadable(Json)`, a
+permissionship outside the set as `Rejected` there with `Unreadable(Declared)`,
+and a conditional permissionship as `AuthForbidden`.
 
 Acceptance: compile, the four tiers, BATS suite A. `RepositoryFailure` is gone,
 so `DomainError` has lost its string-carrying leaves.
@@ -911,9 +989,10 @@ The published schema gains the enum cases `FieldName.Ttl`, `FieldName.IdleTimeou
 cases, `Capability.PinnedReads` and `QueryProblem.AnswerVariablesNotSupported`.
 No client is sent any but `Capability.PinnedReads`,
 `QueryProblem.AnswerVariablesNotSupported` and `FieldProblem.Query`'s wire form,
-which is `RejectionDetail.Query` unchanged. Two cases are removed:
-`RequiresIrminBackend` from `FieldProblem` in Phase 4.3 and `SimulationRequired`
-from `ConflictKind` in Phase 3.4. `ErrorMessages` loses the `SimulationRequired`
+which is `RejectionDetail.Query` unchanged. Three cases are removed:
+`Other` from `HistoryOperation` in Phase 2.1, `RequiresIrminBackend` from
+`FieldProblem` in Phase 4.3 and `SimulationRequired` from `ConflictKind` in
+Phase 3.4. `ErrorMessages` loses the `SimulationRequired`
 arm and gains the `AnswerVariablesNotSupported` arm.
 
 ---
@@ -1143,7 +1222,8 @@ ruling of 2026-11-09 and stays as it is.
 | ADR-010 (error handling) | §1's sealed hierarchy, §4's channel per layer, §5's HTTP mapping | **Amended.** §1 lists `AppError` with four sub-traits and five leaves; it will state `Failure`, `Core` and `TrustZone`. §4 and §5 hold unchanged in substance: the channel stays typed, the mapping stays a one-way projection, now `Failure.toWire`. The "String Matching on Errors" smell is what rows 12 and 39 to 48 violate and this plan closes. The amendment waits on the user's go. |
 | ADR-002 (logging) | §5's typed hierarchy and `AppError.origin` | **Amended.** §5 shows `ValidationFailed(errors)` and names `AppError.origin` as the level's source; it will show `Failure.origin` derived from the zone. The level rule is unchanged. Waits on the user's go. |
 | ADR-035 (error leakage) | §1's exhaustive projection | **Amended.** §1 says the match is over the 32 leaves and a new `AppError` case is a compile error; it will say the projection is total over `(variant, zone)` and a new variant or zone is a compile error. §2 and §3 hold: nothing new reaches the wire, `zone` and `diagnostics` are dropped on every arm, and `Diagnostic.RawValue` is the one place a peer's text is kept, which §3 permits in a log. Waits on the user's go. |
-| ADR-039 (trust-boundary ingress) | every border row | **Complied with, and the record is satisfied.** §4 asks that a rejection name the boundary, the location and the list; `Core` carries `zone`, `errors` and nothing composed. §4 also says "The concrete error type is declared by the plan that implements this record", which is this plan. The two §5 exemptions, the branch listing and the skipped SpiceDB ids, are recorded at their sites. No amendment. |
+| ADR-039 (trust-boundary ingress) | every border row | **Complied with, and the record is amended.** §4 asks that a rejection name the boundary, the location and the list; `Core` carries `zone`, `errors` and nothing composed. §4 also says "The concrete error type is declared by the plan that implements this record", which is this plan. The record's former §5, which let a comment at a site admit a boundary value unrefined, is deleted: it let a site waive §1's rule on an unfalsifiable claim about foreign content, and every value that enters an aggregate is refined instead. §1 gains the sentence stating that. |
+| ADR-024 (externalised authorization) | the enforcement-point interface | **Amended.** The interface listing and the implementation table name `check` alone; `listAccessible` is removed with no caller and the plan's L1.4 records when and in what shape a lookup returns. |
 | ADR-033 (exception boundaries) | the `require`s of rows 48d, 48f, 59a and the simulator's fit (row 56) | Compliant. §5 admits a `require` "when the failing state is unreachable through validated entry points", which `UES-D-9` restates as the rule. |
 | ADR-037 (constants and closed sets) | `Diagnostic`, `OutageMode`, `DenialKind`, every new enum case | Compliant: each closed set is an enum in its owner's file, no spelling is hand-written where the serialiser derives it, and `Diagnostic.render`'s keys are the one declared spelling because a log key is a contract with the log pipeline. |
 | ADR-036 (confidential identifiers) | `Diagnostic.WorkspaceRef`, `BranchChoice.fromBranchRef` | Compliant. A `WorkspaceId` appears only in a diagnostic, which never crosses; the projection's fold that read a `WorkspaceId` moves to the construction site so the projection never holds one. |
@@ -1221,6 +1301,8 @@ their directory follows `UES-D-13`.
 - `modules/common/src/main/scala/com/risquanter/register/http/errors/RejectionDetail.scala`
 - `modules/common/src/main/scala/com/risquanter/register/http/requests/QueryRequest.scala`
 - `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/TreeHistoryResponse.scala`
 - `modules/common/src/test/scala/com/risquanter/register/http/errors/WireErrorSpec.scala`
 
 **Modified, `server`**
@@ -1243,6 +1325,9 @@ their directory follows `UES-D-13`.
 - `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala`
 - `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala`
 - `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/CommitMessage.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/persistence/QuillMappings.scala`
 - `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminCommit.scala`
 - `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala`
 - `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminPath.scala`
@@ -1286,6 +1371,8 @@ listing. `server-it` has no `src/main`, so these are named:
 - `modules/server-it/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceItSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/auth/AuthorizationServiceSpiceDBItSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala`
 - `modules/app/src/test/scala/app/state/TreeBuilderStateSpec.scala`
 
 **Documents**
@@ -1293,6 +1380,10 @@ listing. `server-it` has no `src/main`, so these are named:
 - `docs/dev/decision-records/ADR-010.md`
 - `docs/dev/decision-records/ADR-002.md`
 - `docs/dev/decision-records/ADR-035-error-leakage-prevention.md`
+- `docs/dev/decision-records/ADR-039-trust-boundary-ingress-validation.md`
+- `docs/dev/decision-records/ADR-024-externalized-authorization-pep-pattern.md`
+- `docs/dev/plans/AUTHORIZATION-PLAN.md` (the lookup's removal and the L1.4 decision it waits on)
+- `.claude/rules/security.md` (the enforcement-point interface)
 - `docs/dev/ARCHITECTURE.md`
 - `docs/user/TERMINOLOGY.md`
 - `.claude/skills/adr-constraints/SKILL.md`
@@ -1346,15 +1437,18 @@ for every row §5 does not list.
 EWB's phases 1 to 6 landed and the plan is closed with Phase 7 removed. What
 this plan carries over from Phase 7: the six steps' intent, which is Phase 1.1
 to 1.2 and Phase 2 here; the signatures of §3.6, rewritten from
-`ValidationFailed(errors, zone)` to `Failure`; the two ADR-039 §5 exemptions;
-the inventory additions, which §9 lists; and EWB's decisions 73 and 74, restated
+`ValidationFailed(errors, zone)` to `Failure`; the inventory additions, which
+§9 lists; and EWB's decisions 73 and 74, restated
 as `UES-D-6` and `UES-D-5`. What is dropped: `enum TrustZone(val origin)` with
 four cases, `ValidationFailed(errors, zone)`, the clause keeping three
 `RepositoryFailure` sites and `ensureRootPresent`, the clause keeping
 `TreeLoadFailure` with `TreeLoadProblem` gaining no case, the `IrminError |
 ValidationFailed` and `AuthError | ValidationFailed` unions, and EWB's decision
 72, whose substance, one refusal type carrying the zone as data, survives as
-`Failure.Rejected` and whose name does not.
+`Failure.Rejected` and whose name does not. Also dropped: the two exemptions
+EWB recorded under ADR-039's former §5, the unrefined branch listing and the
+skipped SpiceDB lookup ids, because every value that enters an aggregate is
+refined (§2).
 
 EWB's `EWB-D-6` listed the observable wire changes of its own phases; §5 is this
 plan's list. EWB's `EWB-P-1`, the one-way projection, and `EWB-P-2`, the

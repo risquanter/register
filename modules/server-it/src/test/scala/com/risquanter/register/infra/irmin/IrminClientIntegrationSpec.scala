@@ -9,7 +9,7 @@ import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 import com.risquanter.register.domain.errors.{
   BranchAlreadyExists, BranchHeadStale, Core, ErrorLocation, Failure, OutageMode, PeerZone
 }
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, Url, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{BranchRef, PositiveInt, Url, WorkspaceId}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
@@ -64,7 +64,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         testPath   <- uniquePath("branches-test")
         _          <- IrminClient.set(testPath, "init", msg("Initialize for branches test"))
         branchList <- IrminClient.branches
-      yield assertTrue(branchList.contains("main"))
+      yield assertTrue(branchList.contains(BranchRef.Main))
     },
 
     test("set and get roundtrip works") {
@@ -79,8 +79,8 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         // Read value back
         result <- IrminClient.get(testPath)
       yield assertTrue(
-        commit.hash.nonEmpty,
-        commit.info.message == CommitMessage.render(msg("Integration test write")),
+        commit.hash.value.nonEmpty,
+        commit.info.message == msg("Integration test write"),
         result.contains(testValue)
       )
     },
@@ -92,16 +92,16 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       yield assertTrue(result.isEmpty)
     },
 
-    test("set creates commit with author info") {
+    test("set's commit carries the message written and the instant Irmin dated it") {
       for
-        testPath  <- uniquePath("author-check")
-        testValue  = "\"author test value\""
-        
-        commit <- IrminClient.set(testPath, testValue, msg("Author check test"))
+        before <- Clock.instant
+        testPath  <- uniquePath("info-check")
+        testValue  = "\"info test value\""
+        commit <- IrminClient.set(testPath, testValue, msg("Info check test"))
       yield assertTrue(
-        commit.info.author == "zio-client",
-        commit.info.message == CommitMessage.render(msg("Author check test")),
-        commit.info.date.nonEmpty
+        commit.info.message == msg("Info check test"),
+        // Irmin dates the commit in whole seconds, so it may read up to a second before `before`.
+        !commit.info.date.isBefore(before.minusSeconds(1))
       )
     },
 
@@ -159,7 +159,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       yield assertTrue(
         onMain.contains("\"main-value\""),
         onBranch.contains("\"branch-value\""),
-        listed.contains(branch.toBranchRef)
+        listed.contains(branch)
       )
     },
 
@@ -183,7 +183,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         testPath <- uniquePath("cas-fork")
         branch   <- freshBranch
         mainHead <- IrminClient.set(testPath, "\"main-value\"", msg("main write before fork"))
-        _        <- IrminClient.createBranchAt(branch, commitHash(mainHead.hash))
+        _        <- IrminClient.createBranchAt(branch, mainHead.hash)
         onBranch <- IrminClient.get(testPath, branch)
       yield assertTrue(onBranch.contains("\"main-value\""))
     },
@@ -193,8 +193,8 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         testPath <- uniquePath("cas-collision")
         branch   <- freshBranch
         mainHead <- IrminClient.set(testPath, "\"v\"", msg("main write"))
-        _        <- IrminClient.createBranchAt(branch, commitHash(mainHead.hash))
-        exit     <- IrminClient.createBranchAt(branch, commitHash(mainHead.hash)).exit
+        _        <- IrminClient.createBranchAt(branch, mainHead.hash)
+        exit     <- IrminClient.createBranchAt(branch, mainHead.hash).exit
       yield assert(exit)(fails(isSubtype[BranchAlreadyExists](anything)))
     },
 
@@ -203,11 +203,11 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         testPath <- uniquePath("cas-delete")
         branch   <- freshBranch
         commit   <- IrminClient.set(testPath, "\"v\"", msg("branch write"), branch)
-        _        <- IrminClient.deleteBranch(branch, commitHash(commit.hash))
+        _        <- IrminClient.deleteBranch(branch, commit.hash)
         listed   <- IrminClient.branches
-        found    <- IrminClient.getCommit(commitHash(commit.hash))
+        found    <- IrminClient.getCommit(commit.hash)
       yield assertTrue(
-        !listed.contains(branch.toBranchRef),
+        !listed.contains(branch),
         found.map(_.hash).contains(commit.hash)
       )
     },
@@ -218,7 +218,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         branch   <- freshBranch
         c1       <- IrminClient.set(testPath, "\"v1\"", msg("branch write v1"), branch)
         _        <- IrminClient.set(testPath, "\"v2\"", msg("branch write v2"), branch)
-        exit     <- IrminClient.deleteBranch(branch, commitHash(c1.hash)).exit
+        exit     <- IrminClient.deleteBranch(branch, c1.hash).exit
       yield assert(exit)(fails(isSubtype[BranchHeadStale](anything)))
     },
 
@@ -227,7 +227,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         testPath <- uniquePath("merge-test")
         branch   <- freshBranch
         written  <- IrminClient.set(testPath, "\"merged-value\"", msg("branch write"), branch)
-        _        <- IrminClient.mergeCommit(commitHash(written.hash), BranchRef.Main, msg("merge branch into main"))
+        _        <- IrminClient.mergeCommit(written.hash, BranchRef.Main, msg("merge branch into main"))
         onMain   <- IrminClient.get(testPath)
       yield assertTrue(onMain.contains("\"merged-value\""))
     },
@@ -238,11 +238,12 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         branch   <- freshBranch
         c1       <- IrminClient.set(testPath, "\"before\"", msg("v1"), branch)
         _        <- IrminClient.set(testPath, "\"after\"", msg("v2"), branch)
-        found    <- IrminClient.getCommit(commitHash(c1.hash))
-        _        <- IrminClient.revert(commitHash(c1.hash), branch)
+        found    <- IrminClient.getCommit(c1.hash)
+        _        <- IrminClient.revert(c1.hash, branch)
         value    <- IrminClient.get(testPath, branch)
       yield assertTrue(
         found.map(_.hash).contains(c1.hash),
+        found.map(_.key).contains(c1.key),
         value.contains("\"before\"")
       )
     },
@@ -259,7 +260,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         history  <- IrminClient.getHistory(testPath, positiveInt(10), branch)
       yield assertTrue(
         history.size == 2,
-        history.map(_.info.message).toSet == Set(msg("history v1"), msg("history v2")).map(CommitMessage.render)
+        history.map(_.info.message).toSet == Set(msg("history v1"), msg("history v2"))
       )
     },
 
@@ -317,7 +318,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         c1     <- IrminClient.setTree(base, List(entry("nodes/a", "\"a1\""), entry("nodes/b", "\"b1\"")), msg("list at commit v1"), branch)
         _      <- IrminClient.setTree(base, List(entry("nodes/b", "\"b2\""), entry("nodes/c", "\"c1\"")), msg("list at commit v2"), branch)
         nodes   = IrminPath.unsafeFrom(s"${base.value}/nodes")
-        atC1   <- IrminClient.listAtCommit(commitHash(c1.hash), nodes)
+        atC1   <- IrminClient.listAtCommit(c1.hash, nodes)
         atHead <- IrminClient.list(nodes, branch)
       yield assertTrue(
         atC1.map(_.value).toSet == Set("a", "b"),   // older commit's listing, unaffected by the later replace
@@ -367,9 +368,9 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         branch     <- freshBranch
         base       <- IrminClient.set(basePath, "\"common\"", msg("common base"))
         // Fork: branch starts from main's head, then diverges
-        _          <- IrminClient.mergeCommit(commitHash(base.hash), branch, msg("fork from main"))
+        _          <- IrminClient.mergeCommit(base.hash, branch, msg("fork from main"))
         _          <- IrminClient.set(branchPath, "\"diverged\"", msg("branch diverges"), branch)
-        lcas       <- IrminClient.lca(branch, commitHash(base.hash))
+        lcas       <- IrminClient.lca(branch, base.hash)
       yield assertTrue(lcas.map(_.hash).contains(base.hash))
     }
 
@@ -383,9 +384,6 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
 
   private def unsafeBranch(s: String): BranchRef =
     BranchRef.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
-
-  private def commitHash(s: String): CommitHash =
-    CommitHash.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
 
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe
 

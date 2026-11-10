@@ -4,12 +4,14 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 
+import java.time.Instant
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
 import com.risquanter.register.domain.errors.{DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, IrminError}
+import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
 
 /** Unit tests for `ScenarioServiceLive` against an in-memory `IrminClient` fake —
   * no Docker/live Irmin required. Covers create/list/delete happy paths, both
@@ -24,21 +26,29 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
   private def name(s: String): ScenarioName.ScenarioName = ScenarioName.fromString(s).toOption.get
   private def hash(fill: Char): CommitHash = CommitHash.fromString(fill.toString * 40).toOption.get
 
+  /** The information every fixture commit carries; no assertion here reads it. */
+  private val info: IrminInfo =
+    IrminInfo(Instant.EPOCH, CommitMessage.TreeWritten(ws("fixture-ws"), treeId("fixture-tree"), TreeWriteKind.Update))
+
+  /** The branch a fixture's raw name spells, as the live client refines it. */
+  private def storeBranch(name: String): StoreBranch =
+    StoreBranch.fromString(name, ErrorLocation.Whole).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
+
   /** Minimal in-memory `IrminClient`: only `branches`/`getBranch`/`mainBranch`/
     * `createBranchAt`/`deleteBranch` are exercised by `ScenarioServiceLive` — every
     * other method is unused by it and dies loudly if a test accidentally hits it.
     */
   private final class FakeIrminClient(state: Ref[Map[String, CommitHash]]) extends IrminClient:
-    private def toBranch(name: String, headOpt: Option[CommitHash]): IrminBranch =
-      IrminBranch(name, headOpt.map(h => IrminCommit(h.value, "", Nil, IrminInfo("2026-01-01T00:00:00Z", "test", "test"))))
+    private def toBranch(branch: StoreBranch, headOpt: Option[CommitHash]): IrminBranch =
+      IrminBranch(branch, headOpt.map(h => IrminCommit(h, h, Nil, info)))
 
-    override def branches: IO[IrminError, List[String]] = state.get.map(_.keys.toList)
+    override def branches: IO[IrminError, List[StoreBranch]] = state.get.map(_.keys.toList.map(storeBranch))
 
     override def mainBranch: IO[IrminError, Option[IrminBranch]] =
-      state.get.map(m => Some(toBranch("main", m.get("main"))))
+      state.get.map(m => Some(toBranch(BranchRef.Main, m.get("main"))))
 
     override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
-      state.get.map(m => m.get(branch.name).map(h => toBranch(branch.name, Some(h))))
+      state.get.map(m => m.get(branch.name).map(h => toBranch(branch, Some(h))))
 
     override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit] =
       state.modify { m =>
@@ -77,7 +87,7 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
     override def lca(branch: BranchRef, commit: CommitHash) =
       state.get.map { m =>
         if m.get(branch.name).contains(commit) then
-          List(IrminCommit(commit.value, "", Nil, IrminInfo("2026-01-01T00:00:00Z", "test", "test")))
+          List(IrminCommit(commit, commit, Nil, info))
         else Nil
       }
     override def healthCheck = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))

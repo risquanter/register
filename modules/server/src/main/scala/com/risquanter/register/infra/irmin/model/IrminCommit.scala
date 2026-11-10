@@ -1,68 +1,73 @@
 package com.risquanter.register.infra.irmin.model
 
 import _root_.zio.json.*
+import _root_.zio.prelude.{NonEmptyList, Validation}
+
+import java.time.{DateTimeException, Instant}
+
+import com.risquanter.register.domain.data.iron.{CommitHash, StoreBranch, ValidationUtil}
+import com.risquanter.register.domain.errors.{ErrorLocation, ExpectedInput, FieldProblem, ValidationError}
+import com.risquanter.register.infra.irmin.CommitMessage
 
 /**
   * Irmin commit information - metadata for each write operation.
   *
-  * Corresponds to the GraphQL `Info` type in Irmin's schema:
+  * Corresponds to the GraphQL `Info` type in Irmin's schema, of which the two
+  * fields this service reads are selected:
   * ```graphql
   * type Info {
   *   date: String!
-  *   author: String!
   *   message: String!
   * }
   * ```
   *
-  * @param date ISO 8601 timestamp of the commit
-  * @param author Author identifier (e.g., "zio-client", "user@example.com")
-  * @param message Commit message describing the change
+  * Both are refined where Irmin's answer arrives (ADR-039): the date is the
+  * instant Irmin's epoch-seconds text names, and the message is one this
+  * service wrote, because the store holds no other.
+  *
+  * @param date When the commit was made
+  * @param message The message this service wrote for the commit
   */
 final case class IrminInfo(
-    date: String,
-    author: String,
-    message: String
+    date: Instant,
+    message: CommitMessage
 )
 
 object IrminInfo:
-  given JsonCodec[IrminInfo] = DeriveJsonCodec.gen[IrminInfo]
+  /** Commit information as Irmin's GraphQL answer carries it, before it is
+    * refined. */
+  final case class Raw(date: String, message: String)
 
-/**
-  * Input for commit info when making mutations.
-  *
-  * Corresponds to the GraphQL `InfoInput` type:
-  * ```graphql
-  * input InfoInput {
-  *   parents: [CommitKey!]
-  *   allow_empty: Boolean
-  *   retries: Int
-  *   message: String
-  *   author: String
-  * }
-  * ```
-  *
-  * @param message Commit message (optional, defaults to "zio-client")
-  * @param author Author identifier (optional, defaults to "zio-client")
-  */
-final case class IrminInfoInput(
-    message: Option[String] = None,
-    author: Option[String] = None
-)
+  object Raw:
+    given JsonCodec[Raw] = DeriveJsonCodec.gen[Raw]
 
-object IrminInfoInput:
-  given JsonCodec[IrminInfoInput] = DeriveJsonCodec.gen[IrminInfoInput]
-  
-  /** Default info for automated operations */
-  val default: IrminInfoInput = IrminInfoInput(
-    message = Some("zio-client operation"),
-    author = Some("zio-client")
-  )
-  
-  /** Create info with custom message */
-  def withMessage(msg: String): IrminInfoInput = IrminInfoInput(
-    message = Some(msg),
-    author = Some("zio-client")
-  )
+  /** Refines both fields, accumulating their refusals. Irmin writes the date
+    * as a whole number of seconds since the epoch; text that is not a whole
+    * number is refused as one, and a count outside the range an `Instant`
+    * holds is refused as the instant the reader declares. A message is refused
+    * by `CommitMessage.parse`.
+    * {{{
+    * refine(Raw("0", "workspace:<ws>:risk-tree:<t>:update"))
+    * // Right(IrminInfo(1970-01-01T00:00:00Z, TreeWritten(ws, t, Update)))
+    * refine(Raw("yesterday", "hello"))
+    * // Left(NonEmptyList(ValidationError(Whole, Unreadable(WholeNumber)),
+    * //                  ValidationError(Whole, Unreadable(Declared))))
+    * }}}
+    */
+  def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminInfo] =
+    Validation.validateWith(refineDate(raw.date), ValidationUtil.toValidation(CommitMessage.parse(raw.message).left.map(_.toList)))(IrminInfo.apply)
+      .toEither
+      .left.map(errors => NonEmptyList(errors.head, errors.tail*))
+
+  private def refineDate(text: String): Validation[ValidationError, Instant] =
+    text.trim.toLongOption match
+      case None => Validation.fail(unreadable(ExpectedInput.WholeNumber))
+      case Some(epochSeconds) =>
+        try Validation.succeed(Instant.ofEpochSecond(epochSeconds))
+        catch case _: DateTimeException => Validation.fail(unreadable(ExpectedInput.Declared))
+
+  private def unreadable(expected: ExpectedInput): ValidationError =
+    ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(expected))
 
 /**
   * Irmin commit - represents a point-in-time snapshot.
@@ -78,20 +83,49 @@ object IrminInfoInput:
   * }
   * ```
   *
+  * Every value it carries is refined where Irmin's answer arrives (ADR-039).
+  *
   * @param hash Content-addressed hash of the commit
   * @param key Commit key (may differ from hash in packed format)
   * @param parents Parent commit keys (empty for initial commit)
   * @param info Commit metadata
   */
 final case class IrminCommit(
-    hash: String,
-    key: String,
-    parents: List[String],
+    hash: CommitHash,
+    key: CommitHash,
+    parents: List[CommitHash],
     info: IrminInfo
 )
 
 object IrminCommit:
-  given JsonCodec[IrminCommit] = DeriveJsonCodec.gen[IrminCommit]
+  /** A commit as Irmin's GraphQL answer carries it, before it is refined.
+    * Every query that selects a commit selects all four fields, and Irmin's
+    * schema declares `parents` non-null. */
+  final case class Raw(hash: String, key: String, parents: List[String], info: IrminInfo.Raw)
+
+  object Raw:
+    given JsonCodec[Raw] = DeriveJsonCodec.gen[Raw]
+
+  /** Refines every value the commit carries, accumulating a refusal for each
+    * hash that is not a commit hash and each of the info's refusals.
+    * {{{
+    * refine(Raw("abc", "abc", Nil, IrminInfo.Raw("0", message)))
+    * // Left(NonEmptyList(ValidationError(Whole, WrongFormat(CommitHash)),
+    * //                  ValidationError(Whole, WrongFormat(CommitHash))))
+    * }}}
+    */
+  def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminCommit] =
+    Validation.validateWith(
+      refineHash(raw.hash),
+      refineHash(raw.key),
+      Validation.validateAll(raw.parents.map(refineHash)),
+      ValidationUtil.toValidation(IrminInfo.refine(raw.info).left.map(_.toList))
+    )(IrminCommit.apply)
+      .toEither
+      .left.map(errors => NonEmptyList(errors.head, errors.tail*))
+
+  private def refineHash(text: String): Validation[ValidationError, CommitHash] =
+    ValidationUtil.toValidation(CommitHash.fromString(text, ErrorLocation.Whole))
 
 /**
   * Irmin branch - named reference to a commit.
@@ -105,39 +139,14 @@ object IrminCommit:
   * }
   * ```
   *
-  * @param name Branch name (e.g., "main", "feature/x")
+  * The name is refined where Irmin's answer arrives (ADR-039): every branch in
+  * the store was named by this service, as main, a scenario branch or a merge's
+  * staging branch, so a name that is none of those is refused.
+  *
+  * @param name The branch, as this service names branches
   * @param head Current head commit (None if branch is empty)
   */
 final case class IrminBranch(
-    name: String,
+    name: StoreBranch,
     head: Option[IrminCommit]
 )
-
-object IrminBranch:
-  given JsonCodec[IrminBranch] = DeriveJsonCodec.gen[IrminBranch]
-
-/**
-  * Irmin contents - a value stored at a path.
-  *
-  * Corresponds to the GraphQL `Contents` type:
-  * ```graphql
-  * type Contents {
-  *   path: Path!
-  *   metadata: Metadata!
-  *   value: Value!
-  *   hash: Hash!
-  * }
-  * ```
-  *
-  * @param path Path to the content
-  * @param value Stored value (JSON string)
-  * @param hash Content hash
-  */
-final case class IrminContents(
-    path: String,
-    value: String,
-    hash: String
-)
-
-object IrminContents:
-  given JsonCodec[IrminContents] = DeriveJsonCodec.gen[IrminContents]

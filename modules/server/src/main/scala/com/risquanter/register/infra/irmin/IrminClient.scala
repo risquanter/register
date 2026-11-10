@@ -30,7 +30,9 @@ import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeSta
 trait IrminClient:
 
   /**
-    * Get a value at the specified path.
+    * Get a value at the specified path. The value is the stored bytes as
+    * text: its parse into a domain value is the decoder the caller runs on it
+    * in the same step, so no representation between the two is kept here.
     *
     * @param path Path to the value (e.g., "risks/cyber")
     * @param branch Branch to read from (defaults to main)
@@ -82,11 +84,14 @@ trait IrminClient:
   def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, IrminCommit]
 
   /**
-    * List all branches in the store.
+    * List all branches in the store. Every name is refined where it arrives
+    * to the kind of branch this service names (ADR-039): main, a scenario
+    * branch or a merge's staging branch. A name that is none of those is
+    * content the store returned and this service refuses.
     *
-    * @return List of branch names
+    * @return The branches the store holds
     */
-  def branches: IO[IrminError | Failure, List[String]]
+  def branches: IO[IrminError | Failure, List[StoreBranch]]
 
   /**
     * Get info about the main branch including head commit.
@@ -255,7 +260,7 @@ object IrminClient:
   def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError | Failure, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.remove(path, message, branch))
 
-  def branches: ZIO[IrminClient, IrminError | Failure, List[String]] =
+  def branches: ZIO[IrminClient, IrminError | Failure, List[StoreBranch]] =
     ZIO.serviceWithZIO[IrminClient](_.branches)
 
   def mainBranch: ZIO[IrminClient, IrminError | Failure, Option[IrminBranch]] =

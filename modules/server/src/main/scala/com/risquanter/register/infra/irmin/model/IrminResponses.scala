@@ -3,7 +3,6 @@ package com.risquanter.register.infra.irmin.model
 import _root_.zio.json.*
 import com.risquanter.register.infra.irmin.model.GetValueResponse.given
 import com.risquanter.register.infra.irmin.model.ListTreeResponse.given
-import com.risquanter.register.infra.irmin.model.SetValueResponse.given
 
 /**
   * GraphQL response wrapper types for Irmin queries.
@@ -66,13 +65,13 @@ final case class ListTreeGetTree(
 )
 
 /**
-  * Node in tree listing - can be Contents or Tree.
-  * We use a simplified representation since GraphQL unions are complex.
+  * Node in tree listing - can be Contents or Tree. Only the path is selected,
+  * because a listing is read for the child names one level below the prefix
+  * and nothing else; it is refined to a segment where it arrives
+  * (`IrminClientLive.childPaths`).
   */
 final case class TreeNode(
-    path: String,
-    hash: Option[String],
-    value: Option[String]  // Present only for Contents
+    path: String
 )
 
 object ListTreeResponse:
@@ -117,30 +116,15 @@ final case class SetValueResponse(
 )
 
 final case class SetValueData(
-    set: Option[CommitData]
-)
-
-final case class CommitData(
-    hash: String,
-    key: String,
-    parents: Option[List[String]] = None,
-    info: InfoData
-)
-
-final case class InfoData(
-    date: String,
-    author: String,
-    message: String
+    set: Option[IrminCommit.Raw]
 )
 
 object SetValueResponse:
-  given JsonCodec[InfoData] = DeriveJsonCodec.gen[InfoData]
-  given JsonCodec[CommitData] = DeriveJsonCodec.gen[CommitData]
   given JsonCodec[SetValueData] = DeriveJsonCodec.gen[SetValueData]
   given JsonCodec[SetValueResponse] = DeriveJsonCodec.gen[SetValueResponse]
 
 /**
-  * Response for `set_tree(path, tree, info)` mutation (DD-7).
+  * Response for `set_tree(path, tree, info)` mutation.
   */
 final case class SetTreeResponse(
     data: Option[SetTreeData],
@@ -148,7 +132,7 @@ final case class SetTreeResponse(
 )
 
 final case class SetTreeData(
-    set_tree: Option[CommitData]
+    set_tree: Option[IrminCommit.Raw]
 )
 
 object SetTreeResponse:
@@ -164,7 +148,7 @@ final case class RemoveValueResponse(
 )
 
 final case class RemoveValueData(
-    remove: Option[CommitData]
+    remove: Option[IrminCommit.Raw]
 )
 
 object RemoveValueResponse:
@@ -180,7 +164,7 @@ final case class MergeCommitResponse(
 )
 
 final case class MergeCommitData(
-    merge_with_commit: Option[CommitData]
+    merge_with_commit: Option[IrminCommit.Raw]
 )
 
 object MergeCommitResponse:
@@ -196,7 +180,7 @@ final case class RevertResponse(
 )
 
 final case class RevertData(
-    revert: Option[CommitData]
+    revert: Option[IrminCommit.Raw]
 )
 
 object RevertResponse:
@@ -204,8 +188,8 @@ object RevertResponse:
   given JsonCodec[RevertResponse] = DeriveJsonCodec.gen[RevertResponse]
 
 /**
-  * Response for `test_and_set_branch(branch, test, set)` mutation (Phase B,
-  * A9 fact 2). The mutation itself returns a raw Boolean, not a Commit.
+  * Response for `test_and_set_branch(branch, test, set)` mutation. The
+  * mutation itself returns a raw Boolean, not a Commit.
   */
 final case class TestAndSetBranchResponse(
     data: Option[TestAndSetBranchData],
@@ -273,7 +257,7 @@ final case class CommitQueryResponse(
 )
 
 final case class CommitQueryData(
-    commit: Option[CommitData]
+    commit: Option[IrminCommit.Raw]
 )
 
 object CommitQueryResponse:
@@ -294,7 +278,7 @@ final case class HistoryData(
 )
 
 final case class HistoryBranchData(
-    last_modified: List[CommitData]
+    last_modified: List[IrminCommit.Raw]
 )
 
 object HistoryResponse:
@@ -316,7 +300,7 @@ final case class LcaData(
 )
 
 final case class LcaBranchData(
-    lcas: List[CommitData]
+    lcas: List[IrminCommit.Raw]
 )
 
 object LcaResponse:

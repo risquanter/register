@@ -3,7 +3,7 @@ package com.risquanter.register.infra.irmin
 import zio.*
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, RiskLeaf}
-import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
@@ -57,7 +57,7 @@ object IrminRevertSemanticsSpec extends ZIOSpecDefault:
           irmin      <- ZIO.service[IrminClient]
           _          <- repo.create(wsId, v1, BranchRef.Main)
           histC      <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
-          c1Hash     <- ZIO.fromEither(CommitHash.fromString(histC.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
+          c1Hash      = histC.head.hash
           _          <- repo.update(wsId, tid, _ => treeV2(v1), BranchRef.Main)
           headBefore <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
           // native head-set revert (NOT the production forward-write path)
@@ -65,10 +65,10 @@ object IrminRevertSemanticsSpec extends ZIOSpecDefault:
           headAfter  <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
           loaded     <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
           // the pre-revert head remains reachable by hash — a head-set repoints, it does not destroy commits
-          priorStill <- irmin.getCommit(CommitHash.fromString(headBefore.getOrElse("")).toOption.get)
+          priorStill <- ZIO.foreach(headBefore)(irmin.getCommit).map(_.flatten)
         yield assertTrue(
           loaded.exists(_.index.nodes.size == 3),        // head now reads c1's restored content
-          headAfter.contains(c1Hash.value),              // head-set: head IS the target commit
+          headAfter.contains(c1Hash),                    // head-set: head IS the target commit
           !headAfter.exists(headBefore.contains),        // head moved off c2
           priorStill.isDefined                           // c2 still reachable by hash
         )

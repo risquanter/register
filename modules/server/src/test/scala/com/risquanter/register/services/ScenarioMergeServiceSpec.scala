@@ -14,7 +14,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, R
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
 import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, Core, ErrorLocation, Failure, FieldName, IrminError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, OutageMode, PeerZone, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
-import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus}
+import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath, IrminSegment}
@@ -42,8 +42,12 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
   private def name(s: String): ScenarioName.ScenarioName = ScenarioName.fromString(s).toOption.get
   private def hash(fill: Char): CommitHash = CommitHash.fromString(fill.toString * 40).toOption.get
 
+  /** The information every fixture commit carries; no assertion here reads it. */
+  private val info: IrminInfo =
+    IrminInfo(Instant.EPOCH, CommitMessage.TreeWritten(ws("fixture-ws"), TreeId(safeId("fixture-tree")), TreeWriteKind.Update))
+
   private def commit(h: CommitHash): IrminCommit =
-    IrminCommit(h.value, "", Nil, IrminInfo("2026-01-01T00:00:00Z", "test", "test"))
+    IrminCommit(h, h, Nil, info)
 
   // ── stored blobs ─────────────────────────────────────────────────────────
   // A node is stored as its concrete type's own JSON (RiskTreeRepositoryIrmin
@@ -133,7 +137,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     stagingSets: Option[Ref[List[(IrminPath, String, CommitMessage)]]],
     mainMovesTo: List[CommitHash] = Nil
   ) extends IrminClient:
-    private def branchOf(n: String, h: CommitHash): IrminBranch = IrminBranch(n, Some(commit(h)))
+    private def branchOf(b: StoreBranch, h: CommitHash): IrminBranch = IrminBranch(b, Some(commit(h)))
 
     /** How many times main's head has been read. The first read answers
       * `mainHead`, and each later read answers the next of `mainMovesTo`, so a
@@ -159,14 +163,14 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     override def mainBranch: IO[IrminError | Failure, Option[IrminBranch]] =
       ZIO.succeed {
         val head = (mainHead :: mainMovesTo).applyOrElse(mainReads.getAndIncrement(), _ => mainMovesTo.lastOption.getOrElse(mainHead))
-        Option.when(mainHeadPresent)(branchOf("main", head))
+        Option.when(mainHeadPresent)(branchOf(BranchRef.Main, head))
       }
 
     /** Answers for the scenario branch and for the staging branch alike: the
       * service reads the first for its head and the second only to find the
       * head its cleanup deletes with. */
     override def getBranch(branch: StoreBranch): IO[IrminError | Failure, Option[IrminBranch]] =
-      ZIO.succeed(Some(branchOf(branch.name, scenarioHead)))
+      ZIO.succeed(Some(branchOf(branch, scenarioHead)))
 
     override def lca(branch: BranchRef, c: CommitHash): IO[IrminError | Failure, List[IrminCommit]] =
       ZIO.succeed(List(commit(base)))

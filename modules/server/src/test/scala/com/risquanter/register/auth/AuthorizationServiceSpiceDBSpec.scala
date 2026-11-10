@@ -9,10 +9,10 @@ import sttp.monad.MonadError
 import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId, IronConstants, MeshServiceUrl}
-import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, Core, ErrorLocation, Failure, OutageMode, PeerZone}
+import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, Core, ErrorLocation, ExpectedInput, Failure, FieldProblem, OutageMode, PeerZone, TrustZone}
 import com.risquanter.register.telemetry.TelemetryLive
 
-/** Unit tests for AuthorizationServiceSpiceDB HTTP adapter (T-U1 through T-U14).
+/** Unit tests for AuthorizationServiceSpiceDB HTTP adapter (T-U1 through T-U11).
   *
   * No live SpiceDB required. Uses SttpBackendStub to simulate SpiceDB HTTP
   * responses in isolation — tests the response-mapping logic only.
@@ -26,7 +26,6 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
   private val alice: UserId.Authenticated = UserId.fromString(aliceUuid).toOption.get
 
   private val ws1Id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-  private val ws2Id = "01BX5ZZKBKACTAV9WEVGEMMVRZ"
   private val ws1: WorkspaceId = WorkspaceId.fromString(ws1Id).toOption.get
   // Construct directly — asResource extension is in ResourceRef companion but requires explicit import
   private val ws1Ref: ResourceRef = ResourceRef(ResourceType.Workspace, ws1.toSafeId)
@@ -60,6 +59,15 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
 
   private def failsAsOutage[A](outcome: Either[AuthError | Failure, A], mode: OutageMode): TestResult =
     assertTrue(outcome.left.toOption.flatMap(outageModeOf).contains(mode))
+
+  /** What this service refused in SpiceDB's answer, when the failure is a
+    * refusal at the authorization zone; `None` for anything else. */
+  private def refusalOf(error: AuthError | Failure): Option[FieldProblem] = error match
+    case Failure.Rejected(Core(TrustZone.Peer(PeerZone.Authorization), errors, _)) => Some(errors.head._2)
+    case _                                                                          => None
+
+  private def failsAsRefusal[A](outcome: Either[AuthError | Failure, A], expected: ExpectedInput): TestResult =
+    assertTrue(outcome.left.toOption.flatMap(refusalOf).contains(FieldProblem.Unreadable(expected)))
 
   private def serviceLayer(stub: SttpBackend[Task, Any]): ZLayer[Any, Throwable, AuthorizationService] =
     ZLayer.make[AuthorizationService](
@@ -172,61 +180,30 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
       serviceLayer(stubFailing(new RuntimeException("Connection refused")))
     ),
 
-    test("T-U9 — check() malformed response body is an answer outside the protocol") {
+    test("T-U9 — check() malformed response body is refused as JSON at the authorization zone") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(alice, Permission.ViewWorkspace, ws1Ref)
-      ).either.map(failsAsOutage(_, OutageMode.Protocol))
+      ).either.map(failsAsRefusal(_, ExpectedInput.Json))
     }.provide(
       serviceLayer(stubWith("not-json"))
     ),
 
-    test("T-U10 — listAccessible parses NDJSON result lines in order") {
+    test("T-U10 — a permissionship outside the API's set is refused as the answer the decoder declares") {
       ZIO.serviceWithZIO[AuthorizationService](
-        _.listAccessible(alice, ResourceType.Workspace, Permission.ViewWorkspace)
-      ).map { ids =>
-        assertTrue(ids.map(_.value.toString) == List(ws1Id, ws2Id))
+        _.check(alice, Permission.ViewWorkspace, ws1Ref)
+      ).either.map(failsAsRefusal(_, ExpectedInput.Declared))
+    }.provide(
+      serviceLayer(stubWith("""{"permissionship":"PERMISSIONSHIP_MAYBE"}"""))
+    ),
+
+    test("T-U11 — PERMISSIONSHIP_CONDITIONAL_PERMISSION treated as deny (no caveats are evaluated)") {
+      ZIO.serviceWithZIO[AuthorizationService](
+        _.check(alice, Permission.ViewWorkspace, ws1Ref)
+      ).either.map {
+        case Left(_: AuthForbidden) => assertCompletes
+        case other                  => assertTrue(false)
       }
     }.provide(
-      serviceLayer(stubWith(
-        s"""{"result":{"resourceObjectId":"$ws1Id"}}
-           |{"result":{"resourceObjectId":"$ws2Id"}}
-           |""".stripMargin
-      ))
-    ),
-
-    test("T-U11 — listAccessible empty body yields empty list") {
-      ZIO.serviceWithZIO[AuthorizationService](
-        _.listAccessible(alice, ResourceType.Workspace, Permission.ViewWorkspace)
-      ).map(ids => assertTrue(ids.isEmpty))
-    }.provide(
-      serviceLayer(stubWith(""))
-    ),
-
-    test("T-U12 — listAccessible mid-stream error object fails the whole lookup (no partial results)") {
-      ZIO.serviceWithZIO[AuthorizationService](
-        _.listAccessible(alice, ResourceType.Workspace, Permission.ViewWorkspace)
-      ).either.map(failsAsOutage(_, OutageMode.Protocol))
-    }.provide(
-      serviceLayer(stubWith(
-        s"""{"result":{"resourceObjectId":"$ws1Id"}}
-           |{"error":{"code":4,"message":"DEADLINE_EXCEEDED"}}
-           |""".stripMargin
-      ))
-    ),
-
-    test("T-U13 — listAccessible unparseable stream line is an answer outside the protocol") {
-      ZIO.serviceWithZIO[AuthorizationService](
-        _.listAccessible(alice, ResourceType.Workspace, Permission.ViewWorkspace)
-      ).either.map(failsAsOutage(_, OutageMode.Protocol))
-    }.provide(
-      serviceLayer(stubWith("not-json\n"))
-    ),
-
-    test("T-U14 — listAccessible HTTP 5xx is an outage with that status") {
-      ZIO.serviceWithZIO[AuthorizationService](
-        _.listAccessible(alice, ResourceType.Workspace, Permission.ViewWorkspace)
-      ).either.map(failsAsOutage(_, OutageMode.Status(StatusCode.ServiceUnavailable)))
-    }.provide(
-      serviceLayer(stubWith("""{"code":13,"message":"Internal server error"}""", code = 503))
+      serviceLayer(stubWith("""{"permissionship":"PERMISSIONSHIP_CONDITIONAL_PERMISSION"}"""))
     )
   )

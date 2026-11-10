@@ -32,9 +32,13 @@ trait AuthorizationService:
   // Returns a Checked[P] proof token on success; callers bind it via `given` in for-comprehensions.
   // Fails with AuthError.Forbidden if SpiceDB returns false, and with
   // AuthError.ServiceUnavailable on connectivity failure — deny, never allow.
-
-  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
 ```
+
+A lookup of the resources a user may reach is not part of the interface. Its one
+consumer, a listing of the workspaces a user owns, waits on how an identified
+user reaches a workspace they own, which the authorization plan records as open;
+when that is ruled, the lookup returns `WorkspaceId`s to the server alone, never
+to a client (ADR-036).
 
 `check()` fails the ZIO effect (rather than returning `false`) so a caller
 cannot grant access by ignoring the result — the only way past it is a success:
@@ -112,7 +116,6 @@ trait AuthorizationService:
 // GOOD: App reads authorization state only
 trait AuthorizationService:
   def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
-  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
 ```
 
 ### ❌ Startup Seeding
@@ -162,7 +165,7 @@ trait BootstrapProvisioner:
 
 | Location | Role |
 |----------|------|
-| `AuthorizationService` trait | PEP interface — `check` + `listAccessible` only |
+| `AuthorizationService` trait | PEP interface — `check` only |
 | `AuthorizationServiceSpiceDB` | SpiceDB HTTP adapter — reads only, no write calls |
 | `AuthzProvisioning` CI job | PAP — writes org/team/workspace tuples |
 | `zed` CLI (ops) | PAP — individual access changes, break-glass |

@@ -8,7 +8,8 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision, Url}
 import com.risquanter.register.domain.errors.{Core, Failure, OutageMode, PeerZone}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
+import com.risquanter.register.http.responses.TreeWriteKind
+import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.domain.data.RiskPortfolio
 import com.risquanter.register.domain.data.RiskLeaf
@@ -193,7 +194,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         yield assertTrue(
           hMeta.map(_.hash) == hNode.map(_.hash),   // same single commit wrote meta and node
           hMeta.size == 1,
-          hMeta.headOption.exists(_.info.message == s"workspace:${wsId.value}:risk-tree:${tree.id.value}:create")
+          hMeta.headOption.exists(_.info.message == CommitMessage.TreeWritten(wsId, tree.id, TreeWriteKind.Create))
         )
       },
 
@@ -210,8 +211,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         yield assertTrue(
           hMeta.size == 2,                          // create + update, nothing else
           hMeta.map(_.info.message).toSet == Set(
-            s"workspace:${wsId.value}:risk-tree:${tree.id.value}:create",
-            s"workspace:${wsId.value}:risk-tree:${tree.id.value}:update"
+            CommitMessage.TreeWritten(wsId, tree.id, TreeWriteKind.Create),
+            CommitMessage.TreeWritten(wsId, tree.id, TreeWriteKind.Update)
           ),
           leaf2.isEmpty                             // pruned by subtree replace, no extra commit
         )

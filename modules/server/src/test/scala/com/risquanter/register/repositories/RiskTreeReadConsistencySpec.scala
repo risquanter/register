@@ -9,6 +9,7 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
 import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
+import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminSegment, IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry}
@@ -99,7 +100,9 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       .find(_.parent.contains(prefix))
       .flatMap(_.name)
 
-  private def emptyInfo: IrminInfo = IrminInfo(date = "", author = "", message = "")
+  /** The information every scripted commit carries; no assertion here reads it. */
+  private def emptyInfo: IrminInfo =
+    IrminInfo(Instant.EPOCH, CommitMessage.TreeWritten(wsId, treeIdF, TreeWriteKind.Update))
 
   /** Scripted client. `getBranch` returns `headRef`, counts its calls, and (if
     * `advanceTo` is set) advances the head AFTER answering — so a second head
@@ -119,7 +122,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         head <- headRef.get
         _    <- advanceTo.fold[UIO[Unit]](ZIO.unit)(next => headRef.set(Some(next)))
       yield head.map(h =>
-        IrminBranch(branch.name, Some(IrminCommit(h.value, h.value, Nil, emptyInfo)))
+        IrminBranch(branch, Some(IrminCommit(h, h, Nil, emptyInfo)))
       )
 
     override def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, Option[String]] =

@@ -186,7 +186,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                      case None => ZIO.succeed(MergePreviewStatus.ScenarioMissing())
                      case Some(commit) =>
                        for
-                         head <- ScenarioBranchOps.refineCommitHash(commit.hash)
+                         head <- ZIO.succeed(commit.hash)
                          // A preview writes nothing, so the merged `meta`
                          // values it computes only need some instant.
                          now  <- Clock.instant
@@ -200,7 +200,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       branch       <- ScenarioBranchOps.scenarioBranch(wsId, name)
       maybeHead    <- irmin.getBranch(branch).map(_.flatMap(_.head))
       scenarioHead <- maybeHead match
-                        case Some(commit) => ScenarioBranchOps.refineCommitHash(commit.hash)
+                        case Some(commit) => ZIO.succeed(commit.hash)
                         case None =>
                           ZIO.fail(ValidationFailed(List(ValidationError(
                             ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(name)))))
@@ -263,9 +263,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                    // holds the merge, and a leftover one only blocks the next
                    // merge of this scenario, which reports it as still running.
                    irmin.getBranch(staging)
-                     .flatMap(b => ZIO.foreachDiscard(b.flatMap(_.head))(h =>
-                       ScenarioBranchOps.refineCommitHash(h.hash)
-                         .flatMap(c => irmin.deleteBranch(staging, c))))
+                     .flatMap(b => ZIO.foreachDiscard(b.flatMap(_.head))(h => irmin.deleteBranch(staging, h.hash)))
                      .ignore
                  ) { _ =>
                    for
@@ -280,7 +278,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                      last   <- ZIO.foldLeft(metadataToWrite)(merge) { case (_, (comparison, merged)) =>
                                  irmin.set(WorkspaceStoragePaths.of(wsId, comparison.path), merged.toJson, mergedMessage, staging)
                                }
-                     staged <- ScenarioBranchOps.refineCommitHash(last.hash)
+                     staged  = last.hash
                      _      <- guardStagedState(wsId, name, staged)
                      _      <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged)
                                  .catchSome { case BranchHeadStale(_, _) =>
@@ -378,10 +376,10 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       case None => ZIO.succeed(MergeScan(None, Nil, Map.empty, Nil))
       case Some(mainCommit) =>
         for
-          mainHead    <- ScenarioBranchOps.refineCommitHash(mainCommit.hash)
           lcas        <- irmin.lca(BranchRef.Main, scenarioHead)
+          mainHead     = mainCommit.hash
           base        <- lcas.headOption match
-                           case Some(c) => ScenarioBranchOps.refineCommitHash(c.hash)
+                           case Some(c) => ZIO.succeed(c.hash)
                            case None =>
                              ZIO.die(new IllegalStateException(
                                s"no common ancestor between main and ${branch.toBranchRef} — " +

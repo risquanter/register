@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash, MergeStagingRef, StoreBranch}
 import com.risquanter.register.domain.errors.{AppError, Failure, DataConflict, ErrorLocation, FieldName, FieldProblem, ScenarioHeadStale, ValidationFailed, ValidationError, BranchAlreadyExists, BranchHeadStale}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminBranch
@@ -45,10 +45,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
       branch <- scenarioBranch(wsId, name)
       _      <- irmin.deleteBranch(branch, expectedHead).catchSome { case BranchHeadStale(_, expected) =>
                   irmin.getBranch(branch).orElseSucceed(None).flatMap { maybeBranch =>
-                    val actualHash = maybeBranch.flatMap(_.head).map(_.hash)
-                    ZIO.foreach(actualHash)(refineCommitHash).flatMap { actual =>
-                      ZIO.fail(ScenarioHeadStale(name, expected, actual))
-                    }
+                    ZIO.fail(ScenarioHeadStale(name, expected, maybeBranch.flatMap(_.head).map(_.hash)))
                   }
                 }
     yield ()
@@ -59,7 +56,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     source match
       case ScenarioSource.Main =>
         irmin.mainBranch.flatMap {
-          case Some(IrminBranch(_, Some(commit))) => refineCommitHash(commit.hash)
+          case Some(IrminBranch(_, Some(commit))) => ZIO.succeed(commit.hash)
           case _ =>
             ZIO.fail(ValidationFailed(List(ValidationError(
               ErrorLocation.requestField(FieldName.Source), FieldProblem.WorkspaceHasNoContent))))
@@ -69,7 +66,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
           branch      <- scenarioBranch(wsId, scenario)
           maybeBranch <- irmin.getBranch(branch)
           head        <- maybeBranch.flatMap(_.head) match
-                           case Some(commit) => refineCommitHash(commit.hash)
+                           case Some(commit) => ZIO.succeed(commit.hash)
                            case None =>
                              ZIO.fail(ValidationFailed(List(ValidationError(
                                ErrorLocation.requestField(FieldName.Source), FieldProblem.ScenarioNotFound(scenario)))))
@@ -105,8 +102,8 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     */
   private def reachableFromOwnHistory(wsId: WorkspaceId, commit: CommitHash): IO[AppError | Failure, Boolean] =
     for
-      rawNames    <- irmin.branches
-      ownNames     = rawNames.flatMap(scenarioNameOf(wsId, _))
+      listed      <- irmin.branches
+      ownNames     = listed.flatMap(scenarioNameOf(wsId, _))
       ownBranches <- ZIO.foreach(ownNames)(scenarioBranch(wsId, _))
       reachable   <- ZIO.exists(BranchRef.Main :: ownBranches)(isAncestorOf(_, commit))
     yield reachable
@@ -117,7 +114,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     * false rather than an error. */
   private def isAncestorOf(branch: BranchRef, commit: CommitHash): IO[AppError | Failure, Boolean] =
     irmin.lca(branch, commit)
-      .map(_.exists(_.hash == commit.value))
+      .map(_.exists(_.hash == commit))
       .orElseSucceed(false)
 
   private def summaryFor(wsId: WorkspaceId, name: ScenarioName.ScenarioName): IO[AppError | Failure, ScenarioSummary] =
@@ -136,31 +133,28 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                          ZIO.die(new IllegalStateException(
                            s"scenario branch ${branch.toBranchRef} has no head — creation always forks at a commit"
                          ))
-      hash        <- refineCommitHash(commit.hash)
-    yield ScenarioSummary(name, hash)
+    yield ScenarioSummary(name, commit.hash)
 
   // ── naming ───────────────────────────────────────────────────────────────
 
   /** The scenario name a listed store branch carries, or `None` when the branch
-    * is main, belongs to another workspace, or was not composed by
-    * `BranchRef.scenario`.
+    * is main, belongs to another workspace, or is a merge's staging branch.
     *
     * Reads the same inverse `BranchChoice.fromBranchRef` applies, so the
     * listing and the composition cannot disagree about how a scenario branch is
     * named. A branch this returns `None` for is skipped rather than failing the
-    * listing: another workspace's branch is not this caller's concern, and the
-    * store holds branch kinds that are nobody's scenario.
+    * listing: another workspace's branch is not this caller's concern, and a
+    * staging branch is nobody's scenario.
     */
-  private def scenarioNameOf(wsId: WorkspaceId, rawName: String): Option[ScenarioName.ScenarioName] =
-    BranchRef.fromString(rawName).toOption
-      .flatMap(BranchChoice.fromBranchRef(wsId, _).toOption)
-      .collect { case BranchChoice.Scenario(name) => name }
+  private def scenarioNameOf(wsId: WorkspaceId, branch: StoreBranch): Option[ScenarioName.ScenarioName] =
+    branch match
+      case ref: BranchRef =>
+        BranchChoice.fromBranchRef(wsId, ref).toOption.collect { case BranchChoice.Scenario(name) => name }
+      case _: MergeStagingRef =>
+        None
 
   private def scenarioBranch(wsId: WorkspaceId, name: ScenarioName.ScenarioName): IO[AppError | Failure, BranchRef] =
     ScenarioBranchOps.scenarioBranch(wsId, name)
-
-  private def refineCommitHash(raw: String): IO[AppError | Failure, CommitHash] =
-    ScenarioBranchOps.refineCommitHash(raw)
 
 object ScenarioServiceLive:
   val layer: ZLayer[IrminClient, Nothing, ScenarioService] =

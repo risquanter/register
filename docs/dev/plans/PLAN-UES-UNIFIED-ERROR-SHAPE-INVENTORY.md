@@ -95,3 +95,9 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala
 - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceReaper.scala
+- modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala
+- modules/common/src/main/scala/com/risquanter/register/http/responses/TreeHistoryResponse.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/CommitMessage.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/persistence/QuillMappings.scala

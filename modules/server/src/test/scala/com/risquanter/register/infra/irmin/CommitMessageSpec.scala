@@ -1,12 +1,14 @@
 package com.risquanter.register.infra.irmin
 
+import zio.prelude.NonEmptyList
 import zio.test.*
 import com.risquanter.register.domain.data.iron.{ScenarioName, WorkspaceId}
+import com.risquanter.register.domain.errors.{ErrorLocation, ExpectedInput, FieldProblem, ValidationError, ValueFormat}
 import com.risquanter.register.http.responses.{HistoryOperation, TreeWriteKind}
 import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
 
 /** The commit-message convention: one owner renders and parses every message
-  * this server writes, under the law `parse(render(m)) == Some(m)`. */
+  * this server writes, under the law `parse(render(m)) == Right(m)`. */
 object CommitMessageSpec extends ZIOSpecDefault:
 
   private val ws       = WorkspaceId(safeId("commit-ws"))
@@ -17,8 +19,12 @@ object CommitMessageSpec extends ZIOSpecDefault:
     TreeWriteKind.values.toList.map(CommitMessage.TreeWritten(ws, tree, _)) ++
       List(CommitMessage.MergePrepared(ws, scenario), CommitMessage.ScenarioMerged(ws, scenario))
 
+  /** The whole message, or a segment, did not read as the convention declares. */
+  private val unreadable: ValidationError =
+    ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Declared))
+
   def spec = suite("CommitMessage")(
-    test("parse(render(m)) == Some(m) for every case and every tree write") {
+    test("parse(render(m)) == Right(m) for every case and every tree write") {
       assertTrue(every.forall(m => CommitMessage.parse(CommitMessage.render(m)).contains(m)))
     },
     test("render produces the spellings already in the store") {
@@ -31,26 +37,35 @@ object CommitMessageSpec extends ZIOSpecDefault:
         CommitMessage.render(CommitMessage.MergePrepared(ws, scenario)) == s"workspace:${ws.value}:merge-prepare:draft-a"
       )
     },
-    test("a message this server did not write parses to None and shows as Other") {
+    test("a message this server did not write is refused as the message the reader declares") {
       assertTrue(
-        CommitMessage.parse("some external commit").isEmpty,
-        CommitMessage.parse("").isEmpty,
-        CommitMessage.historyOperation(CommitMessage.parse("some external commit")).contains(HistoryOperation.Other())
+        CommitMessage.parse("some external commit") == Left(NonEmptyList(unreadable)),
+        CommitMessage.parse("") == Left(NonEmptyList(unreadable))
       )
     },
-    test("a message whose identifier segments do not refine parses to None") {
+    test("an identifier segment that does not refine carries the identifier's own refusal") {
       assertTrue(
-        CommitMessage.parse(s"workspace:not-a-ulid:risk-tree:${tree.value}:update").isEmpty,
-        CommitMessage.parse(s"workspace:${ws.value}:risk-tree:${tree.value}:rename").isEmpty,
-        CommitMessage.parse(s"workspace:${ws.value}:merge-scenario:Not A Name").isEmpty
+        CommitMessage.parse(s"workspace:not-a-ulid:risk-tree:${tree.value}:update").left.map(_.map(_.problem)) ==
+          Left(NonEmptyList(FieldProblem.WrongFormat(ValueFormat.Ulid)))
+      )
+    },
+    test("a write kind outside the set, and a segment spelled otherwise than render spells it, are refused as declared") {
+      assertTrue(
+        CommitMessage.parse(s"workspace:${ws.value}:risk-tree:${tree.value}:rename") == Left(NonEmptyList(unreadable)),
+        CommitMessage.parse(s"workspace:${ws.value}:merge-scenario:Draft-A") == Left(NonEmptyList(unreadable))
+      )
+    },
+    test("the refusals of several segments accumulate") {
+      assertTrue(
+        CommitMessage.parse("workspace:not-a-ulid:risk-tree:also-not:rename").left.map(_.length) == Left(3)
       )
     },
     test("the history shows a tree write and a merge, and not a merge's preparation write") {
       assertTrue(
-        CommitMessage.historyOperation(Some(CommitMessage.TreeWritten(ws, tree, TreeWriteKind.Revert)))
+        CommitMessage.historyOperation(CommitMessage.TreeWritten(ws, tree, TreeWriteKind.Revert))
           .contains(HistoryOperation.TreeWrite(TreeWriteKind.Revert)),
-        CommitMessage.historyOperation(Some(CommitMessage.ScenarioMerged(ws, scenario))).contains(HistoryOperation.Merge()),
-        CommitMessage.historyOperation(Some(CommitMessage.MergePrepared(ws, scenario))).isEmpty
+        CommitMessage.historyOperation(CommitMessage.ScenarioMerged(ws, scenario)).contains(HistoryOperation.Merge()),
+        CommitMessage.historyOperation(CommitMessage.MergePrepared(ws, scenario)).isEmpty
       )
     }
   )

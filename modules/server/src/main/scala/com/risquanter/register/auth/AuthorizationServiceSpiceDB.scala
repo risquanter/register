@@ -16,7 +16,8 @@ import scala.concurrent.duration.FiniteDuration
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency}
 import com.risquanter.register.domain.data.iron.{UserId, SafeId}
 import com.risquanter.register.domain.errors.{
-  AuthError, AuthForbidden, Core, Diagnostic, ErrorLocation, Failure, OutageMode, PeerZone
+  AuthError, AuthForbidden, Core, Diagnostic, ErrorLocation, ExpectedInput, Failure, FieldProblem, OutageMode,
+  PeerZone, TrustZone, ValidationError
 }
 
 // ─── SpiceDB REST API request/response types (package-private) ───────────────
@@ -25,42 +26,73 @@ import com.risquanter.register.domain.errors.{
 // shared with BootstrapProvisionerSpiceDB.scala (WriteRelationships request body).
 // Named with SpiceDb prefix to avoid shadowing same-named types from other namespaces.
 
-private case class SpiceDbObjectRef(objectType: String, objectId: String)
-private given JsonEncoder[SpiceDbObjectRef] = DeriveJsonEncoder.gen
+/** What a SpiceDB request names: one of this application's resources, or a
+  * user. The encoder writes each as the Zed definition and the object id, in
+  * the spellings the schema fixes. */
+private enum SpiceDbObjectRef:
+  case Resource(resourceType: ResourceType, id: SafeId.SafeId)
+  case User(id: UserId.Authenticated)
+
+private object SpiceDbObjectRef:
+  /** The Zed `definition` every user belongs to. Spelling fixed by the Zed
+    * schema in `infra/spicedb/schema.zed`. */
+  val UserDefinition: String = "user"
+
+  /** The two field names of a SpiceDB v1 object reference. */
+  private val TypeField = "objectType"
+  private val IdField   = "objectId"
+
+  given JsonEncoder[SpiceDbObjectRef] = JsonEncoder[Json].contramap {
+    case Resource(resourceType, id) => objectJson(resourceType.zedType, id.value)
+    case User(id)                   => objectJson(UserDefinition, id.value)
+  }
+
+  private def objectJson(definition: String, id: String): Json =
+    Json.Obj(TypeField -> Json.Str(definition), IdField -> Json.Str(id))
 
 private case class SpiceDbSubjectRef(`object`: SpiceDbObjectRef)
 private given JsonEncoder[SpiceDbSubjectRef] = DeriveJsonEncoder.gen
 
 private case class SpiceDbCheckRequest(
   resource:    SpiceDbObjectRef,
-  permission:  String,
+  permission:  Permission,
   subject:     SpiceDbSubjectRef,
   consistency: Json
 )
 private given JsonEncoder[SpiceDbCheckRequest] = DeriveJsonEncoder.gen
 
-private case class SpiceDbLookupRequest(
-  resourceObjectType: String,
-  permission:         String,
-  subject:            SpiceDbSubjectRef,
-  consistency:        Json
-)
-private given JsonEncoder[SpiceDbLookupRequest] = DeriveJsonEncoder.gen
+/** SpiceDB's answer to a check. The spellings are the ones the SpiceDB v1 API
+  * fixes for `CheckPermissionResponse.Permissionship`. */
+private enum Permissionship(val wire: String):
+  case Unspecified           extends Permissionship("PERMISSIONSHIP_UNSPECIFIED")
+  case NoPermission          extends Permissionship("PERMISSIONSHIP_NO_PERMISSION")
+  case HasPermission         extends Permissionship("PERMISSIONSHIP_HAS_PERMISSION")
+  case ConditionalPermission extends Permissionship("PERMISSIONSHIP_CONDITIONAL_PERMISSION")
 
+private object Permissionship:
+  /** The answer this spelling names, or `None` for a spelling outside the set. */
+  def fromWire(text: String): Option[Permissionship] = values.find(_.wire == text)
+
+/** A check response as SpiceDB's answer carries it, before the permissionship
+  * is refined. */
 private case class SpiceDbCheckResponse(permissionship: String)
 private given JsonDecoder[SpiceDbCheckResponse] = DeriveJsonDecoder.gen
-
-private case class SpiceDbLookupResultItem(resourceObjectId: String)
-private given JsonDecoder[SpiceDbLookupResultItem] = DeriveJsonDecoder.gen
-
-private case class SpiceDbLookupResponseLine(result: Option[SpiceDbLookupResultItem], error: Option[Json])
-private given JsonDecoder[SpiceDbLookupResponseLine] = DeriveJsonDecoder.gen
 
 /** SpiceDB did not answer, in the given way. Shared by every SpiceDB adapter
   * in this package: no authorization decision was obtained, so the request
   * fails closed as a dependency outage. */
 private def authorizationOutage(mode: OutageMode, diagnostics: List[Diagnostic]): Failure =
   Failure.Unanswered(Core(PeerZone.Authorization, NonEmptyList((ErrorLocation.Whole, mode)), diagnostics))
+
+/** SpiceDB answered with content this service refuses (ADR-039): a body that
+  * is not the check response, or a permissionship outside the set the API
+  * fixes. No authorization decision was obtained, so the request fails closed. */
+private def authorizationRefusal(expected: ExpectedInput, diagnostics: List[Diagnostic]): Failure =
+  Failure.rejected(
+    TrustZone.Peer(PeerZone.Authorization),
+    NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(expected))),
+    diagnostics
+  )
 
 /** A transport exception's own text, for the log, when it has one. */
 private def peerMessage(e: Throwable): List[Diagnostic] =
@@ -71,13 +103,15 @@ private def peerMessage(e: Throwable): List[Diagnostic] =
 /** Live SpiceDB HTTP adapter for the authorization service.
   *
   * Implements AuthorizationService by calling SpiceDB's REST API (v1).
-  * Fail-closed on all transport and SpiceDB-side errors: any failure mode is
-  * an `Unanswered` at the authorization zone, which the wire projection answers
-  * as a dependency outage. No authorization decision was obtained, so none is assumed, and the
-  * caller is told a service did not answer rather than that access was refused.
+  * Fail-closed on all transport and SpiceDB-side errors: a request SpiceDB did
+  * not answer is an `Unanswered` at the authorization zone, which the wire
+  * projection answers as a dependency outage, and an answer outside the
+  * protocol is a `Rejected` there. No authorization decision was obtained in
+  * either case, so none is assumed, and the caller is told a service did not
+  * answer rather than that access was refused.
   *
-  * Only `check()` and `listAccessible()` are implemented. This service
-  * never writes authorization data — it is a pure Policy Enforcement Point.
+  * Only `check()` is implemented. This service never writes authorization
+  * data — it is a pure Policy Enforcement Point.
   *
   * @see ADR-024: Externalized Authorization / PEP Pattern
   */
@@ -89,8 +123,7 @@ final class AuthorizationServiceSpiceDB private (
   checkLatency: Histogram[Double]
 ) extends AuthorizationService:
 
-  private val checkUri:  Uri = Uri.unsafeParse(config.url.value + "/v1/permissions/check")
-  private val lookupUri: Uri = Uri.unsafeParse(config.url.value + "/v1/permissions/resources")
+  private val checkUri: Uri = Uri.unsafeParse(config.url.value + "/v1/permissions/check")
 
   private val timeout: FiniteDuration =
     FiniteDuration(config.timeoutSeconds.toLong, TimeUnit.SECONDS)
@@ -98,9 +131,6 @@ final class AuthorizationServiceSpiceDB private (
   private def consistencyJson: Json = config.consistency match
     case SpiceDbConsistency.MinimizeLatency => Json.Obj("minimizeLatency" -> Json.Obj())
     case SpiceDbConsistency.FullyConsistent => Json.Obj("fullyConsistent" -> Json.Bool(true))
-
-  private def userSubject(user: UserId.Authenticated): SpiceDbSubjectRef =
-    SpiceDbSubjectRef(`object` = SpiceDbObjectRef("user", user.value))
 
   // ─── check() ──────────────────────────────────────────────────────────────
 
@@ -139,9 +169,9 @@ final class AuthorizationServiceSpiceDB private (
     resource:   ResourceRef
   ): IO[AuthError | Failure, Checked[P]] =
     val body = SpiceDbCheckRequest(
-      resource    = SpiceDbObjectRef(resource.resourceType.zedType, resource.resourceId.value),
-      permission  = permission.zedName,
-      subject     = userSubject(user),
+      resource    = SpiceDbObjectRef.Resource(resource.resourceType, resource.resourceId),
+      permission  = permission,
+      subject     = SpiceDbSubjectRef(`object` = SpiceDbObjectRef.User(user)),
       consistency = consistencyJson
     )
     basicRequest
@@ -155,85 +185,35 @@ final class AuthorizationServiceSpiceDB private (
       .mapError(e => authorizationOutage(OutageMode.ConnectionRefused, peerMessage(e)))
       .flatMap { response =>
         if response.code.isSuccess then
-          response.body.fromJson[SpiceDbCheckResponse] match
-            case Right(SpiceDbCheckResponse("PERMISSIONSHIP_HAS_PERMISSION")) =>
+          ZIO.fromEither(refineAnswer(response.body)).flatMap {
+            case Permissionship.HasPermission =>
               ZIO.succeed(Checked[P]())
-            case Right(SpiceDbCheckResponse(_)) =>
-              // PERMISSIONSHIP_NO_PERMISSION, PERMISSIONSHIP_UNSPECIFIED, and any
-              // unknown value all map to explicit denial (fail-closed per §L2.2).
+            case Permissionship.NoPermission | Permissionship.Unspecified | Permissionship.ConditionalPermission =>
+              // Anything but a plain grant is an explicit denial (fail-closed):
+              // this service evaluates no caveats, so a conditional answer
+              // grants nothing.
               ZIO.fail(AuthForbidden(
                 userId       = user.value,
                 permission   = permission.zedName,
                 resourceType = resource.resourceType.zedType,
                 resourceId   = resource.resourceId.value
               ))
-            case Left(parseErr) =>
-              ZIO.fail(authorizationOutage(OutageMode.Protocol, List(Diagnostic.PeerMessage(parseErr))))
+          }
         else
           ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
       }
 
-  // ─── listAccessible() ─────────────────────────────────────────────────────
-
-  // Intentionally uninstrumented: telemetry (span, authz.check.* metrics,
-  // audit log) is scoped to check() only — the
-  // per-request allow/deny enforcement decision. listAccessible is a listing
-  // convenience whose result is shown to the user; failures surface as an
-  // `Unanswered` at the authorization zone and are visible in ordinary request
-  // logs/traces.
-  override def listAccessible(
-    user:         UserId.Authenticated,
-    resourceType: ResourceType,
-    permission:   Permission
-  ): IO[AuthError | Failure, List[ResourceId]] =
-    val body = SpiceDbLookupRequest(
-      resourceObjectType = resourceType.zedType,
-      permission         = permission.zedName,
-      subject            = userSubject(user),
-      consistency        = consistencyJson
-    )
-    basicRequest
-      .post(lookupUri)
-      .contentType("application/json")
-      .auth.bearer(config.token.reveal)
-      .body(body.toJson)
-      .response(asStringAlways)
-      .readTimeout(timeout)
-      .send(backend)
-      .mapError(e => authorizationOutage(OutageMode.ConnectionRefused, peerMessage(e)))
-      .flatMap { response =>
-        if response.code.isSuccess then
-          ZIO.fromEither(parseLookupResponseLines(response.body))
-            .mapError(msg => authorizationOutage(OutageMode.Protocol, List(Diagnostic.PeerMessage(msg))))
-        else
-          ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
-      }
-
-  // SpiceDB LookupResources API streams newline-delimited JSON objects.
-  // Each non-empty line is a complete JSON object containing either a `result`
-  // field or an `error` object (the gateway can report errors mid-stream on an
-  // HTTP 200, e.g. deadline exceeded after partial results). Any error object,
-  // unparseable line, or line with neither field fails the whole lookup —
-  // returning partial results as success would mask incidents (fail-closed
-  // per §L2.2). Result ids that fail SafeId refinement are skipped: they
-  // belong to other tenants of the SpiceDB instance, not to this service.
-  private def parseLookupResponseLines(body: String): Either[String, List[ResourceId]] =
-    body.split('\n')
-      .toList
-      .filter(_.nonEmpty)
-      .foldLeft[Either[String, List[ResourceId]]](Right(Nil)) { (acc, line) =>
-        acc.flatMap { ids =>
-          line.fromJson[SpiceDbLookupResponseLine] match
-            case Right(SpiceDbLookupResponseLine(Some(SpiceDbLookupResultItem(id)), None)) =>
-              Right(SafeId.fromString(id).toOption.fold(ids)(ids :+ _))
-            case Right(SpiceDbLookupResponseLine(_, Some(err))) =>
-              Left(s"error object in lookup stream: ${err.toJson}")
-            case Right(SpiceDbLookupResponseLine(None, None)) =>
-              Left("lookup stream line has neither result nor error")
-            case Left(parseErr) =>
-              Left(s"lookup stream parse error: $parseErr")
-        }
-      }
+  /** Refines the check response where SpiceDB's answer arrives (ADR-039): a
+    * body that is not the response is refused as JSON, and a permissionship
+    * outside the API's set is refused as the answer the decoder declares, kept
+    * for the log. */
+  private def refineAnswer(body: String): Either[Failure, Permissionship] =
+    body.fromJson[SpiceDbCheckResponse] match
+      case Left(parseErr) =>
+        Left(authorizationRefusal(ExpectedInput.Json, List(Diagnostic.PeerMessage(parseErr))))
+      case Right(SpiceDbCheckResponse(text)) =>
+        Permissionship.fromWire(text)
+          .toRight(authorizationRefusal(ExpectedInput.Declared, List(Diagnostic.RawValue(text))))
 
   // ─── Telemetry ────────────────────────────────────────────────────────────
 

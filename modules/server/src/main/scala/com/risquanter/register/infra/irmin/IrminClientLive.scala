@@ -68,7 +68,7 @@ final class IrminClientLive private (
       query     = IrminQueries.setValue(path, value, message, defaultAuthor, branch)
       response <- executeQuery[SetValueResponse](query)
       commit   <- extractCommit(response)
-      _        <- ZIO.logInfo(s"Irmin SET committed: ${commit.hash.take(12)}")
+      _        <- ZIO.logInfo(s"Irmin SET committed: ${commit.hash.value.take(12)}")
     yield commit
 
   override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, IrminCommit] =
@@ -77,9 +77,9 @@ final class IrminClientLive private (
       query     = IrminQueries.setTree(path, entries, message, defaultAuthor, branch)
       response <- executeQuery[SetTreeResponse](query)
       commit   <- response.data.flatMap(_.set_tree) match
-                    case Some(c) => commitFromData(c)
+                    case Some(c) => refineCommit(c)
                     case None    => failWithError(response.errors)
-      _        <- ZIO.logInfo(s"Irmin SET_TREE committed: ${commit.hash.take(12)}")
+      _        <- ZIO.logInfo(s"Irmin SET_TREE committed: ${commit.hash.value.take(12)}")
     yield commit
 
   override def remove(path: IrminPath, message: CommitMessage, branch: BranchRef = BranchRef.Main): IO[IrminError | Failure, IrminCommit] =
@@ -88,16 +88,16 @@ final class IrminClientLive private (
       query     = IrminQueries.removeValue(path, message, defaultAuthor, branch)
       response <- executeQuery[RemoveValueResponse](query)
       commit   <- extractRemoveCommit(response)
-      _        <- ZIO.logInfo(s"Irmin REMOVE committed: ${commit.hash.take(12)}")
+      _        <- ZIO.logInfo(s"Irmin REMOVE committed: ${commit.hash.value.take(12)}")
     yield commit
 
-  override def branches: IO[IrminError | Failure, List[String]] =
+  override def branches: IO[IrminError | Failure, List[StoreBranch]] =
     for
       _        <- ZIO.logDebug("Irmin LIST BRANCHES")
       response <- executeQuery[BranchesResponse](IrminQueries.listBranches)
-      names     = response.data.map(_.branches.map(_.name)).getOrElse(Nil)
-      _        <- ZIO.logDebug(s"Irmin branches: ${names.mkString(", ")}")
-    yield names
+      listed   <- ZIO.foreach(response.data.map(_.branches.map(_.name)).getOrElse(Nil))(refineBranch)
+      _        <- ZIO.logDebug(s"Irmin branches: ${listed.map(_.name).mkString(", ")}")
+    yield listed
 
   override def mainBranch: IO[IrminError | Failure, Option[IrminBranch]] =
     branchInfo(BranchRef.Main)
@@ -109,22 +109,8 @@ final class IrminClientLive private (
     for
       _        <- ZIO.logDebug(s"Irmin GET BRANCH${branchLog(branch)}")
       response <- executeQuery[MainBranchResponse](IrminQueries.getBranchInfo(branch))
-      info      = response.data.flatMap(_.main).map(b =>
-                    IrminBranch(
-                      name = b.name,
-                      head = b.head.map(h =>
-                        IrminCommit(
-                          hash = h.hash,
-                          key = h.key,
-                          parents = h.parents.getOrElse(Nil),
-                          info = IrminInfo(
-                            date = h.info.date,
-                            author = h.info.author,
-                            message = h.info.message
-                          )
-                        )
-                      )
-                    )
+      info     <- ZIO.foreach(response.data.flatMap(_.main))(b =>
+                    refineBranch(b.name).zipWith(ZIO.foreach(b.head)(refineCommit))(IrminBranch.apply)
                   )
     yield info
 
@@ -134,7 +120,7 @@ final class IrminClientLive private (
       query     = IrminQueries.mergeWithCommit(from, into, message, defaultAuthor)
       response <- executeQuery[MergeCommitResponse](query)
       commit   <- response.data.flatMap(_.merge_with_commit) match
-                    case Some(c) => commitFromData(c)
+                    case Some(c) => refineCommit(c)
                     case None    =>
                       // The patched irmin-graphql resolver reports a refused
                       // merge as a GraphQL error prefixed "merge conflict: "
@@ -145,7 +131,7 @@ final class IrminClientLive private (
                       messages.find(_.startsWith(MergeConflictPrefix)) match
                         case Some(m) => ZIO.fail(IrminMergeConflict(m.stripPrefix(MergeConflictPrefix)))
                         case None    => ZIO.fail(graphQlFailure(response.errors))
-      _        <- ZIO.logInfo(s"Irmin MERGE committed: ${commit.hash.take(12)}")
+      _        <- ZIO.logInfo(s"Irmin MERGE committed: ${commit.hash.value.take(12)}")
     yield commit
 
   override def revert(commit: CommitHash, branch: BranchRef): IO[IrminError | Failure, IrminCommit] =
@@ -153,9 +139,9 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin REVERT to ${commit.value.take(12)}${branchLog(branch)}")
       response <- executeQuery[RevertResponse](IrminQueries.revert(commit, branch))
       newHead  <- response.data.flatMap(_.revert) match
-                    case Some(c) => commitFromData(c)
+                    case Some(c) => refineCommit(c)
                     case None    => failWithError(response.errors)
-      _        <- ZIO.logInfo(s"Irmin REVERT new head: ${newHead.hash.take(12)}")
+      _        <- ZIO.logInfo(s"Irmin REVERT new head: ${newHead.hash.value.take(12)}")
     yield newHead
 
   override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError | Failure, Unit] =
@@ -192,7 +178,7 @@ final class IrminClientLive private (
     for
       _        <- ZIO.logDebug(s"Irmin GET COMMIT: ${hash.value.take(12)}")
       response <- executeQuery[CommitQueryResponse](IrminQueries.getCommit(hash))
-      commit   <- ZIO.foreach(response.data.flatMap(_.commit))(commitFromData)
+      commit   <- ZIO.foreach(response.data.flatMap(_.commit))(refineCommit)
     yield commit
 
   override def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError | Failure, Option[String]] =
@@ -215,14 +201,14 @@ final class IrminClientLive private (
     for
       _        <- ZIO.logDebug(s"Irmin HISTORY: ${path.value} (n=$n)${branchLog(branch)}")
       response <- executeQuery[HistoryResponse](IrminQueries.getHistory(path, n, branch))
-      commits  <- ZIO.foreach(response.data.flatMap(_.main).map(_.last_modified).getOrElse(Nil))(commitFromData)
+      commits  <- ZIO.foreach(response.data.flatMap(_.main).map(_.last_modified).getOrElse(Nil))(refineCommit)
     yield commits
 
   override def lca(branch: BranchRef, commit: CommitHash): IO[IrminError | Failure, List[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin LCA: ${commit.value.take(12)}${branchLog(branch)}")
       response <- executeQuery[LcaResponse](IrminQueries.lca(branch, commit))
-      commits  <- ZIO.foreach(response.data.flatMap(_.main).map(_.lcas).getOrElse(Nil))(commitFromData)
+      commits  <- ZIO.foreach(response.data.flatMap(_.main).map(_.lcas).getOrElse(Nil))(refineCommit)
     yield commits
 
   override def healthCheck: IO[IrminError | Failure, Unit] =
@@ -297,12 +283,12 @@ final class IrminClientLive private (
 
   private def extractCommit(response: SetValueResponse): IO[IrminError | Failure, IrminCommit] =
     response.data.flatMap(_.set) match
-      case Some(c) => commitFromData(c)
+      case Some(c) => refineCommit(c)
       case None    => failWithError(response.errors)
 
   private def extractRemoveCommit(response: RemoveValueResponse): IO[IrminError | Failure, IrminCommit] =
     response.data.flatMap(_.remove) match
-      case Some(c) => commitFromData(c)
+      case Some(c) => refineCommit(c)
       case None    => failWithError(response.errors)
 
   private def extractCasResult(response: TestAndSetBranchResponse): IO[IrminError | Failure, Boolean] =
@@ -334,17 +320,20 @@ final class IrminClientLive private (
   private def extractListAtCommit(prefix: IrminPath, response: CommitTreeListResponse): IO[IrminError | Failure, List[IrminSegment]] =
     childPaths(prefix, response.data.flatMap(_.commit).flatMap(_.tree.get_tree).map(_.list), response.errors)
 
-  private def commitFromData(c: CommitData): IO[IrminError | Failure, IrminCommit] =
-    ZIO.succeed(IrminCommit(
-      hash = c.hash,
-      key = c.key,
-      parents = c.parents.getOrElse(Nil),
-      info = IrminInfo(
-        date = c.info.date,
-        author = c.info.author,
-        message = c.info.message
-      )
-    ))
+  /** Refines a commit where Irmin's answer arrives (ADR-039). A hash that is
+    * not a commit hash, a date that is not an instant or a message this
+    * service did not write is content the store returned and this service
+    * refuses; the hash and the message are kept for the log. */
+  private def refineCommit(raw: IrminCommit.Raw): IO[Failure, IrminCommit] =
+    ZIO.fromEither(IrminCommit.refine(raw).left.map(refusals =>
+      Failure.rejected(TrustZone.Peer(PeerZone.Store), refusals, List(Diagnostic.RawValue(raw.hash), Diagnostic.RawValue(raw.info.message)))))
+
+  /** Refines a branch name where Irmin's answer arrives (ADR-039). A name that
+    * is not one this service gives a branch is content the store returned and
+    * this service refuses, kept for the log. */
+  private def refineBranch(name: String): IO[Failure, StoreBranch] =
+    ZIO.fromEither(StoreBranch.fromString(name, ErrorLocation.Whole).left.map(refusals =>
+      Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyList(refusals.head, refusals.tail*), List(Diagnostic.RawValue(name)))))
 
   private def failWithError(errors: Option[List[GraphQLError]]): IO[Failure, IrminCommit] =
     ZIO.fail(graphQlFailure(errors))
@@ -369,18 +358,10 @@ private final case class MainBranchResponseData(
 
 private final case class MainBranchInfo(
     name: String,
-    head: Option[HeadCommit]
-)
-
-private final case class HeadCommit(
-    hash: String,
-    key: String,
-    parents: Option[List[String]],
-    info: InfoData
+    head: Option[IrminCommit.Raw]
 )
 
 private object MainBranchResponse:
-  given JsonCodec[HeadCommit] = DeriveJsonCodec.gen[HeadCommit]
   given JsonCodec[MainBranchInfo] = DeriveJsonCodec.gen[MainBranchInfo]
   given JsonCodec[MainBranchResponseData] = DeriveJsonCodec.gen[MainBranchResponseData]
   given JsonCodec[MainBranchResponse] = DeriveJsonCodec.gen[MainBranchResponse]

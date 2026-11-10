@@ -13,8 +13,8 @@ import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminPath, IrminTreeEntry}
 import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
 
-/** Tests for `TreeHistoryServiceLive`: which commits a history shows, how many
-  * it asks Irmin for, and timestamp normalization. */
+/** Tests for `TreeHistoryServiceLive`: which commits a history shows and how
+  * many it asks Irmin for. */
 object TreeHistoryServiceSpec extends ZIOSpecDefault:
 
   private given Checked[Authority] = TestChecked.value
@@ -24,7 +24,8 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
   private val scenario = ScenarioName.fromString("draft-a").toOption.get
 
   private def commitWith(fill: Char, message: CommitMessage): IrminCommit =
-    IrminCommit(fill.toString * 40, "", Nil, IrminInfo("0", "test", CommitMessage.render(message)))
+    val hash = CommitHash.fromString(fill.toString * 40).toOption.get
+    IrminCommit(hash, hash, Nil, IrminInfo(Instant.EPOCH, message))
 
   private def limit(n: Int): PositiveInt = n.refineUnsafe
 
@@ -106,18 +107,13 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
       },
       test("the number of commits asked for saturates instead of overflowing") {
         assertTrue(TreeHistoryServiceLive.requested(limit(Int.MaxValue)) == limit(Int.MaxValue))
-      }
-    ),
-
-    suite("toIso")(
-      test("normalizes an epoch-seconds string to ISO-8601") {
-        assertTrue(TreeHistoryServiceLive.toIso("0") == Instant.ofEpochSecond(0).toString)
       },
-      test("passes a non-numeric date through unchanged") {
-        assertTrue(TreeHistoryServiceLive.toIso("2026-07-27T00:00:00Z") == "2026-07-27T00:00:00Z")
-      },
-      test("passes an epoch outside Instant's range through unchanged") {
-        assertTrue(TreeHistoryServiceLive.toIso(Long.MaxValue.toString) == Long.MaxValue.toString)
+      test("an entry's timestamp is the commit's instant in ISO-8601") {
+        for
+          asked   <- Ref.make(List.empty[Int])
+          entries <- TreeHistoryServiceLive(FakeHistoryIrmin(log, asked, None))
+                       .history(ws, tree, BranchRef.Main, limit(10))
+        yield assertTrue(entries.map(_.at).forall(_ == Instant.EPOCH.toString))
       }
     )
   )

@@ -4,7 +4,7 @@ import zio.test.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError, ValueFormat}
 
 object OpaqueTypesSpec extends ZIOSpecDefault {
 
@@ -290,6 +290,30 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
         val name = ScenarioName.fromString("draft-v1").toOption.get
         assertTrue(
           BranchRef.scenario(wsIdUpper, name) == BranchRef.scenario(wsIdLower, name)
+        )
+      }
+    ),
+
+    suite("StoreBranch.fromString — a stored branch name refined to its kind")(
+      test("main and a scenario branch read as branch references") {
+        val wsId = WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
+        val name = ScenarioName.fromString("draft-v1").toOption.get
+        val scenario = BranchRef.scenario(wsId, name).toOption.get
+        assertTrue(
+          StoreBranch.fromString("main", ErrorLocation.Whole) == Right(BranchRef.Main),
+          StoreBranch.fromString(scenario.toBranchRef, ErrorLocation.Whole) == Right(scenario)
+        )
+      },
+      test("a merge's staging branch reads as a staging reference") {
+        val wsId = WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
+        val name = ScenarioName.fromString("draft-v1").toOption.get
+        val staging = MergeStagingRef.forScenario(wsId, name).toOption.get
+        assertTrue(StoreBranch.fromString(staging.toBranchRef, ErrorLocation.Whole) == Right(staging))
+      },
+      test("a name this service gives no branch is refused as a branch name, at the given location") {
+        assertTrue(
+          StoreBranch.fromString("feature/x", ErrorLocation.Whole) ==
+            Left(List(ValidationError(ErrorLocation.Whole, FieldProblem.WrongFormat(ValueFormat.BranchName))))
         )
       }
     ),

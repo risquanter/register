@@ -197,18 +197,8 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       case Revision.At(commit)   => ZIO.succeed(Some(commit))
 
   private def resolveHead(branch: BranchRef): IO[AppError | Failure,Option[CommitHash]] =
-    irmin.getBranch(branch).flatMap { branchInfo =>
-      // None = branch absent OR branch exists with no commits; both preserve
-      // today's "no head → empty read" semantics.
-      branchInfo.flatMap(_.head) match
-        case None         => ZIO.succeed(None)
-        case Some(commit) =>
-          ZIO.fromEither(CommitHash.fromString(commit.hash))
-            .mapBoth(
-              errs => RepositoryFailure(s"Invalid branch head hash: ${errs.map(ValidationError.describe).mkString("; ")}"),
-              Some(_)
-            )
-    }
+    // None = branch absent OR branch exists with no commits; both read as empty.
+    irmin.getBranch(branch).map(_.flatMap(_.head).map(_.hash))
 
   private def loadTreeAt(wsId: WorkspaceId, id: TreeId, at: CommitHash): IO[AppError | Failure,Option[TreeWithMeta]] =
     val metaPath = WorkspaceStoragePaths.treeMeta(wsId, id)

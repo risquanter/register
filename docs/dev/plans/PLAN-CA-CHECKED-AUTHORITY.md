@@ -182,7 +182,7 @@ object Checked:
 
 `zedName: String` is unchanged. It is a contract with the SpiceDB schema, which
 is the declared-spelling case of ADR-037 §2, so no refined type replaces it.
-`AuthorizationService.check` and `listAccessible` are unchanged.
+`AuthorizationService.check` is unchanged.
 
 ### The provisioner
 

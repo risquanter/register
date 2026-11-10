@@ -359,7 +359,8 @@ enum ExpectedInput:
   /** One value, where the request carried several for the same input. */
   case SingleValue
 
-  /** Whatever type the endpoint declares for the input. */
+  /** Whatever type the reader declares for the value: the endpoint for an
+    * input, the decoder for a value read back from a store or a peer. */
   case Declared
 
   /** JSON, for a stored value whose text did not parse as JSON. */

@@ -14,16 +14,18 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, MergeStagingRef, SafeName, ScenarioName, StoreBranch, TreeId, WorkspaceId, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, Failure, FieldName, IrminError}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, Failure, FieldName, IrminError}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
-import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioListResponse, ScenarioResponse, TreeLabel, Versions}
-import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
+import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioListResponse, ScenarioResponse, TreeLabel, TreeWriteKind, Versions}
+import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, safeId, treeId, unsafeGet}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory}
 import com.risquanter.register.services.{ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
+
+import java.time.Instant
 
 /** HTTP-layer tests for [[ScenarioController]].
   *
@@ -48,16 +50,24 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
     * `ScenarioServiceLive` actually calls are implemented.
     */
   private final class FakeIrminClient(state: Ref[Map[String, CommitHash]]) extends IrminClient:
-    private def toBranch(name: String, headOpt: Option[CommitHash]): IrminBranch =
-      IrminBranch(name, headOpt.map(h => IrminCommit(h.value, "", Nil, IrminInfo("2026-01-01T00:00:00Z", "test", "test"))))
+    /** The information every fixture commit carries; no assertion here reads it. */
+    private val info: IrminInfo =
+      IrminInfo(Instant.EPOCH, CommitMessage.TreeWritten(WorkspaceId(safeId("fixture-ws")), treeId("fixture-tree"), TreeWriteKind.Update))
 
-    override def branches: IO[IrminError, List[String]] = state.get.map(_.keys.toList)
+    /** The branch a fixture's raw name spells, as the live client refines it. */
+    private def storeBranch(name: String): StoreBranch =
+      StoreBranch.fromString(name, ErrorLocation.Whole).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
+
+    private def toBranch(branch: StoreBranch, headOpt: Option[CommitHash]): IrminBranch =
+      IrminBranch(branch, headOpt.map(h => IrminCommit(h, h, Nil, info)))
+
+    override def branches: IO[IrminError, List[StoreBranch]] = state.get.map(_.keys.toList.map(storeBranch))
 
     override def mainBranch: IO[IrminError, Option[IrminBranch]] =
-      state.get.map(m => Some(toBranch("main", m.get("main"))))
+      state.get.map(m => Some(toBranch(BranchRef.Main, m.get("main"))))
 
     override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
-      state.get.map(m => m.get(branch.name).map(h => toBranch(branch.name, Some(h))))
+      state.get.map(m => m.get(branch.name).map(h => toBranch(branch, Some(h))))
 
     override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit] =
       state.modify { m =>

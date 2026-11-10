@@ -26,17 +26,6 @@ final class AuthorizationServiceStub(
       resourceId   = resource.resourceId.value
     ))
 
-  def listAccessible(
-    user:         UserId.Authenticated,
-    resourceType: ResourceType,
-    permission:   Permission
-  ): IO[AuthError, List[ResourceId]] =
-    ZIO.succeed(
-      allowed.collect {
-        case (u, p, ResourceRef(rt, id)) if u == user && p == permission && rt == resourceType => id
-      }.toList
-    )
-
 object AuthorizationServiceStub:
 
   /** Stub that denies all checks — for testing denial paths. */

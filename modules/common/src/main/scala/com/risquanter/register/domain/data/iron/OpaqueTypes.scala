@@ -561,6 +561,22 @@ object MeshServiceUrl:
 sealed trait StoreBranch:
   def name: String
 
+object StoreBranch:
+  /** A branch name read back from the store, refined to the kind of branch it
+    * spells: a merge's staging branch where it carries that prefix, otherwise
+    * a branch reference. Every branch in the store was named by this service,
+    * so a name that is neither is refused as a branch name.
+    * {{{
+    * fromString("main", Whole)                                   // Right(BranchRef.Main)
+    * fromString("merge-staging.01arz…g5fav.draft-a", Whole)     // Right(MergeStagingRef(…))
+    * fromString("feature/x", Whole)                              // Left(List(ValidationError(Whole, WrongFormat(BranchName))))
+    * }}}
+    */
+  def fromString(s: String, location: ErrorLocation): Either[List[ValidationError], StoreBranch] =
+    s.refineEither[MergeStagingRefConstraint] match
+      case Right(staging) => Right(MergeStagingRef(staging))
+      case Left(_)        => BranchRef.fromString(s, location)
+
 case class BranchRef(toBranchRef: BranchRefStr) extends StoreBranch:
   def name: String = toBranchRef
 
