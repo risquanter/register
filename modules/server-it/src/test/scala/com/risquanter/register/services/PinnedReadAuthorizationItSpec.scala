@@ -4,6 +4,7 @@ import zio.*
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, RiskLeaf}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, BranchRef, Revision}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
@@ -21,8 +22,8 @@ object PinnedReadAuthorizationItSpec extends ZIOSpecDefault:
 
   private def oneLeafTree(tid: TreeId): RiskTree =
     val rootId = nodeId("root"); val leafId = nodeId("leaf-1")
-    val root = RiskPortfolio.create(rootId.value, "Root", Vector(leafId), None).toEither.toOption.get
-    val leaf = RiskLeaf.create(id = leafId.value, name = "Leaf 1", probability = 0.1,
+    val root = RiskPortfolio.create(rootId.value, "Root", Vector(leafId), None, ErrorSubject.Request).toEither.toOption.get
+    val leaf = RiskLeaf.create(subject = ErrorSubject.Request,id = leafId.value, name = "Leaf 1", probability = 0.1,
       shape = lognormalShape(1000L, 2000L), parentId = Some(rootId), seedVarId = 1L).toEither.toOption.get
     RiskTree.fromNodesUnsafe(tid, SafeName.fromString("Pinned Tree").toOption.get, Seq(root, leaf), rootId,
       Some(SeedVarId.fromLong(1L).toOption.get), mitigations = Nil)

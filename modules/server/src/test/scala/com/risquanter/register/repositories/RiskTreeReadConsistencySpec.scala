@@ -4,11 +4,16 @@ import zio.*
 import zio.json.*
 import zio.test.*
 import zio.test.Assertion.*
+import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
-import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
+import com.risquanter.register.domain.errors.{
+  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, IrminError, PeerZone, RepositoryFailure,
+  TrustZone, ValueRange
+}
+import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -38,7 +43,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
   private val headC2: CommitHash = CommitHash.fromString("b" * 40).toOption.get
 
   private def leaf(id: NodeId, probability: Double): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = id.value.toString,
       name = s"Leaf ${id.value}",
       probability = probability,
@@ -52,7 +57,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       RiskTree.fromNodes(
         id = id,
         name = SafeName.SafeName("Consistency Tree".refineUnsafe),
-        nodes = unsafeGet(RiskPortfolio.createFromStrings(
+        nodes = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
           id = rootId.value.toString,
           name = "Root",
           childIds = children.map(_.id.value.toString).toVector,
@@ -219,26 +224,21 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         headResolutions   <- calls.get
         commitsRead       <- queried.get
       yield assertTrue(
-        result.size == 2,
-        result.forall(_.isRight),
+        result.map(_.id).toSet == Set(treeIdF, treeIdG),
         headResolutions == 1,
         commitsRead == Set(headC1)
       )
     },
 
     // ADR-036 confines WorkspaceId to the server: it must never reach a
-    // client-visible surface. The failure a TreeLoadFailure carries embeds it,
-    // because loadTreeAt's "missing value" message carries the full Irmin path
-    // built from WorkspaceStoragePaths.treeNodes(wsId, treeId). This pins that
-    // content, which is why the merge guard
-    // (ScenarioMergeServiceLive.guardStagedState) sends the described problem
-    // to the log and builds its wire-facing MergeConflict from tree ids alone.
-    // A node listed by listAtCommit but absent from getAtCommit at the SAME
-    // pinned commit should not happen under normal operation (Irmin's content
-    // at a fixed commit is immutable), but nothing in the type system rules
-    // it out, and this is exactly the kind of anomaly the post-merge guard
-    // exists to detect.
-    test("the failure a TreeLoadFailure carries embeds the WorkspaceId when a listed node's value is missing") {
+    // client-visible surface. The failure for a listed value the store does not
+    // hold embeds it, because its text carries the full Irmin path built from
+    // WorkspaceStoragePaths.treeNodes(wsId, treeId). That failure answers the
+    // opaque fault, so the text reaches only the log. A node listed by
+    // listAtCommit but absent from getAtCommit at the SAME pinned commit should
+    // not happen under normal operation (Irmin's content at a fixed commit is
+    // immutable), but nothing in the type system rules it out.
+    test("the listing failure for a listed node whose value is missing embeds the WorkspaceId") {
       val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
       val leafPath = WorkspaceStoragePaths.of(wsId, TreePath.Node(treeIdF, leaf1Id))
       // listAtCommit lists leaf1Id as a child because this phantom key lies
@@ -249,25 +249,94 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       for
         setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> tornStore))
         (repo, _, _) = setup
-        result      <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))
+        exit        <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main)).exit
       yield
-        val failures = result.collect { case Left(f) => f }
-        val causes   = failures.collect { case TreeLoadFailure(_, TreeLoadProblem.Failed(cause)) => cause.logMessage }
+        val reason = exit.causeOption.flatMap(_.failureOption).collect { case RepositoryFailure(r) => r }
         assertTrue(
-          causes.exists(_.contains(wsId.value)),
-          causes.exists(_.startsWith("Missing node value at")),
-          failures.exists(f => f.logMessage.startsWith(s"Tree ${f.treeId.value} could not be loaded: Missing node value at"))
+          reason.exists(_.contains(wsId.value)),
+          reason.exists(_.startsWith("Missing value at"))
         )
     },
 
-    test("a listed tree with neither metadata nor nodes is reported as TreeLoadProblem.Empty") {
+    test("a listed tree with neither metadata nor nodes fails the listing as NodesAbsent at the tree") {
       val mitigationOnly = Map(
         WorkspaceStoragePaths.of(wsId, TreePath.Mitigation(treeIdF, mitigationId("m1"))) -> "unread"
       )
       for
         setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> mitigationOnly))
         (repo, _, _) = setup
-        result      <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))
-      yield assertTrue(result == List(Left(TreeLoadFailure(treeIdF, TreeLoadProblem.Empty))))
+        exit        <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main)).exit
+      yield assertTrue(
+        exit.causeOption.flatMap(_.failureOption).contains(Failure.NotFound(Core(
+          TrustZone.Peer(PeerZone.Store),
+          NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
+          Nil
+        )))
+      )
+    },
+
+    test("a stored leaf with two refused fields fails the read with both, each at that node") {
+      val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
+      val store = storeOf(treeF) + (WorkspaceStoragePaths.of(wsId, TreePath.Node(treeIdF, leaf1Id)) -> refusedLeafJson(leaf1Id))
+      for
+        setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> store))
+        (repo, _, _) = setup
+        exit        <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).exit
+      yield assertTrue(
+        exit.causeOption.flatMap(_.failureOption).contains(Failure.Rejected(Core(
+          TrustZone.Peer(PeerZone.Store),
+          NonEmptyList(
+            ErrorLocation.nodeField(leaf1Id, FieldName.Name)        -> FieldProblem.Required,
+            ErrorLocation.nodeField(leaf1Id, FieldName.Probability) -> FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)
+          ),
+          Nil
+        )))
+      )
+    },
+
+    test("a stored leaf whose only refusal is its probability is refused as a leaf, not as an unreadable portfolio") {
+      val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
+      val badProbability = nodeJson(leaf(leaf1Id, 0.1)).replace("\"probability\":0.1", "\"probability\":1.5")
+      val store = storeOf(treeF) + (WorkspaceStoragePaths.of(wsId, TreePath.Node(treeIdF, leaf1Id)) -> badProbability)
+      for
+        setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> store))
+        (repo, _, _) = setup
+        exit        <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).exit
+      yield assertTrue(
+        exit.causeOption.flatMap(_.failureOption).collect { case Failure.Rejected(core) => core.errors.toList }
+          .contains(List(ErrorLocation.nodeField(leaf1Id, FieldName.Probability) -> FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)))
+      )
+    },
+
+    test("a listing holding two refused trees fails with every refusal, naming both trees") {
+      val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
+      val treeG = tree(treeIdG, Seq(leaf(leaf1Id, 0.3)))
+      val store = storeOf(treeF, treeG) +
+        (WorkspaceStoragePaths.of(wsId, TreePath.Node(treeIdF, leaf1Id)) -> refusedLeafJson(leaf1Id)) +
+        (WorkspaceStoragePaths.treeMeta(wsId, treeIdG) -> """{"name":"G","schemaVersion":2,"createdAt":0,"updatedAt":0}""")
+      for
+        setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> store))
+        (repo, _, _) = setup
+        exit        <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main)).exit
+      yield
+        val refusal = exit.causeOption.flatMap(_.failureOption).collect { case Failure.Rejected(core) => core }
+        val atTreeG = ErrorSubject.Tree(treeIdG)
+        assertTrue(
+          refusal.map(_.zone).contains(TrustZone.Peer(PeerZone.Store)),
+          refusal.map(_.errors.toList.map(_._1).toSet).contains(Set(
+            ErrorLocation.nodeField(leaf1Id, FieldName.Name),
+            ErrorLocation.nodeField(leaf1Id, FieldName.Probability),
+            ErrorLocation.Field(atTreeG, FieldName.Id),
+            ErrorLocation.Field(atTreeG, FieldName.RootId),
+            ErrorLocation.Field(atTreeG, FieldName.SeedVarHighWater)
+          )),
+          refusal.map(_.diagnostics.toSet).contains(Set(Diagnostic.TreeRef(treeIdF), Diagnostic.TreeRef(treeIdG)))
+        )
     }
   )
+
+  /** A stored leaf whose name is blank and whose probability is above one. */
+  private def refusedLeafJson(id: NodeId): String =
+    nodeJson(leaf(id, 0.1))
+      .replace("\"probability\":0.1", "\"probability\":1.5")
+      .replace(s"\"name\":\"Leaf ${id.value}\"", "\"name\":\"\"")

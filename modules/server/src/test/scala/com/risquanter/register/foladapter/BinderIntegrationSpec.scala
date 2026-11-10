@@ -7,6 +7,7 @@ import com.risquanter.register.mitigation.MitigationSelection
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.data.iron.SeedVarId
@@ -36,20 +37,20 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   private val cyberId    = nodeId("cyber")
   private val hardwareId = nodeId("hardware")
 
-  private val rootPortfolio = unsafeGet(RiskPortfolio.create(
+  private val rootPortfolio = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
     id   = rootId.value, name = "Root",
     childIds = Vector(itId), parentId = None
   ), "portfolio")
-  private val itPortfolio = unsafeGet(RiskPortfolio.create(
+  private val itPortfolio = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
     id   = itId.value, name = "IT Risk",
     childIds = Vector(cyberId, hardwareId), parentId = Some(rootId)
   ), "portfolio")
-  private val cyberLeaf = unsafeGet(RiskLeaf.create(
+  private val cyberLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = cyberId.value, name = "Cyber",
     probability = 0.25, shape = lognormalShape(1000L, 50000L), parentId = Some(itId),
     seedVarId = 1L
   ), "leaf")
-  private val hardwareLeaf = unsafeGet(RiskLeaf.create(
+  private val hardwareLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = hardwareId.value, name = "Hardware",
     probability = 0.10, shape = lognormalShape(500L, 10000L), parentId = Some(itId),
     seedVarId = 2L

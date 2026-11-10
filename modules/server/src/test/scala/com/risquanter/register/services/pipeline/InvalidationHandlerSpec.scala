@@ -5,6 +5,7 @@ import zio.test.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.*
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
 import com.risquanter.register.testutil.TestHelpers.*
@@ -25,7 +26,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   // Test fixtures
   // ========================================
 
-  val cyberLeaf = unsafeGet(RiskLeaf.create(
+  val cyberLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = idStr("cyber"),
     name = "Cyber Attack",
     probability = 0.25,
@@ -34,7 +35,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     seedVarId = 1L
   ), "leaf")
 
-  val hardwareLeaf = unsafeGet(RiskLeaf.create(
+  val hardwareLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = idStr("hardware"),
     name = "Hardware Failure",
     probability = 0.1,
@@ -43,7 +44,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     seedVarId = 2L
   ), "leaf")
 
-  val softwareLeaf = unsafeGet(RiskLeaf.create(
+  val softwareLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = idStr("software"),
     name = "Software Bug",
     probability = 0.3,
@@ -52,14 +53,14 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     seedVarId = 3L
   ), "leaf")
 
-  val itPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
+  val itPortfolio = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
     id = idStr("it-risk"),
     name = "IT Risk",
     childIds = Vector(idStr("hardware"), idStr("software")),
     parentId = Some(nodeId("ops-risk"))
   ), "portfolio")
 
-  val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
+  val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
     id = idStr("ops-risk"),
     name = "Operational Risk",
     childIds = Vector(idStr("cyber"), idStr("it-risk")),
@@ -106,7 +107,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   def spec = suite("InvalidationHandlerSpec")(
 
     test("param change publishes the node and its full ancestor path") {
-      val changedSoftware = unsafeGet(RiskLeaf.create(
+      val changedSoftware = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
         id = idStr("software"),
         name = "Software Bug",
         probability = 0.7,
@@ -128,7 +129,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
 
     test("reparent + param change in ONE mutation includes the node itself (additive union)") {
       // hardware moves it-risk → ops-risk AND its probability changes in the same PUT
-      val movedChangedHardware = unsafeGet(RiskLeaf.create(
+      val movedChangedHardware = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
         id = idStr("hardware"),
         name = "Hardware Failure",
         probability = 0.6,               // param change
@@ -136,13 +137,13 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         parentId = Some(nodeId("ops-risk")),  // reparent
         seedVarId = 2L
       ), "leaf")
-      val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
+      val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
         id = idStr("it-risk"),
         name = "IT Risk",
         childIds = Vector(idStr("software")),
         parentId = Some(nodeId("ops-risk"))
       ), "portfolio")
-      val newRoot = unsafeGet(RiskPortfolio.createFromStrings(
+      val newRoot = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
         id = idStr("ops-risk"),
         name = "Operational Risk",
         childIds = Vector(idStr("cyber"), idStr("it-risk"), idStr("hardware")),
@@ -178,14 +179,14 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       // report every portfolio (and every metalog leaf) as changed on every
       // mutation. Includes a metalog leaf to cover the array-valued fields.
       def buildMetalogTree(): RiskTree = treeWith(Seq(
-        unsafeGet(RiskPortfolio.createFromStrings(
+        unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
           id = idStr("ops-risk"),
           name = "Operational Risk",
           childIds = Vector(idStr("cyber"), idStr("metalog-leaf")),
           parentId = None
         ), "portfolio"),
         cyberLeaf,
-        unsafeGet(RiskLeaf.create(
+        unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("metalog-leaf"),
           name = "Metalog Leaf",
           probability = 0.2,
@@ -202,7 +203,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
 
     test("changing only a metalog leaf's quantile VALUES publishes exactly that leaf + ancestors") {
       def metalogLeaf(quantiles: Vector[Double]): RiskLeaf =
-        unsafeGet(RiskLeaf.create(
+        unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("metalog-leaf"),
           name = "Metalog Leaf",
           probability = 0.2,
@@ -213,7 +214,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       def build(quantiles: Vector[Double]): RiskTree = treeWith(Seq(
         rootPortfolio,
         cyberLeaf,
-        unsafeGet(RiskPortfolio.createFromStrings(
+        unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
           id = idStr("it-risk"),
           name = "IT Risk",
           childIds = Vector(idStr("hardware"), idStr("software"), idStr("metalog-leaf")),
@@ -237,7 +238,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     },
 
     test("removed node is published (browsers must drop it)") {
-      val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
+      val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
         id = idStr("it-risk"),
         name = "IT Risk",
         childIds = Vector(idStr("software")),
@@ -278,7 +279,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     },
 
     test("SSE subscribers are counted when present") {
-      val changedCyber = unsafeGet(RiskLeaf.create(
+      val changedCyber = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
         id = idStr("cyber"),
         name = "Cyber Attack",
         probability = 0.5,

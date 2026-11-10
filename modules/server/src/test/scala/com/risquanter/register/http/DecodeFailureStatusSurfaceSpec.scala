@@ -13,7 +13,7 @@ import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisio
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, Revision, TreeId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure}
 import com.risquanter.register.http.controllers.{
   DistributionPreviewController,
   QueryController,
@@ -84,7 +84,7 @@ object DecodeFailureStatusSurfaceSpec extends ZIOSpecDefault:
       ZIO.fail(RepositoryFailure("stub"))
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(None)
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
       ZIO.succeed(Nil)
 
   private val controllersLayer = ZLayer.make[

@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.*
-import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator}
+import zio.json.{DecoderOps, JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import io.github.iltotore.iron.autoRefine
@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.iron.{
   ContentHash, MitigationId, NodeId, NonNegativeInt, Probability, ResidualProbability,
   SafeName, ValidationUtil
 }
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** What a mitigation applies to; resolves server-side to the scoped node set. */
@@ -284,19 +284,34 @@ object Mitigation {
   )
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
 
+  /** The raw form refined at `subject`, the identifier and the name
+    * accumulated. The target and the spec arrive already gated by their own
+    * decoders. */
+  private def fromRaw(raw: Raw, subject: ErrorSubject): Validation[ValidationError, Mitigation] =
+    val idV   = ValidationUtil.toValidation(
+      ValidationUtil.refineId(raw.id, ErrorLocation.Field(subject, FieldName.Id)).map(MitigationId(_)))
+    val nameV = ValidationUtil.toValidation(ValidationUtil.refineName(raw.name, ErrorLocation.Field(subject, FieldName.Name)))
+    Validation
+      .validateWith(idV, nameV) { (id, name) => (id, name) }
+      .flatMap { case (id, name) =>
+        create(id, name, raw.target, raw.spec, MitigationPrecedence(raw.precedence))
+      }
+
+  /** A stored mitigation read back, refined at `subject` with every refusal
+    * kept as a value. Text that is not the raw form's JSON is one refusal of the
+    * whole, which includes a stored target or spec its own gate refuses
+    * (ADR-039). */
+  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyList[ValidationError], Mitigation] =
+    json.fromJson[Raw] match
+      case Left(_)    => Left(NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Json))))
+      case Right(raw) => fromRaw(raw, subject).toEither.left.map(errors => NonEmptyList(errors.head, errors.tail*))
+
   given codec: JsonCodec[Mitigation] = JsonCodec(
     JsonEncoder[Raw].contramap(m =>
       Raw(m.id.value, m.name.value, m.target, m.spec, m.precedence.key)),
-    JsonDecoder[Raw].mapOrFail { raw =>
-      val idV   = ValidationUtil.toValidation(MitigationId.fromString(raw.id))
-      val nameV = ValidationUtil.toValidation(ValidationUtil.refineName(raw.name, ErrorLocation.requestField(FieldName.Name)))
-      Validation
-        .validateWith(idV, nameV) { (id, name) => (id, name) }
-        .flatMap { case (id, name) =>
-          create(id, name, raw.target, raw.spec, MitigationPrecedence(raw.precedence))
-        }
-        .toEither.left.map(_.toChunk.map(ValidationError.describe).mkString("; "))
-    }
+    JsonDecoder[Raw].mapOrFail(raw =>
+      fromRaw(raw, ErrorSubject.Request).toEither.left.map(_.toChunk.map(ValidationError.describe).mkString("; "))
+    )
   )
 
   // The published description is the case class's real field list, with the spec

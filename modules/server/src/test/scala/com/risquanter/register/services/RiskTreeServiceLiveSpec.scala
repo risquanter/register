@@ -14,7 +14,7 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, Content
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, RepositoryFailure, TreeLoadFailure,
+  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, RepositoryFailure,
   TrustZone, ValidationError, ValidationErrorCode, ValidationFailed
 }
 import com.risquanter.register.telemetry.TelemetryLive
@@ -81,9 +81,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CascadeTestStubs.stubCommit)))
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
       rev match
-        case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => Right(tree) }.toList)
+        case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => tree }.toList)
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
   }
   
@@ -202,7 +202,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private val revertLeafId = nodeId("revert-leaf")
 
   private val revertedTree: RiskTree =
-    val leaf = unsafeGet(RiskLeaf.create(
+    val leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = revertLeafId.value.toString,
       name = "Restored Leaf",
       probability = 0.2,
@@ -210,7 +210,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       parentId = Some(revertRootId),
       seedVarId = 1L
     ), "revert leaf")
-    val root = unsafeGet(RiskPortfolio.createFromStrings(
+    val root = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
       id = revertRootId.value.toString,
       name = "Restored Root",
       childIds = Vector(revertLeafId.value.toString),

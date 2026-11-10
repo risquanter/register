@@ -7,7 +7,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, SeedEntityId, ContentHash}
-import com.risquanter.register.domain.errors.AppError
+import com.risquanter.register.domain.errors.{AppError, ErrorSubject}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /**
@@ -31,7 +31,7 @@ object CacheTransparencySpec extends ZIOSpecDefault {
   // ----- fixtures: v1 → v2 (param edit) → v3 (reparent + param edit) -----
 
   private def leaf(id: String, parent: String, prob: Double, seedVar: Long): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = idStr(id),
       name = s"Leaf $id",
       probability = prob,
@@ -41,7 +41,7 @@ object CacheTransparencySpec extends ZIOSpecDefault {
     ), "leaf")
 
   private def portfolio(id: String, children: Seq[String], parent: Option[String]): RiskPortfolio =
-    unsafeGet(RiskPortfolio.createFromStrings(
+    unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
       id = idStr(id),
       name = s"Portfolio $id",
       childIds = children.map(idStr).toVector,

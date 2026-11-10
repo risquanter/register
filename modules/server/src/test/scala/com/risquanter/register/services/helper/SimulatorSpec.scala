@@ -5,7 +5,7 @@ import zio.test.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
 import com.risquanter.register.domain.data.iron.{OpenProbability, Probability, PositiveInt, SeedEntityId, SeedVarId}
 import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, DistributionParams}
-import com.risquanter.register.domain.errors.AppError
+import com.risquanter.register.domain.errors.{AppError, ErrorSubject}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, metalogShape}
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
@@ -447,7 +447,7 @@ object SimulatorSpec extends ZIOSpecDefault {
     suite("createSamplerFromLeaf - terms resolution")(
 
       test("uses explicit terms from leaf (terms = Some(3))") {
-        val leaf = RiskLeaf.create(
+        val leaf = RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("terms-explicit"),
           name = "Terms Explicit",
           probability = 0.5,
@@ -464,7 +464,7 @@ object SimulatorSpec extends ZIOSpecDefault {
       },
 
       test("uses explicit terms = 2 (minimum valid)") {
-        val leaf = RiskLeaf.create(
+        val leaf = RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("terms-two"),
           name = "Terms Two",
           probability = 0.5,
@@ -482,7 +482,7 @@ object SimulatorSpec extends ZIOSpecDefault {
 
       test("defaults to min(n=3, 4) = 3 when terms is None") {
         // 3 anchor points, no explicit terms → Simulator uses min(3, 4) = 3
-        val leaf = RiskLeaf.create(
+        val leaf = RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("terms-default-3"),
           name = "Terms Default 3",
           probability = 0.5,
@@ -501,7 +501,7 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("defaults to the anchor count when terms is None and n = 5") {
         // No explicit term count, so the fit uses one term per anchor and its
         // curve passes through all five stated losses.
-        val leaf = RiskLeaf.create(
+        val leaf = RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("terms-default-5"),
           name = "Terms Default 5",
           probability = 0.5,
@@ -524,7 +524,7 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("defaults to the anchor count when terms is None and n = 9") {
         // The derived count follows the anchor count with no ceiling, so nine
         // anchors are fitted with nine terms rather than being smoothed.
-        val leaf = RiskLeaf.create(
+        val leaf = RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("terms-default-9pts"),
           name = "Terms Default 9pts",
           probability = 0.5,

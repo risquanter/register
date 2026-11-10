@@ -4,7 +4,7 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{
   idStr, lognormalShape, mitigationId, nodeId, residualProbability, retentionFactor, treeId, unsafeGet
 }
@@ -73,7 +73,8 @@ object MitigationEntitySpec extends ZIOSpecDefault {
     unsafeGet(RiskLeaf.create(
       id = idStr(label), name = label, probability = 0.4,
       shape = lognormalShape(1000L, 100000L),
-      parentId = Some(nodeId("root-pf")), seedVarId = seedVarId
+      parentId = Some(nodeId("root-pf")), seedVarId = seedVarId,
+      subject = ErrorSubject.Request
     ), "leaf")
 
   private def tree(mitigations: Mitigation*) = {
@@ -81,7 +82,7 @@ object MitigationEntitySpec extends ZIOSpecDefault {
     val l2 = leaf("flood", 2L)
     val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr("root-pf"), name = "Root Portfolio",
-      childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
+      childIds = Vector(l1.id.value, l2.id.value), parentId = None, subject = ErrorSubject.Request), "portfolio")
     RiskTree.fromNodes(treeId("mit-tree"), name("Mit Tree"), Seq(root, l1, l2), root.id,
       seedVarHighWater = None, mitigations = mitigations.toList)
   }

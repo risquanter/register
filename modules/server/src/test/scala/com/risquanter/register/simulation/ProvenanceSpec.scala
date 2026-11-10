@@ -5,6 +5,7 @@ import com.risquanter.register.domain.data.{
   DistributionParams, NodeProvenance, RiskLeaf, RiskPortfolio, RiskTree
 }
 import com.risquanter.register.domain.data.iron.{SafeName, SeedEntityId}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
@@ -173,7 +174,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     
     suite("Provenance Capture")(
       test("ensureCached with includeProvenance=true captures metadata") {
-        val leaf = unsafeGet(RiskLeaf.create(
+        val leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("test-risk"),
           name = "Test Risk",
           probability = 0.5,
@@ -207,7 +208,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       // The cached value embeds the content-only record, so
       // every hit returns provenance without fragmenting the cache.
       test("resolver always captures provenance regardless of includeProvenance flag") {
-        val leaf = unsafeGet(RiskLeaf.create(
+        val leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("test-risk"),
           name = "Test Risk",
           probability = 0.5,
@@ -239,7 +240,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val riskIdLabel = "cyber-attack"
         val riskId = nodeId(riskIdLabel)
 
-        val leaf = unsafeGet(RiskLeaf.create(
+        val leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = riskId.value,
           name = "Cyber Attack",
           probability = 0.25,
@@ -274,7 +275,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance captures distribution parameters for lognormal") {
-        val leaf = unsafeGet(RiskLeaf.create(
+        val leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("lognormal-risk"),
           name = "Lognormal Risk",
           probability = 0.5,
@@ -309,7 +310,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance aggregates multiple node provenances in portfolio") {
-        val risk1 = unsafeGet(RiskLeaf.create(
+        val risk1 = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("risk1"),
           name = "Risk 1",
           probability = 0.5,
@@ -318,7 +319,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           seedVarId = 5L
         ), "leaf")
 
-        val risk2 = unsafeGet(RiskLeaf.create(
+        val risk2 = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("risk2"),
           name = "Risk 2",
           probability = 0.5,
@@ -327,7 +328,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           seedVarId = 6L
         ), "leaf")
 
-        val portfolio = unsafeGet(RiskPortfolio.createFromStrings(
+        val portfolio = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
           id = idStr("portfolio"),
           name = "Test Portfolio",
           childIds = Vector(idStr("risk1"), idStr("risk2")),
@@ -365,7 +366,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     
     suite("Reproduction Validation")(
       test("same provenance seeds produce identical results") {
-        val leaf = unsafeGet(RiskLeaf.create(
+        val leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("deterministic-risk"),
           name = "Deterministic Risk",
           probability = 0.5,
@@ -408,7 +409,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance contains all information for reconstruction") {
-        val leaf = unsafeGet(RiskLeaf.create(
+        val leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("test-reconstruction"),
           name = "Test Reconstruction",
           probability = 0.3,

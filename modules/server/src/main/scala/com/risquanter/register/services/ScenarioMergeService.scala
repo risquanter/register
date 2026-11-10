@@ -2,12 +2,17 @@ package com.risquanter.register.services
 
 import zio.*
 import zio.json.*
+import zio.prelude.{NonEmptyList, Validation}
 import java.time.Instant
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, PositiveInt, Revision, SafeName, TreeId, ValidationUtil}
-import com.risquanter.register.domain.errors.{AppError, Failure, BranchAlreadyExists, BranchHeadStale, ErrorLocation, FieldName, FieldProblem, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, RepositoryFailure, TreeLoadProblem, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, PositiveInt, Revision, SafeId, SafeName, TreeId, ValidationUtil}
+import com.risquanter.register.domain.errors.{
+  AppError, Core, Diagnostic, Failure, BranchAlreadyExists, BranchHeadStale, ErrorLocation, ErrorSubject, FieldName, FieldProblem,
+  IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeRefusal, MergeTargetMoved, PeerZone, RepositoryFailure, TrustZone,
+  ValidationFailed, ValidationError
+}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -90,10 +95,10 @@ object MergeConflictRule:
   * branch deleted it.
   */
 object ConflictFields:
-  /** Fails with `RepositoryFailure` when one is a leaf and the other a
-    * portfolio: no request can store that, so the store holds what this code
-    * did not write. */
-  def node(one: RiskNode, other: RiskNode): Either[RepositoryFailure, List[FieldName]] =
+  /** Refuses a node that is a leaf on one side and a portfolio on the other:
+    * no request can store that, so the store holds what this code did not
+    * write. */
+  def node(one: RiskNode, other: RiskNode): Either[ValidationError, List[FieldName]] =
     (one, other) match
       case (a: RiskLeaf, b: RiskLeaf) =>
         Right(differing(
@@ -110,7 +115,7 @@ object ConflictFields:
           FieldName.ChildIds -> (a.childIds != b.childIds)
         ))
       case _ =>
-        Left(RepositoryFailure(s"node ${one.id.value} is a leaf on one side of a merge and a portfolio on the other"))
+        Left(ValidationError(ErrorLocation.nodeField(one.id, FieldName.Id), FieldProblem.StoredNodeKindDiffers))
 
   def mitigation(one: Mitigation, other: Mitigation): List[FieldName] =
     differing(
@@ -299,23 +304,23 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     *
     * `staged` is on the staging branch and nothing has been published to main,
     * so a failure needs no repair: the caller discards the staging branch and
-    * main is untouched. The repository's own failure text goes to the log and
-    * nowhere else — it can name an absolute storage path, which embeds the
-    * `WorkspaceId` (ADR-036).
+    * main is untouched. The listing's refusal names each refused tree, and those
+    * trees are what the conflict names. The refusal's own text goes to the log
+    * and nowhere else. A refusal naming no tree is about the listing itself and
+    * fails the merge as it is.
     */
   private def guardStagedState(
     wsId: WorkspaceId,
     scenario: ScenarioName.ScenarioName,
     staged: CommitHash
   ): IO[AppError | Failure, Unit] =
-    repo.getAllForWorkspace(wsId, Revision.At(staged)).flatMap { loaded =>
-      loaded.collect { case Left(failure) => failure } match
-        case Nil      => ZIO.unit
-        case failures =>
-          ZIO.logError(
-            s"merge guard rejected ${staged.value} for scenario ${scenario.value}: " +
-            failures.map(f => s"${f.treeId.value}: ${TreeLoadProblem.describe(f.problem)}").mkString("; ")
-          ) *> ZIO.fail(MergeConflict(scenario, MergeRefusal.InvariantBroken(failures.map(_.treeId))))
+    repo.getAllForWorkspace(wsId, Revision.At(staged)).unit.catchSome {
+      case refusal @ Failure.Rejected(Core(TrustZone.Peer(PeerZone.Store), _, diagnostics)) =>
+        diagnostics.collect { case Diagnostic.TreeRef(id) => id } match
+          case Nil   => ZIO.fail(refusal)
+          case trees =>
+            ZIO.logError(s"merge guard rejected ${staged.value} for scenario ${scenario.value}: ${refusal.logMessage}") *>
+              ZIO.fail(MergeConflict(scenario, MergeRefusal.InvariantBroken(trees)))
     }
 
   // ── conflict scan ────────────────────────────────────────────────────────
@@ -406,7 +411,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   private def treeMetadata(comparisons: List[PathComparison], trees: Set[TreeId]): IO[AppError | Failure, Map[TreeId, Versions[TreeMetadata]]] =
     ZIO.foreach(comparisons.collect { case PathComparison(TreePath.Meta(treeId), versions) if trees(treeId) => (treeId, versions) }) {
       (treeId, versions) =>
-        decodeVersions(versions, s"meta of tree ${treeId.value}")(_.fromJson[TreeMetadata]).map(treeId -> _)
+        decodeVersions(versions)(TreeMetadata.decodeValidated(_, ErrorSubject.Tree(treeId))).map(treeId -> _)
     }.map(_.toMap)
 
   /** One path both branches changed into contents that differ: a conflict
@@ -433,13 +438,14 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
               fields,
               changedFields(fields)((a, b) => Right(ConflictFields.metadata(a, b))).merge
             )))
-      case TreePath.Node(treeId, nodeId) =>
+      case TreePath.Node(_, nodeId) =>
         for
-          versions <- decodeVersions(comparison.versions, s"node ${nodeId.value} of tree ${treeId.value}")(RiskTreeRepositoryIrmin.decodeStoredNode)
+          versions <- decodeVersions(comparison.versions)(RiskTreeRepositoryIrmin.decodeStoredNode(_, nodeId))
           fields   <- ZIO.fromEither(changedFields(versions)(ConflictFields.node))
+                        .mapError(refusal => storeRefusal(NonEmptyList(refusal), Nil))
         yield Left(MergeConflictEntry.NodeConflict(label, nodeId, versions, fields))
-      case TreePath.Mitigation(treeId, mitigationId) =>
-        decodeVersions(comparison.versions, s"mitigation ${mitigationId.value} of tree ${treeId.value}")(_.fromJson[Mitigation])
+      case TreePath.Mitigation(_, mitigationId) =>
+        decodeVersions(comparison.versions)(Mitigation.decodeValidated(_, ErrorSubject.Mitigation(mitigationId)))
           .map(versions => Left(MergeConflictEntry.MitigationConflict(
             label,
             mitigationId,
@@ -463,11 +469,15 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       case (Some(base), None, Some(scen))  => compare(base, scen)
       case _                               => Right(Nil)
 
-  /** The three Irmin contents decoded, or a `RepositoryFailure` naming what
-    * failed to decode. The description names tree, node and mitigation
-    * identifiers only, never a storage path, which embeds the `WorkspaceId`. */
-  private def decodeVersions[A](versions: Versions[String], what: String)(decode: String => Either[String, A]): IO[AppError | Failure, Versions[A]] =
-    ZIO.fromEither(versions.traverse(decode)).mapError(err => RepositoryFailure(s"Decode $what: $err"))
+  /** The three Irmin contents decoded, or the store's content refused. Each
+    * decoder locates its refusals at the value it reads, so the refusal names
+    * that value. */
+  private def decodeVersions[A](versions: Versions[String])(decode: String => Either[NonEmptyList[ValidationError], A]): IO[Failure, Versions[A]] =
+    ZIO.fromEither(versions.traverse(decode)).mapError(storeRefusal(_, Nil))
+
+  /** Content the store returned that this service refuses (ADR-039). */
+  private def storeRefusal(errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =
+    Failure.rejected(TrustZone.Peer(PeerZone.Store), errors, diagnostics)
 
   /** Fetch, for every candidate path, the contents at main's head and at the
     * scenario's head as the scan observed them, and at the merge base. Every
@@ -512,13 +522,14 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
         case (TreePath.Node(treeId, nodeId), Some(json)) => (treeId, nodeId, json)
       }
     }
-    ZIO.foreach(nodeValues) { case (treeId, nodeId, json) =>
-      ZIO.fromEither(RiskTreeRepositoryIrmin.decodeStoredNode(json))
-        .mapBoth(
-          err  => RepositoryFailure(s"Decode node ${nodeId.value} of tree ${treeId.value}: $err"),
-          node => treeId -> node.name
-        )
-    }.map { pairs =>
+    val decoded = Validation.validateAll(nodeValues.map { case (treeId, nodeId, json) =>
+      RiskTreeRepositoryIrmin.decodeStoredNode(json, nodeId) match
+        case Right(node)  => Validation.succeed(treeId -> node.name)
+        case Left(errors) => Validation.failNonEmptyChunk(NonEmptyChunk(errors.head, errors.tail*))
+    })
+    ZIO.fromEither(decoded.toEither)
+      .mapError(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), Nil))
+      .map { pairs =>
       pairs
         .groupMap(_._1)(_._2)
         .view
@@ -542,24 +553,24 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       listedTrees <- irmin.listAtCommit(at, WorkspaceStoragePaths.treesRoot(wsId))
       perTree     <- ZIO.foreach(listedTrees) { listedTree =>
                        for
-                         treeId        <- refineListed(listedTree, "tree")(TreeId.fromString)
+                         treeId        <- refineListed(listedTree)(TreeId(_))
                          listed        <- irmin.listAtCommit(at, WorkspaceStoragePaths.treeNodes(wsId, treeId))
                                             .zipPar(irmin.listAtCommit(at, WorkspaceStoragePaths.treeMitigations(wsId, treeId)))
                          (nodes, mits)  = listed
-                         nodeIds       <- ZIO.foreach(nodes)(refineListed(_, s"node of tree ${treeId.value}")(NodeId.fromString))
-                         mitigationIds <- ZIO.foreach(mits)(refineListed(_, s"mitigation of tree ${treeId.value}")(MitigationId.fromString))
+                         nodeIds       <- ZIO.foreach(nodes)(refineListed(_)(NodeId(_)))
+                         mitigationIds <- ZIO.foreach(mits)(refineListed(_)(MitigationId(_)))
                        yield TreePath.Meta(treeId) ::
                          nodeIds.map(TreePath.Node(treeId, _)) :::
                          mitigationIds.map(TreePath.Mitigation(treeId, _))
                      }
     yield perTree.flatten.toSet
 
-  /** One identifier Irmin listed, refined, or a `RepositoryFailure`: this
+  /** One identifier Irmin listed, refined, or the store's content refused: this
     * server writes only refined identifiers, so one that does not refine means
     * the store holds what this code did not write. */
-  private def refineListed[A](segment: IrminSegment, what: String)(refine: String => Either[List[ValidationError], A]): IO[AppError | Failure, A] =
-    ZIO.fromEither(refine(segment.value)).mapError(errs =>
-      RepositoryFailure(s"Listed $what '${segment.value}' does not refine: ${errs.map(ValidationError.describe).mkString("; ")}"))
+  private def refineListed[A](segment: IrminSegment)(wrap: SafeId.SafeId => A): IO[Failure, A] =
+    ZIO.fromEither(ValidationUtil.refineId(segment.value, ErrorLocation.Whole).map(wrap))
+      .mapError(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), List(Diagnostic.RawValue(segment.value))))
 
 object ScenarioMergeServiceLive:
   val layer: ZLayer[IrminClient & RiskTreeRepository & IrminConfig, Nothing, ScenarioMergeService] =

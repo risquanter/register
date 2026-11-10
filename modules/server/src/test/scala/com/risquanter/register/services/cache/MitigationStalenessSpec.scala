@@ -11,6 +11,7 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.domain.data.iron.{NodeId, SafeName, SeedVarId, ContentHash}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.testutil.TestHelpers
 
 /** Tests for [[MitigationStaleness]] — the diagnostic predicate flagging an
@@ -33,19 +34,19 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
     name: String = "Cyber",
     parent: NodeId = rootId
   ): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = cyberId.value, name = name, probability = prob,
       shape = lognormalShape(1000L, maxLoss),
       parentId = Some(parent), seedVarId = 1L), "leaf")
 
   private val flood: RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = floodId.value, name = "Flood", probability = 0.3,
       shape = lognormalShape(1000L, 50000L),
       parentId = Some(rootId), seedVarId = 2L), "leaf")
 
   private def root(childIds: NodeId*): RiskPortfolio =
-    unsafeGet(RiskPortfolio.create(
+    unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
       id = rootId.value, name = "Root", childIds = childIds.toVector, parentId = None), "portfolio")
 
   private def mkTree(root: RiskPortfolio, leaves: Seq[RiskLeaf], mits: Mitigation*): RiskTree =

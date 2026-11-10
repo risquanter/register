@@ -16,7 +16,7 @@ import com.risquanter.register.auth.{
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, TreeLoadFailure}
+import com.risquanter.register.domain.errors.AppError
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.{TreeListResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -70,9 +70,9 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(branchOf(rev).flatMap(b => db.get((wsId, b, id))).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
       ZIO.succeed(branchOf(rev) match
-        case Some(b) => db.collect { case ((wid, bb, _), t) if wid == wsId && bb == b => Right(t) }.toList
+        case Some(b) => db.collect { case ((wid, bb, _), t) if wid == wsId && bb == b => t }.toList
         case None    => Nil)
 
   // ── Controller factory ───────────────────────────────────────────────────────

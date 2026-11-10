@@ -2,6 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.json.EncoderOps
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.testutil.TestHelpers.{metalogShape, lognormalShape, unsafeGet}
 
 /**
@@ -25,7 +26,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         probability = 0.3,
         shape = lognormalShape(1000L, 50000L),
         parentId = None,
-        seedVarId = 7L
+        seedVarId = 7L,
+        subject = ErrorSubject.Request
       ), "leaf")
       val json = LeafSimContent.from(leaf).toJson
       assertTrue(json ==
@@ -39,7 +41,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         probability = 0.25,
         shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3)),
         parentId = None,
-        seedVarId = 9L
+        seedVarId = 9L,
+        subject = ErrorSubject.Request
       ), "leaf")
       val json = LeafSimContent.from(leaf).toJson
       assertTrue(json ==
@@ -53,7 +56,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         probability = 0.3,
         shape = lognormalShape(1000L, 50000L),
         parentId = None,
-        seedVarId = 7L
+        seedVarId = 7L,
+        subject = ErrorSubject.Request
       ), "leaf")
       val b = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ4",
@@ -61,7 +65,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         probability = 0.3,
         shape = lognormalShape(1000L, 50000L),
         parentId = Some(iron.NodeId(iron.SafeId.fromString("01HZZZZZZZZZZZZZZZZZZZZZZ5").toOption.get)),
-        seedVarId = 7L
+        seedVarId = 7L,
+        subject = ErrorSubject.Request
       ), "leaf")
       assertTrue(LeafSimContent.from(a).toJson == LeafSimContent.from(b).toJson)
     },
@@ -73,7 +78,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         probability = 0.3,
         shape = lognormalShape(1000L, 50000L),
         parentId = None,
-        seedVarId = 7L
+        seedVarId = 7L,
+        subject = ErrorSubject.Request
       ), "leaf")
       val b = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ6",
@@ -81,7 +87,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         probability = 0.6,
         shape = lognormalShape(1000L, 50000L),
         parentId = None,
-        seedVarId = 7L
+        seedVarId = 7L,
+        subject = ErrorSubject.Request
       ), "leaf")
       assertTrue(LeafSimContent.from(a).toJson != LeafSimContent.from(b).toJson)
     }

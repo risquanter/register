@@ -5,6 +5,7 @@ import zio.json.*
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, RiskLeaf}
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
@@ -35,17 +36,17 @@ object TreeRevertItSpec extends ZIOSpecDefault:
 
   /** v1: root + two leaves (3 nodes). */
   private def treeV1(tid: TreeId): RiskTree =
-    val root = RiskPortfolio.create(rootId.value, "Root", Vector(leaf1Id, leaf2Id), None).toEither.toOption.get
-    val l1 = RiskLeaf.create(id = leaf1Id.value, name = "Leaf 1", probability = 0.1,
+    val root = RiskPortfolio.create(rootId.value, "Root", Vector(leaf1Id, leaf2Id), None, ErrorSubject.Request).toEither.toOption.get
+    val l1 = RiskLeaf.create(subject = ErrorSubject.Request,id = leaf1Id.value, name = "Leaf 1", probability = 0.1,
       shape = lognormalShape(1000L, 2000L), parentId = Some(rootId), seedVarId = 1L).toEither.toOption.get
-    val l2 = RiskLeaf.create(id = leaf2Id.value, name = "Leaf 2", probability = 0.2,
+    val l2 = RiskLeaf.create(subject = ErrorSubject.Request,id = leaf2Id.value, name = "Leaf 2", probability = 0.2,
       shape = lognormalShape(1500L, 3000L), parentId = Some(rootId), seedVarId = 2L).toEither.toOption.get
     RiskTree.fromNodesUnsafe(tid, SafeName.fromString("Revert Tree").toOption.get, Seq(root, l1, l2), rootId,
       Some(SeedVarId.fromLong(2L).toOption.get), mitigations = Nil)
 
   /** v2: root + one leaf (leaf-2 pruned, 2 nodes). */
   private def treeV2(original: RiskTree): RiskTree =
-    val root = RiskPortfolio.create(rootId.value, "Root", Vector(leaf1Id), None).toEither.toOption.get
+    val root = RiskPortfolio.create(rootId.value, "Root", Vector(leaf1Id), None, ErrorSubject.Request).toEither.toOption.get
     val l1 = original.index.nodes(leaf1Id)
     RiskTree.fromNodesUnsafe(original.id, original.name, Seq(root, l1), rootId,
       Some(original.seedVarHighWater), mitigations = original.mitigations)
@@ -60,7 +61,7 @@ object TreeRevertItSpec extends ZIOSpecDefault:
     * subsequent read fails, because a read runs `fromNodes`.
     */
   private def duplicateNameLeafJson: String =
-    RiskLeaf.create(id = leaf2Id.value, name = "Leaf 1", probability = 0.2,
+    RiskLeaf.create(subject = ErrorSubject.Request,id = leaf2Id.value, name = "Leaf 1", probability = 0.2,
       shape = lognormalShape(1500L, 3000L),
       parentId = Some(rootId), seedVarId = 2L).toEither.toOption.get.toJson
 

@@ -77,7 +77,7 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
   private def name(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
 
   private def leaf(leafName: String, probability: Double): RiskNode =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = E.ErrorSubject.Request,
       id = idStr("fraud"),
       name = leafName,
       probability = probability,

@@ -7,6 +7,7 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, Revision}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.http.responses.{ChangedNodesStatus, NodeChangeEntry, NodeChangeStatus}
 import com.risquanter.register.testutil.TestHelpers.*
 
@@ -30,7 +31,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
   private val seedVarIdOf: Map[NodeId, Long] = Map(leaf1Id -> 1L, leaf2Id -> 2L)
 
   private def leaf(id: NodeId, probability: Double): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = id.value.toString,
       name = s"Leaf ${id.value}",
       probability = probability,
@@ -44,7 +45,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
       RiskTree.fromNodes(
         id = treeIdF,
         name = SafeName.SafeName("Diff Tree".refineUnsafe),
-        nodes = unsafeGet(RiskPortfolio.createFromStrings(
+        nodes = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
           id = rootId.value.toString,
           name = "Root",
           childIds = children.map(_.id.value.toString).toVector,

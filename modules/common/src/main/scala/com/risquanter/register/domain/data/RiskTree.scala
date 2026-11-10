@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeName, TreeId, NodeId, SeedVarId}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.responses.TreeSummaryResponse
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
@@ -132,7 +132,10 @@ object RiskTree {
     // carried the offending value, and here, which covers merges, store reads
     // and programmatic construction. Here there is no field to name — on three
     // of this function's call sites there is no request at all — so both report
-    // at the whole, and the offending values are named in the message.
+    // at the whole, and the offending values are named in the message. The
+    // tree's own fields are reported at the tree, for a request and a stored
+    // tree alike.
+    val subject = ErrorSubject.Tree(id)
     Validation
       .validateWith(
         TreeIndex.fromNodeSeq(nodes),
@@ -140,7 +143,7 @@ object RiskTree {
           nodes.collect { case leaf: RiskLeaf => leaf.name -> leaf.seedVarId },
           ErrorLocation.Whole
         ),
-        resolveSeedVarHighWater(nodes, seedVarHighWater),
+        resolveSeedVarHighWater(nodes, seedVarHighWater, subject),
         validateNodeCount(nodes),
         SafeName.requireDistinct(nodes.map(_.name), ErrorLocation.Whole)
       ) { (index, _, highWater, _, _) => (index, highWater) }
@@ -149,9 +152,9 @@ object RiskTree {
           .validateWith(
             Validation
               .fromPredicateWith[ValidationError, TreeIndex](
-                ValidationError(ErrorLocation.requestField(FieldName.RootId), FieldProblem.RootIdNotFound(rootId))
+                ValidationError(ErrorLocation.Field(subject, FieldName.RootId), FieldProblem.RootIdNotFound(rootId))
               )(index)((idx: TreeIndex) => idx.nodes.contains(rootId)),
-            validateMitigations(mitigations)
+            validateMitigations(mitigations, subject)
           ) { (_, _) => () }
           .as(RiskTree(id, name, nodes, rootId, index, highWater, mitigations))
       }
@@ -167,9 +170,10 @@ object RiskTree {
     * (`MitigationScopeResolver`), not tree invariants.
     */
   private def validateMitigations(
-    mitigations: Seq[Mitigation]
+    mitigations: Seq[Mitigation],
+    subject: ErrorSubject
   ): Validation[ValidationError, Unit] = {
-    val mitigationsLocation = ErrorLocation.requestField(FieldName.Mitigations)
+    val mitigationsLocation = ErrorLocation.Field(subject, FieldName.Mitigations)
 
     val countV =
       if (mitigations.sizeIs <= MaxMitigations) Validation.succeed(())
@@ -188,13 +192,14 @@ object RiskTree {
   /** Resolve and validate the tree's seed watermark (see fromNodes scaladoc). */
   private def resolveSeedVarHighWater(
     nodes: Seq[RiskNode],
-    provided: Option[SeedVarId.SeedVarId]
+    provided: Option[SeedVarId.SeedVarId],
+    subject: ErrorSubject
   ): Validation[ValidationError, SeedVarId.SeedVarId] = {
     val maxAssigned = nodes.collect { case leaf: RiskLeaf => leaf.seedVarId }.maxByOption(_.value)
     (provided, maxAssigned) match {
       case (Some(hw), Some(mx)) if hw.value < mx.value =>
         Validation.fail(ValidationError(
-          ErrorLocation.requestField(FieldName.SeedVarHighWater),
+          ErrorLocation.Field(subject, FieldName.SeedVarHighWater),
           FieldProblem.SeedVarHighWaterBelowMax(hw, mx)
         ))
       case (Some(hw), _) => Validation.succeed(hw)
@@ -203,7 +208,7 @@ object RiskTree {
         // Unreachable for valid trees (every path terminates at a leaf), but
         // total: a leafless node collection has no derivable watermark.
         Validation.fail(ValidationError(
-          ErrorLocation.requestField(FieldName.SeedVarHighWater),
+          ErrorLocation.Field(subject, FieldName.SeedVarHighWater),
           FieldProblem.SeedVarHighWaterNotDerivable
         ))
     }

@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{
   ResultTransformSpec, RiskLeaf, RiskPortfolio, RiskTree, TargetingPredicate
 }
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
 import com.risquanter.register.testutil.RiskResultTestSupport.outcomesOf
 import com.risquanter.register.testutil.TestHelpers.{
   idStr, lognormalShape, mitigationId, nodeId, resultStage, retentionFactor, treeId, unsafeGet
@@ -46,7 +46,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
   private def leaf(label: String, seedVarId: Long, prob: Double = 0.4,
                    min: Long = 1000L, max: Long = 100000L): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = idStr(label), name = label, probability = prob,
       shape = lognormalShape(min, max),
       parentId = Some(nodeId("root-pf")), seedVarId = seedVarId
@@ -54,7 +54,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
   private val cyber = leaf("cyber", 1L)
   private val flood = leaf("flood", 2L)
-  private val root = unsafeGet(RiskPortfolio.createFromStrings(
+  private val root = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
     id = idStr("root-pf"), name = "Root Portfolio",
     childIds = Vector(cyber.id.value, flood.id.value), parentId = None), "portfolio")
 

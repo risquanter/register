@@ -2,9 +2,14 @@ package com.risquanter.register.repositories
 
 import zio.*
 import zio.json.*
+import zio.prelude.{NonEmptyList, Validation}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, Failure, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, TreeLoadProblem, ValidationError}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, SafeId, WorkspaceId, BranchRef, CommitHash, Revision, ValidationUtil}
+import com.risquanter.register.domain.errors.{
+  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, PeerZone,
+  RepositoryFailure, TreeAbsentAtRevision, TrustZone, ValidationError
+}
+import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -88,7 +93,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       case Some(head) => loadTreeAt(wsId, id, head).map(_.map(twm => (twm.tree, head)))
     }
 
-  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure,List[Either[TreeLoadFailure, RiskTree]]] =
+  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]] =
     val root = WorkspaceStoragePaths.treesRoot(wsId)
     // Resolve ONE commit for the whole listing (enumeration + every tree load),
     // so the returned set is a single consistent snapshot.
@@ -98,15 +103,16 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         irmin.listAtCommit(head, root).flatMap { treeIds =>
           ZIO.foreach(treeIds)(treeIdPath =>
             for
-              // The id is parsed before the load, so every entry below can name
-              // the tree it is about without the inner helpers carrying the id.
-              treeId  <- parseTreeId(treeIdPath.value)
-              loaded  <- perTree(loadTreeAt(wsId, treeId, head))
-            yield loaded match
-              case Right(Some(value)) => Right(value.tree)
-              case Right(None)        => Left(TreeLoadFailure(treeId, TreeLoadProblem.Empty))
-              case Left(err)          => Left(TreeLoadFailure(treeId, TreeLoadProblem.Failed(err)))
-          )
+              // The id is parsed before the load, so every refusal below can be
+              // filed under the tree it is about.
+              treeId <- parseTreeId(treeIdPath)
+              loaded <- perTree(loadTreeAt(wsId, treeId, head))
+              tree   <- loaded match
+                          case Right(Some(value)) => ZIO.succeed(Right(value.tree))
+                          case Right(None)        => ZIO.fail(listedTreeEmpty(treeId))
+                          case Left(refusals)     => ZIO.succeed(Left(treeId -> refusals))
+            yield tree
+          ).flatMap(accumulateListing)
         }
     }
 
@@ -125,58 +131,70 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         mitigations.toList.map(m => IrminTreeEntry(WorkspaceStoragePaths.withinTree(TreePath.Mitigation(meta.id, m.id)), m.toJson))
     irmin.setTree(base, entries, message, branch).unit
 
-  private def decodeMeta(json: String): IO[AppError | Failure,TreeMetadata] =
-    ZIO.fromEither(json.fromJson[TreeMetadata].left.map(err => RepositoryFailure(s"Decode meta failed: $err")))
-
-  private def readNodesAt(prefix: IrminPath, at: CommitHash): IO[AppError | Failure,Seq[RiskNode]] =
-    for
-      childNames <- irmin.listAtCommit(at, prefix)
-      nodes      <- ZIO.foreach(childNames) { child =>
-                      val fullPath = prefix / child
-                      irmin.getAtCommit(at, fullPath).flatMap {
-                        case Some(json) => decodeNode(child, json)
-                        case None       => ZIO.fail(RepositoryFailure(s"Missing node value at ${fullPath.value}"))
-                      }
-                    }
-    yield nodes
-
-  private def decodeNode(child: IrminSegment, json: String): IO[AppError | Failure,RiskNode] =
-    ZIO.fromEither(
-      RiskTreeRepositoryIrmin.decodeStoredNode(json)
-        .left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err"))
+  /** The value at every path under `prefix`, with the segment it was listed
+    * under. A listed path the store does not hold a value at is a storage
+    * failure. */
+  private def readValuesAt(prefix: IrminPath, at: CommitHash): IO[AppError | Failure, List[(IrminSegment, String)]] =
+    irmin.listAtCommit(at, prefix).flatMap(children =>
+      ZIO.foreach(children) { child =>
+        val fullPath = prefix / child
+        irmin.getAtCommit(at, fullPath).flatMap {
+          case Some(json) => ZIO.succeed(child -> json)
+          case None       => ZIO.fail(RepositoryFailure(s"Missing value at ${fullPath.value}"))
+        }
+      }
     )
 
-  private def readMitigationsAt(prefix: IrminPath, at: CommitHash): IO[AppError | Failure,Seq[Mitigation]] =
-    for
-      childNames <- irmin.listAtCommit(at, prefix)
-      mits       <- ZIO.foreach(childNames) { child =>
-                      val fullPath = prefix / child
-                      irmin.getAtCommit(at, fullPath).flatMap {
-                        case Some(json) => decodeMitigation(child, json)
-                        case None       => ZIO.fail(RepositoryFailure(s"Missing mitigation value at ${fullPath.value}"))
-                      }
-                    }
-    yield mits
+  /** The `meta` value, the nodes and the mitigations of one tree decoded, every
+    * refusal across all three accumulated. A node or mitigation is reported at
+    * the identifier its path names, and a path segment that is not one is
+    * refused itself. */
+  private def decodeStored(
+    treeId:      TreeId,
+    metaJson:    String,
+    nodes:       List[(IrminSegment, String)],
+    mitigations: List[(IrminSegment, String)]
+  ): Validation[ValidationError, (TreeMetadata, List[RiskNode], List[Mitigation])] =
+    val metaV = fromEither(TreeMetadata.decodeValidated(metaJson, ErrorSubject.Tree(treeId)))
+    val nodesV = Validation.validateAll(nodes.map { (segment, json) =>
+      refineSegment(segment)(NodeId(_)).flatMap(nodeId =>
+        fromEither(RiskTreeRepositoryIrmin.decodeStoredNode(json, nodeId)))
+    })
+    val mitigationsV = Validation.validateAll(mitigations.map { (segment, json) =>
+      refineSegment(segment)(MitigationId(_)).flatMap(mitigationId =>
+        fromEither(Mitigation.decodeValidated(json, ErrorSubject.Mitigation(mitigationId))))
+    })
+    Validation.validateWith(metaV, nodesV, mitigationsV)((meta, ns, ms) => (meta, ns, ms))
 
-  private def decodeMitigation(child: IrminSegment, json: String): IO[AppError | Failure,Mitigation] =
-    ZIO.fromEither(json.fromJson[Mitigation].left.map(err => RepositoryFailure(s"Decode mitigation ${child.value}: $err")))
+  /** A listed path segment refined as the identifier it names. This server
+    * writes only refined identifiers, so one that does not refine is content
+    * this code did not write. */
+  private def refineSegment[A](segment: IrminSegment)(wrap: SafeId.SafeId => A): Validation[ValidationError, A] =
+    ValidationUtil.toValidation(ValidationUtil.refineId(segment.value, ErrorLocation.Whole).map(wrap))
 
-  private def rebuildTree(meta: TreeMetadata, nodes: Seq[RiskNode], mitigations: Seq[Mitigation]): IO[AppError | Failure,RiskTree] =
+  private def fromEither[A](decoded: Either[NonEmptyList[ValidationError], A]): Validation[ValidationError, A] =
+    decoded match
+      case Right(value) => Validation.succeed(value)
+      case Left(errors) => Validation.failNonEmptyChunk(NonEmptyChunk(errors.head, errors.tail*))
+
+  /** The tree rebuilt through the smart constructor, so every tree invariant
+    * (structure, rootId, seedVarId distinctness, high-water >= max, mitigation
+    * id/name uniqueness and count bound) also holds on load. */
+  private def rebuildTree(meta: TreeMetadata, nodes: Seq[RiskNode], mitigations: Seq[Mitigation]): IO[AppError | Failure, RiskTree] =
     if nodes.isEmpty then
       ZIO.fail(RepositoryFailure(s"No nodes found for tree ${meta.id}"))
     else
-      // Route through the smart constructor so every tree invariant (structure,
-      // rootId, seedVarId distinctness, high-water >= max, mitigation id/name
-      // uniqueness and count bound) also holds on load.
       ZIO.fromEither(
         RiskTree
           .fromNodes(meta.id, meta.name, nodes, meta.rootId, Some(meta.seedVarHighWater), mitigations.toList)
           .toEither
-          .left.map(errors => RepositoryFailure(errors.map(ValidationError.describe).mkString("; ")))
+          .left.map(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), Nil))
       )
 
-  private def parseTreeId(raw: String): IO[AppError | Failure,TreeId] =
-    ZIO.fromEither(TreeId.fromString(raw)).mapError(errs => RepositoryFailure(errs.map(ValidationError.describe).mkString("; ")))
+  /** A listed tree segment refined as a `TreeId`, or the listing refused. */
+  private def parseTreeId(segment: IrminSegment): IO[Failure, TreeId] =
+    ZIO.fromEither(ValidationUtil.refineId(segment.value, ErrorLocation.Whole).map(TreeId(_)))
+      .mapError(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), List(Diagnostic.RawValue(segment.value))))
 
   /** Resolve the branch head once, then read every constituent path pinned to
     * that commit — a commit landing mid-load cannot tear the read. A branch
@@ -212,16 +230,19 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
             if children.nonEmpty then ZIO.fail(RepositoryFailure(s"Metadata missing for tree $id but nodes exist"))
             else ZIO.succeed(None)
           }
-        case Some(json) => decodeMeta(json).map(Some(_))
+        case Some(json) => ZIO.succeed(Some(json))
       result <- maybeMeta match
         case None => ZIO.succeed(None)
-        case Some(meta) =>
+        case Some(metaJson) =>
           for
-            nodes       <- readNodesAt(nodePrefix, at)
+            nodes       <- readValuesAt(nodePrefix, at)
             // Mitigations may legitimately be empty (a tree with no mitigations),
             // so — unlike nodes — there is no non-empty guard on them.
-            mitigations <- readMitigationsAt(mitPrefix, at)
-            tree        <- rebuildTree(meta, nodes, mitigations)
+            mitigations <- readValuesAt(mitPrefix, at)
+            decoded     <- ZIO.fromEither(decodeStored(id, metaJson, nodes, mitigations).toEither)
+                             .mapError(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), Nil))
+            (meta, ns, ms) = decoded
+            tree        <- rebuildTree(meta, ns, ms)
           yield Some(TreeWithMeta(meta, tree))
     yield result
 
@@ -238,17 +259,41 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def treeWriteMessage(wsId: WorkspaceId, treeId: TreeId, kind: TreeWriteKind): CommitMessage =
     CommitMessage.TreeWritten(wsId, treeId, kind)
 
-  /** One tree's load inside a listing. A refusal of that tree's content is
-    * recorded against the tree and the listing goes on; a `Failure`, such as the
-    * store not answering, is not about one tree and fails the listing. */
-  private def perTree[A](load: IO[AppError | Failure, A]): IO[Failure, Either[AppError, A]] =
+  /** One tree's load inside a listing. A refusal of that tree's stored content
+    * is kept against the tree and the listing goes on; every other failure,
+    * such as the store not answering, fails the listing. */
+  private def perTree[A](load: IO[AppError | Failure, A]): IO[AppError | Failure, Either[NonEmptyList[(ErrorLocation, FieldProblem)], A]] =
     load.foldZIO(
       {
-        case error: AppError => ZIO.succeed(Left(error))
-        case failure: Failure => ZIO.fail(failure)
+        case Failure.Rejected(Core(TrustZone.Peer(PeerZone.Store), errors, _)) => ZIO.succeed(Left(errors))
+        case other                                                            => ZIO.fail(other)
       },
       value => ZIO.succeed(Right(value))
     )
+
+  /** The listing's trees, or one refusal accumulating every refused tree's
+    * entries, with each refused tree named in the diagnostics. */
+  private def accumulateListing(
+    loaded: List[Either[(TreeId, NonEmptyList[(ErrorLocation, FieldProblem)]), RiskTree]]
+  ): IO[Failure, List[RiskTree]] =
+    loaded.collect { case Left(refused) => refused } match
+      case Nil => ZIO.succeed(loaded.collect { case Right(tree) => tree })
+      case (firstId, firstErrors) :: rest =>
+        val errors = rest.foldLeft(firstErrors) { case (acc, (_, more)) => acc ++ more }
+        val trees  = (firstId :: rest.map(_._1)).map(Diagnostic.TreeRef(_))
+        ZIO.fail(Failure.Rejected(Core(TrustZone.Peer(PeerZone.Store), errors, trees)))
+
+  /** A listed tree whose commit holds neither its metadata nor any node. */
+  private def listedTreeEmpty(treeId: TreeId): Failure =
+    Failure.NotFound(Core(
+      TrustZone.Peer(PeerZone.Store),
+      NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeId), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
+      Nil
+    ))
+
+  /** Content the store returned that this service refuses (ADR-039). */
+  private def storeRefusal(errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =
+    Failure.rejected(TrustZone.Peer(PeerZone.Store), errors, diagnostics)
 
 private final case class TreeWithMeta(meta: TreeMetadata, tree: RiskTree)
 
@@ -272,6 +317,19 @@ object RiskTreeRepositoryIrmin:
     case leaf: RiskLeaf           => leaf.toJson
     case portfolio: RiskPortfolio => portfolio.toJson
 
-  def decodeStoredNode(json: String): Either[String, RiskNode] =
-    json.fromJson[RiskLeaf].map(node => node: RiskNode)
-      .orElse(json.fromJson[RiskPortfolio].map(node => node: RiskNode))
+  /** One stored node read back at `nodeId`. The leaf form is tried first and
+    * the portfolio form only when the text is not a leaf at all, so a stored
+    * leaf with a refused field is reported as that leaf's refusal.
+    *
+    * {{{
+    * decodeStoredNode(leafJsonWithProbability1_5, nodeId)
+    * // Left: OutOfRange(ClosedUnitInterval) at node <nodeId>.Probability
+    * }}}
+    */
+  def decodeStoredNode(json: String, nodeId: NodeId): Either[NonEmptyList[ValidationError], RiskNode] =
+    val subject = ErrorSubject.ExistingNode(nodeId)
+    RiskLeaf.decodeValidated(json, subject) match
+      case Right(leaf) => Right(leaf)
+      case Left(NonEmptyList.Single(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Json)))) =>
+        RiskPortfolio.decodeValidated(json, subject)
+      case Left(refusals) => Left(refusals)

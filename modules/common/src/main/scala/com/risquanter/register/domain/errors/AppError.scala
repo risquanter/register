@@ -99,20 +99,6 @@ case class RepositoryFailure(reason: String) extends DomainError:
   override def logMessage: String = reason
   override def origin: FailureOrigin = FailureOrigin.Service
 
-/** One tree in a workspace listing could not be loaded.
-  *
-  * Separate from `RepositoryFailure`, which also covers failures that are about
-  * no single tree — a workspace record, a branch head that will not refine, a
-  * failure rebuilt from a wire that never carried an identity. Here the tree is
-  * always known, so its id is a field rather than text inside a sentence, and
-  * the problem is a case of `TreeLoadProblem`, so every caller reads both
-  * without parsing prose.
-  */
-case class TreeLoadFailure(treeId: TreeId, problem: TreeLoadProblem) extends DomainError:
-  override def logMessage: String = s"Tree ${treeId.value} could not be loaded: ${TreeLoadProblem.describe(problem)}"
-  override def origin: FailureOrigin = FailureOrigin.Service
-  override def logAnnotations: Map[String, String] = Map("tree_id" -> treeId.value)
-
 /** Simulation execution failure - wraps underlying cause with context */
 case class SimulationFailure(simulationId: String, cause: Throwable) extends DomainError {
   override def logMessage: String = s"Simulation $simulationId failed: ${cause.getMessage}"

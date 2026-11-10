@@ -233,7 +233,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             BranchHeadStale(branch, commit)                        -> "InternalFault",
             IrminMergeConflict("conflict")                         -> "InternalFault",
             RepositoryFailure("disk")                              -> "InternalFault",
-            TreeLoadFailure(treeId, TreeLoadProblem.Failed(RepositoryFailure("corrupt"))) -> "InternalFault",
             SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault",
             FolModelValidationFailure(List("x"))                   -> "InternalFault",
             FolEvaluationFailure("x", "bind")                      -> "InternalFault"
@@ -242,7 +241,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 27)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 26)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope

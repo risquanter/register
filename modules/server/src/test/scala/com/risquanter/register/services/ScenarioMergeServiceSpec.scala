@@ -13,7 +13,11 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
-import com.risquanter.register.domain.errors.{AppError, BranchAlreadyExists, BranchHeadStale, Core, ErrorLocation, Failure, FieldName, IrminError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, OutageMode, PeerZone, RepositoryFailure, TreeLoadFailure, TreeLoadProblem}
+import com.risquanter.register.domain.errors.{
+  AppError, BranchAlreadyExists, BranchHeadStale, Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem,
+  IrminError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, OutageMode, PeerZone, RepositoryFailure,
+  TrustZone, ValueFormat
+}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -58,7 +62,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
   private val rootId = NodeId.fromString("00000000000000000000000099").toOption.get
 
   private def leafNode(id: NodeId, nodeName: String, seedVarId: Long): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = id.value,
       name = nodeName,
       probability = 0.1,
@@ -79,7 +83,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     unsafeGet(RiskTree.fromNodes(
       id = id,
       name = SafeName.SafeName(treeName.refineUnsafe),
-      nodes = unsafeGet(RiskPortfolio.createFromStrings(
+      nodes = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
         id = rootId.value.toString,
         name = "Root",
         childIds = children.map(_.id.value.toString).toVector,
@@ -222,11 +226,11 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     * commit rather than at a branch head.
     */
   private final class FakeRepo(
-    loaded: List[Either[TreeLoadFailure, RiskTree]],
+    loaded: Either[Failure, List[RiskTree]],
     revisions: Ref[List[Revision]]
   ) extends RiskTreeRepository:
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
-      revisions.update(_ :+ rev).as(loaded)
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]] =
+      revisions.update(_ :+ rev) *> ZIO.fromEither(loaded)
 
     override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))
@@ -236,6 +240,18 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
 
   private val validTree =
     tree(treeIdOf("guard-tree"), "Guard Tree", Seq(leafNode(nodeIdOf(1), "Outage", 1L)))
+
+  /** The listing's refusal of the staged state: the store holds a tree whose
+    * root id names no node, and the refusal names that tree. */
+  private def stagedRefusal(diagnostics: Diagnostic*): Failure =
+    Failure.Rejected(Core(
+      TrustZone.Peer(PeerZone.Store),
+      NonEmptyList(
+        ErrorLocation.Field(ErrorSubject.Tree(treeIdOf("guard-tree")), FieldName.RootId) ->
+          FieldProblem.RootIdNotFound(nodeIdOf(9))
+      ),
+      Diagnostic.TreeRef(treeIdOf("guard-tree")) :: diagnostics.toList
+    ))
 
   /** The workspace given to every fixture whose base equals main's head: the
     * scan short-circuits there and reads no path, so no path is ever built
@@ -252,7 +268,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     yield mergeService(
       FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
         mergeResult, resets, ZIO.unit, branchOps = None, stagingSets = None),
-      FakeRepo(List(Right(validTree)), revs)
+      FakeRepo(Right(List(validTree)), revs)
     )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
@@ -305,7 +321,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, shared,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             exit   <- svc.merge(wsId, name("draft-v1")).exit
           yield
@@ -332,7 +348,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, metas,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             head   <- svc.merge(wsId, name("draft-v1"))
           yield assertTrue(head == hash('c'))
@@ -355,7 +371,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             svc     = mergeService(
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, atBase,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             head   <- svc.merge(wsId, name("draft-v1"))
           yield assertTrue(head == hash('c'))
@@ -381,7 +397,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, atBase,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             exit   <- svc.merge(wsId, name("draft-v1")).exit
           yield
@@ -409,7 +425,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), onMain, onScen, atBase,
                           ZIO.die(new IllegalStateException("a preview must not merge")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             result <- svc.preview(wsId, name("draft-v1"))
           yield result match
@@ -442,7 +458,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), onMain, onScen, atBase,
                           ZIO.die(new IllegalStateException("a preview must not merge")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             result <- svc.preview(wsId, name("draft-v1"))
           yield assertTrue(result == MergePreviewStatus.Clean())
@@ -464,14 +480,14 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), onMain, onScen, atBase,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit,
                           branchOps = None, stagingSets = Some(sets)),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             _      <- TestClock.setTime(Instant.parse("2026-11-01T12:00:00Z"))
             head   <- svc.merge(wsId, scenario)
             writes <- sets.get
           yield
             val stored = WorkspaceStoragePaths.of(wsId, metaPath)
-            val merged = writes.lift(1).flatMap(w => w._2.fromJson[TreeMetadata].toOption)
+            val merged = writes.lift(1).flatMap(w => TreeMetadata.decodeValidated(w._2, ErrorSubject.Tree(treeId)).toOption)
             assertTrue(
               writes.map(_._1) == List(stored, stored),
               writes.headOption.map(_._2).contains(scenarioMeta),
@@ -500,7 +516,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, meta,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             result <- svc.preview(wsId, name("draft-v1"))
           yield result match
@@ -528,7 +544,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(wsId, hash('a'), hash('b'), hash('d'), mainBlobs, scenarioBlobs, atBase,
                           ZIO.die(new IllegalStateException("mergeCommit must not be called")),
                           resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             result <- svc.preview(wsId, name("draft-v1"))
           yield assertTrue(result match { case MergePreviewStatus.Conflicts(_) => true; case _ => false })
@@ -543,7 +559,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             head   <- svc.merge(ws("ws-guard-clean"), name("draft-v1"))
             calls  <- resets.get
@@ -566,7 +582,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Left(TreeLoadFailure(treeIdOf("guard-tree"), TreeLoadProblem.Failed(RepositoryFailure("duplicate seedVarId 7"))))), revs)
+                        FakeRepo(Left(stagedRefusal()), revs)
                       )
             exit   <- svc.merge(ws("ws-guard-undo"), name("draft-v1")).exit
             calls  <- resets.get
@@ -582,8 +598,8 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             )
         },
         test("the guard's refusal names the trees, never the repository's own text") {
-          // TreeLoadFailure.reason can name an absolute storage path, which
-          // embeds the WorkspaceId (ADR-036). It goes to the log, and the
+          // The listing's diagnostics can carry an absolute storage path, which
+          // embeds the WorkspaceId (ADR-036). They go to the log, and the
           // refusal names the tree instead.
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
@@ -591,12 +607,9 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Left(TreeLoadFailure(
-                          treeIdOf("guard-tree"),
-                          TreeLoadProblem.Failed(RepositoryFailure(
-                            "Missing node value at workspaces/01ARZ3NDEKTSV4RRFFQ69G5FAV/risk-trees/t/nodes/n"
-                          ))
-                        ))), revs)
+                        FakeRepo(Left(stagedRefusal(
+                          Diagnostic.RawValue("workspaces/01ARZ3NDEKTSV4RRFFQ69G5FAV/risk-trees/t/nodes/n")
+                        )), revs)
                       )
             exit   <- svc.merge(ws("ws-guard-leak"), name("draft-v1")).exit
           yield
@@ -607,6 +620,30 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
               failure.forall(f => !f.logMessage.toLowerCase.contains("workspaces/"))
             )
         },
+        test("a listing refusal that names no tree fails the merge as itself") {
+          // A refused listed segment is about the listing, not about a tree
+          // whose invariant the merge broke, so the guard does not turn it into
+          // a conflict.
+          val listingRefusal = Failure.Rejected(Core(
+            TrustZone.Peer(PeerZone.Store),
+            NonEmptyList(ErrorLocation.Whole -> FieldProblem.WrongFormat(ValueFormat.Ulid)),
+            List(Diagnostic.RawValue("not-a-ulid"))
+          ))
+          for
+            resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
+            revs   <- Ref.make(List.empty[Revision])
+            svc     = mergeService(
+                        FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
+                          ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, branchOps = None, stagingSets = None),
+                        FakeRepo(Left(listingRefusal), revs)
+                      )
+            exit   <- svc.merge(ws("ws-guard-listing"), name("draft-v1")).exit
+            calls  <- resets.get
+          yield assertTrue(
+            exit.causeOption.flatMap(_.failureOption).contains(listingRefusal),
+            calls.isEmpty
+          )
+        },
         test("a commit landing on main during the merge fails MergeTargetMoved and publishes nothing") {
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
@@ -615,7 +652,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets,
                           ZIO.fail(BranchHeadStale(BranchRef.Main, hash('a'))), branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             exit   <- svc.merge(ws("ws-publish-stale"), name("draft-v1")).exit
             calls  <- resets.get
@@ -637,7 +674,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                           ZIO.succeed(commit(hash('c'))), resets,
                           ZIO.fail(BranchHeadStale(BranchRef.Main, hash('a'))), branchOps = None, stagingSets = None,
                           mainMovesTo = List(hash('d'))),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             exit   <- svc.merge(ws("ws-main-moved"), name("draft-v1")).exit
             calls  <- resets.get
@@ -658,7 +695,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit,
                           createResult = ZIO.fail(BranchAlreadyExists(BranchRef.Main)), branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             exit   <- svc.merge(ws("ws-merge-busy"), name("draft-v1")).exit
             calls  <- resets.get
@@ -670,7 +707,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             )
         },
         test("the staging branch is created before the merge and removed after it, on both outcomes") {
-          def run(repoResult: List[Either[TreeLoadFailure, RiskTree]]) =
+          def run(repoResult: Either[Failure, List[RiskTree]]) =
             for
               resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
               revs   <- Ref.make(List.empty[Revision])
@@ -686,8 +723,8 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             yield seen
 
           for
-            onSuccess <- run(List(Right(validTree)))
-            onRefusal <- run(List(Left(TreeLoadFailure(treeIdOf("guard-tree"), TreeLoadProblem.Failed(RepositoryFailure("duplicate seedVarId 7"))))))
+            onSuccess <- run(Right(List(validTree)))
+            onRefusal <- run(Left(stagedRefusal()))
           yield
             val staging = onSuccess.collectFirst { case o if o.startsWith("create:") => o.stripPrefix("create:") }
             assertTrue(
@@ -710,7 +747,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
                         FakeMergeIrmin(noReadWs, hash('a'), scenarioHead, hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit,
                           branchOps = Some(ops), stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             _      <- svc.merge(ws("ws-merges-scanned-commit"), name("draft-v1"))
             seen   <- ops.get
@@ -725,7 +762,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             svc     = mergeService(
                         FakeMergeIrmin(noReadWs, hash('a'), hash('b'), hash('a'), Map.empty, Map.empty, Map.empty,
                           ZIO.succeed(commit(hash('c'))), resets, ZIO.unit, mainHeadPresent = false, branchOps = None, stagingSets = None),
-                        FakeRepo(List(Right(validTree)), revs)
+                        FakeRepo(Right(List(validTree)), revs)
                       )
             exit   <- svc.merge(ws("ws-guard-nohead"), name("draft-v1")).exit
             calls  <- resets.get

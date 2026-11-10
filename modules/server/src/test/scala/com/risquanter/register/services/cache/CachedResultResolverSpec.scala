@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, R
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /** Content-addressed resolver: cache-aside, per-workspace isolation, leaf-only caching, orphan semantics, and the ADR-034 F mitigation fold. */
@@ -26,7 +26,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
   private val risk1IdStr = safeId("risk1").value.toString
   private val risk2IdStr = safeId("risk2").value.toString
 
-  val risk1Leaf = unsafeGet(RiskLeaf.create(
+  val risk1Leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = risk1IdStr,
     name = "Risk 1",
     probability = 0.1,
@@ -35,7 +35,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     seedVarId = 1L
   ), "leaf")
 
-  val risk2Leaf = unsafeGet(RiskLeaf.create(
+  val risk2Leaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = risk2IdStr,
     name = "Risk 2",
     probability = 0.2,
@@ -44,7 +44,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     seedVarId = 2L
   ), "leaf")
 
-  val rootNode: RiskNode = unsafeGet(RiskPortfolio.createFromStrings(
+  val rootNode: RiskNode = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
     id = rootIdStr,
     name = "Root Portfolio",
     childIds = Vector(risk1IdStr, risk2IdStr),
@@ -198,7 +198,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
 
       test("param edit strands the old entry (orphan) and the new content misses the old key") {
         // Same leaf identity, changed probability → different content hash
-        val editedLeaf = unsafeGet(RiskLeaf.create(
+        val editedLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = risk1IdStr,
           name = "Risk 1",
           probability = 0.6,
@@ -254,7 +254,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
             id = treeId("other-tree"),
             name = SafeName.SafeName("Other Tree".refineUnsafe),
             nodes = Seq(
-              unsafeGet(RiskPortfolio.createFromStrings(
+              unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
                 id = rootIdStr,
                 name = "Other Root",
                 childIds = Vector(risk1IdStr),

@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, SimulationFailure, AppError, Failure, TrustZone}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, RepositoryFailure, TreeAbsentAtRevision, SimulationFailure, AppError, Failure, TrustZone}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
@@ -86,15 +86,7 @@ class RiskTreeServiceLive private (
   // Trees at the head of the branch being written; uniqueness (tree ID and
   // name) is checked against exactly this set.
   private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): IO[AppError | Failure,List[RiskTree]] =
-    repo.getAllForWorkspace(wsId, Revision.Head(branch)).flatMap { results =>
-      val (errs, trees) = results.foldLeft((List.empty[TreeLoadFailure], List.empty[RiskTree])) {
-        case ((es, ts), Left(err))  => (err :: es, ts)
-        case ((es, ts), Right(t))   => (es, t :: ts)
-      }
-      errs match
-        case Nil => ZIO.succeed(trees.reverse)
-        case _   => ZIO.fail(RepositoryFailure(errs.reverse.map(_.logMessage).mkString("; ")))
-    }
+    repo.getAllForWorkspace(wsId, Revision.Head(branch))
   
   /** Record operation metric with optional error context
     *

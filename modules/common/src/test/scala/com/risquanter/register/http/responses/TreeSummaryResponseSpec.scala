@@ -6,6 +6,7 @@ import sttp.tapir.DecodeResult
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf}
 import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, treeId, unsafeGet}
 
 /** The tree summary and the location a tree create answers with. */
@@ -20,7 +21,8 @@ object TreeSummaryResponseSpec extends ZIOSpecDefault {
       probability = 0.5,
       shape = lognormalShape(1000L, 50000L),
       parentId = None,
-      seedVarId = 1L
+      seedVarId = 1L,
+      subject = ErrorSubject.Request
     ), "leaf")
     unsafeGet(RiskTree.fromNodes(
       id = treeId("sim-1"),

@@ -12,6 +12,7 @@ import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -35,12 +36,12 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   private val aId    = nodeId("qsl-a")
   private val bId    = nodeId("qsl-b")
 
-  private val rootP = unsafeGet(RiskPortfolio.create(
+  private val rootP = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
     id = rootId.value, name = "Root", childIds = Vector(aId, bId), parentId = None), "portfolio")
-  private val aLeaf = unsafeGet(RiskLeaf.create(
+  private val aLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = aId.value, name = "Alpha", probability = 0.2,
     shape = lognormalShape(100L, 100000L), parentId = Some(rootId), seedVarId = 1L), "leaf")
-  private val bLeaf = unsafeGet(RiskLeaf.create(
+  private val bLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = bId.value, name = "Beta", probability = 0.2,
     shape = lognormalShape(100L, 100000L), parentId = Some(rootId), seedVarId = 2L), "leaf")
 

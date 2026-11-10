@@ -4,7 +4,7 @@ import java.time.Instant
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, WorkspaceId}
-import com.risquanter.register.domain.errors.FieldName
+import com.risquanter.register.domain.errors.{ErrorSubject, FieldName}
 import com.risquanter.register.http.responses.{TreeMetadataFields, Versions}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -47,7 +47,7 @@ object MergeConflictRuleSpec extends ZIOSpecDefault:
   // ── node fixtures ────────────────────────────────────────────────────────
 
   private def leaf(probability: Double): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = idStr("cyber"),
       name = "Cyber",
       probability = probability,
@@ -57,7 +57,7 @@ object MergeConflictRuleSpec extends ZIOSpecDefault:
     ), "leaf")
 
   private def portfolio(children: Seq[String]): RiskPortfolio =
-    unsafeGet(RiskPortfolio.createFromStrings(
+    unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
       id = idStr("cyber"),
       name = "Cyber",
       childIds = children.map(idStr).toVector,

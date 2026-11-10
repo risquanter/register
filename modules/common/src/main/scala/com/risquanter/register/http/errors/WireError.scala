@@ -207,7 +207,6 @@ object WireError:
       case BranchHeadStale(_, _)               => WireError.InternalFault(t)
       case IrminMergeConflict(_)               => WireError.InternalFault(t)
       case RepositoryFailure(_)                => WireError.InternalFault(t)
-      case TreeLoadFailure(_, _)               => WireError.InternalFault(t)
       case SimulationFailure(_, _)             => WireError.InternalFault(t)
       case FolModelValidationFailure(_)        => WireError.InternalFault(t)
       case FolEvaluationFailure(_, _)          => WireError.InternalFault(t)

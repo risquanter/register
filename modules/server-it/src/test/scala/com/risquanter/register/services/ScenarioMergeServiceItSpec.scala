@@ -13,7 +13,7 @@ import com.risquanter.register.domain.data.{
   AbsoluteReplacement
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, MergeStagingRef, SafeName, StoreBranch, TreeId, NodeId, MitigationId}
-import com.risquanter.register.domain.errors.{AppError, Failure, FieldName, MergeConflict, RepositoryFailure, ValidationFailed}
+import com.risquanter.register.domain.errors.{AppError, ErrorSubject, Failure, FieldName, MergeConflict, RepositoryFailure, ValidationFailed}
 import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -80,7 +80,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     * seed-variable distinctness.
     */
   private def leaf(id: NodeId, leafName: String, probability: Double, seedVarId: Long): RiskLeaf =
-    RiskLeaf.create(
+    RiskLeaf.create(subject = ErrorSubject.Request,
       id = id.value, name = leafName, probability = probability,
       shape = lognormalShape(1000L, 100000L),
       parentId = Some(rootId), seedVarId = seedVarId
@@ -91,7 +91,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     * has a matching child link.
     */
   private def root(childIds: NodeId*): RiskPortfolio =
-    RiskPortfolio.create(
+    RiskPortfolio.create(subject = ErrorSubject.Request,
       id = rootId.value, name = "Merge Root", childIds = childIds.toVector, parentId = None
     ).toEither.toOption.get
 
@@ -240,7 +240,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         _         <- svc.merge(wsId, scenario)
         a         <- IrminClient.get(nodePath(wsId, nodeA))
         b         <- IrminClient.get(nodePath(wsId, nodeB))
-        meta      <- IrminClient.get(metaPath(wsId)).map(_.flatMap(_.fromJson[TreeMetadata].toOption))
+        meta      <- IrminClient.get(metaPath(wsId)).map(_.flatMap(TreeMetadata.decodeValidated(_, ErrorSubject.Tree(treeId)).toOption))
         irmin     <- ZIO.service[IrminClient]
         history   <- TreeHistoryServiceLive(irmin).history(wsId, treeId, BranchRef.Main, 10)
         operations = history.map(_.operation)

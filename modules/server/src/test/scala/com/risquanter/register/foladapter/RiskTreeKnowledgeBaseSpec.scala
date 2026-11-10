@@ -13,7 +13,7 @@ import com.risquanter.register.common.ValuationBasis
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
-import com.risquanter.register.domain.errors.FolQueryFailure
+import com.risquanter.register.domain.errors.{ErrorSubject, FolQueryFailure}
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
@@ -50,28 +50,28 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   //
   // 4 nodes, 2 leaves, 2 portfolios
 
-  private val rootPortfolio = unsafeGet(RiskPortfolio.create(
+  private val rootPortfolio = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
     id   = rootId.value,
     name = "Root",
     childIds = Vector(itId),
     parentId = None
   ), "portfolio")
 
-  private val itPortfolio = unsafeGet(RiskPortfolio.create(
+  private val itPortfolio = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
     id   = itId.value,
     name = "IT Risk",
     childIds = Vector(cyberId, hardwareId),
     parentId = Some(rootId)
   ), "portfolio")
 
-  private val cyberLeaf = unsafeGet(RiskLeaf.create(
+  private val cyberLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = cyberId.value, name = "Cyber",
     probability = 0.25, shape = lognormalShape(1000L, 50000L),
     parentId = Some(itId),
     seedVarId = 1L
   ), "leaf")
 
-  private val hardwareLeaf = unsafeGet(RiskLeaf.create(
+  private val hardwareLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
     id = hardwareId.value, name = "Hardware",
     probability = 0.10, shape = lognormalShape(500L, 10000L),
     parentId = Some(itId),
@@ -640,11 +640,11 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     test("C3: reserved-name collision (\"leaf\") — skipped from constants; predicate retained") {
       val rootIdStr = idStr("root3")
       val cIdStr    = idStr("c")
-      val rootP = unsafeGet(RiskPortfolio.create(
+      val rootP = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
         id = rootIdStr, name = "Root3",
         childIds = Vector(NodeId(safeId("c"))), parentId = None
       ), "portfolio")
-      val c = unsafeGet(RiskLeaf.create(
+      val c = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
         id = cIdStr, name = "leaf",
         probability = 0.1, shape = lognormalShape(1L, 2L), parentId = Some(NodeId(safeId("root3"))),
         seedVarId = 5L
@@ -845,11 +845,11 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       )
     },
     test("a node or mitigation named inherent/residual is surfaced via the collision diagnostics") {
-      val rootP = unsafeGet(RiskPortfolio.create(
+      val rootP = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
         id = idStr("root-col"), name = "Root Col",
         childIds = Vector(NodeId(safeId("inh"))), parentId = None
       ), "portfolio")
-      val leafInherent = unsafeGet(RiskLeaf.create(
+      val leafInherent = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
         id = idStr("inh"), name = "inherent",
         probability = 0.1, shape = lognormalShape(1L, 2L), parentId = Some(NodeId(safeId("root-col"))),
         seedVarId = 7L

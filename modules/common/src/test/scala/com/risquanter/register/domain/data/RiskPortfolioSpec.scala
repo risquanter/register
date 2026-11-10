@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import com.risquanter.register.domain.data.iron.NodeId
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, unsafeGet}
 
 object RiskPortfolioSpec extends ZIOSpecDefault {
@@ -16,7 +16,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -35,7 +36,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("multi-child"),
           name = "Multi-Child Portfolio",
           childIds = childIds,
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -48,7 +50,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("parent-port"),
           name = "Parent Portfolio",
           childIds = Vector[NodeId](nodeId("child-port")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -62,7 +65,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("mixed-port"),
           name = "Mixed Portfolio",
           childIds = Vector[NodeId](nodeId("leaf-1"), nodeId("child-port")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -74,7 +78,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("abc"),
           name = "Short ID",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess)
@@ -85,7 +90,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("long-id"),
           name = "Long ID",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess)
@@ -96,7 +102,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("ops-risk_2024"),
           name = "Ops Risk",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess)
@@ -107,7 +114,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("child-portfolio"),
           name = "Child Portfolio",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = Some(nodeId("parent-portfolio"))
+          parentId = Some(nodeId("parent-portfolio")),
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -122,7 +130,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "",
           name = "Valid Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -133,7 +142,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "   ",
           name = "Valid Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -144,7 +154,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "ab",
           name = "Valid Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -156,7 +167,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = longId,
           name = "Valid Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -167,7 +179,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "ops risk",
           name = "Valid Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -178,7 +191,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "ops.risk/2024",
           name = "Valid Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -192,7 +206,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("valid-id"),
           name = "",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -203,7 +218,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("valid-id"),
           name = "   ",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -215,7 +231,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("valid-id"),
           name = longName,
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -229,7 +246,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("valid-id"),
           name = "Valid Name",
           childIds = Vector.empty[NodeId],
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -240,7 +258,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("valid-id"),
           name = "Valid Name",
           childIds = Vector.tabulate(1000)(i => nodeId(s"leaf-$i")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess)
@@ -251,7 +270,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("valid-id"),
           name = "Valid Name",
           childIds = Vector.tabulate(1001)(i => nodeId(s"leaf-$i")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(
@@ -269,7 +289,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "ab",  // Too short
           name = "",  // Empty
           childIds = Vector.empty[NodeId],  // Empty array
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)
@@ -280,7 +301,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "x",                    // Too short (< 3 chars)
           name = "",                   // Empty
           childIds = Vector.empty[NodeId],  // Empty - invalid
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
         
         result.toEither match {
@@ -302,7 +324,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "this-id-is-way-too-long-and-exceeds-thirty-characters",  // > 30 chars
           name = "Valid Name",
           childIds = Vector.empty[NodeId],  // Empty - invalid
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         result.toEither match {
@@ -323,7 +346,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = "invalid id!",          // Contains spaces and special chars
           name = "a" * 51,              // > 50 chars
           childIds = Vector.empty[NodeId],
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
         
         result.toEither match {
@@ -348,7 +372,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("test-id"),
           name = "Test Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -360,7 +385,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("test-id"),
           name = "Test Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -378,7 +404,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
               id = idStr("same-portfolio"),
               name = "Same Portfolio",
               childIds = Vector(nodeId("leaf-1"), nodeId("leaf-2")),
-              parentId = None
+              parentId = None,
+              subject = ErrorSubject.Request
             ),
             "portfolio"
           )
@@ -396,7 +423,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("test-id"),
           name = "Test Name",
           childIds = childIds,
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -410,7 +438,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("test-id"),
           name = "Test Name",
           childIds = Vector[NodeId](nodeId("leaf-1")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -425,7 +454,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
           childIds = Vector(idStr("leaf-1"), idStr("leaf-2")),
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isSuccess) &&
@@ -437,7 +467,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
           id = idStr("portfolio-1"),
           name = "Test Portfolio",
           childIds = Vector("ab", idStr("valid-id")),  // "ab" is not a valid ULID
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         )
 
         assertTrue(result.isFailure)

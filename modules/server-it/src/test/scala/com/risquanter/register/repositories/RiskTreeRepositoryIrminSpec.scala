@@ -3,10 +3,13 @@ package com.risquanter.register.repositories
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
+import zio.prelude.NonEmptyList
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision, Url}
-import com.risquanter.register.domain.errors.{Core, Failure, OutageMode, PeerZone}
+import com.risquanter.register.domain.errors.{
+  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, OutageMode, PeerZone, TrustZone, ValueRange
+}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive}
@@ -34,14 +37,14 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val leaf1Id = nodeId("leaf-1")
     val leaf2Id = nodeId("leaf-2")
 
-    val portfolio = RiskPortfolio.create(
+    val portfolio = RiskPortfolio.create(subject = ErrorSubject.Request,
       id = rootId.value,
       name = "Root",
       childIds = Vector(leaf1Id, leaf2Id),
       parentId = None
     ).toEither.toOption.get
 
-    val leaf1 = RiskLeaf.create(
+    val leaf1 = RiskLeaf.create(subject = ErrorSubject.Request,
       id = leaf1Id.value,
       name = "Leaf 1",
       probability = 0.1,
@@ -50,7 +53,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       seedVarId = 1L
     ).toEither.toOption.get
 
-    val leaf2 = RiskLeaf.create(
+    val leaf2 = RiskLeaf.create(subject = ErrorSubject.Request,
       id = leaf2Id.value,
       name = "Leaf 2",
       probability = 0.2,
@@ -73,7 +76,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val leaf1Id = nodeId("leaf-1")
     val root    = original.index.nodes(rootId).asInstanceOf[RiskPortfolio]
     val leaf1   = original.index.nodes(leaf1Id)
-    val newRoot = RiskPortfolio.create(
+    val newRoot = RiskPortfolio.create(subject = ErrorSubject.Request,
       id = root.id.value,
       name = root.name.value,
       childIds = Vector(leaf1Id),
@@ -97,7 +100,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val leaf2Id = nodeId("leaf-2")
     val root    = original.index.nodes(rootId).asInstanceOf[RiskPortfolio]
     val leaf2   = original.index.nodes(leaf2Id)
-    val newLeaf1 = RiskLeaf.create(
+    val newLeaf1 = RiskLeaf.create(subject = ErrorSubject.Request,
       id = leaf1Id.value,          // SAME id → same path nodes/{leaf-1}
       name = "Leaf 1",
       probability = 0.1,
@@ -167,7 +170,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           tree  = sampleTree(treeId("tree-3"), "Tree Three")
           _    <- repo.create(wsId, tree, BranchRef.Main)
           all  <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))
-        yield assertTrue(all.exists(_.exists(_.id == tree.id)))
+        yield assertTrue(all.exists(_.id == tree.id))
       },
 
       test("delete removes tree") {
@@ -306,5 +309,86 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           headBefore != headAfter,                          // a new commit → the path has lineage
           reloaded.exists(_.index.nodes.contains(leaf1Id))  // NodeId preserved across the update
         )
+      },
+
+      // The three store-refusal tests write content this service would never
+      // write, so they use a workspace of their own and no other test lists it.
+      test("a stored leaf with two refused fields fails the read with both, each at that node") {
+        val tid = treeId("tree-refused-leaf")
+        for
+          repo  <- ZIO.service[RiskTreeRepository]
+          irmin <- ZIO.service[IrminClient]
+          _     <- repo.create(refusalWs, sampleTree(tid, "Refused Leaf"), BranchRef.Main)
+          _     <- corruptLeaf1(irmin, tid, refuseName = true)
+          exit  <- repo.getById(refusalWs, tid, Revision.Head(BranchRef.Main)).exit
+        yield assertTrue(
+          exit.causeOption.flatMap(_.failureOption).contains(Failure.Rejected(Core(
+            TrustZone.Peer(PeerZone.Store),
+            NonEmptyList(
+              ErrorLocation.nodeField(nodeId("leaf-1"), FieldName.Name)        -> FieldProblem.Required,
+              ErrorLocation.nodeField(nodeId("leaf-1"), FieldName.Probability) -> FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)
+            ),
+            Nil
+          )))
+        )
+      },
+
+      test("a stored leaf whose only refusal is its probability is refused as a leaf") {
+        val tid = treeId("tree-refused-probability")
+        for
+          repo  <- ZIO.service[RiskTreeRepository]
+          irmin <- ZIO.service[IrminClient]
+          _     <- repo.create(refusalWs, sampleTree(tid, "Refused Probability"), BranchRef.Main)
+          _     <- corruptLeaf1(irmin, tid, refuseName = false)
+          exit  <- repo.getById(refusalWs, tid, Revision.Head(BranchRef.Main)).exit
+        yield assertTrue(
+          exit.causeOption.flatMap(_.failureOption).collect { case Failure.Rejected(core) => core.errors.toList }
+            .contains(List(ErrorLocation.nodeField(nodeId("leaf-1"), FieldName.Probability) -> FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)))
+        )
+      },
+
+      test("a listing holding refused trees fails with every refusal, a tree's own fields at that tree") {
+        val tid = treeId("tree-refused-meta")
+        val metaPath = IrminPath.unsafeFrom(s"workspaces/${refusalWs.value}/risk-trees/${tid.value}/meta")
+        for
+          repo  <- ZIO.service[RiskTreeRepository]
+          irmin <- ZIO.service[IrminClient]
+          _     <- repo.create(refusalWs, sampleTree(tid, "Refused Meta"), BranchRef.Main)
+          _     <- irmin.set(metaPath, """{"name":"Refused Meta","schemaVersion":2,"createdAt":0,"updatedAt":0}""",
+                     CommitMessage.TreeWritten(refusalWs, tid, TreeWriteKind.Update), BranchRef.Main)
+          exit  <- repo.getAllForWorkspace(refusalWs, Revision.Head(BranchRef.Main)).exit
+        yield
+          val refusal = exit.causeOption.flatMap(_.failureOption).collect { case Failure.Rejected(core) => core }
+          val atTree  = ErrorSubject.Tree(tid)
+          assertTrue(
+            refusal.map(_.zone).contains(TrustZone.Peer(PeerZone.Store)),
+            refusal.exists(_.errors.toList.map(_._1).toSet.subsetOf(Set(
+              ErrorLocation.nodeField(nodeId("leaf-1"), FieldName.Name),
+              ErrorLocation.nodeField(nodeId("leaf-1"), FieldName.Probability),
+              ErrorLocation.Field(atTree, FieldName.Id),
+              ErrorLocation.Field(atTree, FieldName.RootId),
+              ErrorLocation.Field(atTree, FieldName.SeedVarHighWater)
+            ))),
+            refusal.exists(_.errors.toList.map(_._1).contains(ErrorLocation.Field(atTree, FieldName.RootId))),
+            refusal.map(_.diagnostics.toSet).contains(Set(
+              Diagnostic.TreeRef(treeId("tree-refused-leaf")),
+              Diagnostic.TreeRef(treeId("tree-refused-probability")),
+              Diagnostic.TreeRef(tid)
+            ))
+          )
       }
     ).provideLayerShared(irminLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
+
+  /** The workspace the store-refusal tests write into. */
+  private val refusalWs: WorkspaceId = WorkspaceId(safeId("test-irmin-refusals"))
+
+  /** Rewrite leaf-1 of `tid` in place with a probability above one, and with a
+    * blank name when `refuseName` holds. */
+  private def corruptLeaf1(irmin: IrminClient, tid: TreeId, refuseName: Boolean) =
+    val leafPath = IrminPath.unsafeFrom(s"workspaces/${refusalWs.value}/risk-trees/${tid.value}/nodes/${nodeId("leaf-1").value}")
+    for
+      stored <- irmin.get(leafPath).someOrFailException
+      bad     = stored.replace("\"probability\":0.1", "\"probability\":1.5")
+      written = if refuseName then bad.replace("\"name\":\"Leaf 1\"", "\"name\":\"\"") else bad
+      _      <- irmin.set(leafPath, written, CommitMessage.TreeWritten(refusalWs, tid, TreeWriteKind.Update), BranchRef.Main)
+    yield ()

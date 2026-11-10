@@ -1,14 +1,14 @@
 package com.risquanter.register.domain.data
 
 import zio.NonEmptyChunk
-import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
-import zio.prelude.Validation
+import zio.json.{JsonCodec, DeriveJsonCodec, DecoderOps, JsonDecoder, JsonEncoder, jsonField}
+import zio.prelude.{NonEmptyList, Validation}
 import io.github.iltotore.iron.autoRefine
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeId, SafeName, Probability, NodeId, SeedVarId, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** ADT representing a node of a risk hierarchy tree.
@@ -25,11 +25,13 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   * {{{
   * RiskPortfolio.create(
   *   id = "ops-risk", name = "Operational Risk",
-  *   childIds = Vector(cyberId, itRiskId), parentId = None
+  *   childIds = Vector(cyberId, itRiskId), parentId = None,
+  *   subject = ErrorSubject.Request
   * )
   * RiskLeaf.create(
   *   id = "cyber", name = "Cyber Attack", probability = 0.25,
-  *   shape = lognormalShape, parentId = Some(opsRiskId), seedVarId = 1L
+  *   shape = lognormalShape, parentId = Some(opsRiskId), seedVarId = 1L,
+  *   subject = ErrorSubject.Request
   * )
   * }}}
   */
@@ -43,6 +45,18 @@ object RiskNode {
   given codec: JsonCodec[RiskNode] = DeriveJsonCodec.gen[RiskNode]
 
   given schema: Schema[RiskNode] = Schema.derived[RiskNode]
+
+  /** A node's parent reference refined at `subject`. Absent is the root. */
+  private[data] def refineParent(parentId: Option[String], subject: ErrorSubject): Validation[ValidationError, Option[NodeId]] =
+    parentId match
+      case None      => Validation.succeed(None)
+      case Some(pid) =>
+        toValidation(ValidationUtil.refineId(pid, ErrorLocation.Field(subject, FieldName.ParentId)))
+          .map(id => Some(NodeId(id)))
+
+  /** The refusal of stored text that is not the raw form's JSON. */
+  private[data] val unreadable: ValidationError =
+    ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Json))
 }
 
 /** Leaf node: Represents an actual risk with a loss distribution.
@@ -118,7 +132,7 @@ object RiskLeaf {
     shape: DistributionShape,
     parentId: Option[NodeId],
     seedVarId: Long,
-    subject: ErrorSubject = ErrorSubject.Request
+    subject: ErrorSubject
   ): Validation[ValidationError, RiskLeaf] = {
     val idV       = toValidation(ValidationUtil.refineId(id, ErrorLocation.Field(subject, FieldName.Id)))
     val nameV      = toValidation(ValidationUtil.refineName(name, ErrorLocation.Field(subject, FieldName.Name)))
@@ -163,30 +177,29 @@ object RiskLeaf {
     given rawCodec: JsonCodec[RiskLeafRaw] = DeriveJsonCodec.gen[RiskLeafRaw]
   }
 
-  /** Custom decoder that uses smart constructor for cross-field validation.
-    *
-    * The shape arrives already gated: `DistributionShape`'s decoder routes
-    * through its own smart constructors, so this refines only the four
-    * remaining primitives.
-    */
+  /** The raw form refined at `subject`: the parent reference and the four
+    * primitives `create` refines, every refusal accumulated. The shape arrives
+    * already gated, because `DistributionShape`'s decoder routes through its own
+    * smart constructors. */
+  private def fromRaw(raw: RiskLeafRaw, subject: ErrorSubject): Validation[ValidationError, RiskLeaf] =
+    Validation.validateWith(
+      RiskNode.refineParent(raw.parentId, subject),
+      create(raw.id, raw.name, raw.probability, raw.shape, None, raw.seedVarId, subject)
+    )((parentId, leaf) => leaf.copy(parentId = parentId))
+
+  /** A stored leaf read back, refined at `subject` with every refusal kept as a
+    * value. Text that is not the raw form's JSON is one refusal of the whole,
+    * which includes a stored shape its own gate refuses (ADR-039). */
+  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyList[ValidationError], RiskLeaf] =
+    json.fromJson[RiskLeafRaw] match
+      case Left(_)    => Left(NonEmptyList(RiskNode.unreadable))
+      case Right(raw) => fromRaw(raw, subject).toEither.left.map(errors => NonEmptyList(errors.head, errors.tail*))
+
+  /** Decodes through `fromRaw`, so a decoded leaf is refined exactly as a
+    * constructed one, and reports at the request. */
   given decoder: JsonDecoder[RiskLeaf] = RiskLeafRaw.rawCodec.decoder.mapOrFail { raw =>
-    // Convert parentId string to NodeId if present
-    val parentIdOpt: Either[String, Option[NodeId]] = raw.parentId match {
-      case None => Right(None)
-      case Some(pid) => SafeId.fromString(pid).map(sid => Some(NodeId(sid))).left.map(_.mkString(", "))
-    }
-    parentIdOpt.flatMap { validParentId =>
-      create(
-        id = raw.id,
-        name = raw.name,
-        probability = raw.probability,
-        shape = raw.shape,
-        parentId = validParentId,
-        seedVarId = raw.seedVarId,
-        subject = ErrorSubject.Request
-      )
-        .toEither.left.map(errors => errors.toChunk.map(ValidationError.describe).mkString("; "))
-    }
+    fromRaw(raw, ErrorSubject.Request)
+      .toEither.left.map(errors => errors.toChunk.map(ValidationError.describe).mkString("; "))
   }
 
   /** Encoder: Extract primitives from Iron types for wire format */
@@ -268,7 +281,7 @@ object RiskPortfolio {
     name: String,
     childIds: Vector[NodeId],
     parentId: Option[NodeId],
-    subject: ErrorSubject = ErrorSubject.Request
+    subject: ErrorSubject
   ): Validation[ValidationError, RiskPortfolio] = {
     // Step 1: Validate ID (Iron refinement)
     val idValidation: Validation[ValidationError, SafeId.SafeId] =
@@ -313,7 +326,7 @@ object RiskPortfolio {
     name: String,
     childIds: Vector[String],
     parentId: Option[NodeId],
-    subject: ErrorSubject = ErrorSubject.Request
+    subject: ErrorSubject
   ): Validation[ValidationError, RiskPortfolio] = {
 
     // Each child identifier is refined at its own position, so a malformed one
@@ -346,17 +359,27 @@ object RiskPortfolio {
     given rawCodec: JsonCodec[RiskPortfolioRaw] = DeriveJsonCodec.gen[RiskPortfolioRaw]
   }
 
-  /** Custom decoder that uses smart constructor for cross-field validation */
+  /** The raw form refined at `subject`: the parent reference and every field
+    * `createFromStrings` refines, every refusal accumulated. */
+  private def fromRaw(raw: RiskPortfolioRaw, subject: ErrorSubject): Validation[ValidationError, RiskPortfolio] =
+    Validation.validateWith(
+      RiskNode.refineParent(raw.parentId, subject),
+      createFromStrings(raw.id, raw.name, raw.childIds, None, subject)
+    )((parentId, portfolio) => portfolio.copy(parentId = parentId))
+
+  /** A stored portfolio read back, refined at `subject` with every refusal kept
+    * as a value. Text that is not the raw form's JSON is one refusal of the
+    * whole (ADR-039). */
+  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyList[ValidationError], RiskPortfolio] =
+    json.fromJson[RiskPortfolioRaw] match
+      case Left(_)    => Left(NonEmptyList(RiskNode.unreadable))
+      case Right(raw) => fromRaw(raw, subject).toEither.left.map(errors => NonEmptyList(errors.head, errors.tail*))
+
+  /** Decodes through `fromRaw`, so a decoded portfolio is refined exactly as a
+    * constructed one, and reports at the request. */
   given decoder: JsonDecoder[RiskPortfolio] = RiskPortfolioRaw.rawCodec.decoder.mapOrFail { raw =>
-    // Convert parentId string to NodeId if present
-    val parentIdOpt: Either[String, Option[NodeId]] = raw.parentId match {
-      case None => Right(None)
-      case Some(pid) => SafeId.fromString(pid).map(sid => Some(NodeId(sid))).left.map(_.mkString(", "))
-    }
-    parentIdOpt.flatMap { validParentId =>
-      createFromStrings(raw.id, raw.name, raw.childIds, parentId = validParentId, subject = ErrorSubject.Request)
-        .toEither.left.map(errors => errors.toChunk.map(ValidationError.describe).mkString("; "))
-    }
+    fromRaw(raw, ErrorSubject.Request)
+      .toEither.left.map(errors => errors.toChunk.map(ValidationError.describe).mkString("; "))
   }
 
   /** Encoder: Extract primitives from Iron types for wire format */

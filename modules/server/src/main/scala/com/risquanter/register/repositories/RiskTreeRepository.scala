@@ -2,7 +2,7 @@ package com.risquanter.register.repositories
 
 import zio.*
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.errors.{AppError, Failure, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
 
 /** Repository for RiskTree persistence operations.
@@ -33,9 +33,9 @@ trait RiskTreeRepository {
     * resolution memoizes on. One read names the head it resolved, so there is
     * no second call and no resolve-then-reload race. */
   def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]]
-  /** Every tree in the workspace at `rev`, one entry per stored tree: the tree,
-    * or a failure naming that tree. A failure about the listing itself — the
-    * branch, the enumeration — fails the effect instead of appearing as an
-    * entry, so an entry always identifies the tree it is about. */
-  def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[Either[TreeLoadFailure, RiskTree]]]
+  /** Every tree in the workspace at `rev`. When the store holds content it
+    * refuses for one or more trees, the listing fails with one refusal
+    * accumulating every refused tree's entries, each tree named in its
+    * diagnostics. Any other failure fails the listing as it is. */
+  def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]]
 }

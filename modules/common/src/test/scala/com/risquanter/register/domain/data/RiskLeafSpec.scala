@@ -76,7 +76,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       test("accepts a leaf with a parent") {
         val result = RiskLeaf.create(
           idStr("child-leaf"), "Child Leaf", 0.5, validShape,
-          parentId = Some(nodeId("root-pf")), seedVarId = 6L
+          parentId = Some(nodeId("root-pf")), seedVarId = 6L, subject = ErrorSubject.Request
         )
         assertTrue(result.map(_.parentId).toOption.contains(Some(nodeId("root-pf"))))
       }

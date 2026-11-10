@@ -4,7 +4,7 @@ import zio.*
 import zio.json.EncoderOps
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, RepositoryFailure, TreeAbsentAtRevision, TreeLoadFailure, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, RepositoryFailure, TreeAbsentAtRevision, ValidationFailed, ValidationError}
 
 /** In-memory implementation of RiskTreeRepository for testing and development.
   *
@@ -111,8 +111,8 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
     CommitHash.fromString(hex).toOption.getOrElse(
       throw new IllegalStateException(s"synthetic commit hash not 40 hex: '$hex'"))
 
-  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
-    requireMainRevision(rev) { ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList) }
+  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
+    requireMainRevision(rev) { ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => tree }.toList) }
 }
 
 object RiskTreeRepositoryInMemory {

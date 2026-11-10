@@ -57,15 +57,16 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     def leafNode(id: String, name: String, parent: String, seed: Long): RiskNode =
       unsafeGet(RiskLeaf.create(
         id = id, name = name, probability = 0.8,
-        shape = lognormalShape(1000L, 5000L), parentId = Some(nodeIdOf(parent)), seedVarId = seed
+        shape = lognormalShape(1000L, 5000L), parentId = Some(nodeIdOf(parent)), seedVarId = seed,
+        subject = ErrorSubject.Request
       ), "leaf")
-    val root: RiskNode = unsafeGet(RiskPortfolio.createFromStrings(rootIdStr, "Root", Vector(childIdStr), None), "root")
+    val root: RiskNode = unsafeGet(RiskPortfolio.createFromStrings(rootIdStr, "Root", Vector(childIdStr), None, ErrorSubject.Request), "root")
     val below: Seq[RiskNode] = child match
       case NodeKind.Leaf =>
         Seq(leafNode(childIdStr, "Leaf1", rootIdStr, 1L))
       case NodeKind.Portfolio =>
         Seq(
-          unsafeGet(RiskPortfolio.createFromStrings(childIdStr, "Child", Vector(grandchildIdStr), Some(nodeIdOf(rootIdStr))), "child"),
+          unsafeGet(RiskPortfolio.createFromStrings(childIdStr, "Child", Vector(grandchildIdStr), Some(nodeIdOf(rootIdStr)), ErrorSubject.Request), "child"),
           leafNode(grandchildIdStr, "Grandchild", childIdStr, 1L)
         )
     TreeIndex.fromNodesUnsafe((root +: below).map(n => n.id -> n).toMap)

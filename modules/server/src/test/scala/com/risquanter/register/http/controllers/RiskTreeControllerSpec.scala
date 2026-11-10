@@ -5,7 +5,7 @@ import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.errors.{AppError, Failure, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.* // For .assert extension method
@@ -64,8 +64,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(db.get((wsId, id)).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
 
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[Either[TreeLoadFailure, RiskTree]]] =
-      ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
+      ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => tree }.toList)
   }
 
   // Layer factory - creates fresh layer with isolated repository per test

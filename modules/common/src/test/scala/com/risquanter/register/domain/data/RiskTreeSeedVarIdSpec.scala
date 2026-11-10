@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
 
 /** Defense-in-depth layer for seed identity:
@@ -24,7 +24,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       probability = 0.5,
       shape = lognormalShape(100L, 1000L),
       parentId = Some(nodeId("root-pf")),
-      seedVarId = seedVarId
+      seedVarId = seedVarId,
+      subject = ErrorSubject.Request
     ), "leaf")
 
   private def tree(leaves: RiskLeaf*) = {
@@ -32,7 +33,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       id = idStr("root-pf"),
       name = "Root Portfolio",
       childIds = leaves.map(_.id.value).toVector,
-      parentId = None
+      parentId = None,
+      subject = ErrorSubject.Request
     ), "portfolio")
     RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, seedVarHighWater = None, mitigations = Nil)
   }
@@ -82,7 +84,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
           childIds = leaves.map(_.id.value).toVector,
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         ), "portfolio")
         val hw = SeedVarId.fromLong(9L).toOption.get
         val result = RiskTree.fromNodes(
@@ -95,7 +98,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
           childIds = leaves.map(_.id.value).toVector,
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         ), "portfolio")
         val hw = SeedVarId.fromLong(3L).toOption.get
         val result = RiskTree.fromNodes(
@@ -104,7 +108,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val errs = result.toEither.swap.toOption.get
         assertTrue(
           errs.exists(e =>
-            e.location == ErrorLocation.requestField(FieldName.SeedVarHighWater) &&
+            e.location == ErrorLocation.Field(ErrorSubject.Tree(treeId("seed-tree")), FieldName.SeedVarHighWater) &&
             (e.problem match
               case FieldProblem.SeedVarHighWaterBelowMax(highWater, maxAssigned) =>
                 highWater.value == 3L && maxAssigned.value == 5L
@@ -117,7 +121,8 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
           childIds = leaves.map(_.id.value).toVector,
-          parentId = None
+          parentId = None,
+          subject = ErrorSubject.Request
         ), "portfolio")
         val hw = SeedVarId.fromLong(42L).toOption.get
         val valid = RiskTree.fromNodes(

@@ -14,7 +14,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, MergeStagingRef, SafeName, ScenarioName, StoreBranch, TreeId, WorkspaceId, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, Failure, FieldName, IrminError}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, Failure, FieldName, IrminError}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioListResponse, ScenarioResponse, TreeLabel, TreeWriteKind, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, safeId, treeId, unsafeGet}
@@ -192,7 +192,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("merge-preview conflict wire mapping: a NodeConflict encodes and decodes to the same value") {
       def leaf(probability: Double): RiskLeaf =
-        unsafeGet(RiskLeaf.create(
+        unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
           id = idStr("cyber"),
           name = "Cyber",
           probability = probability,

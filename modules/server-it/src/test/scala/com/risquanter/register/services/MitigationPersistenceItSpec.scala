@@ -9,6 +9,7 @@ import com.risquanter.register.domain.data.{
   AbsoluteReplacement
 }
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceId, SafeName, ContentHash, BranchRef, Revision}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.testcontainers.IrminCompose
@@ -50,9 +51,11 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
   /** root-pf → {cyber}, carrying `mits`. */
   private def treeWith(tid: TreeId, mits: Mitigation*): RiskTree =
     val root = RiskPortfolio.create(
-      id = rootId.value, name = "Root", childIds = Vector(cyberId), parentId = None
+      id = rootId.value, name = "Root", childIds = Vector(cyberId), parentId = None,
+      subject = ErrorSubject.Request
     ).toEither.toOption.get
     val cyber = RiskLeaf.create(
+      subject = ErrorSubject.Request,
       id = cyberId.value, name = "Cyber", probability = 0.2,
       shape = lognormalShape(1000L, 100000L),
       parentId = Some(rootId), seedVarId = 1L

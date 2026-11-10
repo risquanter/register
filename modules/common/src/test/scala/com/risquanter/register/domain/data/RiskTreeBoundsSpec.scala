@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldProblem, ValidationErrorCode}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId, unsafeGet}
 
 /** Tree-level collection bounds enforced in `RiskTree.fromNodes`:
@@ -23,7 +23,8 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       probability = 0.5,
       shape = lognormalShape(100L, 1000L),
       parentId = Some(nodeId(parent)),
-      seedVarId = seedVarId
+      seedVarId = seedVarId,
+      subject = ErrorSubject.Request
     ), "leaf")
 
   def spec = suite("RiskTree collection bounds")(
@@ -32,7 +33,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val l2 = leaf("flood", "Flood", 2L, "root-pf")
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
+        childIds = Vector(l1.id.value, l2.id.value), parentId = None, subject = ErrorSubject.Request), "portfolio")
       val result = RiskTree.fromNodes(treeId("bounds-ok"), name("Bounds OK"), Seq(root, l1, l2), root.id, seedVarHighWater = None, mitigations = Nil)
       assertTrue(result.isSuccess)
     },
@@ -43,7 +44,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val l2 = leaf("dup-b", "Dup", 2L, "root-pf")
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
+        childIds = Vector(l1.id.value, l2.id.value), parentId = None, subject = ErrorSubject.Request), "portfolio")
       val result = RiskTree.fromNodes(treeId("bounds-dup"), name("Bounds Dup"), Seq(root, l1, l2), root.id, seedVarHighWater = None, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
@@ -61,7 +62,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val l2 = leaf("space-b", "Server  Outage", 2L, "root-pf")
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = Vector(l1.id.value, l2.id.value), parentId = None), "portfolio")
+        childIds = Vector(l1.id.value, l2.id.value), parentId = None, subject = ErrorSubject.Request), "portfolio")
       val result = RiskTree.fromNodes(treeId("bounds-space"), name("Bounds Space"), Seq(root, l1, l2), root.id, seedVarHighWater = None, mitigations = Nil)
       assertTrue(
         SafeName.requireDistinct(Seq(l1.name, l2.name), ErrorLocation.Whole).isSuccess,
@@ -84,12 +85,12 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
         val sub = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr(subLabel), name = s"Sub $s",
           childIds = leaves.map(_.id.value).toVector,
-          parentId = Some(nodeId("root-pf"))), "portfolio")
+          parentId = Some(nodeId("root-pf")), subject = ErrorSubject.Request), "portfolio")
         (sub, leaves)
       }
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
-        childIds = subs.map(_._1.id.value).toVector, parentId = None), "portfolio")
+        childIds = subs.map(_._1.id.value).toVector, parentId = None, subject = ErrorSubject.Request), "portfolio")
       val allNodes = root +: subs.flatMap { case (sub, leaves) => sub +: leaves }
       val result = RiskTree.fromNodes(treeId("bounds-many"), name("Bounds Many"), allNodes, root.id, seedVarHighWater = None, mitigations = Nil)
       assertTrue(

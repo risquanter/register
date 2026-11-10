@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.{
   RelativeLikelihood, RelativeSeverity, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.testutil.TestHelpers
 
 /** Tests for [[MitigationScopeResolver]] — turning each mitigation's stored
@@ -35,14 +36,14 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
   private val dbId      = nodeId("db")
   private val edgeId    = nodeId("edge")
 
-  private val servers = unsafeGet(RiskPortfolio.create(
+  private val servers = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
     id = serversId.value, name = "Servers",
     childIds = Vector(appTierId, edgeId), parentId = None), "portfolio")
-  private val appTier = unsafeGet(RiskPortfolio.create(
+  private val appTier = unsafeGet(RiskPortfolio.create(subject = ErrorSubject.Request,
     id = appTierId.value, name = "AppTier",
     childIds = Vector(webId, dbId), parentId = Some(serversId)), "portfolio")
   private def leaf(id: NodeId, nm: String, seed: Long, parent: NodeId): RiskLeaf =
-    unsafeGet(RiskLeaf.create(
+    unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
       id = id.value, name = nm, probability = 0.2,
       shape = lognormalShape(1000L, 50000L), parentId = Some(parent), seedVarId = seed), "leaf")
   private val web  = leaf(webId, "Web", 1L, appTierId)
