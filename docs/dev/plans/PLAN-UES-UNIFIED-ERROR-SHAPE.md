@@ -7,7 +7,7 @@ ruled, `UES-D-16` is withdrawn and `UES-D-17` is ruled. No decision is open. Pha
 Phase 0 step 0.3 and Phase 1 steps 1.1 to 1.3 landed together, at version 0.18.3.
 Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
 2.1 and 2.5 landed together, at version 0.18.5. Phase 2 step 2.2 landed at
-version 0.18.6. Phase 2 step 2.3 is next. The
+version 0.18.6, and step 2.3 at version 0.18.7. Phase 2 step 2.4 is next. The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -741,7 +741,13 @@ new kinds and `StoragePath` where the record names it. 48d: `writeTree` takes
 the `RiskTree` and `ensureRootPresent` is deleted, per `UES-D-15`; a `RiskTree`
 holds its root by construction, so nothing is left to check. 48f:
 `MergeStagingRef.forScenario` returns `MergeStagingRef`
-directly, so the refinement of a composition of two refined values goes. Test:
+directly, so the refinement of a composition of two refined values goes, and
+with it `ValueFormat.StagingBranchName` and its message, ruled 2026-11-10.
+`writeTree` returns `IO[IrminError | Failure, Unit]` until step 3.1 deletes
+`IrminError`, because `IrminClient.setTree` still fails with it. Ruled
+2026-11-10: in this plan, a signature may carry an existing error type in a
+union with `Failure` until the step that deletes that type, without its own
+echo. Test:
 `RiskTreeRepositoryIrminSpec` pins metadata-absent and nodes-absent as
 `NotFound` with their kinds.
 
@@ -988,10 +994,13 @@ The published schema gains the enum cases `FieldName.Ttl`, `FieldName.IdleTimeou
 cases, `Capability.PinnedReads` and `QueryProblem.AnswerVariablesNotSupported`.
 No client is sent any but `Capability.PinnedReads`,
 `QueryProblem.AnswerVariablesNotSupported` and `FieldProblem.Query`'s wire form,
-which is `RejectionDetail.Query` unchanged. Three cases are removed:
-`Other` from `HistoryOperation` in Phase 2.1, `RequiresIrminBackend` from
-`FieldProblem` in Phase 4.3 and `SimulationRequired` from `ConflictKind` in
-Phase 3.4. `ErrorMessages` loses the `SimulationRequired`
+which is `RejectionDetail.Query` unchanged. Four cases are removed:
+`Other` from `HistoryOperation` in Phase 2.1, `StagingBranchName` from
+`ValueFormat` in Phase 2.3, `RequiresIrminBackend` from `FieldProblem` in
+Phase 4.3 and `SimulationRequired` from `ConflictKind` in Phase 3.4.
+`StagingBranchName` had one producer, `MergeStagingRef.forScenario`, which no
+longer refines, and no client can be sent it, because a staging branch name
+embeds the `WorkspaceId` and is never accepted from a client. `ErrorMessages` loses the `SimulationRequired`
 arm and gains the `AnswerVariablesNotSupported` arm.
 
 ---
