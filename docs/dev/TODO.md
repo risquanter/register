@@ -2747,3 +2747,34 @@ text, for example "No trees yet. Create a tree to start a workspace.", and
 `TreeListView.apply` is checked when the change is planned.
 
 **Status.** Researched, no code changed.
+
+## 65. Query text and query variables carry no maximum length — research what a bound would imply
+
+**What exists.** `QueryRequest.query` is a raw `String`. The only limit on it is
+the request body cap, `maxRequestBytes` in `application.conf`, 8 MiB by default
+and sized for the largest tree payload rather than for a query. The engine sets
+no length on a variable either: `VagueQueryParser.isIdentifier` requires a
+non-empty name that starts with a letter and holds only letters, digits and `_`.
+`QueryVariable`, which carries the answer variables a refused query names,
+encodes that character rule and no maximum. A variable cannot be longer than
+the query it was read from, so a bound on the query text bounds the variables
+too.
+
+**What to research before choosing a number.**
+
+- How long real screening queries are, from the ADR-028 appendix's examples and
+  from what the query pane lets a user type.
+- Where the text is echoed back. A refusal carries the variable names, and the
+  engine's own messages in `QueryProblem`'s other cases quote parts of the
+  query, so the bound decides the largest refusal body and the largest
+  sentence the pane renders.
+- What the log already does: `Failure` cuts a logged message to 300 characters
+  (`LoggedMessageLimit`), and the wire carries the whole text.
+- What parsing and binding cost as the text grows, so the bound is set where
+  the cost is still small.
+- Where the bound belongs: an Iron `MaxLength` on a refined query-text type, so
+  the codec refuses an over-long query with 422 before the handler runs,
+  checked first for whether `QueryVariable` then needs a bound of its own.
+
+**Status.** Open. Left out of `PLAN-UES-UNIFIED-ERROR-SHAPE.md` by the user's
+ruling of 2026-11-11.
