@@ -3,7 +3,7 @@ package com.risquanter.register.http.errors
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
-import com.risquanter.register.domain.data.iron.{ScenarioName, TreeId}
+import com.risquanter.register.domain.data.iron.ScenarioName
 import com.risquanter.register.domain.errors.MergeRefusal
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -43,9 +43,6 @@ enum ConflictKind:
     */
   case ScenarioHeadStale(scenario: ScenarioName.ScenarioName)
 
-  /** A query arrived before the tree had simulation results. */
-  case SimulationRequired(treeId: TreeId)
-
 object ConflictKind:
   /** The key naming which conflict a payload states. Read by this coproduct's
     * decoder and published in its schema, and stated here once so the two
@@ -70,4 +67,3 @@ object ConflictKind:
     case MergeAlreadyRunning(scenario) => s"a merge of scenario ${scenario.value} is already running"
     case MergeTargetMoved(scenario)    => s"main moved while scenario ${scenario.value} was being merged"
     case ScenarioHeadStale(scenario)   => s"the head of scenario ${scenario.value} is not the one expected"
-    case SimulationRequired(treeId)    => s"tree ${treeId.value} has no simulation results"

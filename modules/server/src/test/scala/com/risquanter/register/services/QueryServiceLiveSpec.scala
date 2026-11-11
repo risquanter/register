@@ -1,8 +1,11 @@
 package com.risquanter.register.services
 
+import zio.*
 import zio.test.*
 import io.github.iltotore.iron.autoRefine
 
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
+import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{
   RiskLeaf, RiskPortfolio, RiskNode, RiskTree,
   Mitigation, MitigationTarget, MitigationPrecedence, TargetingPredicate,
@@ -11,9 +14,14 @@ import com.risquanter.register.domain.data.{
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
-import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
-import com.risquanter.register.domain.errors.ErrorSubject
+import com.risquanter.register.domain.data.iron.{
+  BranchRef, CommitHash, NodeId, MitigationId, Revision, SafeName, SeedEntityId, SeedVarId, TreeId, WorkspaceId
+}
+import com.risquanter.register.domain.errors.{AppError, ErrorSubject, Failure, SimulationFailure}
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
+import com.risquanter.register.repositories.RiskTreeRepository
+import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry}
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
@@ -25,7 +33,8 @@ import vql.typed.{FolModel, QueryBinder}
   * the part that decides which mitigation valuations a bound query references so
   * the service precomputes exactly those result maps — plus the parse → bind →
   * evaluate integration through [[RiskTreeKnowledgeBase]] that the service's
-  * `evaluate` drives. The full ZIO/HTTP round trip is covered in the serverIt
+  * `evaluate` drives, and `evaluate`'s handling of a failure computing a
+  * referenced selection. The full ZIO/HTTP round trip is covered in the serverIt
   * `QueryEndpointSpec`.
   */
 object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
@@ -109,7 +118,8 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
 
   def spec = suite("QueryServiceLiveSpec")(
     scanSuite,
-    evaluationSuite
+    evaluationSuite,
+    serviceSuite
   )
 
   private val everyMitigation: Set[MitigationSelection] =
@@ -156,6 +166,54 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
         inherentHits == Set(aId, bId),
         residualHits == Set(bId)
       )
+    }
+  )
+
+  // ── evaluate, against a resolver that fails ────────────────────────
+
+  private val entity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
+  private val readCommit: CommitHash           = CommitHash.fromString("a" * 40).toOption.get
+
+  /** What the resolver fails with: a fault simulating a leaf. */
+  private val resolverFailure: AppError = SimulationFailure("qsl-tree", new RuntimeException("sampler failed"))
+
+  /** A repository holding `tree` alone; `evaluate` only reads it. */
+  private val oneTreeRepo: RiskTreeRepository = new RiskTreeRepository:
+    private def unused = ZIO.die(new NotImplementedError("unused by evaluate"))
+    def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
+    def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
+    def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
+    def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
+    def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]] =
+      ZIO.succeed(Some((tree, readCommit)))
+    def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]] = unused
+
+  /** A resolver whose every computation fails with `resolverFailure`. */
+  private val failingResolver: CachedResultResolver = new CachedResultResolver:
+    def ensureCached(
+      tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean,
+      selection: MitigationSelection, resolvedScopes: Map[MitigationId, Set[NodeId]]
+    ): IO[AppError, LossDistribution] = ZIO.fail(resolverFailure)
+    def ensureCachedAll(
+      tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean,
+      selection: MitigationSelection, resolvedScopes: Map[MitigationId, Set[NodeId]]
+    ): IO[AppError, Map[NodeId, LossDistribution]] = ZIO.fail(resolverFailure)
+
+  private val serviceSuite = suite("QueryServiceLive.evaluate")(
+    test("a failure computing a referenced selection reaches the caller as that failure") {
+      given Checked[Authority] = TestChecked.value
+      val parsed = VagueQueryParser.parse("""Q[>=]^{1/1} x (leaf(x), gt_loss(p95(x, "inherent"), 50))""").toOption.get
+      (for
+        svc  <- ZIO.service[QueryService]
+        exit <- svc.evaluate(WorkspaceId(safeId("qsl-ws")), tree.id, parsed, entity, BranchRef.Main).exit
+      yield assertTrue(exit.causeOption.flatMap(_.failureOption) == Some(resolverFailure)))
+        .provide(
+          ZLayer.succeed(oneTreeRepo),
+          ZLayer.succeed(failingResolver),
+          MitigationScopeResolverRegistry.layer,
+          TestConfigs.telemetryLayer >>> TelemetryLive.configured,
+          QueryServiceLive.layer
+        )
     }
   )
 

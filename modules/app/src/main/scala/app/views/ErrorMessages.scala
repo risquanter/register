@@ -238,11 +238,6 @@ object ErrorMessages:
     case ConflictKind.ScenarioHeadStale(scenario) =>
       s"${scenario.value} changed since you read it, so the change was not applied. Reload the scenario."
 
-    // The tree is named because a query can reach a tree other than the one on
-    // screen, and the remedy is to simulate that one.
-    case ConflictKind.SimulationRequired(treeId) =>
-      s"Tree ${treeId.value} has no simulation results yet. Run a simulation on it before querying it."
-
   /** Why a merge was refused, and what to do about it.
     *
     * Each case says what the remedy is, because the four refusals need four

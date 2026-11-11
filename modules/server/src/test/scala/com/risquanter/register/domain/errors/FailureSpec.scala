@@ -165,7 +165,7 @@ object FailureSpec extends ZIOSpecDefault:
           List(ConflictKind.Rejected(), ConflictKind.StaleVersion(),
                ConflictKind.MergeRefused(scenario, MergeRefusal.BranchesConflict()),
                ConflictKind.MergeAlreadyRunning(scenario), ConflictKind.MergeTargetMoved(scenario),
-               ConflictKind.ScenarioHeadStale(scenario), ConflictKind.SimulationRequired(treeId)).map(ConflictKind.describe),
+               ConflictKind.ScenarioHeadStale(scenario)).map(ConflictKind.describe),
           Capability.values.toList.map(Capability.describe),
           List(QueryProblem.Unparseable("m", Some(3)), QueryProblem.UnknownReferences(List("m")),
                QueryProblem.TypeCheckFailed(List("m")), QueryProblem.NotQuantifiable("n")).map(QueryProblem.describe),

@@ -187,10 +187,6 @@ object WireError:
       case AppAccessDenied(_)                  => WireError.AccessDenied(t)
       case AuthForbidden(_, _, _, _)           => WireError.AccessDenied(t)
 
-      // Conflicts
-      case VersionConflict(_, _, _)            => WireError.Conflict(ConflictKind.StaleVersion(), t)
-      case SimulationNotCached(treeId)         => WireError.Conflict(ConflictKind.SimulationRequired(treeId), t)
-
       // Capability absent
       case ScenariosNotSupported(_)            => WireError.NotSupported(Capability.Scenarios, t)
 

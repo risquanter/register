@@ -109,8 +109,6 @@ class QueryServiceLive private (
         resultsBySelection <- ZIO.foreach(selections.toList) { sel =>
                                 resolver.ensureCachedAll(tree, allNodeIds, seedEntityId,
                                     selection = sel, resolvedScopes = resolved.appliedScopes)
-                                  .tapError(e => ZIO.logWarning(s"Simulation cache unavailable for tree ${treeId.value}: ${e.logMessage}"))
-                                  .mapError(_ => FolQueryFailure.SimulationNotCached(treeId))
                                   .map(sel -> _)
                               }.map(_.toMap)
         _ <- tracing.setAttribute("query.selections", selections.size.toLong)

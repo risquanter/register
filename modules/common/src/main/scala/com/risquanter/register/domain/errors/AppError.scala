@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import java.time.{Duration, Instant}
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{CommitHash, Revision, TreeId, ValidationMessages, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{Revision, TreeId, ValidationMessages, WorkspaceId}
 import vql.error.{BindErrorDetail, QueryError}
 
 /** Who a failure is attributable to, which decides the level its log line is
@@ -205,21 +205,6 @@ case class TreeAbsentAtRevision(wsId: WorkspaceId, treeId: TreeId, rev: Revision
     "tree_id"      -> treeId.value,
     "revision"     -> rev.toString
   )
-}
-
-/** A tree write refused because the branch head is not the commit the client
-  * read, so the submitted body was composed against a tree that has since
-  * changed.
-  *
-  * The conflict is about a tree at a revision, so it names a `TreeId` and two
-  * commits rather than a node: the precondition is on the branch head, which
-  * no single node owns. Attributed to the caller, who resolves it by re-reading
-  * and resubmitting.
-  */
-case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash) extends DomainError {
-  override def logMessage: String =
-    s"Version conflict on tree ${treeId.value}: expected ${expected.value}, found ${actual.value}"
-  override def origin: FailureOrigin = FailureOrigin.Caller
 }
 
 /** Scenarios are unavailable in this deployment (repository.type=in-memory has no
@@ -432,23 +417,6 @@ object FolQueryFailure:
     extends FolQueryFailure:
     override def logMessage: String = s"Evaluation failed in $phase: $message"
     override def origin: FailureOrigin = FailureOrigin.Service
-
-  /** Register precondition — no `Fol` prefix because no vql-engine involvement.
-    *
-    * Simulation results have not yet been computed for the requested tree.
-    * The user must run a simulation before querying.
-    *
-    * Example: POST `/w/{key}/risk-trees/{treeId}/query` before any
-    * simulation has been triggered for `treeId`.
-    *
-    * Projects onto `Conflict` with `SimulationRequired` — HTTP 409.
-    */
-  final case class SimulationNotCached(treeId: TreeId)
-    extends FolQueryFailure:
-    override def logMessage: String =
-      s"Simulation not cached for tree ${treeId.value}"
-    override def origin: FailureOrigin = FailureOrigin.Caller
-    override def logAnnotations: Map[String, String] = Map("tree_id" -> treeId.value)
 
   /** Centralised mapping from library `vql.error.QueryError` to register's
     * `FolQueryFailure` hierarchy. Used by both the controller (parse errors)

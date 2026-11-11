@@ -12,7 +12,10 @@ BATS suite A passed at version 0.18.8, which closes Phase 2. Phase 3 step 3.1
 landed at version 0.18.9, with `IrminWriteOutcome.Refused` carrying an optional
 head (§3.5). Step 3.2 landed at version 0.18.10, and step 3.3 at 0.18.11 with
 `Diagnostic.StoreRefusal` added for row 22 (§3.3) and `logAnnotations` keeping
-every value of a repeated key. The
+every value of a repeated key. Step 3.4 landed at 0.18.12; the `tapError`
+beside the deleted `mapError` went with it, because its line called the failure
+an unavailable cache and the boundary logs the failure once. Phase 3 closes
+when BATS suites A and C pass. The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 

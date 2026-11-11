@@ -37,7 +37,6 @@ object WireErrorSpec extends ZIOSpecDefault:
   private val wsId: WorkspaceId     = WorkspaceId.fromString("01HQ8K3F7XJ2M4N5P6R7S8T9V0").toOption.get
   private val treeId: TreeId        = TreeId.fromString("01HQ8K3F7XJ2M4N5P6R7S8T9V1").toOption.get
   private val commit: CommitHash    = CommitHash.fromString("0123456789abcdef0123456789abcdef01234567").toOption.get
-  private val otherCommit: CommitHash = CommitHash.fromString("89abcdef0123456789abcdef0123456789abcdef").toOption.get
   private val scenario              = ScenarioName.fromString("feature-1").toOption.get
   private val trace                 = TelemetryPlaceholders.UnlinkedTrace
 
@@ -217,9 +216,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             // Refused
             AccessDenied("no")                                     -> "AccessDenied",
             AuthForbidden("u", "read", "tree", "t1")               -> "AccessDenied",
-            // Conflicts
-            VersionConflict(treeId, commit, otherCommit)           -> "Conflict",
-            SimulationNotCached(treeId)                            -> "Conflict",
             // Capability absent
             ScenariosNotSupported("in-memory")                     -> "NotSupported",
             // Faults
@@ -231,7 +227,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 17)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 15)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope
