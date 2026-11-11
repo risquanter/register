@@ -95,19 +95,6 @@ case class SimulationFailure(simulationId: String, cause: Throwable) extends Dom
   override def origin: FailureOrigin = FailureOrigin.Service
 }
 
-/** Scenarios are unavailable in this deployment (repository.type=in-memory has no
-  * Irmin to hold branches). A deliberate, expected condition — not a server
-  * malfunction — so it gets its own type, which projects onto `NotSupported`
-  * and answers 501 rather than an internal fault's 500. The reason stays in
-  * the server's log: the wire case names the condition, and the browser
-  * composes what a user reads from that case. `ScenarioServiceNotSupported`
-  * fails every method with this.
-  */
-case class ScenariosNotSupported(reason: String) extends DomainError {
-  override def logMessage: String = s"Scenarios not supported: $reason"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
 // ============================================================================
 // FOL Query Errors (ADR-028: Vague Quantifier Query Evaluation)
 // ============================================================================

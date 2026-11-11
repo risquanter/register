@@ -21,6 +21,10 @@ values built by `RiskTreeRepository.treeAbsent`, which dies on a branch that is
 not one of the workspace's, per `UES-D-9`; approved 2026-11-11. Step 4.2
 landed at 0.18.14, with `UserContextExtractor` narrowed to `IO[Failure, A]`
 because the leaf it failed with is deleted in this step; approved 2026-11-11.
+Step 4.3 landed at 0.18.15, with the two `NotSupported` services narrowed to
+`IO[Failure, A]` and sharing one `scenariosUnavailable` value, and the in-memory
+repository's row 9 values built by `pinnedReadsUnavailable`; approved
+2026-11-11. Phase 4 closes when BATS suite C passes at 0.18.15.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 

@@ -4,9 +4,10 @@ import zio.*
 import zio.prelude.NonEmptyList
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, BranchRef, Revision, SafeName, SeedVarId, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, BranchRef, CommitHash, Revision, SafeName, SeedVarId, TreeId}
 import com.risquanter.register.domain.errors.{
-  Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, RequestHeaderName, TrustZone, ValidationError
+  Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, RequestHeaderName, RequestQueryParam, TrustZone,
+  ValidationError
 }
 import com.risquanter.register.http.errors.Capability
 import com.risquanter.register.testutil.TestHelpers.{safeId, treeId, nodeId, lognormalShape}
@@ -15,12 +16,19 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, treeId, nodeId, log
   * Branch-threading contract of the in-memory backend: branches are an Irmin
   * capability, so the in-memory repository must reject a non-main branch
   * request with a typed failure instead of silently answering with
-  * main-branch data. Its create refuses an identifier the workspace holds.
+  * main-branch data. History is an Irmin capability too, so a read pinned to a
+  * commit and a revert fail the same way. Its create refuses an identifier the
+  * workspace holds.
   */
 object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
 
-  private val wsId: WorkspaceId = WorkspaceId(safeId("branch-spec-ws"))
-  private val someTree = treeId("branch-spec-tree")
+  private val wsId: WorkspaceId  = WorkspaceId(safeId("branch-spec-ws"))
+  private val someTree: TreeId   = treeId("branch-spec-tree")
+  private val commit: CommitHash = CommitHash.fromString("a" * 40).toOption.get
+
+  /** The failure a read or revert pinned to a commit produces, at `location`. */
+  private def pinnedReadsUnavailable(location: ErrorLocation): Failure =
+    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyList(location -> Capability.PinnedReads), Nil))
 
   /** A root portfolio holding one leaf. */
   private def minimalTree(tid: TreeId): RiskTree =
@@ -54,6 +62,26 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
           NonEmptyList(ErrorLocation.Header(RequestHeaderName.Branch) -> Capability.Scenarios),
           Nil
         )))
+      )
+    },
+
+    test("a read pinned to a commit fails as NotSupported for pinned reads, at the at parameter") {
+      for {
+        repo <- ZIO.service[RiskTreeRepository]
+        exit <- repo.getById(wsId, someTree, Revision.At(commit)).exit
+      } yield assertTrue(
+        exit.causeOption.flatMap(_.failureOption)
+          .contains(pinnedReadsUnavailable(ErrorLocation.QueryParameter(RequestQueryParam.At)))
+      )
+    },
+
+    test("a revert fails as NotSupported for pinned reads, at the request's target commit") {
+      for {
+        repo <- ZIO.service[RiskTreeRepository]
+        exit <- repo.revert(wsId, someTree, commit, BranchRef.Main).exit
+      } yield assertTrue(
+        exit.causeOption.flatMap(_.failureOption)
+          .contains(pinnedReadsUnavailable(ErrorLocation.requestField(FieldName.ToCommit)))
       )
     },
 

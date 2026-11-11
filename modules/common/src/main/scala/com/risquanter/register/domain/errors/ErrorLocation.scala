@@ -543,7 +543,6 @@ enum FieldProblem:
   case ScenarioNotFound(scenario: ScenarioName.ScenarioName)
   case CommitNotFound(commit: CommitHash)
   case WorkspaceHasNoContent
-  case RequiresIrminBackend
 
   /** The error-accumulation branch that cannot be reached: a failed refinement
     * always produces at least one error, so an empty list has no problem to
@@ -633,7 +632,6 @@ object FieldProblem:
     case ScenarioNotFound(_)                        => ValidationErrorCode.NOT_FOUND
     case CommitNotFound(_)                          => ValidationErrorCode.NOT_FOUND
     case WorkspaceHasNoContent                      => ValidationErrorCode.NOT_FOUND
-    case RequiresIrminBackend                       => ValidationErrorCode.NOT_SUPPORTED
     case Unspecified                                => ValidationErrorCode.CONSTRAINT_VIOLATION
 
   /** The query codes, one per refusal the engine reports. */

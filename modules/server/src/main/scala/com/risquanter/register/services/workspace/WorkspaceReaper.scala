@@ -29,7 +29,7 @@ import com.risquanter.register.services.{CascadeDelete, RiskTreeService, Scenari
   * `WorkspaceLifecycleController.deleteWorkspace` uses. Without it they would stay
   * in Irmin, unreachable by any workspace key. The cascade is best-effort and
   * swallows each deletion's failure. A tree may already have been deleted, and on
-  * the in-memory backend listing scenarios fails with `ScenariosNotSupported`.
+  * the in-memory backend listing scenarios fails as `NotSupported`.
   *
   * == Enterprise no-op ==
   * When both `ttl` and `idleTimeout` are zero or negative, `WorkspaceRecord.isExpired`

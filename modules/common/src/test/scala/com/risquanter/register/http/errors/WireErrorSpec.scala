@@ -158,8 +158,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             FolUnknownReference(List("x"))                         -> "InternalFault",
             FolBindFailure(List("x"))                              -> "InternalFault",
             FolDomainNotQuantifiable("x")                          -> "InternalFault",
-            // Capability absent
-            ScenariosNotSupported("in-memory")                     -> "NotSupported",
             // Faults
             SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault",
             FolModelValidationFailure(List("x"))                   -> "InternalFault",
@@ -169,7 +167,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 9)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 8)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope

@@ -6,7 +6,7 @@ import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, TrustZone, ValidationFailed,
+  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, RequestQueryParam, TrustZone,
   ValidationError
 }
 import com.risquanter.register.http.errors.Capability
@@ -19,10 +19,10 @@ import com.risquanter.register.http.errors.Capability
   *
   * Branches and commit pins are an Irmin capability: this backend serves only
   * the main branch at its head. A non-main branch fails as `NotSupported` for
-  * scenarios; a commit pin (`Revision.At`) fails with a typed
-  * ValidationFailed — point-in-time reads require the Irmin backend. Neither is
-  * reachable in normal operation: the scenario and history interface is
-  * disabled on the in-memory backend.
+  * scenarios, and a commit pin (`Revision.At`) or a revert fails as
+  * `NotSupported` for pinned reads, because this backend keeps no history.
+  * Neither is reachable in normal operation: the scenario and history
+  * interface is disabled on the in-memory backend.
   */
 class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
   private val db = collection.concurrent.TrieMap[(WorkspaceId, TreeId), RiskTree]()
@@ -40,16 +40,14 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
         Nil
       )))
 
-  /** Runs `effect` for the main branch at its head. A commit pin fails with a
-    * typed ValidationFailed rather than being silently served from main:
-    * point-in-time reads require the Irmin backend.
+  /** Runs `effect` for the main branch at its head. A commit pin fails as
+    * `NotSupported` rather than being silently served from main.
     */
   private def requireMainRevision[A](rev: Revision)(effect: => IO[AppError | Failure, A]): IO[AppError | Failure, A] =
     rev match
       case Revision.Head(branch) => requireMain(branch)(effect)
       case Revision.At(_) =>
-        ZIO.fail(ValidationFailed(List(ValidationError(
-          ErrorLocation.requestField(FieldName.At), FieldProblem.RequiresIrminBackend))))
+        ZIO.fail(RiskTreeRepositoryInMemory.pinnedReadsUnavailable(ErrorLocation.QueryParameter(RequestQueryParam.At)))
 
   override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] =
     requireMain(branch) {
@@ -100,8 +98,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
     }
 
   override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError | Failure, RiskTree] =
-    ZIO.fail(ValidationFailed(List(ValidationError(
-      ErrorLocation.requestField(FieldName.ToCommit), FieldProblem.RequiresIrminBackend))))
+    ZIO.fail(RiskTreeRepositoryInMemory.pinnedReadsUnavailable(ErrorLocation.requestField(FieldName.ToCommit)))
 
   override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]] =
     requireMainRevision(rev) { ZIO.succeed(db.get((wsId, id)).map(t => (t, syntheticHash(t)))) }
@@ -125,6 +122,11 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
 }
 
 object RiskTreeRepositoryInMemory {
+  /** This backend keeps no history, so a read pinned to a commit and a revert
+    * to one are capabilities the deployment lacks. */
+  private def pinnedReadsUnavailable(location: ErrorLocation): Failure =
+    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyList(location -> Capability.PinnedReads), Nil))
+
   val layer: ZLayer[Any, Nothing, RiskTreeRepository] = ZLayer {
     ZIO.succeed(new RiskTreeRepositoryInMemory())
   }

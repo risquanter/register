@@ -22,7 +22,12 @@ import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath, IrminWriteOutcome}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory}
-import com.risquanter.register.services.{ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
+import com.risquanter.register.http.errors.{Capability, WireError}
+import com.risquanter.register.http.errors.WireError.given
+import com.risquanter.register.services.{
+  ScenarioMergeService, ScenarioMergeServiceLive, ScenarioMergeServiceNotSupported, ScenarioService, ScenarioServiceLive,
+  ScenarioServiceNotSupported
+}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 
 import java.time.Instant
@@ -107,8 +112,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
   private def buildBackend(
     initial:      Map[String, CommitHash]       = Map("main" -> hash('a')),
-    extractor:    UserContextExtractor          = UserContextExtractor.noOp,
-    mergeService: Option[ScenarioMergeService]
+    extractor:       UserContextExtractor          = UserContextExtractor.noOp,
+    scenarioService: Option[ScenarioService],
+    mergeService:    Option[ScenarioMergeService]
   // `Throwable` rather than `Nothing`: building the tracing layer reads
   // configuration, so constructing the backend can fail.
   ): ZIO[Any, Throwable, (SttpBackend[Task, Any], WorkspaceKeySecret)] =
@@ -131,7 +137,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       mergeSvc        = mergeService.getOrElse(new ScenarioMergeServiceLive(FakeIrminClient(state), repo, TestConfigs.conflictScanFetchParallelism))
       ctrl           <- ScenarioController.makeZIO
         .provide(
-          ZLayer.succeed(new ScenarioServiceLive(FakeIrminClient(state))),
+          ZLayer.succeed[ScenarioService](scenarioService.getOrElse(new ScenarioServiceLive(FakeIrminClient(state)))),
           ZLayer.succeed[ScenarioMergeService](mergeSvc),
           ZLayer.succeed(workspaceStore),
           AuthorizationServiceNoOp.layer,
@@ -148,7 +154,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("create from main: 200, response echoes name only — no branch reference") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         resp <- basicRequest
           .post(uri"http://localhost/w/${key.reveal}/scenarios")
           .body(CreateScenarioRequest(name = scenarioName("draft-v1"), source = ScenarioSourceDto.Branch(BranchChoice.Main)).toJson)
@@ -168,7 +174,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("create forkOf an existing scenario forks that scenario's head, not main's — verified via list") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         _     <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
                    .body(CreateScenarioRequest(scenarioName("base"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         _     <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
@@ -185,7 +191,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("create name collision: 409") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         _    <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
                   .body(CreateScenarioRequest(scenarioName("draft-v1"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         resp <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
@@ -216,7 +222,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
-        (backend, key) <- buildBackend(mergeService = Some(stub))
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =Some(stub))
         resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1/merge-preview").send(backend)
         body    = orThrow(resp.body.toOption, s"expected success body, got: $resp")
         decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
@@ -239,7 +245,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
-        (backend, key) <- buildBackend(mergeService = Some(stub))
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =Some(stub))
         resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1/merge-preview").send(backend)
         body    = orThrow(resp.body.toOption, s"expected success body, got: $resp")
         decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
@@ -256,7 +262,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
-        (backend, key) <- buildBackend(mergeService = Some(stub))
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =Some(stub))
         resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1/merge-preview").send(backend)
         body    = orThrow(resp.body.toOption, s"expected success body, got: $resp")
         decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
@@ -268,7 +274,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("delete with matching If-Match: 204, then absent from list") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         _      <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
                     .body(CreateScenarioRequest(scenarioName("draft-v1"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         // main's seeded head is hash('a') and create forks it verbatim, so
@@ -283,7 +289,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("delete with stale If-Match: 409") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         _    <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
                   .body(CreateScenarioRequest(scenarioName("draft-v1"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         resp <- basicRequest.delete(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1")
@@ -293,7 +299,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("delete with a malformed scenario-name path segment: 400") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         resp <- basicRequest.delete(uri"http://localhost/w/${key.reveal}/scenarios/NOT-A-VALID-SLUG!!")
                   .header("If-Match", s""""${hash('a').value}"""").send(backend)
       yield assertTrue(resp.code.code == 400)
@@ -301,14 +307,14 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("delete without If-Match header: 400") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         resp <- basicRequest.delete(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1").send(backend)
       yield assertTrue(resp.code.code == 400)
     },
 
     test("create with a full branch-ref-style name (containing dots): 400 — only a slug is ever accepted") {
       for
-        (backend, key) <- buildBackend(mergeService = None)
+        (backend, key) <- buildBackend(scenarioService = None, mergeService =None)
         // The `scenarios.<workspaceId>.<name>` composed ref is a server-side
         // derivation, never caller input — this posts exactly that shape as `name`
         // to confirm the Iron `ScenarioName` codec at the Tapir boundary rejects it
@@ -324,9 +330,22 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("identity mode: absent x-user-id is rejected with 403") {
       for
-        (backend, key) <- buildBackend(extractor = UserContextExtractor.requirePresent, mergeService = None)
+        (backend, key) <- buildBackend(extractor = UserContextExtractor.requirePresent, scenarioService = None, mergeService = None)
         resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios").send(backend)
       yield assertTrue(resp.code.code == 403)
+    },
+
+    test("in-memory deployment: a scenario list answers 501 NotSupported for scenarios") {
+      for
+        (backend, key) <- buildBackend(
+                            scenarioService = Some(ScenarioServiceNotSupported),
+                            mergeService    = Some(ScenarioMergeServiceNotSupported))
+        resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios").send(backend)
+        body  = resp.body.fold(identity, identity)
+      yield assertTrue(
+        resp.code.code == 501,
+        body.fromJson[WireError.NotSupported].map(_.capability) == Right(Capability.Scenarios)
+      )
     }
   )
 

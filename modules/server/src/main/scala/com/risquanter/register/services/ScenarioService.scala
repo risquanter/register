@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt}
-import com.risquanter.register.domain.errors.{AppError, Core, Failure, ScenariosNotSupported}
+import com.risquanter.register.domain.errors.{AppError, Core, Failure}
 import com.risquanter.register.http.errors.ConflictKind
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
@@ -108,8 +108,8 @@ object ScenarioService:
     * stale-head race would reproduce the exact leak it closes. If the
     * scenario is gone by the retry, there's nothing left to delete.
     *
-    * `list` failing with `ScenariosNotSupported` is routine (the in-memory
-    * backend has no scenario support) and is not logged. Any other `list`
+    * `list` failing as `NotSupported` is routine (the in-memory backend has no
+    * scenario support) and is not logged. Any other `list`
     * failure, and any individual `delete` failure surviving the retry, is
     * logged as a warning before being swallowed, so a genuinely orphaned
     * scenario branch is observable instead of silent.
@@ -131,7 +131,7 @@ object ScenarioService:
         }
       self.list(wsId)
         .tapError {
-          case _: ScenariosNotSupported => ZIO.unit
+          case Failure.NotSupported(_) => ZIO.unit
           case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${messageOf(e)}")
         }
         .flatMap(scenarios => ZIO.withParallelism(parallelism) {

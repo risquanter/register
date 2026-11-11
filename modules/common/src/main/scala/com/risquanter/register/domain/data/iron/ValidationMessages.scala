@@ -145,7 +145,6 @@ object ValidationMessages:
     case FieldProblem.ScenarioNotFound(scenario)   => s"Scenario not found: ${scenario.value}"
     case FieldProblem.CommitNotFound(commit)       => s"Commit not found: ${commit.value}"
     case FieldProblem.WorkspaceHasNoContent        => "Workspace has no content yet — nothing to fork a scenario from"
-    case FieldProblem.RequiresIrminBackend         => "This read requires the Irmin backend"
     case FieldProblem.Unspecified                  => "Unknown validation error"
 
   private def unreadable(expected: ExpectedInput): String = expected match

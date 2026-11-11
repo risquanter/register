@@ -148,9 +148,6 @@ object WireError:
       case FolBindFailure(errors)              => queryRejected(QueryProblem.TypeCheckFailed(errors))
       case FolDomainNotQuantifiable(message)   => queryRejected(QueryProblem.NotQuantifiable(message))
 
-      // Capability absent
-      case ScenariosNotSupported(_)            => WireError.NotSupported(Capability.Scenarios, t)
-
       // Faults: a client can act on none of them.
       case SimulationFailure(_, _)             => WireError.InternalFault(t)
       case FolModelValidationFailure(_)        => WireError.InternalFault(t)

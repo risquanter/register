@@ -26,7 +26,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     ZLayer.succeed(CascadeTestStubs.noOpRiskTreeService)
 
   /** No-op stub: matches the in-memory-backend deployment shape (`list`/`delete`
-    * both fail with `ScenariosNotSupported`) — the reaper swallows this the same
+    * both fail as `NotSupported`) — the reaper swallows this the same
     * as any other best-effort cascade failure. Used by every test that isn't
     * specifically exercising scenario cascade-delete.
     */
