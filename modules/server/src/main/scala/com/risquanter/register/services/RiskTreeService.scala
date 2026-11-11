@@ -34,7 +34,7 @@ trait RiskTreeService {
     *   `branch` belongs to `wsId` — see `ActiveBranch.resolve`; this method trusts it.
     * @return Persisted risk tree metadata (no LEC data)
     */
-  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree]
+  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree]
 
   /** Update risk tree definition - modifies tree structure only
     * @param wsId Workspace that owns the tree
@@ -44,7 +44,7 @@ trait RiskTreeService {
     *   `branch` belongs to `wsId` — see `ActiveBranch.resolve`; this method trusts it.
     * @return Updated risk tree metadata
     */
-  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree]
+  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree]
 
   /** Delete risk tree configuration
     * @param wsId Workspace that owns the tree
@@ -52,7 +52,7 @@ trait RiskTreeService {
     * @param branch Target branch.
     * @return Deleted risk tree metadata
     */
-  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree]
+  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree]
 
   /** Revert a tree to `toCommit` as one forward commit. Reads the
     * tree state at `toCommit` and writes it forward with a `:revert` message;
@@ -63,7 +63,7 @@ trait RiskTreeService {
     * @param branch Target branch the revert commit lands on.
     * @return The reverted (now current) risk tree metadata
     */
-  def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree]
+  def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree]
 
   /** Retrieve single risk tree configuration by ID (no LEC data), together with
     * the concrete commit it was read at.
@@ -81,7 +81,7 @@ trait RiskTreeService {
     * @param rev Read coordinate — branch head or a pinned commit.
     * @return The tree and the commit it resolved to, or `None` when absent
     */
-  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[AppError | Failure, Option[(RiskTree, CommitHash)]]
+  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[Failure, Option[(RiskTree, CommitHash)]]
   
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
@@ -138,11 +138,7 @@ object RiskTreeService:
         ZIO.foreachParDiscard(ids)(id =>
           // Workspace teardown removes the workspace-level (main) tree set.
           self.delete(wsId, id, BranchRef.Main)
-            .tapError { error =>
-              val cause = error match
-                case e: AppError => e.logMessage
-                case f: Failure  => f.logMessage
-              ZIO.logWarning(s"cascadeDeleteTrees: failed to delete tree ${id.value} in workspace ${wsId.value}: $cause")
-            }
+            .tapError(error =>
+              ZIO.logWarning(s"cascadeDeleteTrees: failed to delete tree ${id.value} in workspace ${wsId.value}: ${error.logMessage}"))
             .ignore)
       }

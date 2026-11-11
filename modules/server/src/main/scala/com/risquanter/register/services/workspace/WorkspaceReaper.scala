@@ -3,7 +3,7 @@ package com.risquanter.register.services.workspace
 import zio.*
 import com.risquanter.register.auth.{BootstrapProvisioner, Checked, LifecycleMarker}
 import com.risquanter.register.configs.WorkspaceConfig
-import com.risquanter.register.domain.errors.{AppError, Failure}
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
 
 /** Background daemon that periodically evicts expired workspaces.
@@ -90,10 +90,6 @@ object WorkspaceReaper:
       yield ()
     // A failed cycle costs one interval, so it is logged and the loop carries
     // on. Ending the fiber would stop every later eviction with no symptom.
-    val survivingCycle = cycle.catchAll { error =>
-      val message = error match
-        case e: AppError => e.logMessage
-        case f: Failure  => f.logMessage
-      ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: $message")
-    }
+    val survivingCycle = cycle.catchAll(error =>
+      ZIO.logWarning(s"Workspace eviction cycle failed, retrying at the next interval: ${error.logMessage}"))
     (ZIO.sleep(zio.Duration.fromJava(config.reaperInterval)) *> survivingCycle).forever

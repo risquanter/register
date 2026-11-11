@@ -16,7 +16,7 @@ import com.risquanter.register.services.pipeline.{InvalidationHandler, Invalidat
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
   AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
-  TrustZone, ValidationError, ValidationErrorCode, ValidationFailed
+  TrustZone, ValidationError, ValidationErrorCode
 }
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.*
@@ -54,35 +54,35 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private def makeStubRepo = new RiskTreeRepository {
     private val db = collection.mutable.Map[(WorkspaceId, BranchRef, TreeId), RiskTree]()
 
-    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.succeed {
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[Failure,RiskTree] = ZIO.succeed {
       db += ((wsId, branch, riskTree.id) -> riskTree)
       riskTree
     }
 
     // A missing key here is a test that did not seed what it reads, which is a
     // defect in the test rather than a failure the service should handle.
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[Failure,RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, branch, id))
       val updated = op(riskTree)
       db += ((wsId, branch, id) -> updated)
       updated
     }.orDie
 
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[Failure,RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, branch, id))
       db -= ((wsId, branch, id))
       riskTree
     }.orDie
 
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure,RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure,Option[(RiskTree, CommitHash)]] =
       rev match
         case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CascadeTestStubs.stubCommit)))
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure,List[RiskTree]] =
       rev match
         case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => tree }.toList)
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
@@ -231,10 +231,10 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     * target commit that `revert` performs internally still succeeds.
     */
   private def revertRepo(headReadFails: Boolean) = new RiskTreeRepository {
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure,RiskTree] =
       ZIO.succeed(revertedTree)
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure, Option[(RiskTree, CommitHash)]] =
       if headReadFails then ZIO.fail(Failure.rejected(
         TrustZone.Peer(PeerZone.Store),
         NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.DuplicateNodeName(SafeName.fromString("Restored Leaf").toOption.get, 2.refineUnsafe))),
@@ -317,18 +317,19 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       case ErrorLocation.Field(_, actual) => actual == field
       case _                              => false
 
-  private def isDuplicateName(exit: Exit[AppError | Failure, Any]): Boolean =
-    exit match
-      case Exit.Failure(cause) =>
-        cause.failureOption.exists {
-          case ValidationFailed(errors) =>
-            errors.exists(e =>
-              e.location == ErrorLocation.requestField(FieldName.Name) &&
-              FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE
-            )
-          case _ => false
-        }
-      case Exit.Success(_) => false
+  /** The caller's refusal of a tree name another tree on the branch holds. */
+  private def duplicateName(name: String): Failure =
+    Failure.rejected(
+      TrustZone.Client,
+      NonEmptyList(ValidationError(
+        ErrorLocation.requestField(FieldName.Name),
+        FieldProblem.TreeNameAlreadyExists(SafeName.fromString(name).toOption.get)
+      )),
+      Nil
+    )
+
+  private def failedWith(exit: Exit[AppError | Failure, Any], expected: Failure): Boolean =
+    exit.causeOption.flatMap(_.failureOption).contains(expected)
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
     suite("RiskTreeServiceLive")(
@@ -338,7 +339,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         program.assert { result =>
           result.id.value.nonEmpty &&
             result.name == SafeName.SafeName("Test Risk Tree".refineUnsafe) &&
-            result.root.isInstanceOf[RiskLeaf]
+            (result.root match { case _: RiskLeaf => true; case _ => false })
         }
       },
 
@@ -765,7 +766,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             _    <- service(_.create(stubWsId, validRequest.copy(name = "Dup Name"), scenarioBranch))
             exit <- service(_.create(stubWsId, validRequest.copy(name = "Dup Name"), scenarioBranch)).exit
           } yield exit
-          program.assert(exit => isDuplicateName(exit))
+          program.assert(failedWith(_, duplicateName("Dup Name")))
         },
 
         test("update rename to a name taken on the same branch is rejected") {
@@ -774,7 +775,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             b    <- service(_.create(stubWsId, seedTreeRequest("Name B"), BranchRef.Main))
             exit <- service(_.update(stubWsId, b.id, renameOnly(b, "Name A"), BranchRef.Main)).exit
           } yield exit
-          program.assert(exit => isDuplicateName(exit))
+          program.assert(failedWith(_, duplicateName("Name A")))
         },
 
         test("update rename to a name held only on another branch is allowed") {

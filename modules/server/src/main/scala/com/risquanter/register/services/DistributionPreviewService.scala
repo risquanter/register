@@ -1,11 +1,12 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 
 import com.risquanter.register.domain.data.{DistributionShape, DistributionParams}
 import com.risquanter.register.domain.data.iron.{MetalogTermCount, OpenProbability, OpenProbabilityConstraint, PositiveLong}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError, ValidationFailed}
+import com.risquanter.register.domain.errors.{ErrorLocation, Failure, FieldProblem, TrustZone, ValidationError}
 import com.risquanter.register.http.responses.{DistributionPreviewPoint, DistributionPreviewResponse, PreviewFit}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
 
@@ -15,7 +16,7 @@ import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
   * function of its request input. The workspace key auth gate lives in the controller.
   */
 trait DistributionPreviewService:
-  def preview(shape: DistributionShape): IO[ValidationFailed, DistributionPreviewResponse]
+  def preview(shape: DistributionShape): IO[Failure, DistributionPreviewResponse]
 
 object DistributionPreviewService:
   val layer: ZLayer[Any, Nothing, DistributionPreviewService] =
@@ -44,7 +45,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
 
   /** The preview runs the same resolution the simulator does, so the curve a
     * client sees is the curve a run would fit. */
-  override def preview(shape: DistributionShape): IO[ValidationFailed, DistributionPreviewResponse] =
+  override def preview(shape: DistributionShape): IO[Failure, DistributionPreviewResponse] =
     DistributionShape.resolve(shape) match
       case DistributionParams.Metalog(percentiles, quantiles, terms) =>
         previewMetalog(percentiles, quantiles, terms)
@@ -55,7 +56,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
     percentiles: Vector[Double],
     quantiles: Vector[Double],
     resolvedTerms: MetalogTermCount
-  ): IO[ValidationFailed, DistributionPreviewResponse] =
+  ): IO[Failure, DistributionPreviewResponse] =
     for
       metalog <- ZIO.fromEither(
         MetalogDistribution.fromPercentilesUnsafe(
@@ -67,21 +68,25 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
           lower       = Some(0.0),
           upper       = None
         )
-      ).mapError(_ => ValidationFailed(List(ValidationError(ErrorLocation.Whole, FieldProblem.MetalogFitFailed))))
+      ).mapError(_ => fitRefused(FieldProblem.MetalogFitFailed))
     yield DistributionPreviewResponse(PreviewFit.Metalog(resolvedTerms), sampleMetalog(metalog))
 
   private def previewLognormal(
     minLoss: PositiveLong,
     maxLoss: PositiveLong
-  ): IO[ValidationFailed, DistributionPreviewResponse] =
+  ): IO[Failure, DistributionPreviewResponse] =
     for
       lognormal <- ZIO.fromEither(LognormalHelper.fromLognormal90CI(minLoss, maxLoss))
-        .mapError(_ => ValidationFailed(List(ValidationError(ErrorLocation.Whole, FieldProblem.LognormalFitFailed))))
+        .mapError(_ => fitRefused(FieldProblem.LognormalFitFailed))
       points = pGrid.map { p =>
         val x = lognormal.quantile(p)
         DistributionPreviewPoint(x = x, pdf = lognormal.density(x), cdf = p)
       }
     yield DistributionPreviewResponse(PreviewFit.Lognormal(), points)
+
+  /** The caller's shape refused because no curve fits it. */
+  private def fitRefused(problem: FieldProblem): Failure =
+    Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.Whole, problem)), Nil)
 
   private def sampleMetalog(metalog: MetalogDistribution): Vector[DistributionPreviewPoint] =
     pGrid.map { p =>

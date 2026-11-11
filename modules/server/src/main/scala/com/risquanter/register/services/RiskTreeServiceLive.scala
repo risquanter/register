@@ -1,6 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.{Meter, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
@@ -39,53 +40,58 @@ class RiskTreeServiceLive private (
   /** Fetch tree by id, with the commit it resolved to. Every caller runs after
     * the controller has confirmed the workspace holds the tree, so an empty
     * read means the revision lacks it. */
-  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[AppError | Failure,(RiskTree, CommitHash)] =
+  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[Failure,(RiskTree, CommitHash)] =
     repo.getById(wsId, treeId, rev).someOrElseZIO(RiskTreeRepository.treeAbsent(wsId, treeId, rev))
+
+  /** The caller's refusal of every refusal in `errors`, or nothing when there
+    * are none. */
+  private def refuseAll(errors: List[ValidationError]): IO[Failure, Unit] =
+    NonEmptyList.fromIterableOption(errors) match
+      case None          => ZIO.unit
+      case Some(refused) => ZIO.fail(Failure.rejected(TrustZone.Client, refused, Nil))
+
+  /** The refusal of a node the tree does not hold. */
+  private def nodeAbsent(nodeId: NodeId): ValidationError =
+    ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotFound)
 
   /** Fetch tree, its resolved commit, and the node together. Fails with
     * `RiskTreeRepository.treeAbsent` when the revision lacks the tree, and with
-    * `ValidationFailed` when the tree lacks the node. */
-  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): IO[AppError | Failure,(RiskTree, CommitHash, RiskNode)] =
+    * the caller's `Rejected` when the tree lacks the node. */
+  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): IO[Failure,(RiskTree, CommitHash, RiskNode)] =
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
-      node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
-        ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotFound))))
+      node <- ZIO.fromOption(tree.index.nodes.get(nodeId))
+                .orElseFail(Failure.rejected(TrustZone.Client, NonEmptyList(nodeAbsent(nodeId)), Nil))
     yield (tree, commit, node)
 
-  /** Fetch tree and all requested nodes. With `omitAbsent = false` (the
-    * default), fail with aggregated validation errors when any node is missing;
-    * with `omitAbsent = true`, absent nodes are simply not in the returned map
-    * (the point-in-time read path — a node may not exist at an earlier commit). */
-  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): IO[AppError | Failure,(RiskTree, CommitHash, Map[NodeId, RiskNode])] =
+  /** Fetch tree and all requested nodes. With `omitAbsent = false`, fail with
+    * one refusal accumulating every missing node; with `omitAbsent = true`,
+    * absent nodes are simply not in the returned map (the point-in-time read
+    * path — a node may not exist at an earlier commit). */
+  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): IO[Failure,(RiskTree, CommitHash, Map[NodeId, RiskNode])] =
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
-      missing = nodeIds.filterNot(tree.index.nodes.contains)
-      _ <- if missing.isEmpty || omitAbsent then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id =>
-        ValidationError(ErrorLocation.nodeField(id, FieldName.Id), FieldProblem.NodeNotFound))))
+      _ <- ZIO.unless(omitAbsent)(refuseAll(nodeIds.filterNot(tree.index.nodes.contains).toList.map(nodeAbsent)))
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, commit, nodes)
 
-  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId]): IO[AppError | Failure,Unit] =
+  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId]): IO[Failure,Unit] =
     collectAllTrees(wsId, branch).flatMap { trees =>
       val candidates = trees.filterNot(t => excludeId.contains(t.id))
 
-      val errors = List(
+      refuseAll(List(
         Option.when(candidates.exists(_.id == treeId))(
           ValidationError(ErrorLocation.requestField(FieldName.Id), FieldProblem.TreeIdAlreadyExists(treeId))
         ),
         Option.when(candidates.exists(_.name == treeName))(
           ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.TreeNameAlreadyExists(treeName))
         )
-      ).flatten
-
-      errors match
-        case Nil => ZIO.unit
-        case _   => ZIO.fail(ValidationFailed(errors))
+      ).flatten)
     }
 
   // Trees at the head of the branch being written; uniqueness (tree ID and
   // name) is checked against exactly this set.
-  private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): IO[AppError | Failure,List[RiskTree]] =
+  private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): IO[Failure,List[RiskTree]] =
     repo.getAllForWorkspace(wsId, Revision.Head(branch))
   
   /** Record operation metric with optional error context
@@ -192,7 +198,7 @@ class RiskTreeServiceLive private (
     * Identifier generation failing is a broken invariant, not a request
     * outcome, so it dies rather than entering the error channel.
     */
-  private def allocateIds(count: Int): IO[AppError | Failure, List[SafeId.SafeId]] =
+  private def allocateIds(count: Int): UIO[List[SafeId.SafeId]] =
     IdGenerators.batch(count).orDie
 
   /** Deterministic generator for RiskTreeRequests based on a pre-allocated pool. */
@@ -226,7 +232,7 @@ class RiskTreeServiceLive private (
     leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
     rootName: SafeName.SafeName,
     seedVarIdByLeafName: Map[SafeName.SafeName, SeedVarId.SeedVarId]
-  ): IO[AppError | Failure,(Seq[RiskNode], NodeId)] = ZIO.attempt {
+  ): UIO[(Seq[RiskNode], NodeId)] = ZIO.attempt {
     val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap
     val childrenByParent: Map[RiskTreeRequests.ParentRef, List[SafeName.SafeName]] =
       nodesByName.values.groupBy(_.parent).view.mapValues(_.toList.map(_.name)).toMap
@@ -284,7 +290,11 @@ class RiskTreeServiceLive private (
         errors.map(ValidationError.describe).mkString("; ")))
 
   // Config CRUD - only persist, no execution
-  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree] = {
+  /** A seed identifier the assigner refused, as the caller's refusal. */
+  private def seedVarIdRefused(error: ValidationError): Failure =
+    Failure.rejected(TrustZone.Client, NonEmptyList(error), Nil)
+
+  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree] = {
     val operation = for {
       // Identifier generation failing is a broken invariant, as in `allocateIds`.
       treeId <- IdGenerators.nextTreeId.orDie
@@ -293,7 +303,7 @@ class RiskTreeServiceLive private (
       _ <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch, excludeId = None)
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(leafNamesOf(resolved.nodes), resolved.providedSeedVarIds, highWater = 0L))
-        .mapError(e => ValidationFailed(List(e)))
+        .mapError(seedVarIdRefused)
       (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafOccurrenceAndShape, resolved.rootName, seedVarIds)
       riskTree <- RiskTree.fromNodes(
         id = treeId,
@@ -314,7 +324,7 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, RiskTree] = {
+  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree] = {
     val operation = for {
       (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
@@ -338,7 +348,7 @@ class RiskTreeServiceLive private (
           carriedOverSeedVarIds(oldTree, resolved.existing) ++ resolved.providedSeedVarIds,
           highWater = oldTree.seedVarHighWater.value
         ))
-        .mapError(e => ValidationFailed(List(e)))
+        .mapError(seedVarIdRefused)
       (nodes, rootId) <- buildNodes(allNodes, allLeafOccurrenceAndShape, resolved.rootName, seedVarIds)
       riskTree <- RiskTree.fromNodes(
         id = id,
@@ -365,7 +375,7 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure,RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[Failure,RiskTree] =
     repo.delete(wsId, id, branch)
       .tap(tree => clientBranch(wsId, branch).flatMap(invalidationHandler.handleTreeDeletion(tree, _)))
       .tapBoth(
@@ -373,7 +383,7 @@ class RiskTreeServiceLive private (
       _ => recordOperation(Operation.Delete, success = true, None)
     )
 
-  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure,RiskTree] = {
+  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[Failure,RiskTree] = {
     val operation = for {
       // The head state feeds the change notification and nothing else, so a
       // failure to read it must not stop the revert. A stored tree that breaks
@@ -384,11 +394,8 @@ class RiskTreeServiceLive private (
       // indistinguishable here and only the log tells them apart.
       oldTree  <- repo.getById(wsId, id, Revision.Head(branch))
                     .catchAll(error =>
-                      val cause = error match
-                        case e: AppError => e.logMessage
-                        case f: Failure  => f.logMessage
                       ZIO.logWarning(
-                        s"revert of tree ${id.value}: head read failed, notifying the whole tree instead: $cause"
+                        s"revert of tree ${id.value}: head read failed, notifying the whole tree instead: ${error.logMessage}"
                       ).as(None))
       reverted <- repo.revert(wsId, id, toCommit, branch)
       tag      <- clientBranch(wsId, branch)
@@ -405,7 +412,7 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[AppError | Failure,Option[(RiskTree, CommitHash)]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[Failure,Option[(RiskTree, CommitHash)]] =
     repo.getById(wsId, id, rev).tapBoth(
       error => recordOperation(Operation.GetById, success = false, Some(extractErrorContext(error))),
       _ => recordOperation(Operation.GetById, success = true, None)
@@ -445,8 +452,8 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
 
         // Validate inputs and fetch requested tree + nodes
-        _ <- ZIO.when(nodeIds.isEmpty)(ZIO.fail(ValidationFailed(List(ValidationError(
-               ErrorLocation.requestField(FieldName.Nodes), FieldProblem.NodeIdsEmpty)))))
+        _ <- ZIO.when(nodeIds.isEmpty)(refuseAll(List(ValidationError(
+               ErrorLocation.requestField(FieldName.Nodes), FieldProblem.NodeIdsEmpty))))
         (tree, _, nodesMap) <- lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
         // With omitAbsent, nodesMap holds only the ids present at this revision;
         // resolve and log against that present set (empty input still failed above).

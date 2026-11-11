@@ -533,7 +533,7 @@ enum FieldProblem:
   case TargetingSeveralFreeVariables
   case TargetingMitigationStateReferenced
 
-  // Workspace limits and lookups the services report through ValidationFailed
+  // Workspace limits and lookups the services report in a Rejected
   case SeedEntityIdInUse(seedEntityId: SeedEntityId.SeedEntityId)
   case MaxTreesReached(limit: NonNegativeInt)
   case NodeNotFound

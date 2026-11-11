@@ -10,10 +10,10 @@ import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, TreeId, SeedEntityId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeId, TelemetryPlaceholders, TreeId, SeedEntityId, WorkspaceId}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpiryDetail, Failure, FieldName, FieldProblem, TrustZone,
-  ValidationError, ValidationFailed, ValidationErrorCode, ValueRange
+  Core, Diagnostic, ErrorLocation, ErrorSubject, ExpiryDetail, Failure, FieldName, FieldProblem, TrustZone,
+  ValidationError, ValueRange
 }
 import com.risquanter.register.http.errors.{NotFoundKind, TreeScope, WireError}
 import zio.prelude.NonEmptyList
@@ -68,12 +68,21 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
   ))
 
   /** The body a failure answers on the wire, when it answers `NotFound`. */
-  private def notFoundBody(failure: AppError | Failure): Option[String] = failure match
-    case f: Failure =>
-      f.toWire(TelemetryPlaceholders.UnlinkedTrace, TreeScope.NoTree) match
-        case nf: WireError.NotFound => Some(nf.toJson)
-        case _                      => None
-    case _: AppError => None
+  private def notFoundBody(failure: Failure): Option[String] =
+    failure.toWire(TelemetryPlaceholders.UnlinkedTrace, TreeScope.NoTree) match
+      case nf: WireError.NotFound => Some(nf.toJson)
+      case _                      => None
+
+  /** The caller's refusal of a new tree once the workspace holds `limit`. */
+  private def treesAtLimit(limit: Int): Failure =
+    Failure.rejected(
+      TrustZone.Client,
+      NonEmptyList(ValidationError(
+        ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
+        FieldProblem.MaxTreesReached(NonNegativeInt.count(limit))
+      )),
+      Nil
+    )
 
   override def spec = suite("WorkspaceStoreLive security regressions")(
     test("create + resolve succeeds") {
@@ -139,7 +148,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         _     <- store.addTree(key, treeA)
         exit  <- store.addTree(key, treeB).exit
         list  <- store.listTrees(key)
-      yield assert(exit)(fails(isSubtype[ValidationFailed](anything))) &&
+      yield assert(exit)(fails(equalTo(treesAtLimit(1)))) &&
         assertTrue(list == List(treeA))
     },
 
@@ -175,7 +184,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         _     <- store.addTree(key, treeA)
         atMax <- store.checkTreeCapacity(key).exit
       yield assertTrue(below.isRight) &&
-        assert(atMax)(fails(isSubtype[ValidationFailed](anything)))
+        assert(atMax)(fails(equalTo(treesAtLimit(1))))
     },
 
     test("resolveTreeWorkspace returns workspace for member tree") {
@@ -305,15 +314,18 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       yield assertTrue(ws.seedEntityId.value == 42L)
     },
 
-    test("duplicate provided seedEntityId is rejected with DUPLICATE_VALUE") {
+    test("duplicate provided seedEntityId is the caller's refusal naming the id in use") {
       for
         store <- mkStore
         id    <- ZIO.fromEither(SeedEntityId.fromLong(7L)).orDieWith(e => new AssertionError(e.toString))
         _     <- store.create(Some(id))
         exit  <- store.create(Some(id)).exit
-      yield assert(exit)(fails(isSubtype[ValidationFailed](
-        hasField("errors", _.errors.map(e => FieldProblem.code(e.problem)), contains(ValidationErrorCode.DUPLICATE_VALUE))
-      )))
+      yield assert(exit)(fails(equalTo(Failure.rejected(
+        TrustZone.Client,
+        NonEmptyList(ValidationError(
+          ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id))),
+        Nil
+      ))))
     },
 
     test("assignment after a provided value skips past it, so no collision") {

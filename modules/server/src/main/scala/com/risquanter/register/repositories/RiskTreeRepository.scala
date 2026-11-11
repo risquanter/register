@@ -4,7 +4,7 @@ import zio.*
 import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, ErrorLocation, Failure, RequestHeaderName, RequestQueryParam, TrustZone, ValidationError
+  Core, Diagnostic, ErrorLocation, Failure, RequestHeaderName, RequestQueryParam, TrustZone, ValidationError
 }
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchChoice, BranchRef, CommitHash, Revision}
 import com.risquanter.register.http.errors.NotFoundKind
@@ -22,26 +22,26 @@ import com.risquanter.register.http.errors.NotFoundKind
   * failure rather than silently serving main-branch/head data.
   */
 trait RiskTreeRepository {
-  def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree]
-  def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree]
-  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError | Failure, RiskTree]
+  def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[Failure, RiskTree]
+  def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[Failure, RiskTree]
+  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[Failure, RiskTree]
 
   /** Revert a tree to `toCommit` as one forward `set_tree` commit.
     * Reads the tree state at `toCommit` and writes it forward with a `:revert`
     * message; no precondition. Absent target (commit or path) → NotFound. */
-  def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError | Failure, RiskTree]
+  def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure, RiskTree]
 
   /** Loads a tree and reports the concrete commit it was read at. The
     * `CommitHash` is the Irmin commit the read resolved to — a whole-tree,
     * byte-level revision, never a domain content hash — and is what scope
     * resolution memoizes on. One read names the head it resolved, so there is
     * no second call and no resolve-then-reload race. */
-  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]]
+  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure, Option[(RiskTree, CommitHash)]]
   /** Every tree in the workspace at `rev`. When the store holds content it
     * refuses for one or more trees, the listing fails with one refusal
     * accumulating every refused tree's entries, each tree named in its
     * diagnostics. Any other failure fails the listing as it is. */
-  def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]]
+  def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure, List[RiskTree]]
 }
 
 object RiskTreeRepository:

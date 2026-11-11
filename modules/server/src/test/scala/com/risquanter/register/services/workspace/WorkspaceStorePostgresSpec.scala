@@ -14,10 +14,10 @@ import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, TreeId, SeedEntityId, WorkspaceId}
 import com.risquanter.register.domain.errors.{
   Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, ExpiryDetail, Failure, FieldName, FieldProblem, OutageMode,
-  PeerZone, TrustZone, ValidationError, ValidationFailed
+  PeerZone, TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.infra.persistence.RepositorySpec
@@ -157,7 +157,14 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         exit   <- store.addTree(key, second).exit
         listed <- store.listTrees(key)
       yield assertTrue(again.isRight, listed == List(first)) &&
-        assert(exit)(fails(isSubtype[ValidationFailed](anything)))
+        assert(exit)(fails(equalTo(Failure.rejected(
+          TrustZone.Client,
+          NonEmptyList(ValidationError(
+            ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
+            FieldProblem.MaxTreesReached(NonNegativeInt.count(1))
+          )),
+          Nil
+        ))))
     },
 
     test("concurrent associations cannot exceed the ceiling between them") {

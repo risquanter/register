@@ -12,7 +12,7 @@ import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
-import com.risquanter.register.domain.errors.{AppError, Failure}
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
 
@@ -33,15 +33,15 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
   // ── Stub repository (minimal — tests don't exercise business logic) ──
 
   private val stubRepo = new RiskTreeRepository:
-    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.succeed(t)
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] =
+    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[Failure,RiskTree] = ZIO.succeed(t)
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[Failure,RiskTree] =
       RiskTreeRepository.treeAbsent(wsId, id, Revision.Head(branch))
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError | Failure, RiskTree] =
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[Failure,RiskTree] =
       RiskTreeRepository.treeAbsent(wsId, id, Revision.Head(branch))
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError | Failure, RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure,RiskTree] =
       RiskTreeRepository.treeAbsent(wsId, id, Revision.At(toCommit))
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] = ZIO.succeed(None)
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] = ZIO.succeed(Nil)
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure,Option[(RiskTree, CommitHash)]] = ZIO.succeed(None)
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure,List[RiskTree]] = ZIO.succeed(Nil)
 
   // ── Shared layer for controller instantiation ────────────────────────
 

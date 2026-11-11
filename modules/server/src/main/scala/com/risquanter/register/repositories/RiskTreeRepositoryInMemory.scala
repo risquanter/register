@@ -6,7 +6,7 @@ import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, RequestQueryParam, TrustZone,
+  Core, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, RequestQueryParam, TrustZone,
   ValidationError
 }
 import com.risquanter.register.http.errors.Capability
@@ -31,7 +31,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
     * other branch fails as `NotSupported` for scenarios and `effect` is never
     * evaluated.
     */
-  private def requireMain[A](branch: BranchRef)(effect: => IO[AppError | Failure, A]): IO[AppError | Failure, A] =
+  private def requireMain[A](branch: BranchRef)(effect: => IO[Failure, A]): IO[Failure, A] =
     branch match
       case BranchRef.Main => effect
       case _              => ZIO.fail(Failure.NotSupported(Core(
@@ -43,13 +43,13 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
   /** Runs `effect` for the main branch at its head. A commit pin fails as
     * `NotSupported` rather than being silently served from main.
     */
-  private def requireMainRevision[A](rev: Revision)(effect: => IO[AppError | Failure, A]): IO[AppError | Failure, A] =
+  private def requireMainRevision[A](rev: Revision)(effect: => IO[Failure, A]): IO[Failure, A] =
     rev match
       case Revision.Head(branch) => requireMain(branch)(effect)
       case Revision.At(_) =>
         ZIO.fail(RiskTreeRepositoryInMemory.pinnedReadsUnavailable(ErrorLocation.QueryParameter(RequestQueryParam.At)))
 
-  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] =
+  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[Failure, RiskTree] =
     requireMain(branch) {
       // putIfAbsent reports the collision and inserts in one step, so two
       // concurrent creates of the same identifier cannot both succeed.
@@ -63,7 +63,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       }
     }
 
-  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] =
+  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[Failure, RiskTree] =
     requireMain(branch) {
       // Suspended, so the lookup and `op` run when the effect runs rather than
       // when it is constructed; a throwing `op` is then this effect's defect
@@ -81,7 +81,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       }
     }
 
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError | Failure, RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[Failure, RiskTree] =
     requireMain(branch) {
       // Suspended for the same reason as `update`: the lookup belongs to the
       // effect's execution, not to its construction.
@@ -97,10 +97,10 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       }
     }
 
-  override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError | Failure, RiskTree] =
+  override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure, RiskTree] =
     ZIO.fail(RiskTreeRepositoryInMemory.pinnedReadsUnavailable(ErrorLocation.requestField(FieldName.ToCommit)))
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure, Option[(RiskTree, CommitHash)]] =
     requireMainRevision(rev) { ZIO.succeed(db.get((wsId, id)).map(t => (t, syntheticHash(t)))) }
 
   /** A deterministic, content-sensitive stand-in for a real Irmin commit hash.
@@ -117,7 +117,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
     CommitHash.fromString(hex).toOption.getOrElse(
       throw new IllegalStateException(s"synthetic commit hash not 40 hex: '$hex'"))
 
-  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]] =
+  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure, List[RiskTree]] =
     requireMainRevision(rev) { ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => tree }.toList) }
 }
 

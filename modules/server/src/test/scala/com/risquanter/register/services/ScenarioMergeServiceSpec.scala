@@ -14,7 +14,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, R
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, NodeId, PositiveInt, Revision, SafeName, SeedVarId, StoreBranch, TreeId}
 import com.risquanter.register.repositories.model.TreeMetadata
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem,
+  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem,
   MergeRefusal, OutageMode, PeerZone, TrustZone, ValueFormat
 }
 import com.risquanter.register.http.errors.{ConflictKind, NotFoundKind}
@@ -245,7 +245,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     loaded: Either[Failure, List[RiskTree]],
     revisions: Ref[List[Revision]]
   ) extends RiskTreeRepository:
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure, List[RiskTree]] =
       revisions.update(_ :+ rev) *> ZIO.fromEither(loaded)
 
     override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))

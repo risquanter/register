@@ -13,7 +13,7 @@ import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeySecret, SeedEntityId, ValidationUtil}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, OutageMode, PeerZone,
+  Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, OutageMode, PeerZone,
   TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.ConflictKind
@@ -53,7 +53,7 @@ final class WorkspaceStorePostgres private (
     * race-free, as the caller's refusal of v, and the sequence is bumped past v
     * so later assignments cannot collide.
     */
-  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError | Failure, WorkspaceKeySecret] =
+  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[Failure, WorkspaceKeySecret] =
     for
       key <- WorkspaceKeyCrypto.generate
       sid <- IdGenerators.nextId.orDie
@@ -90,7 +90,7 @@ final class WorkspaceStorePostgres private (
     yield key
 
   /** Advance the assignment sequence past a provided value (never backwards). */
-  private def bumpSeedEntitySequence(value: Long): IO[AppError | Failure, Unit] =
+  private def bumpSeedEntitySequence(value: Long): IO[Failure, Unit] =
     db(
       run(
         quote {
@@ -110,7 +110,7 @@ final class WorkspaceStorePostgres private (
     * workspace. The refusal travels as a `Left` so the transaction commits,
     * keeping the typed error out of `db`'s classification of driver failures.
     */
-  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[Failure, Unit] =
     for
       ws     <- resolveInternal(key)
       now    <- Clock.instant
@@ -133,13 +133,13 @@ final class WorkspaceStorePostgres private (
     */
   private def associate(wsId: WorkspaceId, treeId: TreeId, now: Instant, existing: Seq[String]) =
     (existing.contains(treeId.value), existing.size >= config.maxTreesPerWorkspace) match
-      case (true, _) => ZIO.succeed(Right(()): Either[AppError, Unit])
+      case (true, _) => ZIO.succeed(Right(()): Either[Failure, Unit])
       case (_, true) => ZIO.succeed(Left(WorkspaceStore.maxTreesReached(config.maxTreesPerWorkspace)))
       case _         =>
         run(query[WorkspaceTreeRow].insertValue(lift(WorkspaceTreeRow(wsId.value, treeId.value, toOffsetDateTime(now)))))
-          .as(Right(()): Either[AppError, Unit])
+          .as(Right(()): Either[Failure, Unit])
 
-  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[Failure, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(
@@ -151,18 +151,18 @@ final class WorkspaceStorePostgres private (
             ).unit
     yield ()
 
-  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, List[TreeId]] =
+  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
   /** Refuse a creation that would exceed the tree ceiling, before the tree is
     * written.
     */
-  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, Unit] =
     resolveInternal(key).flatMap(ws =>
       ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
     )
 
-  override def resolve(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
+  override def resolve(key: WorkspaceKeySecret): IO[Failure, WorkspaceRecord] =
     for
       ws  <- loadWorkspaceByKey(key)
       now <- Clock.instant
@@ -175,10 +175,10 @@ final class WorkspaceStorePostgres private (
             ).unit
     yield ws.touch(now)
 
-  override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, Boolean] =
+  override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[Failure, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
 
-  override def evictExpired: IO[AppError | Failure, List[WorkspaceRecord]] =
+  override def evictExpired: IO[Failure, List[WorkspaceRecord]] =
     for
       rows    <- db(run(query[WorkspaceRow]))
       now     <- Clock.instant
@@ -195,14 +195,14 @@ final class WorkspaceStorePostgres private (
                  )
     yield doomed
 
-  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(run(query[WorkspaceRow].filter(_.id == lift(ws.id.value)).delete)).unit
       _  <- logSecurity(WorkspaceStore.SecurityEvent.Deleted, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace deleted")
     yield ()
 
-  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, WorkspaceKeySecret] =
+  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, WorkspaceKeySecret] =
     for
       ws     <- resolveInternal(key)
       newKey <- WorkspaceKeyCrypto.generate
@@ -221,10 +221,10 @@ final class WorkspaceStorePostgres private (
       _      <- logSecurity(WorkspaceStore.SecurityEvent.Rotated, WorkspaceStore.WorkspaceIdKey -> ws.id.value)("Workspace key rotated")
     yield newKey
 
-  private def resolveInternal(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
+  private def resolveInternal(key: WorkspaceKeySecret): IO[Failure, WorkspaceRecord] =
     loadWorkspaceByKey(key)
 
-  private def loadWorkspaceByKey(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
+  private def loadWorkspaceByKey(key: WorkspaceKeySecret): IO[Failure, WorkspaceRecord] =
     for
       row <- loadWorkspaceRowByHash(key)
       ws  <- toRecord(row)
@@ -234,7 +234,7 @@ final class WorkspaceStorePostgres private (
       _   <- ZIO.foreachDiscard(ws.expiry(now))(e => ZIO.fail(WorkspaceStore.workspaceExpired(ws, e)))
     yield ws
 
-  private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRow] =
+  private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[Failure, WorkspaceRow] =
     db(run(query[WorkspaceRow].filter(_.keyHash == lift(WorkspaceKeyCrypto.hash(key).value: String)))).flatMap(rows =>
       ZIO.fromOption(rows.headOption).orElseFail(WorkspaceStore.workspaceNotFound)
     )
@@ -252,7 +252,7 @@ final class WorkspaceStorePostgres private (
   /** The workspace a row describes, with every column refined and every refusal
     * across them accumulated. A column that does not refine is the database's
     * content refused, since this service writes only refined values (ADR-039). */
-  private def toRecord(row: WorkspaceRow): IO[AppError | Failure, WorkspaceRecord] =
+  private def toRecord(row: WorkspaceRow): IO[Failure, WorkspaceRecord] =
     loadTrees(row.id).flatMap(treeIds =>
       ZIO.fromEither(refineRow(row, treeIds).toEither).mapError(refused =>
         Failure.rejected(

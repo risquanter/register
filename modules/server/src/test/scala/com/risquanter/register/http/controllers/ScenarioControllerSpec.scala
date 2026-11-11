@@ -14,7 +14,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, MergeStagingRef, SafeName, ScenarioName, StoreBranch, TreeId, WorkspaceId, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, Failure, FieldName}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, Failure, FieldName}
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, MergePreviewStatus, ScenarioListResponse, ScenarioResponse, TreeLabel, TreeWriteKind, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, safeId, treeId, unsafeGet}
@@ -124,12 +124,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       // `WorkspaceStoreLive.layer` build would be a distinct, empty store
       // that never learns about the workspace key `create` returns here.
       workspaceStore <- ZIO.service[WorkspaceStore].provide(TestConfigs.workspaceLayer >>> WorkspaceStoreLive.layer)
-      // `create` fails with an `AppError`, which is not a `Throwable`, so the
+      // `create` fails with a `Failure`, which is not a `Throwable`, so the
       // conversion to a defect is explicit. A failure here is a broken fixture.
-      wsKey          <- workspaceStore.create(None).orDieWith {
-                          case e: AppError => RuntimeException(e.logMessage)
-                          case f: Failure  => RuntimeException(f.logMessage)
-                        }
+      wsKey          <- workspaceStore.create(None).orDieWith(f => RuntimeException(f.logMessage))
       // The post-merge guard reads trees back through a repository. This spec
       // injects its own merge service in every case that exercises a merge, so
       // the fallback only has to be a real repository, not a configured one.
@@ -217,9 +214,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         fields = List(FieldName.Probability)
       )
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, MergePreviewStatus] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[Failure,MergePreviewStatus] =
           ZIO.succeed(MergePreviewStatus.Conflicts(List(conflict)))
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[Failure,CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(scenarioService = None, mergeService =Some(stub))
@@ -240,9 +237,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
           List(SafeName.fromString("Alpha").toOption.get)
       )
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, MergePreviewStatus] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[Failure,MergePreviewStatus] =
           ZIO.succeed(MergePreviewStatus.DuplicateNames(dupMap))
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[Failure,CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(scenarioService = None, mergeService =Some(stub))
@@ -257,9 +254,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
     test("merge-preview clean wire mapping: duplicateNames absent/None when the preview is clean") {
       val stub = new ScenarioMergeService:
-        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, MergePreviewStatus] =
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[Failure,MergePreviewStatus] =
           ZIO.succeed(MergePreviewStatus.Clean())
-        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[AppError, CommitHash] =
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Authority]): IO[Failure,CommitHash] =
           ZIO.die(new NotImplementedError("unused by this test"))
       for
         (backend, key) <- buildBackend(scenarioService = None, mergeService =Some(stub))

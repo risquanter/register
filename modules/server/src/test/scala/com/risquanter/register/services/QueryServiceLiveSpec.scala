@@ -180,13 +180,13 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   /** A repository holding `tree` alone; `evaluate` only reads it. */
   private val oneTreeRepo: RiskTreeRepository = new RiskTreeRepository:
     private def unused = ZIO.die(new NotImplementedError("unused by evaluate"))
-    def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
-    def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
-    def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
-    def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError | Failure, RiskTree] = unused
-    def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError | Failure, Option[(RiskTree, CommitHash)]] =
+    def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[Failure,RiskTree] = unused
+    def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[Failure,RiskTree] = unused
+    def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[Failure,RiskTree] = unused
+    def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure,RiskTree] = unused
+    def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure,Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(Some((tree, readCommit)))
-    def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]] = unused
+    def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure,List[RiskTree]] = unused
 
   /** A resolver whose every computation fails with `resolverFailure`. */
   private val failingResolver: CachedResultResolver = new CachedResultResolver:

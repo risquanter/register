@@ -15,7 +15,7 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, MergeStagingRef, SafeName, StoreBranch, TreeId, NodeId, MitigationId}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, MergeRefusal, PeerZone, TrustZone, ValidationFailed
+  Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, MergeRefusal, PeerZone, TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.{ConflictKind, NotFoundKind}
 import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
@@ -181,7 +181,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     case _: MergeStagingRef => true
     case _: BranchRef       => false
 
-  private def mainHeadHash: ZIO[IrminClient, AppError | Failure, CommitHash] =
+  private def mainHeadHash: ZIO[IrminClient, Failure, CommitHash] =
     IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
       .someOrFail(Failure.NotFound(Core(
         TrustZone.Peer(PeerZone.Store),
@@ -441,7 +441,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       )
     },
 
-    test("unknown scenario: preview reports ScenarioMissing, merge fails with ValidationFailed") {
+    test("unknown scenario: preview reports ScenarioMissing, merge is the caller's refusal naming the scenario") {
       val scenario = scenarioName("merge-nowhere")
       val wsId     = WorkspaceId(safeId("merge-ws-missing"))
       for
@@ -449,7 +449,11 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         previewed <- svc.preview(wsId, scenario)
         mergeExit <- svc.merge(wsId, scenario).exit
       yield assertTrue(previewed == MergePreviewStatus.ScenarioMissing()) &&
-        assert(mergeExit)(fails(isSubtype[ValidationFailed](anything)))
+        assert(mergeExit)(fails(equalTo(Failure.rejected(
+          TrustZone.Client,
+          NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(scenario))),
+          Nil
+        ))))
     }
 
   ).provideLayerShared(testLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock

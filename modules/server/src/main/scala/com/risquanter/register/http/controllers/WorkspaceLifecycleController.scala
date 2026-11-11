@@ -1,13 +1,14 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, BootstrapProvisioner, Checked, LifecycleMarker, Permission, UserContextExtractor}
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.configs.WorkspaceConfig
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, RequestHeaderName, ValidationError, ValidationFailed}
+import com.risquanter.register.domain.errors.{ErrorLocation, Failure, FieldProblem, RequestHeaderName, TrustZone, ValidationError}
 import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, NonNegativeInt, Revision}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{EvictExpiredResponse, TreeListResponse, TreeLocation, WorkspaceBootstrapResponse, WorkspaceLocation, WorkspaceRotateResponse}
@@ -111,8 +112,11 @@ class WorkspaceLifecycleController private (
                     case BranchChoice.Scenario(name) =>
                       scenarioService.list(ws.id).flatMap { scenarios =>
                         ZIO.unless(scenarios.exists(_.name == name))(
-                          ZIO.fail(ValidationFailed(List(ValidationError(
-                            ErrorLocation.Header(RequestHeaderName.Branch), FieldProblem.ScenarioNotFound(name)))))
+                          ZIO.fail(Failure.rejected(
+                            TrustZone.Client,
+                            NonEmptyList(ValidationError(ErrorLocation.Header(RequestHeaderName.Branch), FieldProblem.ScenarioNotFound(name))),
+                            Nil
+                          ))
                         )
                       }.unit
         tree   <- riskTreeService.create(ws.id, req, branch)

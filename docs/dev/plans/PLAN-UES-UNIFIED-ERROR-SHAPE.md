@@ -24,7 +24,11 @@ because the leaf it failed with is deleted in this step; approved 2026-11-11.
 Step 4.3 landed at 0.18.15, with the two `NotSupported` services narrowed to
 `IO[Failure, A]` and sharing one `scenariosUnavailable` value, and the in-memory
 repository's row 9 values built by `pinnedReadsUnavailable`; approved
-2026-11-11. Phase 4 closes when BATS suite C passes at 0.18.15.
+2026-11-11. Phase 4 closes when BATS suite C passes at 0.18.15. Phase 5 step
+5.1 landed at 0.18.16, with the deletion of `ValidationFailed` moved to step
+5.5, because rows 56 to 58 still build it until steps 5.4 and 5.5, and with
+`WorkspaceStore.maxTreesReached` and its two capacity checks taking the
+configured limit as `PositiveInt`; approved 2026-11-11.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -905,11 +909,12 @@ Acceptance: compile, the four tiers, BATS suite C.
 Rows 2 to 8, 10, 11, 13, 26 and 56 to 59. Old leaves deleted: `ValidationFailed`,
 the seven `FolQueryFailure` leaves and the trait, and `SimulationFailure`.
 
-5.1 Rows 2 to 8, 10, 11 and 13 already build `Rejected` at `Client` through
-`toZIOValidation(TrustZone.Client)` since Phase 0.3. This step deletes
-`ValidationFailed` and its arm, and narrows every signature whose only
-`AppError` was `ValidationFailed`. Grep: `ValidationFailed`. Test: the existing
-controller specs pin 422 and 400 unchanged.
+5.1 Rows 2 to 8, 10, 11 and 13 build `Rejected` at `Client` with the locations
+and problems of record §9. Row 2's resolve and `fromNodes` already do so through
+`toZIOValidation(TrustZone.Client)`. Its `SeedVarIdAssigner` step and rows 3 to
+8, 10, 11 and 13 are converted here. Every signature with no `AppError` left is
+narrowed to `IO[Failure, A]`. Test: the existing specs assert the full
+`Rejected` values, and the controller specs pin 422 and 400 unchanged.
 
 5.2 Row 26. `FolQueryFailure.fromQueryError` becomes
 `QueryProblem.fromQueryError(err: QueryError): Option[QueryProblem]`, `Some` for
@@ -969,12 +974,13 @@ arm's text.
 second leaf's error; `SimulatorSpec` pins that an unfit leaf at simulation is a
 defect.
 
-5.5 Rows 57 and 58. Row 57's four checks in `CachedResultResolverLive` stay and
+5.5 Rows 57 and 58. `ValidationFailed` and its `fromAppError` arm are deleted.
+Row 57's four checks in `CachedResultResolverLive` stay and
 build `Rejected` at `Service` with their present locations and problems
 (`UES-D-15`). Row 58a builds `Rejected` at `Peer(Store)`,
 `(Field(ExistingNode(id), AggregatedLoss), AggregatedLossOverflow)`; 58b stays
 `Rejected` at `Client`. The resolver's `fromValidation` takes the zone, as
-`toZIOValidation` does. Grep: none beyond `ValidationFailed` in 5.1. Test: the
+`toZIOValidation` does. Grep: `ValidationFailed`. Test: the
 resolver's suite pins row 57's and 58a's zones.
 
 Acceptance: compile, the four tiers, BATS suites A and C.

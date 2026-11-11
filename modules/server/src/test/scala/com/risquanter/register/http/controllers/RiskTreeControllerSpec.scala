@@ -1,16 +1,16 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.* // For .assert extension method
-import com.risquanter.register.domain.data.iron.{NonNegativeLong, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationErrorCode, ValueRange}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeName, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
+import com.risquanter.register.domain.errors.{ErrorLocation, Failure, FieldName, FieldProblem, TrustZone, ValidationError, ValueRange}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.testutil.TestHelpers.{safeId}
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -21,10 +21,10 @@ import sttp.tapir.{Codec, CodecFormat, DecodeResult}
 object RiskTreeControllerSpec extends ZIOSpecDefault {
   private given Checked[Authority] = TestChecked.value
 
-  // Service accessor pattern. The error type is `AppError | Failure` rather than
+  // Service accessor pattern. The error type is `Failure` rather than
   // `Throwable` because that is what the service declares; a helper widened to
   // `Throwable` would hide which failures a call can actually produce.
-  private def service[A](f: RiskTreeService => IO[AppError | Failure, A]): ZIO[RiskTreeService, AppError | Failure, A] =
+  private def service[A](f: RiskTreeService => IO[Failure, A]): ZIO[RiskTreeService, Failure, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   // Stub repository factory - creates fresh instance per test
@@ -33,7 +33,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   private def makeStubRepo() = new RiskTreeRepository {
     private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
     
-    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[Failure,RiskTree] =
       // Identifier generation fails only on a broken platform, which is a
       // defect rather than an outcome a caller can act on — the same treatment
       // the service gives it.
@@ -45,26 +45,26 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     // A missing key here is a test that did not seed what it reads, which is a
     // defect in the test rather than a failure the service should handle.
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[Failure,RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       val updated = op(riskTree)
       db += ((wsId, id) -> updated)
       updated
     }.orDie
 
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] = ZIO.attempt {
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[Failure,RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       db -= ((wsId, id))
       riskTree
     }.orDie
 
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure,RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure,Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(db.get((wsId, id)).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
 
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure,List[RiskTree]] =
       ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => tree }.toList)
   }
 
@@ -147,14 +147,12 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
           e <- service(_.create(stubWsId, secondRequest, BranchRef.Main)).flip
         } yield e
 
-        program.assert {
-          case ValidationFailed(errors) =>
-            errors.exists(e =>
-              e.location == ErrorLocation.requestField(FieldName.Name) &&
-              FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE
-            )
-          case _ => false
-        }.provide(serviceLayer)
+        val name = SafeName.fromString("Duplicate Risk Portfolio").toOption.get
+        program.assert(_ == Failure.rejected(
+          TrustZone.Client,
+          NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.TreeNameAlreadyExists(name))),
+          Nil
+        )).provide(serviceLayer)
       }
     ),
 
@@ -207,8 +205,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         // refinement then rejects it, which is what makes the wire code
         // INVALID_FORMAT rather than TYPE_MISMATCH.
         assertTrue(
-          codec.decode("-1").isInstanceOf[DecodeResult.InvalidValue],
-          codec.decode("-999").isInstanceOf[DecodeResult.InvalidValue]
+          codec.decode("-1") match { case DecodeResult.InvalidValue(_) => true; case _ => false },
+          codec.decode("-999") match { case DecodeResult.InvalidValue(_) => true; case _ => false }
         )
       },
 

@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt}
-import com.risquanter.register.domain.errors.{AppError, Core, Failure}
+import com.risquanter.register.domain.errors.{Core, Failure}
 import com.risquanter.register.http.errors.ConflictKind
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
@@ -63,12 +63,12 @@ trait ScenarioService:
     *      changing mid-fork.
     */
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Authority]): IO[AppError | Failure, BranchRef]
+    (using Checked[Authority]): IO[Failure, BranchRef]
 
   /** List a workspace's scenarios, where ownership is a branch-name prefix
     * filter. Never includes `main` — main is not a scenario.
     */
-  def list(wsId: WorkspaceId)(using Checked[Authority]): IO[AppError | Failure, List[ScenarioSummary]]
+  def list(wsId: WorkspaceId)(using Checked[Authority]): IO[Failure, List[ScenarioSummary]]
 
   /** Delete a scenario via compare-and-set. Only removes the branch
     * pointer — commits remain reachable by hash, so forks survive.
@@ -81,18 +81,18 @@ trait ScenarioService:
     *      `expectedHead` (concurrent modification)
     */
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Authority]): IO[AppError | Failure, Unit]
+    (using Checked[Authority]): IO[Failure, Unit]
 
 object ScenarioService:
   def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
-    (using Checked[Authority]): ZIO[ScenarioService, AppError | Failure, BranchRef] =
+    (using Checked[Authority]): ZIO[ScenarioService, Failure, BranchRef] =
     ZIO.serviceWithZIO[ScenarioService](_.create(wsId, name, source))
 
-  def list(wsId: WorkspaceId)(using Checked[Authority]): ZIO[ScenarioService, AppError | Failure, List[ScenarioSummary]] =
+  def list(wsId: WorkspaceId)(using Checked[Authority]): ZIO[ScenarioService, Failure, List[ScenarioSummary]] =
     ZIO.serviceWithZIO[ScenarioService](_.list(wsId))
 
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
-    (using Checked[Authority]): ZIO[ScenarioService, AppError | Failure, Unit] =
+    (using Checked[Authority]): ZIO[ScenarioService, Failure, Unit] =
     ZIO.serviceWithZIO[ScenarioService](_.delete(wsId, name, expectedHead))
 
   /** Best-effort cascade deletion — lists a workspace's scenarios, then deletes
@@ -121,7 +121,7 @@ object ScenarioService:
     */
   extension (self: ScenarioService)
     def cascadeDeleteScenarios(wsId: WorkspaceId, parallelism: PositiveInt)(using Checked[Authority]): UIO[Unit] =
-      def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[AppError | Failure, Unit] =
+      def deleteWithFreshHeadRetry(s: ScenarioSummary): IO[Failure, Unit] =
         self.delete(wsId, s.name, s.head).catchSome { case StaleHead() =>
           self.list(wsId).flatMap { fresh =>
             fresh.find(_.name == s.name) match
@@ -132,27 +132,22 @@ object ScenarioService:
       self.list(wsId)
         .tapError {
           case Failure.NotSupported(_) => ZIO.unit
-          case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${messageOf(e)}")
+          case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.logMessage}")
         }
         .flatMap(scenarios => ZIO.withParallelism(parallelism) {
           ZIO.foreachParDiscard(scenarios)(s =>
             deleteWithFreshHeadRetry(s)
-              .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${messageOf(e)}"))
+              .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.logMessage}"))
               .ignore)
         })
         .ignore
 
   /** Matches the conflict a delete answers when the scenario's head moved. */
   private object StaleHead:
-    def unapply(error: AppError | Failure): Boolean = error match
+    def unapply(error: Failure): Boolean = error match
       case Failure.Conflict(Core(_, errors, _)) =>
         errors.exists {
           case (_, ConflictKind.ScenarioHeadStale(_)) => true
           case _                                      => false
         }
       case _ => false
-
-  /** The log text of either failure type. */
-  private def messageOf(error: AppError | Failure): String = error match
-    case e: AppError => e.logMessage
-    case f: Failure  => f.logMessage

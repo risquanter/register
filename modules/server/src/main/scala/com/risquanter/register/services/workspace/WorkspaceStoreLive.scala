@@ -7,7 +7,7 @@ import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId}
 import com.risquanter.register.domain.errors.{
-  AppError, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, TrustZone, ValidationFailed, ValidationError,
+  Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, TrustZone, ValidationError,
   ValueRange
 }
 import com.risquanter.register.configs.WorkspaceConfig
@@ -67,7 +67,7 @@ final class WorkspaceStoreLive private (
     * workspace holds v, and the counter is bumped past v. Assignment and
     * uniqueness check are atomic in a single Ref.modify.
     */
-  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError | Failure, WorkspaceKeySecret] =
+  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[Failure, WorkspaceKeySecret] =
     for
       key <- WorkspaceKeyCrypto.generate
       sid <- IdGenerators.nextId.orDie
@@ -102,12 +102,16 @@ final class WorkspaceStoreLive private (
   private def resolveSeedEntityId(
     state: WorkspaceStoreLive.State,
     provided: Option[SeedEntityId.SeedEntityId]
-  ): Either[AppError | Failure, (SeedEntityId.SeedEntityId, Long)] =
+  ): Either[Failure, (SeedEntityId.SeedEntityId, Long)] =
     provided match
       case Some(id) =>
         if state.byHash.values.exists(_.seedEntityId.value == id.value) then
-          Left(ValidationFailed(List(ValidationError(
-            ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id)))))
+          Left(Failure.rejected(
+            TrustZone.Client,
+            NonEmptyList(ValidationError(
+              ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id))),
+            Nil
+          ))
         else
           Right((id, math.max(state.nextSeedEntityId, id.value + 1)))
       case None =>
@@ -133,11 +137,11 @@ final class WorkspaceStoreLive private (
     * calls cannot all pass a ceiling only one of them may pass. Re-associating
     * a tree the workspace already holds stays allowed at the ceiling.
     */
-  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[Failure, Unit] =
     for
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
-      result  <- ref.modify[Either[AppError | Failure, Unit]] { state =>
+      result  <- ref.modify[Either[Failure, Unit]] { state =>
                    validateWorkspace(state.byHash, keyHash, now) match
                      case Left(err) => (Left(err), state)
                      case Right(ws) =>
@@ -155,7 +159,7 @@ final class WorkspaceStoreLive private (
     * the tree ceiling in one `Ref.modify`; a removal has no ceiling to enforce,
     * so it needs no single atomic step.
     */
-  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using Checked[Authority]): IO[Failure, Unit] =
     for
       _       <- resolveInternal(key)
       keyHash  = WorkspaceKeyCrypto.hash(key)
@@ -165,13 +169,13 @@ final class WorkspaceStoreLive private (
     yield ()
 
   /** List all tree IDs in a workspace. */
-  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, List[TreeId]] =
+  override def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
   /** Refuse a creation that would exceed the tree ceiling, before the tree is
     * written.
     */
-  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def checkTreeCapacity(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, Unit] =
     resolveInternal(key).flatMap(ws =>
       ZIO.fromEither(WorkspaceStore.treeCapacityForNew(ws, config.maxTreesPerWorkspace))
     )
@@ -181,7 +185,7 @@ final class WorkspaceStoreLive private (
     * One Ref.modify validates and touches in a single step, so there is no
     * window between the read and the write.
     */
-  override def resolve(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
+  override def resolve(key: WorkspaceKeySecret): IO[Failure, WorkspaceRecord] =
     for
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)
@@ -196,7 +200,7 @@ final class WorkspaceStoreLive private (
     yield ws
 
   /** Check if a tree belongs to a workspace. */
-  override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, Boolean] =
+  override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[Failure, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
 
   /** Evict all expired workspaces. Returns evicted entries for the caller's
@@ -220,7 +224,7 @@ final class WorkspaceStoreLive private (
     * delete is idempotent: a concurrent delete in between removes a key that is
     * already gone, a no-op on Map.
     */
-  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, Unit] =
+  override def delete(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, Unit] =
     for
       ws      <- resolveInternal(key)
       keyHash  = WorkspaceKeyCrypto.hash(key)
@@ -231,7 +235,7 @@ final class WorkspaceStoreLive private (
   /** Atomic rotation via one Ref.modify — no window where neither key works.
     * Validates through `validateWorkspace`. Logs a rotation event.
     */
-  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, WorkspaceKeySecret] =
+  override def rotate(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, WorkspaceKeySecret] =
     for
       newKey <- WorkspaceKeyCrypto.generate
       now    <- Clock.instant
@@ -260,7 +264,7 @@ final class WorkspaceStoreLive private (
     * and the projection onto the wire writes one line for the failure with the
     * trace the response carries.
     */
-  private def resolveInternal(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRecord] =
+  private def resolveInternal(key: WorkspaceKeySecret): IO[Failure, WorkspaceRecord] =
     for
       now     <- Clock.instant
       keyHash  = WorkspaceKeyCrypto.hash(key)

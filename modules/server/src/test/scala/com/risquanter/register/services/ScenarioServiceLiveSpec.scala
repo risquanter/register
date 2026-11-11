@@ -3,13 +3,12 @@ package com.risquanter.register.services
 import zio.*
 import zio.prelude.NonEmptyList
 import zio.test.*
-import zio.test.Assertion.*
 
 import java.time.Instant
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, PositiveInt, StoreBranch}
 import com.risquanter.register.domain.errors.{
-  Core, Diagnostic, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, TrustZone, ValidationFailed
+  Core, Diagnostic, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.ConflictKind
 import com.risquanter.register.http.responses.TreeWriteKind
@@ -104,6 +103,10 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
   private def conflict(location: ErrorLocation, kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
     Failure.Conflict(Core(TrustZone.Client, NonEmptyList(location -> kind), diagnostics))
 
+  /** The caller's refusal of the request's `source`. */
+  private def sourceRefused(problem: FieldProblem): Failure =
+    Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Source), problem)), Nil)
+
   /** The stale-head conflict a delete expecting `expected` answers when the head is `actual`. */
   private def staleHead(scenario: String, expected: CommitHash, actual: Option[CommitHash]): Failure =
     conflict(
@@ -130,7 +133,8 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         for
           svc  <- makeService(Map.empty)
           exit <- svc.create(wsId, name("draft-v1"), ScenarioSource.Main).exit
-        yield assert(exit)(fails(isSubtype[ValidationFailed](anything)))
+        yield assertTrue(exit.causeOption.flatMap(_.failureOption) ==
+          Some(sourceRefused(FieldProblem.WorkspaceHasNoContent)))
       },
 
       test("create ForkOf an existing scenario forks that scenario's head, not main's") {
@@ -150,7 +154,8 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         for
           svc  <- makeService(Map("main" -> hash('a')))
           exit <- svc.create(wsId, name("draft-v2"), ScenarioSource.ForkOf(name("ghost"))).exit
-        yield assert(exit)(fails(isSubtype[ValidationFailed](anything)))
+        yield assertTrue(exit.causeOption.flatMap(_.failureOption) ==
+          Some(sourceRefused(FieldProblem.ScenarioNotFound(name("ghost")))))
       },
 
       test("create fails with the caller's Conflict at the name on a name collision") {
@@ -251,14 +256,9 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
           svc  <- makeService(Map("main" -> hash('a'), foreignDraft -> hash('e')))
           exit <- svc.create(wsId, name("draft-v1"), ScenarioSource.AtCommit(hash('e'))).exit
           list <- svc.list(wsId)
-        yield assert(exit)(fails(isSubtype[ValidationFailed](anything))) &&
-          assertTrue(
-            exit.causeOption.flatMap(_.failureOption) match
-              case Some(ValidationFailed(errs)) =>
-                errs.exists(e => e.problem == FieldProblem.CommitNotFound(hash('e')) &&
-                  e.location == ErrorLocation.requestField(FieldName.Source))
-              case _ => false,
-            list.isEmpty
-          )
+        yield assertTrue(
+          exit.causeOption.flatMap(_.failureOption) == Some(sourceRefused(FieldProblem.CommitNotFound(hash('e')))),
+          list.isEmpty
+        )
       }
     ) @@ TestAspect.sequential

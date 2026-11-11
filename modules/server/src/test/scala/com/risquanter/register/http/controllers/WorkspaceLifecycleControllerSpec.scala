@@ -16,7 +16,7 @@ import com.risquanter.register.auth.{
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash, Revision}
-import com.risquanter.register.domain.errors.AppError
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.{TreeListResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -57,20 +57,20 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
     private def branchOf(rev: Revision): Option[BranchRef] = rev match
       case Revision.Head(b) => Some(b)
       case Revision.At(_)   => None
-    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
+    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[Failure,RiskTree] =
       com.risquanter.register.util.IdGenerators.nextTreeId.orDie.map { id =>
         val tree = RiskTree.fromNodesUnsafe(id, t.name, t.nodes, t.rootId, Some(t.seedVarHighWater), t.mitigations); db += ((wsId, branch, id) -> tree); tree
       }
     // A missing key is a test that did not seed what it reads, so it dies.
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[AppError, RiskTree] =
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): IO[Failure,RiskTree] =
       ZIO.attempt { val t = db((wsId, branch, id)); val u = op(t); db += ((wsId, branch, id) -> u); u }.orDie
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError, RiskTree] =
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[Failure,RiskTree] =
       ZIO.attempt { val t = db((wsId, branch, id)); db -= ((wsId, branch, id)); t }.orDie
-    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[AppError, RiskTree] =
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure,RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[AppError, Option[(RiskTree, CommitHash)]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure,Option[(RiskTree, CommitHash)]] =
       ZIO.succeed(branchOf(rev).flatMap(b => db.get((wsId, b, id))).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
-    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError, List[RiskTree]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure,List[RiskTree]] =
       ZIO.succeed(branchOf(rev) match
         case Some(b) => db.collect { case ((wid, bb, _), t) if wid == wsId && bb == b => t }.toList
         case None    => Nil)
