@@ -89,7 +89,7 @@ val bootstrapWorkspace = bootstrapWorkspaceEndpoint.serverLogic { case (xff, req
 
 ### 3. `Checked[P]` Proof Token — Base `Authority` Type
 
-`authz.check()` returns `IO[AuthError, Checked[P]]`. Service methods that require authorization
+`authz.check()` returns `IO[Failure, Checked[P]]`. Service methods that require authorization
 declare `(using Checked[Authority])`. A call site lacking a `given Checked[Authority]` in
 scope is a **compile error** — the check cannot be silently omitted.
 

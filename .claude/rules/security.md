@@ -34,13 +34,13 @@ state. It never writes authorization data.
 ```scala
 // ✅ The complete interface — check only, returns Checked[P] proof token
 trait AuthorizationService:
-  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[Failure, Checked[P]]
   // Checked[P] is bound via `given` in controller for-comprehensions.
   // Protected service methods require `using Checked[Authority]` — missing proof is a compile error.
 
 // ❌ NEVER — app never writes tuples to SpiceDB
-def grant(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]
-def revoke(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]
+def grant(user: UserId, permission: Permission, resource: ResourceRef): IO[Failure, Unit]
+def revoke(user: UserId, permission: Permission, resource: ResourceRef): IO[Failure, Unit]
 ```
 
 SpiceDB tuple writes are exclusively ops tooling (CI/CD, `zed` CLI). Adding

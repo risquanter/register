@@ -28,10 +28,10 @@ PAP), distinct from this application's codebase and deployment.
 ```scala
 // The complete AuthorizationService interface — no grant(), no revoke()
 trait AuthorizationService:
-  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[Failure, Checked[P]]
   // Returns a Checked[P] proof token on success; callers bind it via `given` in for-comprehensions.
-  // Fails with AuthError.Forbidden if SpiceDB returns false, and with
-  // AuthError.ServiceUnavailable on connectivity failure — deny, never allow.
+  // Fails with an AccessDenied at the authorization zone if SpiceDB does not grant, and with
+  // an Unanswered there on connectivity failure — deny, never allow.
 ```
 
 A lookup of the resources a user may reach is not part of the interface. Its one
@@ -110,12 +110,12 @@ relations are prohibited.
 ```scala
 // BAD: App writes authorization data — PAP concern smuggled into PEP
 trait AuthorizationService:
-  def grant(user: UserId, relation: String, resource: ResourceRef): IO[AuthError, Unit]
-  def revoke(user: UserId, relation: String, resource: ResourceRef): IO[AuthError, Unit]
+  def grant(user: UserId, relation: String, resource: ResourceRef): IO[Failure, Unit]
+  def revoke(user: UserId, relation: String, resource: ResourceRef): IO[Failure, Unit]
 
 // GOOD: App reads authorization state only
 trait AuthorizationService:
-  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[Failure, Checked[P]]
 ```
 
 ### ❌ Startup Seeding
@@ -151,11 +151,11 @@ authService.check(user, permission, resource)
 // BAD: Resource lifecycle write added to PEP — blurs the PAP boundary
 trait AuthorizationService:
   def check(...)
-  def recordOwnership(userId: UserId, wsId: WorkspaceId): IO[AuthError, Unit]  // ← PAP leak
+  def recordOwnership(userId: UserId, wsId: WorkspaceId): IO[Failure, Unit]  // ← PAP leak
 
 // GOOD: Separate trait scoped to the one handler that needs it
 trait BootstrapProvisioner:
-  def recordOwnership(userId: UserId.Authenticated, wsId: WorkspaceId): IO[AuthError, Unit]
+  def recordOwnership(userId: UserId.Authenticated, wsId: WorkspaceId): IO[Failure, Unit]
 // AuthorizationService unchanged — zero write methods
 ```
 

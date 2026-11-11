@@ -123,9 +123,10 @@ The client-visible message is the one place both are forbidden.
 would reveal whether a resource exists collapses to one status, so neither the
 status nor the message distinguishes "not yours" from "does not exist". A caller
 who does not hold a resource's capability must not learn from the response
-whether it is there. `AccessDenied` and `AuthForbidden` both project onto the
-same wire case for the same reason: a denial this service decided and one the
-authorization service decided are indistinguishable from outside.
+whether it is there. An `AccessDenied` at the mesh header and one at the
+authorization zone project onto the same wire case for the same reason: a denial
+this service decided and one the authorization service decided are
+indistinguishable from outside.
 
 An unreachable authorization service is **not** a denial. No decision was
 obtained, so none is assumed, and the request fails closed — but it answers as a
