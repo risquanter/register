@@ -41,16 +41,15 @@ final class AnalyzeQueryState(
 
   // ── Client-side parse validation ──────────────────────────────
   //
-  // VagueQueryParser.parse() runs in-browser (fol-engine cross-compiled
+  // VagueQueryParser.parse() runs in-browser (vql-engine cross-compiled
   // to JS via common). Validation is triggered by:
   //   - Blur (always) — textarea loses focus
   //   - Run / Ctrl+Enter — executeQuery() validates before submitting
   //   - Keystroke debounce (300ms) — only when instantValidate is on
   //
   // None when not yet validated or input is empty, Left(err) on syntax
-  // error, Right(parsed) on valid parse. The library error type is used
-  // directly on the JS side — no mapping to FolQueryFailure needed
-  // (that type exists only for HTTP dispatch on the server).
+  // error, Right(parsed) on valid parse. The pane shows the engine's own
+  // error text, so the library error type is held as it is.
 
   /** When true, parse validation runs on every keystroke (debounced 300ms). */
   val instantValidate: Var[Boolean] = Var(false)
@@ -98,11 +97,11 @@ final class AnalyzeQueryState(
   // still runs to completion server-side, and its result goes nowhere.
   val queryResult: Var[LoadState[QueryResponse]] = Var(LoadState.Idle)
 
-  /** Server-side domain error (400 query failures) for inline display.
+  /** The server's refusal of the query text, for inline display.
     *
-    * Populated when `executeQuery()` receives a 400-level `FolQueryFailure`
-    * (parse, unknown-symbol, bind, domain-not-quantifiable). Rendered as
-    * `span.form-error` in the query panel, parallel to `parseError`.
+    * Populated when `executeQuery()` receives a 422 `ValidationRejected`
+    * carrying `RejectionDetail.Query`, rendered through `ErrorMessages.query`.
+    * Shown as `span.form-error` in the query panel, parallel to `parseError`.
     *
     * Cleared on every new query execution. Every other failure lands in
     * `queryResult` as `LoadState.Failed`, which the result card renders.

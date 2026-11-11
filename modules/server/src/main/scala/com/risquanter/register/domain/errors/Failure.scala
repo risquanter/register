@@ -6,7 +6,7 @@ import zio.prelude.NonEmptyList
 
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{TraceId, ValidationMessages}
-import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, RejectionDetail, TreeScope, WireError}
+import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, QueryProblem, RejectionDetail, TreeScope, WireError}
 
 /** The fields every failure carries. `Z` is the zone type a variant admits and
   * `P` the problem type its list holds; a variant fixes both and adds nothing.
@@ -158,7 +158,7 @@ object Failure:
   private final case class View(zone: TrustZone, entries: NonEmptyList[String], diagnostics: List[Diagnostic])
 
   private def view(f: Failure): View = f match
-    case Rejected(c)     => View(c.zone, entries(c, ValidationMessages.render), c.diagnostics)
+    case Rejected(c)     => View(c.zone, entries(c, logged), c.diagnostics)
     case Unanswered(c)   => View(TrustZone.Peer(c.zone), entries(c, OutageMode.describe), c.diagnostics)
     case NotFound(c)     => View(c.zone, entries(c, NotFoundKind.describe), c.diagnostics)
     case Conflict(c)     => View(c.zone, entries(c, ConflictKind.describe), c.diagnostics)
@@ -168,6 +168,31 @@ object Failure:
 
   private def entries[Z, P](core: Core[Z, P], describe: P => String): NonEmptyList[String] =
     core.errors.map((location, problem) => s"[${ErrorLocation.describe(location)}] ${describe(problem)}")
+
+  /** How much of a parser message reaches the log line.
+    *
+    * The parser's "unexpected tokens" message renders every remaining token, so
+    * its length follows the submitted query, which is bounded only by the 8 MiB
+    * request-body cap. One line per failed request is written synchronously to
+    * standard output, so an unbounded message makes a request's log cost scale
+    * with its body. 300 characters is chosen here as enough to identify where a
+    * query stopped parsing while keeping the line a fixed cost.
+    *
+    * The full message still crosses to the caller who sent the query, because
+    * it is their own text coming back.
+    */
+  private val LoggedMessageLimit: Int = 300
+
+  /** A refused problem's sentence for the log line, with a parser message cut
+    * to `LoggedMessageLimit`. */
+  private def logged(problem: FieldProblem): String = problem match
+    case FieldProblem.Query(QueryProblem.Unparseable(message, position)) =>
+      ValidationMessages.render(FieldProblem.Query(QueryProblem.Unparseable(bounded(message), position)))
+    case other => ValidationMessages.render(other)
+
+  private def bounded(message: String): String =
+    if message.length <= LoggedMessageLimit then message
+    else s"${message.take(LoggedMessageLimit)}… (message truncated)"
 
   /** The zone's log value. Declared rather than derived from the case name,
     * because the log pipeline matches it exactly (ADR-037). */

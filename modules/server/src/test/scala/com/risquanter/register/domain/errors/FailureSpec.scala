@@ -186,6 +186,24 @@ object FailureSpec extends ZIOSpecDefault:
         val problem = QueryProblem.Unparseable("unexpected token", Some(7))
         assertTrue(ValidationMessages.render(FieldProblem.Query(problem)) == "unexpected token (at character 7)")
       },
+      test("a parser message reaches the log line cut to 300 characters, and a tree's wire answer whole") {
+        val message = "x" * 400
+        val failure = Failure.rejected(
+          TrustZone.Client,
+          NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable(message, Some(2))))),
+          Nil
+        )
+        val trace = TelemetryPlaceholders.UnlinkedTrace
+        assertTrue(
+          failure.logMessage ==
+            s"Rejected: [${ErrorLocation.describe(ErrorLocation.Whole)}] ${"x" * 300}… (message truncated) (at character 2)",
+          failure.toWire(trace, TreeScope.InTree(treeId)) ==
+            WireError.ValidationRejected(treeId, RejectionDetail.Query(QueryProblem.Unparseable(message, Some(2))), trace),
+          // A query runs only on a route naming a tree, so a refusal with none
+          // in scope is this service's defect.
+          failure.toWire(trace, TreeScope.NoTree) == WireError.InternalFault(trace)
+        )
+      },
       test("a refused query is classified by the engine's refusal") {
         assertTrue(
           FieldProblem.code(FieldProblem.Query(QueryProblem.Unparseable("m", None))) == ValidationErrorCode.PARSE_ERROR,

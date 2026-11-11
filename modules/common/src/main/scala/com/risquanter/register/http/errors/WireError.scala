@@ -129,24 +129,9 @@ object WireError:
         case TreeScope.InTree(tree) => ValidationRejected(tree, detail, t)
         case TreeScope.NoTree       => RequestRejected(fallback, t)
 
-    // A query runs only on a route carrying `path[TreeId]("treeId")`, so
-    // `NoTree` cannot occur here. It is this service's defect rather than the
-    // caller's, so it answers the opaque fault and the boundary log line
-    // records it.
-    def queryRejected(problem: QueryProblem): WireError =
-      scope match
-        case TreeScope.InTree(tree) => ValidationRejected(tree, RejectionDetail.Query(problem), t)
-        case TreeScope.NoTree       => InternalFault(t)
-
     e match
       // Content of a known tree, or a request that named none
       case ValidationFailed(errors)            => rejected(RejectionDetail.Fields(errors), errors)
-
-      // Query refused
-      case FolParseFailure(message, position)  => queryRejected(QueryProblem.Unparseable(message, position))
-      case FolUnknownReference(messages)       => queryRejected(QueryProblem.UnknownReferences(messages))
-      case FolBindFailure(errors)              => queryRejected(QueryProblem.TypeCheckFailed(errors))
-      case FolDomainNotQuantifiable(message)   => queryRejected(QueryProblem.NotQuantifiable(message))
 
       // Faults: a client can act on none of them.
       case SimulationFailure(_, _)             => WireError.InternalFault(t)

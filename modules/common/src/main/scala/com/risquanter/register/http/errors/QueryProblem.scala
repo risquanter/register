@@ -3,6 +3,9 @@ package com.risquanter.register.http.errors
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
+import vql.error.{BindErrorDetail, QueryError}
+
+import com.risquanter.register.domain.errors.FolQueryFailure
 
 /** Why the engine refused a well-formed query.
   *
@@ -58,3 +61,43 @@ object QueryProblem:
       s"The query does not type-check: ${messages.mkString("; ")}"
     case NotQuantifiable(message) =>
       message
+
+  /** The refusal the caller can act on, when the engine's error is one.
+    *
+    * `None` for a model that does not satisfy its catalog and for a failure
+    * after binding succeeded: those are faults in how this service wires the
+    * knowledge base, so nothing about the query would fix them.
+    *
+    * A bind failure whose every detail is a quoted literal of a node-reference
+    * sort names a node the tree does not hold, so it is `UnknownReferences`.
+    * Any other bind detail is a type error and makes the whole failure
+    * `TypeCheckFailed`. The engine raises `ValidationError` from the query's own
+    * variable rules, so it is the caller's text being refused.
+    *
+    * {{{
+    * fromQueryError(QueryError.ParseError("Expected '}'", "Q[>=]^{2/3 x", Some(14)))
+    * // Some(Unparseable("Expected '}'", Some(14)))
+    * }}}
+    */
+  def fromQueryError(err: QueryError): Option[QueryProblem] = err match
+    case e: QueryError.ParseError                    => Some(Unparseable(e.message, e.position))
+    case e: QueryError.ValidationError               => Some(Unparseable(e.message, None))
+    case e: QueryError.UnknownConstantOrLiteralError => Some(UnknownReferences(List(e.message)))
+    case e: QueryError.BindError                     =>
+      val allNodeUnresolved =
+        e.details.nonEmpty && e.details.forall {
+          case BindErrorDetail.UnparseableConstant(_, sortName, _, _) =>
+            FolQueryFailure.NodeReferenceSortNames.contains(sortName)
+          case _ => false
+        }
+      Some(if allNodeUnresolved then UnknownReferences(e.messages) else TypeCheckFailed(e.messages))
+    case e: QueryError.DomainNotFoundError           => Some(NotQuantifiable(notEnumerable(e.typeName, e.availableTypes)))
+    case _: QueryError.ModelValidationError          => None
+    case _: QueryError.EvaluationError               => None
+    case _: QueryError.UnboundVariableError          => None
+
+  /** The sentence for a quantifier over a type with no enumerable domain. */
+  private def notEnumerable(typeName: String, availableTypes: Iterable[String]): String =
+    s"Queries can only range over tree nodes (type 'Asset'). " +
+      s"The type '$typeName' cannot be enumerated. " +
+      s"Available quantifiable types: ${availableTypes.mkString(", ")}"

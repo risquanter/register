@@ -5,7 +5,6 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
-import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.services.QueryService
@@ -14,9 +13,9 @@ import com.risquanter.register.http.errors.TreeScope
 
 /** Query controller — wires `QueryRequest.resolve()` to `QueryService.evaluate()`.
   *
-  * This controller is "dumb" per ADR-001: it calls `resolve()` at the HTTP
-  * boundary, maps the library error to `FolQueryFailure`, then forwards the
-  * typed `ParsedQuery` to the service. No query content inspection.
+  * The controller inspects no query content (ADR-001). It calls `resolve()` at
+  * the HTTP boundary, turns the engine's error into a failure through
+  * `QueryService.refused`, and forwards the typed `ParsedQuery` to the service.
   *
   * Authorization layers:
   *  - Layer 0: [[WorkspaceStore.resolveTreeWorkspace]] validates the workspace key
@@ -49,8 +48,7 @@ class QueryController private (
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        parsed <- ZIO.fromEither(QueryRequest.resolve(req))
-                    .mapError(e => FolQueryFailure.fromQueryError(e))
+        parsed <- ZIO.fromEither(QueryRequest.resolve(req)).mapError(QueryService.refused)
         result <- queryService.evaluate(ws.id, treeId, parsed, ws.seedEntityId, branch)
       yield result).wireEither(TreeScope.InTree(treeId))
   }

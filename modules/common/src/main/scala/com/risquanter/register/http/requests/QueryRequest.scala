@@ -19,10 +19,9 @@ object QueryRequest:
 
   /** Inbound parse boundary (ADR-001 §1 — parse-don't-validate).
     *
-    * Wraps `VagueQueryParser.parse()` — the library's syntactic parser.
-    * Returns the library's `vql.error.QueryError` on failure (not register's
-    * `FolQueryFailure`); the controller maps the error type at the wiring
-    * layer, keeping this DTO free of `AppError` dependencies.
+    * Wraps `VagueQueryParser.parse()`, the library's syntactic parser, and
+    * returns the library's `vql.error.QueryError` on failure. The controller
+    * turns that error into a failure, so this DTO depends on no failure type.
     *
     * Analogous to `RiskTreeDefinitionRequest.resolve()` returning
     * `Validation[ValidationError, ResolvedCreate]` — the DTO owns the

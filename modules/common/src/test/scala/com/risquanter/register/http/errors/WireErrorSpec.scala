@@ -148,16 +148,9 @@ object WireErrorSpec extends ZIOSpecDefault:
         test("each leaf reaches the case assigned to it") {
           val mapping: List[(AppError, String)] = List(
             // Rejected request. Read with no tree in scope, so the content
-            // failures answer at the request level; the suite below reads the
-            // same five with a tree in scope.
+            // failure answers at the request level; the test below reads it
+            // with a tree in scope.
             ValidationFailed(Nil)                                  -> "RequestRejected",
-            // Refused query. A query route always names a tree, so reaching
-            // here without one is this service's defect rather than the
-            // caller's and answers the opaque fault.
-            FolParseFailure("bad", None)                           -> "InternalFault",
-            FolUnknownReference(List("x"))                         -> "InternalFault",
-            FolBindFailure(List("x"))                              -> "InternalFault",
-            FolDomainNotQuantifiable("x")                          -> "InternalFault",
             // Faults
             SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault",
             FolModelValidationFailure(List("x"))                   -> "InternalFault",
@@ -167,39 +160,17 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 8)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 4)
         },
-        test("with a tree in scope, the five content failures name that tree instead") {
-          // The same five leaves the table above reads with no tree. The scope
-          // is the only thing that differs, so this is what it decides.
-          val inTree: List[AppError] = List(
-            ValidationFailed(Nil),
-            FolParseFailure("bad", None),
-            FolUnknownReference(List("x")),
-            FolBindFailure(List("x")),
-            FolDomainNotQuantifiable("x")
-          )
-          val projected = inTree.map(e => WireError.fromAppError(e, trace, TreeScope.InTree(treeId)))
-          assertTrue(
-            projected.forall {
-              case WireError.ValidationRejected(t, _, _) => t == treeId
-              case _                                     => false
-            }
-          )
-        },
-        test("the detail says which kind of content was refused") {
+        test("with a tree in scope, a content failure names that tree and carries its fields") {
+          // The scope is the only thing that differs from the table above, so
+          // this is what it decides.
           val fields = WireError.fromAppError(
             ValidationFailed(List(fieldFailure)), trace, TreeScope.InTree(treeId)
-          )
-          val query = WireError.fromAppError(
-            FolParseFailure("bad", Some(4)), trace, TreeScope.InTree(treeId)
           )
           assertTrue(
             fields == WireError.ValidationRejected(
               treeId, RejectionDetail.Fields(List(fieldFailure)), trace
-            ),
-            query == WireError.ValidationRejected(
-              treeId, RejectionDetail.Query(QueryProblem.Unparseable("bad", Some(4))), trace
             )
           )
         }

@@ -1,48 +1,47 @@
 package com.risquanter.register.domain.errors
 
+import zio.prelude.NonEmptyList
 import zio.test.*
 
 import vql.error.QueryError as QE
 import vql.error.BindErrorDetail
 
-/** Tests for [[FolQueryFailure.fromQueryError]] — the centralised mapping
-  * from fol-engine's `QueryError` algebra to register's error hierarchy.
-  *
-  * Covers the exhaustive match: every concrete `QueryError` subtype maps
-  * to the correct `FolQueryFailure` variant, preserving relevant fields.
+import com.risquanter.register.http.errors.QueryProblem
+import com.risquanter.register.services.QueryService
+
+/** Tests for `QueryProblem.fromQueryError`, which reads the engine's
+  * `QueryError` as the refusal a caller can act on, and for
+  * `QueryService.refused`, which turns that reading into a failure.
   */
-object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
+object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
-    suite("FolQueryFailure.fromQueryError")(
+    suite("QueryProblem.fromQueryError")(
       parseSuite,
       bindSuite,
       domainNotFoundSuite,
-      modelValidationSuite,
-      evaluationSuite,
-      catchAllSuite
+      wiringSuite,
+      refusedSuite
     )
 
-  // ── Parse errors → FolParseFailure ──────────────────────────────────
+  // ── Errors in the query's own text → Unparseable ────────────────────
 
-  private val parseSuite = suite("→ FolParseFailure")(
+  private val parseSuite = suite("→ Unparseable")(
     test("ParseError with position") {
       val err = QE.ParseError("Unexpected token", "Q[>=]^{2/3 x", position = Some(10))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolParseFailure(msg, pos) =>
-          assertTrue(msg == "Unexpected token", pos == Some(10))
-        case other => throw MatchError(other)
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.Unparseable("Unexpected token", Some(10))))
     },
     test("ParseError without position") {
       val err = QE.ParseError("Empty input", "")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolParseFailure(_, pos) =>
-          assertTrue(pos.isEmpty)
-        case other => throw MatchError(other)
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.Unparseable("Empty input", None)))
+    },
+    test("ValidationError, raised from the query's own variable rules, is the caller's text refused") {
+      val err = QE.ValidationError("Variable x is bound twice", "query")
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.Unparseable("Variable x is bound twice", None)))
     }
   )
 
-  // ── Bind errors → classification (UNKNOWN_REFERENCE vs BIND_FAILED) ──
+  // ── Bind errors → UnknownReferences or TypeCheckFailed ──────────────
 
   /** A bind-phase unparseable-constant detail with a synthetic rendered message. */
   private def unparseable(name: String, sortName: String): BindErrorDetail =
@@ -52,17 +51,14 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
     )
 
   private val bindSuite = suite("BindError classification")(
-    test("all-node-unresolved → FolUnknownReference carrying the rendered messages") {
+    test("every detail an unresolved node → UnknownReferences carrying the rendered messages") {
       val err = QE.BindError(List(
         unparseable("Foo", FolQueryFailure.NodeSortName),
         unparseable("Bar", FolQueryFailure.NodeSortName)
       ))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolUnknownReference(messages) =>
-          assertTrue(messages == err.messages, messages.exists(_.contains("Foo")))
-        case other => throw MatchError(other)
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.UnknownReferences(err.messages)))
     },
-    test("node-unresolved mixed with a genuine type error → FolBindFailure") {
+    test("an unresolved node beside a genuine type error → TypeCheckFailed") {
       val err = QE.BindError(List(
         unparseable("Foo", FolQueryFailure.NodeSortName),
         BindErrorDetail.ArityMismatch(
@@ -70,130 +66,89 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
           rendered = "arity mismatch for 'leaf': expected 1, actual 2"
         )
       ))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolBindFailure(errors) =>
-          assertTrue(errors == err.messages, errors.exists(_.contains("arity mismatch")))
-        case other => throw MatchError(other)
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.TypeCheckFailed(err.messages)))
     },
-    test("homogeneous NodeNameLiteral unparseable constant → FolUnknownReference") {
-      // named_risk(x, "Nonexistent") fails on the NodeNameLiteral sort — the same
-      // nonexistent-node error as a Node-slot name, so it classifies as
-      // UNKNOWN_REFERENCE, not BIND_FAILED (Option B).
-      val err = QE.BindError(List(
-        unparseable("Nonexistent", FolQueryFailure.NodeNameLiteralSortName)
-      ))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolUnknownReference(messages) =>
-          assertTrue(messages == err.messages, messages.exists(_.contains("Nonexistent")))
-        case other => throw MatchError(other)
+    test("a name literal naming no node → UnknownReferences") {
+      // named_risk(x, "Nonexistent") fails on the NodeNameLiteral sort, which is
+      // the same missing node as a name in a node slot.
+      val err = QE.BindError(List(unparseable("Nonexistent", FolQueryFailure.NodeNameLiteralSortName)))
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.UnknownReferences(err.messages)))
     },
-    test("Node and NodeNameLiteral mixed unresolved → FolUnknownReference") {
-      // A query naming a nonexistent node in both a structural slot and via
-      // named_risk still classifies wholly as UNKNOWN_REFERENCE.
+    test("a node slot and a name literal both unresolved → UnknownReferences") {
       val err = QE.BindError(List(
         unparseable("Foo", FolQueryFailure.NodeSortName),
         unparseable("Bar", FolQueryFailure.NodeNameLiteralSortName)
       ))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolUnknownReference(messages) =>
-          assertTrue(messages == err.messages)
-        case other => throw MatchError(other)
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.UnknownReferences(err.messages)))
     },
-    test("homogeneous NodeIdLiteral unparseable constant → FolBindFailure") {
-      // A malformed id (risk_id(x, "not-an-id")) is genuine bind failure, not a
-      // nonexistent-node reference — NodeIdLiteral is excluded from the set.
+    test("a malformed id literal → TypeCheckFailed") {
+      // risk_id(x, "not-an-id") is a type error, so NodeIdLiteral is not a
+      // node-reference sort.
       val err = QE.BindError(List(unparseable("not-an-id", "NodeIdLiteral")))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolBindFailure(errors) =>
-          assertTrue(errors.size == 1, errors.head.contains("not-an-id"))
-        case other => throw MatchError(other)
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.TypeCheckFailed(err.messages)))
     },
-    test("homogeneous non-node unparseable constant → FolBindFailure") {
+    test("a non-node literal → TypeCheckFailed") {
       val err = QE.BindError(List(unparseable("notaloss", "Loss")))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolBindFailure(errors) =>
-          assertTrue(errors.size == 1, errors.head.contains("notaloss"))
-        case other => throw MatchError(other)
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.TypeCheckFailed(err.messages)))
     },
-    test("BindError logMessage joins rendered messages with semicolons") {
-      val err = QE.BindError(List(
-        BindErrorDetail.UnknownPredicate("A", rendered = "error A"),
-        BindErrorDetail.UnknownFunction("B", rendered = "error B")
-      ))
-      val mapped = FolQueryFailure.fromQueryError(err)
-      assertTrue(mapped.logMessage.contains("error A; error B"))
+    test("an unknown constant or literal → UnknownReferences") {
+      // Reachable through a quoted literal in the mitigation slot, such as
+      // p95(x, "foo"), because no literal validator exists for that sort.
+      val err = QE.UnknownConstantOrLiteralError("foo")
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.UnknownReferences(List(err.message))))
     }
   )
 
-  // ── Domain-not-found errors → FolDomainNotQuantifiable ──────────────
+  // ── Domain not found → NotQuantifiable ──────────────────────────────
 
-  private val domainNotFoundSuite = suite("→ FolDomainNotQuantifiable")(
-    test("DomainNotFoundError renders type and Asset into the message") {
+  private val domainNotFoundSuite = suite("→ NotQuantifiable")(
+    test("DomainNotFoundError names the type and the quantifiable types") {
       val err = QE.DomainNotFoundError("Loss", Set("Asset"))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolDomainNotQuantifiable(message) =>
-          assertTrue(message.contains("Loss"), message.contains("Asset"))
-        case other => throw MatchError(other)
-    },
-    test("DomainNotFoundError logMessage mentions type and Asset") {
-      val err = QE.DomainNotFoundError("Probability", Set("Asset"))
-      val mapped = FolQueryFailure.fromQueryError(err)
-      assertTrue(
-        mapped.logMessage.contains("Probability"),
-        mapped.logMessage.contains("Asset")
-      )
+      assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.NotQuantifiable(
+        "Queries can only range over tree nodes (type 'Asset'). " +
+          "The type 'Loss' cannot be enumerated. " +
+          "Available quantifiable types: Asset"
+      )))
     }
   )
 
-  // ── Model validation errors → FolModelValidationFailure ─────────────
+  // ── Wiring faults → None ────────────────────────────────────────────
 
-  private val modelValidationSuite = suite("→ FolModelValidationFailure")(
-    test("ModelValidationError preserves error list") {
-      val err = QE.ModelValidationError(List(
-        "Missing function implementation: lec",
-        "Missing domain for type: Asset"
+  private val wiringSuite = suite("→ None")(
+    test("ModelValidationError") {
+      assertTrue(QueryProblem.fromQueryError(QE.ModelValidationError(List("Missing domain for type: Asset"))).isEmpty)
+    },
+    test("EvaluationError") {
+      assertTrue(QueryProblem.fromQueryError(QE.EvaluationError("Division by zero", "scope_eval")).isEmpty)
+    },
+    test("UnboundVariableError") {
+      assertTrue(QueryProblem.fromQueryError(QE.UnboundVariableError("x", Set("y", "z"))).isEmpty)
+    }
+  )
+
+  // ── QueryService.refused ────────────────────────────────────────────
+
+  private val refusedSuite = suite("QueryService.refused")(
+    test("a parse failure is Rejected at Client at the whole request") {
+      val err = QE.ParseError("Expected '}'", "Q[>=]^{2/3 x", Some(14))
+      assertTrue(QueryService.refused(err) == Failure.rejected(
+        TrustZone.Client,
+        NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable("Expected '}'", Some(14))))),
+        Nil
       ))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolModelValidationFailure(errors) =>
-          assertTrue(errors.size == 2, errors.head == "Missing function implementation: lec")
-        case other => throw MatchError(other)
     },
-    test("ModelValidationError logMessage joins errors") {
-      val err = QE.ModelValidationError(List("error X"))
-      val mapped = FolQueryFailure.fromQueryError(err)
-      assertTrue(mapped.logMessage.contains("error X"))
-    }
-  )
-
-  // ── Evaluation errors → FolEvaluationFailure ─────────────────────────
-
-  private val evaluationSuite = suite("→ FolEvaluationFailure")(
-    test("EvaluationError preserves message and phase") {
+    test("a model that does not satisfy its catalog is a model-validation fault") {
+      val err = QE.ModelValidationError(List("Missing function implementation: lec"))
+      assertTrue(QueryService.refused(err) == FolQueryFailure.FolModelValidationFailure(List("Missing function implementation: lec")))
+    },
+    test("an evaluation failure keeps its message and phase") {
       val err = QE.EvaluationError("Division by zero", "scope_eval")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(msg, phase) =>
-          assertTrue(msg == "Division by zero", phase == "scope_eval")
-        case other => throw MatchError(other)
+      assertTrue(QueryService.refused(err) == FolQueryFailure.FolEvaluationFailure("Division by zero", "scope_eval"))
     },
-    test("fol ValidationError maps with phase 'validation'") {
-      val err = QE.ValidationError("Invalid field", "query")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "validation")
-        case other => throw MatchError(other)
-    }
-  )
-
-  // ── Catch-all for remaining subtypes ────────────────────────────────
-
-  private val catchAllSuite = suite("remaining subtypes → FolEvaluationFailure")(
-    test("UnboundVariableError maps with phase 'unbound_variable'") {
+    test("an unbound variable is an evaluation fault") {
       val err = QE.UnboundVariableError("x", Set("y", "z"))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "unbound_variable")
-        case other => throw MatchError(other)
+      assertTrue(QueryService.refused(err) == FolQueryFailure.FolEvaluationFailure(err.message, "unbound_variable"))
     }
   )
 
-end FolQueryFailureFromQueryErrorSpec
+end QueryProblemFromQueryErrorSpec

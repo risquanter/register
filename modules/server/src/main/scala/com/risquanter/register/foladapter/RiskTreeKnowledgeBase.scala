@@ -444,7 +444,7 @@ object RiskTreeKnowledgeBase:
     * the node's id at bind time by the literal validator (`riskNameToId.get`).
     * A `ValueType`: it flows through an argument slot and is never quantified over.
     * The sort string surfaces in a failed-literal bind message and is a
-    * node-reference discriminator in [[FolQueryFailure.fromQueryError]]. */
+    * node-reference discriminator in `QueryProblem.fromQueryError`. */
   val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")
 
   /** Value sort for a node reference written as a quoted node ID literal

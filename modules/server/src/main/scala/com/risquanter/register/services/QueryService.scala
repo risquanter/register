@@ -1,12 +1,15 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.NonEmptyList
 
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef}
-import com.risquanter.register.domain.errors.{AppError, Failure}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, Failure, FieldProblem, FolQueryFailure, TrustZone, ValidationError}
+import com.risquanter.register.http.errors.QueryProblem
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.auth.{Authority, Checked}
 
+import vql.error.QueryError
 import vql.logic.ParsedQuery
 
 /** Service layer for vague quantifier query evaluation (ADR-028).
@@ -39,6 +42,20 @@ trait QueryService:
   def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, QueryResponse]
 
 object QueryService:
+
+  /** The failure an engine error is: the caller's refused query, located at the
+    * whole request, or a fault in how this service wired the knowledge base.
+    *
+    * {{{
+    * refused(QueryError.ParseError("Expected '}'", "Q[>=]^{2/3 x", Some(14)))
+    * // Rejected at Client: (Whole, Query(Unparseable("Expected '}'", Some(14))))
+    * }}}
+    */
+  def refused(err: QueryError): AppError | Failure =
+    QueryProblem.fromQueryError(err) match
+      case Some(problem) =>
+        Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(problem))), Nil)
+      case None => FolQueryFailure.wiringFault(err)
 
   def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): ZIO[QueryService, AppError | Failure, QueryResponse] =
     ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed, seedEntityId, branch))

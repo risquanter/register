@@ -17,7 +17,12 @@ import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{
   BranchRef, CommitHash, NodeId, MitigationId, Revision, SafeName, SeedEntityId, SeedVarId, TreeId, WorkspaceId
 }
-import com.risquanter.register.domain.errors.{AppError, ErrorSubject, Failure, SimulationFailure}
+import zio.prelude.NonEmptyList
+
+import com.risquanter.register.domain.errors.{
+  AppError, ErrorLocation, ErrorSubject, Failure, FieldProblem, SimulationFailure, TrustZone, ValidationError
+}
+import com.risquanter.register.http.errors.QueryProblem
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry}
@@ -207,6 +212,30 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
         svc  <- ZIO.service[QueryService]
         exit <- svc.evaluate(WorkspaceId(safeId("qsl-ws")), tree.id, parsed, entity, BranchRef.Main).exit
       yield assertTrue(exit.causeOption.flatMap(_.failureOption) == Some(resolverFailure)))
+        .provide(
+          ZLayer.succeed(oneTreeRepo),
+          ZLayer.succeed(failingResolver),
+          MitigationScopeResolverRegistry.layer,
+          TestConfigs.telemetryLayer >>> TelemetryLive.configured,
+          QueryServiceLive.layer
+        )
+    },
+    test("a query naming a node the tree does not hold is Rejected at Client with UnknownReferences") {
+      // The bind fails before any selection is computed, so the failing
+      // resolver is never reached.
+      given Checked[Authority] = TestChecked.value
+      val parsed = VagueQueryParser.parse("""Q[>=]^{1/1} x (named_risk(x, "NoSuchNode"), leaf(x))""").toOption.get
+      (for
+        svc  <- ZIO.service[QueryService]
+        exit <- svc.evaluate(WorkspaceId(safeId("qsl-ws")), tree.id, parsed, entity, BranchRef.Main).exit
+      yield assertTrue(exit.causeOption.flatMap(_.failureOption) == Some(Failure.rejected(
+        TrustZone.Client,
+        NonEmptyList(ValidationError(
+          ErrorLocation.Whole,
+          FieldProblem.Query(QueryProblem.UnknownReferences(List("cannot parse 'NoSuchNode' as NodeNameLiteral")))
+        )),
+        Nil
+      ))))
         .provide(
           ZLayer.succeed(oneTreeRepo),
           ZLayer.succeed(failingResolver),

@@ -8,7 +8,6 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.{AppError, Failure}
-import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.common.ValuationBasis
 import com.risquanter.register.http.responses.QueryResponse
@@ -122,7 +121,7 @@ class QueryServiceLive private (
         // 6. Validate catalog+model pairing (FolModel smart constructor)
         folModel <- ZIO.fromEither(FolModel(kb.catalog, kb.model))
                       .tapError(e => ZIO.logWarning(s"FolModel validation failed for tree ${treeId.value}: ${e.formatted}"))
-                      .mapError(e => FolQueryFailure.fromQueryError(e))
+                      .mapError(QueryService.refused)
 
         // 7. Evaluate via vql.typed pipeline
         queryText = parsed.toString
@@ -136,7 +135,7 @@ class QueryServiceLive private (
                       hdrConfig = HDRConfig.default
                     )
                   ).tapError(e => ZIO.logWarning(s"FOL evaluation failed for tree ${treeId.value}: ${e.formatted}"))
-                   .mapError(e => FolQueryFailure.fromQueryError(e))
+                   .mapError(QueryService.refused)
 
         // 8. Build response
         _ <- tracing.setAttribute("query.range_size", output.rangeElements.size.toLong)

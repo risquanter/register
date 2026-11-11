@@ -28,7 +28,12 @@ repository's row 9 values built by `pinnedReadsUnavailable`; approved
 5.1 landed at 0.18.16, with the deletion of `ValidationFailed` moved to step
 5.5, because rows 56 to 58 still build it until steps 5.4 and 5.5, and with
 `WorkspaceStore.maxTreesReached` and its two capacity checks taking the
-configured limit as `PositiveInt`; approved 2026-11-11.
+configured limit as `PositiveInt`; approved 2026-11-11. Step 5.2 landed at
+0.18.17. Until step 5.3, `QueryService.refused` answers `None` through
+`FolQueryFailure.wiringFault`, which keeps today's two wiring leaves. The
+parser-message log limit moved to `Failure`'s log rendering. The service-level
+test pins a refused bind, because the service receives a parsed query. Approved
+2026-11-11.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -937,8 +942,12 @@ FieldProblem.Query(problem))`. The projection emits `RejectionDetail.Query(probl
 on a route with a tree, so the wire is unchanged (`UES-D-7`). Grep:
 `FolParseFailure`, `FolUnknownReference`, `FolBindFailure`,
 `FolDomainNotQuantifiable`. Test: `FolQueryFailureFromQueryErrorSpec` is
-rewritten over the new function and pins `ValidationError` as `Unparseable`;
-`QueryServiceLiveSpec` pins a parse failure as `Rejected` with `Query(Unparseable(…))`.
+rewritten over the new function as `QueryProblemFromQueryErrorSpec`. It pins
+`ValidationError` as `Unparseable`, and it pins `QueryService.refused` turning a
+parse failure into `Rejected` with `Query(Unparseable(…))`.
+`QueryServiceLiveSpec` pins a query naming a node the tree does not hold as
+`Rejected` with `Query(UnknownReferences(…))`. `FailureSpec` pins the parser
+message cut to 300 characters in the log line and whole on the wire.
 
 5.3 Row 59. 59a: `FolModelValidationFailure` becomes a `require` at
 `QueryServiceLive.scala` line 125, where `FolModel(kb.catalog, kb.model)` pairs
