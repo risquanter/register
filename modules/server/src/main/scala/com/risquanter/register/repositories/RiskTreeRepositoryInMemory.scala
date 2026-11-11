@@ -6,7 +6,7 @@ import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, TreeAbsentAtRevision, TrustZone, ValidationFailed,
+  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, RequestHeaderName, TrustZone, ValidationFailed,
   ValidationError
 }
 import com.risquanter.register.http.errors.Capability
@@ -73,7 +73,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       ZIO.suspendSucceed {
         val key = (wsId, id)
         db.get(key) match
-          case None           => ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
+          case None           => RiskTreeRepository.treeAbsent(wsId, id, Revision.Head(branch))
           case Some(riskTree) =>
             val updated = op(riskTree)
             ZIO.succeed {
@@ -90,7 +90,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       ZIO.suspendSucceed {
         val key = (wsId, id)
         db.get(key) match
-          case None           => ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
+          case None           => RiskTreeRepository.treeAbsent(wsId, id, Revision.Head(branch))
           case Some(riskTree) =>
             ZIO.succeed {
               db -= key

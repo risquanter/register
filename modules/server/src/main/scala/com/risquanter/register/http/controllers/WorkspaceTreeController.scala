@@ -7,7 +7,7 @@ import sttp.tapir.server.ServerEndpoint
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.domain.data.iron.{BranchChoice, Revision}
-import com.risquanter.register.domain.errors.TreeAbsentAtRevision
+import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.http.responses.{ChangedNodesResponse, TreeHistoryResponse}
 import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, TreeHistoryService}
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -50,7 +50,7 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = Revision.Head(branch)
         // The workspace holds the tree, so an empty read means the branch lacks it.
-        loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrFail(TreeAbsentAtRevision(ws.id, treeId, rev))
+        loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrElseZIO(RiskTreeRepository.treeAbsent(ws.id, treeId, rev))
         (tree, _) = loaded
       yield tree.toWire).wireEither(TreeScope.InTree(treeId))
   }
@@ -64,7 +64,7 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
         // The workspace holds the tree, so an empty read means the revision lacks it.
-        loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrFail(TreeAbsentAtRevision(ws.id, treeId, rev))
+        loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrElseZIO(RiskTreeRepository.treeAbsent(ws.id, treeId, rev))
         (tree, _) = loaded
       yield tree).wireEither(TreeScope.InTree(treeId))
   }

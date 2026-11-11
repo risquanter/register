@@ -14,8 +14,11 @@ head (§3.5). Step 3.2 landed at version 0.18.10, and step 3.3 at 0.18.11 with
 `Diagnostic.StoreRefusal` added for row 22 (§3.3) and `logAnnotations` keeping
 every value of a repeated key. Step 3.4 landed at 0.18.12; the `tapError`
 beside the deleted `mapError` went with it, because its line called the failure
-an unavailable cache and the boundary logs the failure once. Phase 3 closes
-when BATS suites A and C pass. The
+an unavailable cache and the boundary logs the failure once. BATS suites A
+and C passed at 0.18.12, which closes Phase 3. Phase 4 step 4.1 landed at
+0.18.13, with `Diagnostic.KeyUnresolved` added for row 14 (§3.3) and the row 17
+values built by `RiskTreeRepository.treeAbsent`, which dies on a branch that is
+not one of the workspace's, per `UES-D-9`; approved 2026-11-11. The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -330,6 +333,7 @@ enum Diagnostic:
   case GraphQlPath(path: List[String])                            // graphql_path
   case StoreRefusal(entries: NonEmptyList[(ErrorLocation, FieldProblem)])
                                                                   // store_refusal: the store refusal a merge conflict was built from
+  case KeyUnresolved                                              // event_type, reason: a workspace key that resolved to nothing
 
 object Diagnostic:
   /** The log key and rendered value of one entry. Total over the enum. */
@@ -348,7 +352,9 @@ merge guard's conflict carries the listing's refused entries, typed rather than
 as text, and the guard's separate `logError` goes. The same approval made
 `logAnnotations` join the values of diagnostics that render under one key,
 because `.toMap` kept only the last `tree_id` of a refusal naming several
-trees.
+trees. Step 4.1 added `KeyUnresolved` for row 14, approved 2026-11-11: it
+renders the `event_type` and `reason` values the deleted `WorkspaceNotFound`
+logged, so the line that selects a replayed key is unchanged.
 
 ### 3.4 What is derived, once
 

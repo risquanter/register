@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, TreeAbsentAtRevision, SimulationFailure, AppError, Failure, TrustZone}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, SimulationFailure, AppError, Failure, TrustZone}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
@@ -40,10 +40,10 @@ class RiskTreeServiceLive private (
     * the controller has confirmed the workspace holds the tree, so an empty
     * read means the revision lacks it. */
   private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[AppError | Failure,(RiskTree, CommitHash)] =
-    repo.getById(wsId, treeId, rev).someOrFail(TreeAbsentAtRevision(wsId, treeId, rev))
+    repo.getById(wsId, treeId, rev).someOrElseZIO(RiskTreeRepository.treeAbsent(wsId, treeId, rev))
 
   /** Fetch tree, its resolved commit, and the node together. Fails with
-    * `TreeAbsentAtRevision` when the revision lacks the tree, and with
+    * `RiskTreeRepository.treeAbsent` when the revision lacks the tree, and with
     * `ValidationFailed` when the tree lacks the node. */
   private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): IO[AppError | Failure,(RiskTree, CommitHash, RiskNode)] =
     for

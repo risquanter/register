@@ -2,9 +2,14 @@ package com.risquanter.register.services.workspace
 
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
-import com.risquanter.register.domain.data.WorkspaceRecord
+import zio.prelude.NonEmptyList
+import com.risquanter.register.domain.data.{Expiry, WorkspaceRecord}
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, WorkspaceKeySecret, TreeId, SeedEntityId}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, TreeNotInWorkspace, ValidationError, ValidationFailed}
+import com.risquanter.register.domain.errors.{
+  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpiryDetail, Failure, FieldName, FieldProblem, TrustZone,
+  ValidationError, ValidationFailed
+}
+import com.risquanter.register.http.errors.NotFoundKind
 
 /** Workspace lifecycle service — association/token index.
   *
@@ -28,8 +33,8 @@ trait WorkspaceStore:
     * axis. `None` assigns the next value from the store's monotonic counter,
     * which each backend owns: a Postgres sequence, or a fixed-base in-memory
     * counter. `Some(v)` provides it explicitly;
-    * fails with ValidationFailed(DUPLICATE_VALUE) when a live workspace already
-    * holds `v`, and bumps the counter past `v` so later assignments cannot collide.
+    * fails with the caller's `Rejected` naming `SeedEntityIdInUse` when a live
+    * workspace already holds `v`, and bumps the counter past `v` so later assignments cannot collide.
     *
     * Logs a creation event.
     */
@@ -49,7 +54,7 @@ trait WorkspaceStore:
   /** List all tree IDs in a workspace. Fails if expired or not found. */
   def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError | Failure, List[TreeId]]
 
-  /** Resolve a workspace. Fails with WorkspaceExpired or WorkspaceNotFound.
+  /** Resolve a workspace. Fails with `workspaceExpired` or `workspaceNotFound`.
     * Implements dual timeout: absolute (createdAt + ttl) AND idle (lastAccessedAt + idleTimeout).
     * Updates lastAccessedAt on successful resolution. Not-found and expired
     * encode to one constant response at the HTTP layer, so neither is
@@ -70,13 +75,17 @@ trait WorkspaceStore:
 
   /** Resolve a workspace, verify tree membership, and return the workspace.
     *
-    * Fails with `TreeNotInWorkspace` when the tree does not belong to the
-    * resolved workspace.
+    * Fails with the caller's `NotFound` when the tree does not belong to the
+    * resolved workspace, the same answer as for a key that resolves to nothing.
     */
   def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, WorkspaceRecord] =
     for
       ws <- resolve(key)
-      _  <- ZIO.unless(ws.trees.contains(treeId))(ZIO.fail(TreeNotInWorkspace(ws.id, treeId)))
+      _  <- ZIO.unless(ws.trees.contains(treeId))(ZIO.fail(Failure.NotFound(Core(
+              TrustZone.Client,
+              NonEmptyList(ErrorLocation.requestField(FieldName.Id) -> NotFoundKind.Unknown()),
+              List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.TreeRef(treeId))
+            ))))
     yield ws
 
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
@@ -84,9 +93,8 @@ trait WorkspaceStore:
 
   /** Resolve workspace + verify tree ownership.
     *
-    * Composed from `resolve` and `belongsTo` — fails with
-    * `TreeNotInWorkspace` when the tree does not belong to the workspace,
-    * which encodes to the same opaque 404 as a missing workspace.
+    * Composed from `resolveTreeWorkspace`, so it fails with the same caller's
+    * `NotFound` when the tree does not belong to the workspace.
     */
   def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError | Failure, Unit] =
     resolveTreeWorkspace(key, treeId).unit
@@ -144,6 +152,22 @@ object WorkspaceStore:
 
   def checkTreeCapacity(key: WorkspaceKeySecret)(using p: Checked[Authority]): ZIO[WorkspaceStore, AppError | Failure, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.checkTreeCapacity(key))
+
+  /** The caller's NotFound for a workspace key that resolves to no workspace. */
+  val workspaceNotFound: Failure =
+    Failure.NotFound(Core(
+      TrustZone.Client,
+      NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
+      List(Diagnostic.KeyUnresolved)
+    ))
+
+  /** The caller's Expired for a workspace past the deadline `expiry` names. */
+  def workspaceExpired(ws: WorkspaceRecord, expiry: Expiry): Failure =
+    Failure.Expired(Core(
+      TrustZone.Client,
+      NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> ExpiryDetail(expiry.cause, ws.ttl, ws.idleTimeout)),
+      List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.ExpiredAt(expiry.at))
+    ))
 
   /** The refusal a workspace already holding `limit` trees produces. A value
     * rather than a function of a record, because a backend deciding capacity

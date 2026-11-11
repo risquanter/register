@@ -13,11 +13,13 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
+import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{TreeId, SeedEntityId, WorkspaceId}
 import com.risquanter.register.domain.errors.{
-  Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, OutageMode, PeerZone, TrustZone,
-  ValidationError, ValidationFailed, WorkspaceExpired, WorkspaceNotFound
+  Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, ExpiryDetail, Failure, FieldName, FieldProblem, OutageMode,
+  PeerZone, TrustZone, ValidationError, ValidationFailed
 }
+import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -101,16 +103,34 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       yield assertTrue(
         viaKey.id == ws1.id,
         viaKey.keyHash == WorkspaceKeyCrypto.hash(newKey)
-      ) && assert(oldExit)(fails(isSubtype[WorkspaceNotFound](anything)))
+      ) && assert(oldExit)(fails(equalTo(WorkspaceStore.workspaceNotFound)))
     },
 
-    test("an expired workspace reports expired") {
+    test("an expired workspace reports expired, at its idle deadline, naming the workspace") {
       for
-        store <- ZIO.service[WorkspaceStore]
-        key   <- store.create(None)
-        _     <- ZIO.sleep(2.seconds)
-        byKey <- store.resolve(key).exit
-      yield assert(byKey)(fails(isSubtype[WorkspaceExpired](anything)))
+        store   <- ZIO.service[WorkspaceStore]
+        key     <- store.create(None)
+        ws      <- store.resolve(key)
+        _       <- ZIO.sleep(2.seconds)
+        failure <- store.resolve(key).flip
+      yield
+        // The deadline is read back through the database, which keeps
+        // microseconds, so it is compared to the moment of last access within
+        // that resolution rather than to the nanosecond.
+        val expiredAt = failure match
+          case Failure.Expired(Core(_, _, List(_, Diagnostic.ExpiredAt(at)))) => Some(at)
+          case _                                                             => None
+        assertTrue(
+          expiredAt.exists(at =>
+            failure == Failure.Expired(Core(
+              TrustZone.Client,
+              NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
+                ExpiryDetail(ExpiryCause.Inactivity, storeConfig.ttl, storeConfig.idleTimeout)),
+              List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.ExpiredAt(at))
+            ))),
+          expiredAt.exists(at =>
+            Duration.between(ws.lastAccessedAt.plus(storeConfig.idleTimeout), at).abs.compareTo(Duration.ofMillis(1)) < 0)
+        )
     },
 
     test("delete reports not-found on the deleted key") {
@@ -119,7 +139,11 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         key     <- store.create(None)
         _       <- store.delete(key)
         keyExit <- store.resolve(key).exit
-      yield assert(keyExit)(fails(isSubtype[WorkspaceNotFound](anything)))
+      yield assert(keyExit)(fails(equalTo(Failure.NotFound(Core(
+        TrustZone.Client,
+        NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
+        List(Diagnostic.KeyUnresolved)
+      )))))
     },
 
     test("the tree ceiling refuses a new tree and allows re-association") {

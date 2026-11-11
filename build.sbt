@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.18.12"
+ThisBuild / version      := "0.18.13"
 ThisBuild / scalaVersion := "3.8.4"
 
 ThisBuild / scalacOptions ++= Seq(

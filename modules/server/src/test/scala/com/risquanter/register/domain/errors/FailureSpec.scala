@@ -87,7 +87,8 @@ object FailureSpec extends ZIOSpecDefault:
     Diagnostic.PeerMessage("driver said no")        -> Set("peer_message"),
     Diagnostic.PeerBody("<html>")                   -> Set("peer_body"),
     Diagnostic.GraphQlPath(List("main", "tree"))    -> Set("graphql_path"),
-    Diagnostic.StoreRefusal(one(FieldProblem.Required)) -> Set("store_refusal")
+    Diagnostic.StoreRefusal(one(FieldProblem.Required)) -> Set("store_refusal"),
+    Diagnostic.KeyUnresolved                        -> Set("event_type", "reason")
   )
 
   def spec = suite("FailureSpec")(
@@ -131,6 +132,10 @@ object FailureSpec extends ZIOSpecDefault:
         val entries = NonEmptyList(nameRequired, second).map(e => (e.location, e.problem))
         assertTrue(Diagnostic.render(Diagnostic.StoreRefusal(entries)) ==
           List("store_refusal" -> s"${ValidationError.describe(nameRequired)}; ${ValidationError.describe(second)}"))
+      },
+      test("an unresolved key renders the resolve-failure marker the workspace lifecycle events are selected with") {
+        assertTrue(Diagnostic.render(Diagnostic.KeyUnresolved) ==
+          List("event_type" -> "workspace.resolve_failed", "reason" -> "not_found"))
       }
     ),
     suite("logMessage")(

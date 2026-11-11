@@ -14,7 +14,7 @@ import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeySecret, SeedEntityId, ValidationUtil}
 import com.risquanter.register.domain.errors.{
   AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem, OutageMode, PeerZone,
-  TrustZone, ValidationError, WorkspaceExpired, WorkspaceNotFound
+  TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.ConflictKind
 import com.risquanter.register.infra.persistence.QuillMappings.given
@@ -231,13 +231,12 @@ final class WorkspaceStorePostgres private (
       now <- Clock.instant
       // The record answers which deadline was passed, so the failure can carry
       // that moment for the log line without restating the two-deadline rule.
-      _   <- ZIO.foreachDiscard(ws.expiry(now))(e =>
-               ZIO.fail(WorkspaceExpired(ws.id, ws.ttl, ws.idleTimeout, e.cause, e.at)))
+      _   <- ZIO.foreachDiscard(ws.expiry(now))(e => ZIO.fail(WorkspaceStore.workspaceExpired(ws, e)))
     yield ws
 
   private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError | Failure, WorkspaceRow] =
     db(run(query[WorkspaceRow].filter(_.keyHash == lift(WorkspaceKeyCrypto.hash(key).value: String)))).flatMap(rows =>
-      ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFound())
+      ZIO.fromOption(rows.headOption).orElseFail(WorkspaceStore.workspaceNotFound)
     )
 
   /** The stored tree-id column of one workspace, as text; `toRecord` refines it. */

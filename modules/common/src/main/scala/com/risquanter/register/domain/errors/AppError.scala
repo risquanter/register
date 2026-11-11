@@ -1,9 +1,7 @@
 package com.risquanter.register.domain.errors
 
-import java.time.{Duration, Instant}
 import zio.json.{DeriveJsonCodec, JsonCodec}
-import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{Revision, TreeId, ValidationMessages, WorkspaceId}
+import com.risquanter.register.domain.data.iron.ValidationMessages
 import vql.error.{BindErrorDetail, QueryError}
 
 /** Who a failure is attributable to, which decides the level its log line is
@@ -101,111 +99,6 @@ case class SimulationFailure(simulationId: String, cause: Throwable) extends Dom
 case class AccessDenied(reason: String) extends DomainError:
   override def logMessage: String = reason
   override def origin: FailureOrigin = FailureOrigin.Caller
-
-// ============================================================================
-// Workspace Errors — all three encode to one opaque 404, so a caller cannot
-// tell which of them it was.
-// ============================================================================
-
-/** A workspace key that resolved to no live workspace.
-  *
-  * Carries nothing. At the point this is built the lookup has already failed,
-  * so there is no workspace identity to name, and the capability key is not a
-  * field: a credential is a `final class` so that no `copy`, `unapply` or
-  * product serialisation exists for it, and a `case class` holding one returns
-  * all three for the wrapper (ADR-022 R1).
-  *
-  * A parameterless `case class` rather than a `case object`, so that it stays
-  * uniform with the hierarchy's other payload-free cases.
-  */
-case class WorkspaceNotFound() extends DomainError {
-  override def logMessage: String = "Workspace not found"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-
-  /** Carries the resolve-failure marker even though there is nothing to name.
-    *
-    * A key that resolves to nothing is the only signal that one is being
-    * replayed after it was rotated, deleted or guessed, and the marker is what
-    * lets that line be selected alongside the workspace lifecycle events rather
-    * than found by searching message text. There is no identifier to annotate:
-    * the key did not resolve, so no workspace is known, and the key itself may
-    * never be logged (ADR-022 R3).
-    */
-  override def logAnnotations: Map[String, String] = Map(
-    "event_type" -> "workspace.resolve_failed",
-    "reason"     -> "not_found"
-  )
-}
-
-/** A workspace past its absolute or idle timeout.
-  *
-  * Carries what a diagnosis needs, because nothing reconstructs this type: the
-  * browser receives a `WireError`, never one of these, and that wire case
-  * declares no workspace identifier (ADR-036).
-  *
-  * `cause`, `ttl` and `idleTimeout` are what cross: a workspace has two
-  * deadlines, so a browser told only a figure would state the wrong one half the
-  * time. `expiredAt` stays internal — it is a fact about a single workspace, and
-  * it is what makes a log line answer "how long ago" rather than only "how long
-  * were they given".
-  *
-  * `logMessage` names none of them, which ADR-035 §3 requires: a log line reads
-  * them as annotations, where they are queryable, rather than as text in a
-  * sentence.
-  */
-case class WorkspaceExpired(
-  wsId:        WorkspaceId,
-  ttl:         Duration,
-  idleTimeout: Duration,
-  cause:       ExpiryCause,
-  expiredAt:   Instant
-) extends DomainError {
-  override def logMessage: String = "Workspace expired"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-  override def logAnnotations: Map[String, String] = Map(
-    "event_type"   -> "workspace.resolve_failed",
-    "reason"       -> "expired",
-    "workspace_id" -> wsId.value,
-    "expiry_cause" -> cause.toString,
-    "expired_at"   -> expiredAt.toString
-  )
-}
-
-/** A tree the resolved workspace does not hold.
-  *
-  * `wsId` is a diagnostic for the server's own logs. It stays out of
-  * `logMessage`, which may name no confidential internal identifier
-  * (ADR-035 §3), and out of every response (ADR-036). The tree identifier is
-  * not confidential and is the useful part of the message.
-  */
-case class TreeNotInWorkspace(wsId: WorkspaceId, treeId: TreeId) extends DomainError {
-  override def logMessage: String = s"Tree ${treeId.value} not found in workspace"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-  override def logAnnotations: Map[String, String] = Map(
-    "workspace_id" -> wsId.value,
-    "tree_id"      -> treeId.value
-  )
-}
-
-/** A tree the workspace holds, absent at the revision a read named: the head
-  * of a branch the tree was never written to, or a commit before the tree
-  * existed. Raised only after the workspace has been found to hold the tree,
-  * so it never describes another workspace's tree.
-  *
-  * `wsId` and the branch inside `rev` are diagnostics for the server's own
-  * logs. Both stay out of `logMessage` (ADR-035 §3) and out of every response
-  * (ADR-036): the wire carries the client-facing branch name or the fact of a
-  * pinned commit, never the composed branch reference.
-  */
-case class TreeAbsentAtRevision(wsId: WorkspaceId, treeId: TreeId, rev: Revision) extends DomainError {
-  override def logMessage: String = s"Tree ${treeId.value} absent at the revision read"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-  override def logAnnotations: Map[String, String] = Map(
-    "workspace_id" -> wsId.value,
-    "tree_id"      -> treeId.value,
-    "revision"     -> rev.toString
-  )
-}
 
 /** Scenarios are unavailable in this deployment (repository.type=in-memory has no
   * Irmin to hold branches). A deliberate, expected condition — not a server

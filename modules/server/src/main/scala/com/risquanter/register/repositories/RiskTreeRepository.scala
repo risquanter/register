@@ -1,9 +1,13 @@
 package com.risquanter.register.repositories
 
 import zio.*
+import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.errors.{AppError, Failure}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.errors.{
+  AppError, Core, Diagnostic, ErrorLocation, Failure, RequestHeaderName, RequestQueryParam, TrustZone, ValidationError
+}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchChoice, BranchRef, CommitHash, Revision}
+import com.risquanter.register.http.errors.NotFoundKind
 
 /** Repository for RiskTree persistence operations.
   *
@@ -39,3 +43,29 @@ trait RiskTreeRepository {
     * diagnostics. Any other failure fails the listing as it is. */
   def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[AppError | Failure, List[RiskTree]]
 }
+
+object RiskTreeRepository:
+  /** Fails with the caller's NotFound for a tree its workspace holds and the
+    * revision read lacks. A branch is named as the client-facing choice, which
+    * only the site holding `wsId` can derive. A branch that is not one of
+    * `wsId`'s branches dies: every branch passed here was composed for `wsId`,
+    * so that case cannot hold (ADR-033 §5).
+    *
+    * {{{
+    * treeAbsent(wsId, treeId, Revision.Head(BranchRef.Main))
+    * // fails with NotFound at Client: (Header(Branch), TreeNotOnBranch(Main))
+    * }}}
+    */
+  def treeAbsent(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[Failure, Nothing] =
+    val diagnostics = List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeId), Diagnostic.RevisionRead(rev))
+    def notFound(location: ErrorLocation, kind: NotFoundKind): IO[Failure, Nothing] =
+      ZIO.fail(Failure.NotFound(Core(TrustZone.Client, NonEmptyList(location -> kind), diagnostics)))
+    rev match
+      case Revision.Head(branch) =>
+        BranchChoice.fromBranchRef(wsId, branch) match
+          case Right(choice) => notFound(ErrorLocation.Header(RequestHeaderName.Branch), NotFoundKind.TreeNotOnBranch(choice))
+          case Left(errors)  => ZIO.die(new IllegalStateException(
+            s"branch ${branch.toBranchRef} is not a branch of workspace ${wsId.value}: " +
+            errors.map(ValidationError.describe).mkString("; ")))
+      case Revision.At(_) =>
+        notFound(ErrorLocation.QueryParameter(RequestQueryParam.At), NotFoundKind.TreeNotAtCommit())

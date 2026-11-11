@@ -167,7 +167,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           svc               = CascadeTestStubs.riskTreeService((wsId, id) =>
                                deletedRef.update(_ :+ id) *>
                                deleted.succeed(()).unit *>
-                               ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
+                               CascadeTestStubs.treeAlreadyGone(wsId, id))
           key              <- store.create(None)
           treeId           <- IdGenerators.nextTreeId
           _                <- store.addTree(key, treeId)
@@ -200,7 +200,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           svc               = CascadeTestStubs.riskTreeService((wsId, id) =>
                                deletedRef.updateAndGet(_ :+ id).flatMap { updated =>
                                  allDeleted.succeed(()).when(updated.size >= 3).unit
-                               } *> ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
+                               } *> CascadeTestStubs.treeAlreadyGone(wsId, id))
           // Workspace 1 with 2 trees
           key1             <- store.create(None)
           ids1             <- IdGenerators.batch(2).map(_.map(TreeId(_)))

@@ -23,8 +23,8 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, TraceId, WorkspaceId}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, Failure, FieldName, FieldProblem, OutageMode, PeerZone, SimulationFailure,
-  TrustZone, ValidationError, WorkspaceExpired
+  AppError, Core, Diagnostic, ErrorLocation, ExpiryDetail, Failure, FieldName, FieldProblem, OutageMode, PeerZone,
+  SimulationFailure, TrustZone, ValidationError
 }
 import com.risquanter.register.http.RequestSpanInterceptor
 import com.risquanter.register.http.endpoints.BaseEndpoint
@@ -87,8 +87,12 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
     * both the level and the annotations. The two windows are the configured
     * defaults and the instant only has to be a recognisable value.
     */
-  private val expired: AppError =
-    WorkspaceExpired(wsId, JDuration.ofHours(72), JDuration.ofHours(1), ExpiryCause.Inactivity, Instant.EPOCH)
+  private val expired: Failure = Failure.Expired(Core(
+    TrustZone.Client,
+    NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
+      ExpiryDetail(ExpiryCause.Inactivity, JDuration.ofHours(72), JDuration.ofHours(1))),
+    List(Diagnostic.WorkspaceRef(wsId), Diagnostic.ExpiredAt(Instant.EPOCH))
+  ))
 
   /** A refusal of the caller's content, in the failure shape. Its message names
     * its own field, so the line a test reads can only be the line it wrote. */
@@ -132,7 +136,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
 
   /** An endpoint whose logic always fails with `error` and ends in the
     * projection, which is how every controller method ends. */
-  private def failingEndpoint(error: AppError)(using Tracing): ServerEndpoint[Any, Task] =
+  private def failingEndpoint(error: AppError | Failure)(using Tracing): ServerEndpoint[Any, Task] =
     baseEndpoint.get
       .in(RequestPath)
       .out(stringBody)
@@ -140,7 +144,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
 
   /** Serves one request to that endpoint through the span interceptor, so the
     * projection runs where it runs in production: inside the request's span. */
-  private def requestFailing(error: AppError)(using tracing: Tracing): Task[Response[Either[String, String]]] =
+  private def requestFailing(error: AppError | Failure)(using tracing: Tracing): Task[Response[Either[String, String]]] =
     val backend = TapirStubInterpreter(
       ZioHttpServerOptions
         .customiseInterceptors[Any]
@@ -255,8 +259,8 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
           yield assertTrue(
             // A confidential internal identifier may be named in a server log.
             line.flatMap(_.annotations.get("workspace_id")).contains(wsId.value),
-            line.flatMap(_.annotations.get("expiry_cause")).contains(ExpiryCause.Inactivity.toString),
-            line.exists(_.annotations.contains("expired_at")),
+            line.flatMap(_.annotations.get("expired_at")).contains(Instant.EPOCH.toString),
+            line.flatMap(_.annotations.get("trust_zone")).contains("client"),
             // The same identifier the caller received, so the two can be joined.
             line.flatMap(_.annotations.get("trace_id")).contains(context.getTraceId)
           )

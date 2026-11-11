@@ -7,7 +7,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, R
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, SafeId, WorkspaceId, BranchRef, CommitHash, Revision, ValidationUtil}
 import com.risquanter.register.domain.errors.{
   AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpectedInput, Failure, FieldName, FieldProblem,
-  PeerZone, TreeAbsentAtRevision, TrustZone, ValidationError
+  PeerZone, TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.NotFoundKind
 import com.risquanter.register.http.responses.TreeWriteKind
@@ -76,7 +76,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
     loadTreeAt(wsId, id, toCommit).flatMap {
       case None =>
-        ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.At(toCommit)))
+        RiskTreeRepository.treeAbsent(wsId, id, Revision.At(toCommit))
       case Some(existing) =>
         for
           now         <- Clock.instant
@@ -262,7 +262,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def getTreeWithMeta(wsId: WorkspaceId, id: TreeId, branch: BranchRef): IO[AppError | Failure,TreeWithMeta] =
     loadTree(wsId, id, branch).flatMap {
       case Some(value) => ZIO.succeed(value)
-      case None        => ZIO.fail(TreeAbsentAtRevision(wsId, id, Revision.Head(branch)))
+      case None        => RiskTreeRepository.treeAbsent(wsId, id, Revision.Head(branch))
     }
 
   private def treeWriteMessage(wsId: WorkspaceId, treeId: TreeId, kind: TreeWriteKind): CommitMessage =

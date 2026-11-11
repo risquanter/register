@@ -3,17 +3,14 @@ package com.risquanter.register.http.errors
 import java.time.Duration
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{BranchChoice, Revision, TraceId, TreeId}
+import com.risquanter.register.domain.data.iron.{TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
 import com.risquanter.register.domain.errors.FolQueryFailure.*
-// Two internal error names collide with the wire case that carries them. The
+// An internal error name collides with the wire case that carries it. The
 // rename is the one sanctioned use of a non-plain import (ADR-011 §2), and it
 // keeps `fromAppError`'s arms reading left-to-right: internal name in, wire name
 // out.
-import com.risquanter.register.domain.errors.{
-  WorkspaceExpired as AppWorkspaceExpired,
-  AccessDenied as AppAccessDenied
-}
+import com.risquanter.register.domain.errors.AccessDenied as AppAccessDenied
 
 /** The only error type that crosses to a client.
   *
@@ -155,31 +152,6 @@ object WireError:
       case FolUnknownReference(messages)       => queryRejected(QueryProblem.UnknownReferences(messages))
       case FolBindFailure(errors)              => queryRejected(QueryProblem.TypeCheckFailed(errors))
       case FolDomainNotQuantifiable(message)   => queryRejected(QueryProblem.NotQuantifiable(message))
-
-      // Absent, or not the caller's. One shape for both, so neither is an
-      // existence oracle. The workspace identifier may not cross (ADR-036), and
-      // the tree identifier is dropped because it would distinguish the two.
-      case WorkspaceNotFound()                 => WireError.NotFound(NotFoundKind.Unknown(), t)
-      case TreeNotInWorkspace(_, _)            => WireError.NotFound(NotFoundKind.Unknown(), t)
-
-      // A held tree, absent at the revision read. The branch crosses as the
-      // client-facing name, never as the composed reference that embeds the
-      // workspace identifier (ADR-036). A commit crosses as the bare fact: the
-      // caller supplied the hash, and the store reads an unknown commit the same
-      // way, so naming it would add nothing and disclose nothing.
-      case TreeAbsentAtRevision(wsId, _, Revision.Head(branch)) =>
-        BranchChoice.fromBranchRef(wsId, branch).fold(
-          // Unreachable for a reference `BranchRef.scenario` composed; a failure
-          // here is this service's defect and answers the opaque fault.
-          _      => WireError.InternalFault(t),
-          choice => WireError.NotFound(NotFoundKind.TreeNotOnBranch(choice), t))
-      case TreeAbsentAtRevision(_, _, Revision.At(_)) =>
-        WireError.NotFound(NotFoundKind.TreeNotAtCommit(), t)
-
-      // Expired. The configured lifetime crosses; the workspace identifier may
-      // not (ADR-036), and the moment this one expired is a fact about a single
-      // workspace that the browser has no use for.
-      case AppWorkspaceExpired(_, ttl, idle, cause, _) => WireError.WorkspaceExpired(cause, ttl, idle, t)
 
       // Refused. The internal reason is dropped from both, so a denial this
       // service decided and one the authorization service decided look

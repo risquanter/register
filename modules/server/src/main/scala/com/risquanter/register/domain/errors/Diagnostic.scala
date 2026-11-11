@@ -47,6 +47,11 @@ enum Diagnostic:
     * value's location and problem. */
   case StoreRefusal(entries: NonEmptyList[(ErrorLocation, FieldProblem)])
 
+  /** A workspace key that resolved to no workspace. The marker selects a key
+    * replayed after rotation, deletion or a guess alongside the workspace
+    * lifecycle events. The key itself is never logged (ADR-022 R3). */
+  case KeyUnresolved
+
 object Diagnostic:
   /** The log key and rendered value of one entry. Total over the enum. The keys
     * are a contract with the log pipeline, so each is declared here once and
@@ -73,6 +78,7 @@ object Diagnostic:
     case StoreRefusal(entries)   =>
       List("store_refusal" -> entries.toList.map((location, problem) =>
         s"[${ErrorLocation.describe(location)}] ${ValidationMessages.render(problem)}").mkString("; "))
+    case KeyUnresolved           => List("event_type" -> "workspace.resolve_failed", "reason" -> "not_found")
 
   private def revision(rev: Revision): String = rev match
     case Revision.Head(branch) => s"head of ${branch.toBranchRef}"

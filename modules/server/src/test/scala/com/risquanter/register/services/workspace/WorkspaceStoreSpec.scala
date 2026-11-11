@@ -4,15 +4,18 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import zio.test.TestClock
+import zio.json.*
 import java.time.Duration
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.iron.{SafeId, TreeId, SeedEntityId}
+import com.risquanter.register.domain.data.ExpiryCause
+import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, TreeId, SeedEntityId, WorkspaceId}
 import com.risquanter.register.domain.errors.{
-  Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, TreeNotInWorkspace, TrustZone, ValidationError,
-  ValidationFailed, ValidationErrorCode, ValueRange, WorkspaceExpired, WorkspaceNotFound
+  AppError, Core, Diagnostic, ErrorLocation, ErrorSubject, ExpiryDetail, Failure, FieldName, FieldProblem, TrustZone,
+  ValidationError, ValidationFailed, ValidationErrorCode, ValueRange
 }
+import com.risquanter.register.http.errors.{NotFoundKind, TreeScope, WireError}
 import zio.prelude.NonEmptyList
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -48,6 +51,30 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     List("B", "C", "D", "E", "F", "G", "H", "J")
       .map(suffix => treeId(s"01ARZ3NDEKTSV4RRFFQ69G5F${suffix}A"))
 
+  /** A key that resolves to no workspace: the caller's NotFound at the key,
+    * carrying the resolve-failure marker and no identifier. */
+  private val keyUnresolved: Failure = Failure.NotFound(Core(
+    TrustZone.Client,
+    NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
+    List(Diagnostic.KeyUnresolved)
+  ))
+
+  /** A tree the resolved workspace does not hold: the caller's NotFound at the
+    * tree id, with both identifiers as diagnostics. */
+  private def treeOutside(wsId: WorkspaceId, treeId: TreeId): Failure = Failure.NotFound(Core(
+    TrustZone.Client,
+    NonEmptyList(ErrorLocation.requestField(FieldName.Id) -> NotFoundKind.Unknown()),
+    List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeId))
+  ))
+
+  /** The body a failure answers on the wire, when it answers `NotFound`. */
+  private def notFoundBody(failure: AppError | Failure): Option[String] = failure match
+    case f: Failure =>
+      f.toWire(TelemetryPlaceholders.UnlinkedTrace, TreeScope.NoTree) match
+        case nf: WireError.NotFound => Some(nf.toJson)
+        case _                      => None
+    case _: AppError => None
+
   override def spec = suite("WorkspaceStoreLive security regressions")(
     test("create + resolve succeeds") {
       for
@@ -71,9 +98,15 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       for
         store <- mkStore
         key   <- store.create(None)
+        ws    <- store.resolve(key)
         _     <- TestClock.adjust(2.minutes)
         exit  <- store.resolve(key).exit
-      yield assert(exit)(fails(isSubtype[WorkspaceExpired](anything)))
+      yield assert(exit)(fails(equalTo(Failure.Expired(Core(
+        TrustZone.Client,
+        NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
+          ExpiryDetail(ExpiryCause.Inactivity, testConfig.ttl, testConfig.idleTimeout)),
+        List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.ExpiredAt(ws.lastAccessedAt.plus(testConfig.idleTimeout)))
+      )))))
     },
 
     test("addTree/listTrees/belongsTo operate within workspace") {
@@ -159,9 +192,23 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       for
         store  <- mkStore
         key    <- store.create(None)
-        treeId <- IdGenerators.nextTreeId
-        exit   <- store.resolveTreeWorkspace(key, treeId).exit
-      yield assert(exit)(fails(isSubtype[TreeNotInWorkspace](anything)))
+        ws     <- store.resolve(key)
+        exit   <- store.resolveTreeWorkspace(key, treeA).exit
+      yield assert(exit)(fails(equalTo(treeOutside(ws.id, treeA))))
+    },
+
+    test("a tree outside the workspace and an unknown key answer the same bytes, naming neither identifier") {
+      for
+        store  <- mkStore
+        key    <- store.create(None)
+        ws     <- store.resolve(key)
+        absent <- store.resolveTreeWorkspace(key, treeA).flip
+      yield
+        val outside = notFoundBody(absent)
+        assertTrue(
+          outside == notFoundBody(WorkspaceStore.workspaceNotFound),
+          outside.exists(json => !json.contains(ws.id.value) && !json.contains(treeA.value))
+        )
     },
 
     test("removeTree disassociates tree from workspace") {
@@ -201,7 +248,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         oldExit <- store.resolve(oldKey).exit
         newList <- store.listTrees(newKey)
       yield assertTrue(oldKey != newKey, newList.contains(treeId)) &&
-        assert(oldExit)(fails(isSubtype[WorkspaceNotFound](anything)))
+        assert(oldExit)(fails(equalTo(keyUnresolved)))
     },
 
     test("rotate preserves the workspace's identity and moves the key hash") {
@@ -223,7 +270,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         key   <- store.create(None)
         _     <- store.delete(key)
         exit  <- store.resolve(key).exit
-      yield assert(exit)(fails(isSubtype[WorkspaceNotFound](anything)))
+      yield assert(exit)(fails(equalTo(keyUnresolved)))
     },
 
     test("evictExpired removes expired workspaces and returns evicted entries") {

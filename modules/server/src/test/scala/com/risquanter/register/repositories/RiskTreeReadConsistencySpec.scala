@@ -8,12 +8,15 @@ import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
-import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, StoreBranch}
+import com.risquanter.register.domain.data.iron.{
+  SafeName, WorkspaceId, TreeId, NodeId, BranchChoice, BranchRef, CommitHash, MergeStagingRef, PositiveInt, Revision, ScenarioName,
+  StoreBranch, TelemetryPlaceholders
+}
 import com.risquanter.register.domain.errors.{
-  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
+  Core, Diagnostic, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone, RequestHeaderName, RequestQueryParam,
   TrustZone, ValueRange
 }
-import com.risquanter.register.http.errors.NotFoundKind
+import com.risquanter.register.http.errors.{NotFoundKind, TreeScope, WireError}
 import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -29,6 +32,10 @@ import java.time.Instant
   * Deterministic, no Docker: a scripted `IrminClient` whose branch head
   * advances after the first resolution, plus per-commit stores, lets us assert
   * that every read targeted the one resolved commit.
+  *
+  * The same scripted client pins what a read answers when the revision lacks a
+  * tree the workspace holds: the caller's `NotFound`, naming the branch as the
+  * caller knows it and never the workspace identifier.
   */
 object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
 
@@ -351,8 +358,77 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
           )),
           refusal.map(_.diagnostics.toSet).contains(Set(Diagnostic.TreeRef(treeIdF), Diagnostic.TreeRef(treeIdG)))
         )
-    }
+    },
+
+    suite("a tree the workspace holds and the revision read lacks")(
+      test("on main is the caller's NotFound at the branch header, naming main") {
+        val rev = Revision.Head(BranchRef.Main)
+        for exit <- RiskTreeRepository.treeAbsent(wsId, treeIdF, rev).exit
+        yield assert(exit)(fails(equalTo(treeAbsentAt(
+          ErrorLocation.Header(RequestHeaderName.Branch), NotFoundKind.TreeNotOnBranch(BranchChoice.Main), rev))))
+      },
+
+      test("on a scenario names the scenario on the wire and neither identifier") {
+        // The internal branch reference embeds the workspace identifier; the
+        // wire carries the client-facing branch name instead (ADR-036).
+        val rev = Revision.Head(scenarioBranch)
+        for failure <- RiskTreeRepository.treeAbsent(wsId, treeIdF, rev).flip
+        yield
+          val json = failure.toWire(TelemetryPlaceholders.UnlinkedTrace, TreeScope.InTree(treeIdF)) match
+            case nf: WireError.NotFound => Some(nf.toJson)
+            case _                      => None
+          assertTrue(
+            failure == treeAbsentAt(
+              ErrorLocation.Header(RequestHeaderName.Branch), NotFoundKind.TreeNotOnBranch(BranchChoice.Scenario(scenario)), rev),
+            json.exists(_.contains(scenario.value)),
+            json.exists(j => !j.contains(wsId.value) && !j.contains(treeIdF.value))
+          )
+      },
+
+      test("at a commit is the caller's NotFound at the pinned read, naming no commit on the wire") {
+        val rev = Revision.At(headC1)
+        for failure <- RiskTreeRepository.treeAbsent(wsId, treeIdF, rev).flip
+        yield
+          val json = failure.toWire(TelemetryPlaceholders.UnlinkedTrace, TreeScope.InTree(treeIdF)) match
+            case nf: WireError.NotFound => Some(nf.toJson)
+            case _                      => None
+          assertTrue(
+            failure == treeAbsentAt(ErrorLocation.QueryParameter(RequestQueryParam.At), NotFoundKind.TreeNotAtCommit(), rev),
+            json.exists(j => !j.contains(headC1.value) && !j.contains(wsId.value))
+          )
+      },
+
+      test("a branch that is not one of the workspace's dies") {
+        val otherWs = WorkspaceId(safeId("consistency-other-ws"))
+        val foreign = BranchRef.scenario(otherWs, scenario).toOption.get
+        for exit <- RiskTreeRepository.treeAbsent(wsId, treeIdF, Revision.Head(foreign)).exit
+        yield assertTrue(exit.isFailure, exit.causeOption.exists(_.isDie))
+      },
+
+      test("deleting a tree a scenario lacks fails with that NotFound before anything is written") {
+        for
+          setup        <- scripted(initialHead = None, advanceTo = None, store = Map.empty)
+          (repo, _, _)  = setup
+          exit         <- repo.delete(wsId, treeIdF, scenarioBranch).exit
+        yield assert(exit)(fails(equalTo(treeAbsentAt(
+          ErrorLocation.Header(RequestHeaderName.Branch),
+          NotFoundKind.TreeNotOnBranch(BranchChoice.Scenario(scenario)),
+          Revision.Head(scenarioBranch)
+        ))))
+      }
+    )
   )
+
+  private val scenario: ScenarioName.ScenarioName = ScenarioName.fromString("stress-2026").toOption.get
+  private val scenarioBranch: BranchRef           = BranchRef.scenario(wsId, scenario).toOption.get
+
+  /** The caller's NotFound for `treeIdF` absent at `rev`, at `location`. */
+  private def treeAbsentAt(location: ErrorLocation, kind: NotFoundKind, rev: Revision): Failure =
+    Failure.NotFound(Core(
+      TrustZone.Client,
+      NonEmptyList(location -> kind),
+      List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeIdF), Diagnostic.RevisionRead(rev))
+    ))
 
   /** A stored leaf whose name is blank and whose probability is above one. */
   private def refusedLeafJson(id: NodeId): String =

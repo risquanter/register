@@ -79,7 +79,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         name             = scenarioName("stress-2026")
         treeSvc          = CascadeTestStubs.riskTreeService((wsId, id) =>
                               treeDeleted.update(_ :+ id) *>
-                              ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
+                              CascadeTestStubs.treeAlreadyGone(wsId, id))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
@@ -106,7 +106,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
         name             = scenarioName("stress-2026")
         treeSvc          = CascadeTestStubs.riskTreeService((wsId, id) =>
                               treeDeleted.update(_ :+ id) *>
-                              ZIO.fail(CascadeTestStubs.treeAlreadyGone(wsId, id)))
+                              CascadeTestStubs.treeAlreadyGone(wsId, id))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
                               onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
