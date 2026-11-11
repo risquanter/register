@@ -6,6 +6,9 @@
 #   tests/bats/run-suites.sh C A B      suites C, A and B, in that order
 #   tests/bats/run-suites.sh all        every suite: C, then B, then A
 #
+# It first clears leaked serverIt stacks and the application images of earlier
+# versions, since both accumulate on disk across runs.
+#
 # `all` runs the in-memory gate first because it is the quickest to fail, and
 # the standalone Irmin image before the full stack that runs on it.
 #
@@ -16,6 +19,27 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
+
+# Each serverIt spec starts its own `register_it_<id>` stack for Irmin or
+# `register_it_authz_<id>` stack for SpiceDB. An interrupted run leaves the
+# containers, networks and volumes behind. The name filter matches both, and
+# images are kept, so nothing is rebuilt or pulled.
+echo "==> clearing leaked register_it_ containers, networks and volumes"
+docker ps -a --filter name=register_it_ -q | xargs -r docker rm -f
+docker network ls --filter name=register_it_ -q | xargs -r docker network rm
+docker volume ls --filter name=register_it_ -q | xargs -r docker volume rm
+
+# Every version bump tags a new pair of application images. Tags of other
+# versions are removed. An image still used by a container is left in place
+# and does not stop the run.
+app_version=$(sed -n 's/^APP_VERSION=//p' .env)
+: "${app_version:?APP_VERSION is missing from .env}"
+echo "==> removing local/register-server and local/frontend tags other than $app_version"
+docker images --format '{{.Repository}}:{{.Tag}}' \
+  | { grep -E '^local/(register-server|frontend):' || true; } \
+  | { grep -vxF -e "local/register-server:$app_version" -e "local/frontend:$app_version" || true; } \
+  | xargs -r docker rmi \
+  || echo "some earlier images are still used by a container and were left in place" >&2
 
 SUITE_A=tests/bats/suite-a-full-prod.bats
 SUITE_B=tests/bats/suite-b-irmin-prod.bats
