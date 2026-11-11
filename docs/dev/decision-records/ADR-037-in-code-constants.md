@@ -37,7 +37,7 @@ object ScenarioSourceDto:
 
 Annotate a case's spelling only where §2 applies. The key names the field; the values come from the case names.
 
-No central constants file. A set's definition lives with its owner, so it cannot outlive the type it describes.
+A set's definition lives with its owner, so it cannot outlive the type it describes. A shared object holds only shared constants, decided by the tests in §3.
 
 ### 2. An Explicit Spelling Is Declared Only When the String Contracts With Something Else
 
@@ -64,7 +64,32 @@ object FolQueryFailure:
   val NodeSortName: String = "Node"
 ```
 
-Ownership must be unambiguous. A value two types need is not this pattern — it is a set not yet recognised, or it belongs to a third type neither site declares.
+Every constant is either owned or shared, and the two tests below decide which.
+
+**Owned.** A constant belongs to a type when two things hold: that type's definition reads it, in its refinement, its smart constructor or its codec, and changing the value changes the behaviour of that type alone. It lives in that type's companion.
+
+**Shared.** A constant is shared when it is held for use by several types rather than being about one of them. It is one of three kinds:
+
+- a value of a refined type that many types are built from;
+- a value that constrains several unrelated types equally;
+- a contract fixed outside the code, such as a protocol limit.
+
+It lives in the shared object for its kind and states its origin there. Its present readers do not move it. A shared value that one type reads today stays in the shared object, because that object is where the next type looks for an existing value before writing its own.
+
+`IronConstants` in `OpaqueTypes.scala` is the complete example. It holds values of `PositiveInt`, `NonNegativeInt`, `NonNegativeLong` and `DistributionType`, the refined types the domain types are built from:
+
+```scala
+object IronConstants:
+  val One: PositiveInt     = 1
+  val Ten: PositiveInt     = 10
+  val Zero: NonNegativeInt = 0
+  val ZeroL: NonNegativeLong = 0L
+  val Metalog: DistributionType = "Metalog"
+```
+
+`IronConstants.Zero` is read today only by `NonNegativeInt.count`, and it stays in `IronConstants`.
+
+A value two types need is checked against the other patterns before it is called shared. It may be a set not yet recognised (§1), or it may belong to a third type neither site declares.
 
 A value that can reasonably be assumed to change behaviour in a way that should be exposed as a user choice or as a best practice is not this pattern either. It is a setting in `application.conf`, read into its refined type by the config decoder, with any default listed in that file (ADR-016).
 
@@ -124,7 +149,7 @@ given JsonDecoder[HistoryOperation] = JsonDecoder[String].map {
 given codec: JsonCodec[HistoryOperation] = DeriveJsonCodec.gen[HistoryOperation]
 ```
 
-### ❌ Central Constants Object
+### ❌ A Set's Members as Constants in a Shared Object
 
 ```scala
 // BAD: assignable anywhere a String is wanted; no exhaustiveness at any match
@@ -170,6 +195,7 @@ div(cls := "banner", ErrorMessages.workspaceExpired(lifetime))
 | `LeafSimContent`'s raw projection | Declared spellings — the bytes are a hash preimage, which owes stability rather than agreement with a decoder |
 | `ValuationBasis` | Declared spelling — contract with the query engine |
 | `FolQueryFailure.NodeSortName` | Single constant in its owner's companion, origin documented |
+| `IronConstants` | Shared object of values of shared refined types, kept together for reuse |
 | `WireError` | Closed set carrying the status per case |
 | `ErrorMessages`, `MergeMessages` | Named user-facing text, parameterised as functions |
 
