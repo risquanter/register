@@ -461,6 +461,30 @@ object SafeName:
   given JsonDecoder[SafeName] = JsonDecoder[String].mapOrFail(s =>
     fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
+// QueryVariable: a variable name in query-language text. The query engine's
+// lexer emits a word from the ASCII letters, digits, '_' and "'", and its
+// parser accepts a word as a variable when it starts with a letter and holds
+// only letters, digits and '_'. This is that rule. No maximum length is stated:
+// the query text it comes from has none.
+type QueryVariableConstraint = Match["^[A-Za-z][A-Za-z0-9_]*$"]
+type QueryVariableStr = String :| QueryVariableConstraint
+
+object QueryVariable:
+  opaque type QueryVariable = QueryVariableStr
+
+  extension (v: QueryVariable)
+    def value: QueryVariableStr = v
+
+  /** The variable a name is, or the reason it is not one. */
+  def fromString(s: String): Either[String, QueryVariable] =
+    s.refineEither[QueryVariableConstraint]
+
+  // JSON codecs (companion object placement ensures implicit scope). A
+  // variable crosses the wire inside a refused query's payload, and is
+  // refined again on decode (ADR-038).
+  given JsonEncoder[QueryVariable] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[QueryVariable] = JsonDecoder[String].mapOrFail(fromString)
+
 // Opaque type for emails
 object Email:
   opaque type Email = ValidEmail

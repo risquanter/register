@@ -111,3 +111,7 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/app/src/main/scala/app/Main.scala
 - modules/server/src/main/scala/com/risquanter/register/configs/SpiceDbConfig.scala
 - modules/server/src/main/resources/application.conf
+- modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/BindProblem.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/QueryEndpointSpec.scala

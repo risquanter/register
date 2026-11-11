@@ -10,7 +10,6 @@ import sttp.tapir.EndpointOutput
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
-import com.risquanter.register.domain.errors.FolQueryFailure.*
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError.given
 
@@ -152,15 +151,13 @@ object WireErrorSpec extends ZIOSpecDefault:
             // with a tree in scope.
             ValidationFailed(Nil)                                  -> "RequestRejected",
             // Faults
-            SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault",
-            FolModelValidationFailure(List("x"))                   -> "InternalFault",
-            FolEvaluationFailure("x", "bind")                      -> "InternalFault"
+            SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault"
           )
 
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 4)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 2)
         },
         test("with a tree in scope, a content failure names that tree and carries its fields") {
           // The scope is the only thing that differs from the table above, so

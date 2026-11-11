@@ -374,7 +374,11 @@ Q[>=]^{2/3} x (leaf_descendant_of(x, y), gt_loss(p95(x, "inherent"), 5000000))(y
 ```
 
 "Which portfolios have at least ⅔ of their leaf descendants with P95
-above 5M?" Answer variable `y` projects matching portfolio IDs.
+above 5M?" Answer variable `y` projects matching portfolio IDs. The service
+does not serve answer variables yet: it answers this query with a 422 naming
+`y` as an answer variable it does not support, and
+`docs/dev/plans/PLAN-QAV-QUERY-ANSWER-VARIABLES.md` records the work that
+would serve it.
 
 ### Exceedance screening
 

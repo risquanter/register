@@ -4,7 +4,7 @@ import zio.*
 import zio.prelude.NonEmptyList
 
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, Failure, FieldProblem, FolQueryFailure, TrustZone, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, ErrorLocation, Failure, FieldProblem, TrustZone, ValidationError}
 import com.risquanter.register.http.errors.QueryProblem
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.auth.{Authority, Checked}
@@ -43,19 +43,24 @@ trait QueryService:
 
 object QueryService:
 
-  /** The failure an engine error is: the caller's refused query, located at the
-    * whole request, or a fault in how this service wired the knowledge base.
+  /** The caller's refused query, located at the whole request.
     *
     * {{{
-    * refused(QueryError.ParseError("Expected '}'", "Q[>=]^{2/3 x", Some(14)))
+    * rejected(QueryProblem.Unparseable("Expected '}'", Some(14)))
     * // Rejected at Client: (Whole, Query(Unparseable("Expected '}'", Some(14))))
     * }}}
     */
-  def refused(err: QueryError): AppError | Failure =
+  def rejected(problem: QueryProblem): Failure =
+    Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(problem))), Nil)
+
+  /** The failure an engine error is: the caller's refused query, or a defect
+    * when the error is a fault in how this service wired the knowledge base,
+    * which no query reaches (ADR-033 §5). */
+  def refused(err: QueryError): IO[Failure, Nothing] =
     QueryProblem.fromQueryError(err) match
-      case Some(problem) =>
-        Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(problem))), Nil)
-      case None => FolQueryFailure.wiringFault(err)
+      case Some(problem) => ZIO.fail(rejected(problem))
+      case None          =>
+        ZIO.die(new IllegalStateException(s"The query engine reported a fault in this service's knowledge base: ${err.formatted}"))
 
   def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): ZIO[QueryService, AppError | Failure, QueryResponse] =
     ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed, seedEntityId, branch))

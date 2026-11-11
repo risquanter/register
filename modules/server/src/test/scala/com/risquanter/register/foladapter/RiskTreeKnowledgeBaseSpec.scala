@@ -10,11 +10,11 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.common.ValuationBasis
-import com.risquanter.register.common.FolSymbols.ValueFunction
+import com.risquanter.register.common.FolSymbols.{QuerySort, ValueFunction}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
-import com.risquanter.register.domain.errors.{ErrorSubject, FolQueryFailure}
+import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
@@ -689,17 +689,14 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         ValueFunction.values.map(f => vql.typed.SymbolName(f.symbol)).toSet.subsetOf(kb.catalog.functions.keySet)
       )
     },
-    test("node-reference sort discriminators match the classifier's names") {
-      // Drift guard for the bind-error classifier's sort-name literals in
-      // `common` (FolQueryFailure.NodeSortName / NodeNameLiteralSortName), which
-      // it compares against UnparseableConstant.sortName to classify a
-      // nonexistent-node reference as QueryProblem.UnknownReferences. The catalog is
-      // server-side and off `common`'s dependency graph, so those literals are
-      // manual mirrors of the catalog sorts, held here where both are visible —
-      // change one without the other and this goes red.
+    test("the catalog's sorts are exactly QuerySort's, and fromSymbol undoes symbol") {
+      // The bind-error classifier reads a reported sort name back through
+      // QuerySort.fromSymbol, so every sort the catalog declares must be one
+      // of QuerySort's and parse back to itself.
       assertTrue(
-        RiskTreeKnowledgeBase.NodeSort.value            == FolQueryFailure.NodeSortName,
-        RiskTreeKnowledgeBase.NodeNameLiteralSort.value == FolQueryFailure.NodeNameLiteralSortName
+        QuerySort.values.forall(s => QuerySort.fromSymbol(s.symbol) == Some(s)),
+        QuerySort.fromSymbol("Asset").isEmpty,
+        kb.catalog.types.map(_.typeId.value) == QuerySort.values.map(_.symbol).toSet
       )
     }
   )

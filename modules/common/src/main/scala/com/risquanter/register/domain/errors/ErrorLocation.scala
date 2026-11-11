@@ -634,9 +634,10 @@ object FieldProblem:
     case WorkspaceHasNoContent                      => ValidationErrorCode.NOT_FOUND
     case Unspecified                                => ValidationErrorCode.CONSTRAINT_VIOLATION
 
-  /** The query codes, one per refusal the engine reports. */
+  /** The query codes, one per refusal of a query. */
   private def queryCode(problem: QueryProblem): ValidationErrorCode = problem match
-    case QueryProblem.Unparseable(_, _)     => ValidationErrorCode.PARSE_ERROR
-    case QueryProblem.UnknownReferences(_)  => ValidationErrorCode.UNKNOWN_REFERENCE
-    case QueryProblem.TypeCheckFailed(_)    => ValidationErrorCode.BIND_FAILED
-    case QueryProblem.NotQuantifiable(_)    => ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE
+    case QueryProblem.Unparseable(_, _)                => ValidationErrorCode.PARSE_ERROR
+    case QueryProblem.UnknownReferences(_)             => ValidationErrorCode.UNKNOWN_REFERENCE
+    case QueryProblem.TypeCheckFailed(_)               => ValidationErrorCode.BIND_FAILED
+    case QueryProblem.NotQuantifiable(_)               => ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE
+    case QueryProblem.AnswerVariablesNotSupported(_)   => ValidationErrorCode.NOT_SUPPORTED

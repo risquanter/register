@@ -119,10 +119,12 @@ class QueryServiceLive private (
         _ <- logNameCollisions(kb)
         _ <- logResolutionFailures(resolved)
 
-        // 6. Validate catalog+model pairing (FolModel smart constructor)
+        // 6. Pair the catalog with the runtime model. Both come from the one
+        //    schema above, so a model that does not satisfy its catalog is a
+        //    defect in this service's wiring and no query reaches it.
         folModel <- ZIO.fromEither(FolModel(kb.catalog, kb.model))
-                      .tapError(e => ZIO.logWarning(s"FolModel validation failed for tree ${treeId.value}: ${e.formatted}"))
-                      .mapError(QueryService.refused)
+                      .orDieWith(e => new IllegalStateException(
+                        s"The knowledge base for tree ${treeId.value} does not satisfy its catalog: ${e.formatted}"))
 
         // 7. Evaluate via vql.typed pipeline
         queryText = parsed.toString
@@ -135,8 +137,7 @@ class QueryServiceLive private (
                       samplingParams = SamplingParams.exact,
                       hdrConfig = HDRConfig.default
                     )
-                  ).tapError(e => ZIO.logWarning(s"FOL evaluation failed for tree ${treeId.value}: ${e.formatted}"))
-                   .mapError(QueryService.refused)
+                  ).catchAll(QueryService.refused)
 
         // 8. Build response
         _ <- tracing.setAttribute("query.range_size", output.rangeElements.size.toLong)

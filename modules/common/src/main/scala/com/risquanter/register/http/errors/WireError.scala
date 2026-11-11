@@ -5,7 +5,6 @@ import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
-import com.risquanter.register.domain.errors.FolQueryFailure.*
 
 /** The only error type that crosses to a client.
   *
@@ -135,5 +134,3 @@ object WireError:
 
       // Faults: a client can act on none of them.
       case SimulationFailure(_, _)             => WireError.InternalFault(t)
-      case FolModelValidationFailure(_)        => WireError.InternalFault(t)
-      case FolEvaluationFailure(_, _)          => WireError.InternalFault(t)

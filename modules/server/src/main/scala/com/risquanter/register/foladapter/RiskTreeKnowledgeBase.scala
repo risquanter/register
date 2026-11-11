@@ -8,7 +8,7 @@ import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, Probabili
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.common.{FolSymbols, ValuationBasis}
-import com.risquanter.register.common.FolSymbols.ValueFunction
+import com.risquanter.register.common.FolSymbols.{QuerySort, ValueFunction}
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given
 
 import vql.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, Value}
@@ -438,44 +438,44 @@ object RiskTreeKnowledgeBase:
 
   /** Canonical sort id for tree nodes (leaves and portfolios). Shared with
     * [[QueryResponseBuilder]] so the id projection uses one declaration. */
-  val NodeSort: TypeId = TypeId("Node")
+  val NodeSort: TypeId = TypeId(QuerySort.Node.symbol)
 
   /** Value sort for a node reference written as a quoted node NAME literal
     * (`named_risk(x, "IT Risk")`). Carrier: `NodeId` — the name is resolved to
     * the node's id at bind time by the literal validator (`riskNameToId.get`).
     * A `ValueType`: it flows through an argument slot and is never quantified over.
-    * The sort string surfaces in a failed-literal bind message and is a
-    * node-reference discriminator in `QueryProblem.fromQueryError`. */
-  val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")
+    * The sort string surfaces in a failed-literal bind message and is one of
+    * `QuerySort.NodeReferences`. */
+  val NodeNameLiteralSort: TypeId = TypeId(QuerySort.NodeNameLiteral.symbol)
 
   /** Value sort for a node reference written as a quoted node ID literal
     * (`risk_id(x, "01BX…")`). Carrier: `NodeId` — the id string is parsed by
     * `NodeId.fromString` at bind time. A failed id literal is malformed syntax,
     * classified `BIND_FAILED` (unlike a failed name, which is a nonexistent
     * node). */
-  val NodeIdLiteralSort: TypeId = TypeId("NodeIdLiteral")
+  val NodeIdLiteralSort: TypeId = TypeId(QuerySort.NodeIdLiteral.symbol)
 
   /** Domain sort for tree-level mitigations. Carrier: `MitigationId`. A
     * `DomainType` so `∃m : mitigation …` is well-typed and the runtime domain
     * enumerates the tree's mitigations. */
-  val MitigationSort: TypeId = TypeId("Mitigation")
+  val MitigationSort: TypeId = TypeId(QuerySort.Mitigation.symbol)
 
   /** Value sort for a mitigation reference written as a quoted NAME literal
     * (`named_mitigation(m, "IT Risk")`). Carrier: `MitigationId`, resolved at
     * bind time by the name→id validator. */
-  val MitigationNameLiteralSort: TypeId = TypeId("MitigationNameLiteral")
+  val MitigationNameLiteralSort: TypeId = TypeId(QuerySort.MitigationNameLiteral.symbol)
 
   /** Value sort for a mitigation reference written as a quoted ID literal
     * (`mitigation_id(m, "01H…")`). Carrier: `MitigationId` via `fromString`. */
-  val MitigationIdLiteralSort: TypeId = TypeId("MitigationIdLiteral")
+  val MitigationIdLiteralSort: TypeId = TypeId(QuerySort.MitigationIdLiteral.symbol)
 
   /** Value sort for monetary loss figures, the result of `p95` and `p99`.
     * Carrier: `Long`. */
-  val LossSort: TypeId = TypeId("Loss")
+  val LossSort: TypeId = TypeId(QuerySort.Loss.symbol)
 
   /** Value sort for exceedance probabilities, the result of `lec`. Carrier:
     * `Double`. */
-  val ProbabilitySort: TypeId = TypeId("Probability")
+  val ProbabilitySort: TypeId = TypeId(QuerySort.Probability.symbol)
 
   /** Consumer carrier for the node sort (ADR-015 §2): the engine holds the
     * register `NodeId` opaquely in `Value.raw`; this lifts it back out. A

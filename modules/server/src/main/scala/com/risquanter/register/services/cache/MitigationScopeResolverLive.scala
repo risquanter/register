@@ -3,7 +3,7 @@ package com.risquanter.register.services.cache
 import zio.*
 import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, LeafStageSpec, TargetingPredicate}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash}
-import com.risquanter.register.domain.errors.FolQueryFailure   // NodeReferenceSortNames (single source of truth)
+import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given   // Extract[NodeId]
 
@@ -95,10 +95,10 @@ final case class MitigationScopeResolverLive(
     * legitimately reach collapses to `MalformedPredicate`. */
   private def fromTypeCheckError(e: TypeCheckError): ScopeResolutionFailure = e match
     case TypeCheckError.UnparseableConstant(name, sort, _) =>
-      sort.value match
-        case s if s == RiskTreeKnowledgeBase.NodeIdLiteralSort.value  => ScopeResolutionFailure.MalformedNodeId(name)
-        case s if FolQueryFailure.NodeReferenceSortNames.contains(s)  => ScopeResolutionFailure.UnknownNode(name)
-        case s                                                        => ScopeResolutionFailure.MalformedPredicate(s"unparseable literal '$name' for sort '$s'")
+      QuerySort.fromSymbol(sort.value) match
+        case Some(QuerySort.NodeIdLiteral)                     => ScopeResolutionFailure.MalformedNodeId(name)
+        case Some(s) if QuerySort.NodeReferences.contains(s)   => ScopeResolutionFailure.UnknownNode(name)
+        case _                                                 => ScopeResolutionFailure.MalformedPredicate(s"unparseable literal '$name' for sort '${sort.value}'")
     case TypeCheckError.TypeMismatch(expected, actual, ctx)           => ScopeResolutionFailure.TypeError(s"$ctx: expected ${expected.value}, got ${actual.value}")
     case TypeCheckError.ConflictingTypes(name, l, r)                  => ScopeResolutionFailure.TypeError(s"variable '$name' used at ${l.value} and ${r.value}")
     case TypeCheckError.UnknownPredicate(name)                        => ScopeResolutionFailure.MalformedPredicate(s"unknown predicate '$name'")

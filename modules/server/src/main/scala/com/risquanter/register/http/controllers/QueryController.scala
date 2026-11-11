@@ -14,8 +14,8 @@ import com.risquanter.register.http.errors.TreeScope
 /** Query controller — wires `QueryRequest.resolve()` to `QueryService.evaluate()`.
   *
   * The controller inspects no query content (ADR-001). It calls `resolve()` at
-  * the HTTP boundary, turns the engine's error into a failure through
-  * `QueryService.refused`, and forwards the typed `ParsedQuery` to the service.
+  * the HTTP boundary, turns its refusal into a failure through
+  * `QueryService.rejected`, and forwards the typed `ParsedQuery` to the service.
   *
   * Authorization layers:
   *  - Layer 0: [[WorkspaceStore.resolveTreeWorkspace]] validates the workspace key
@@ -48,7 +48,7 @@ class QueryController private (
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        parsed <- ZIO.fromEither(QueryRequest.resolve(req)).mapError(QueryService.refused)
+        parsed <- ZIO.fromEither(QueryRequest.resolve(req)).mapError(QueryService.rejected)
         result <- queryService.evaluate(ws.id, treeId, parsed, ws.seedEntityId, branch)
       yield result).wireEither(TreeScope.InTree(treeId))
   }

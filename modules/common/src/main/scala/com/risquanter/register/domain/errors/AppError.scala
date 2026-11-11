@@ -2,7 +2,6 @@ package com.risquanter.register.domain.errors
 
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.iron.ValidationMessages
-import vql.error.QueryError
 
 /** Who a failure is attributable to, which decides the level its log line is
   * written at (ADR-002).
@@ -94,96 +93,3 @@ case class SimulationFailure(simulationId: String, cause: Throwable) extends Dom
   override def logMessage: String = s"Simulation $simulationId failed: ${cause.getMessage}"
   override def origin: FailureOrigin = FailureOrigin.Service
 }
-
-// ============================================================================
-// FOL Query Errors (ADR-028: Vague Quantifier Query Evaluation)
-// ============================================================================
-
-/** Errors originating from vql-engine interaction or query preconditions.
-  * The `Fol` prefix identifies types mapped from `vql.error.QueryError`
-  * (the library's error algebra); the `Failure` suffix follows the
-  * `SimulationFailure` naming convention.
-  *
-  * @see ADR-028 §4 — Query Validation Before Evaluation
-  */
-sealed trait FolQueryFailure extends AppError
-
-object FolQueryFailure:
-  /** Node-sort discriminator: the `TypeId.value` the engine crosses in
-    * `BindErrorDetail.UnparseableConstant.sortName` when a quoted token failed
-    * the node-sort literal validator. `RiskTreeKnowledgeBase.NodeSort` declares
-    * the catalog's `TypeId("Node")`; a drift-guard assertion in
-    * `RiskTreeKnowledgeBaseSpec` binds the two, matching the `FolSymbols`
-    * mirror-plus-drift convention. The catalog is server-side and off `common`'s
-    * dependency graph, so this literal cannot be derived from it here.
-    */
-  val NodeSortName: String = "Node"
-
-  /** The `TypeId.value` of the `named` predicate's name-literal argument sort.
-    * A `named(x, "Nonexistent")` whose literal fails the name validator crosses
-    * this sort in `UnparseableConstant.sortName`, not `NodeSortName`, so it must
-    * join the set below to keep classifying as `QueryProblem.UnknownReferences`.
-    * Bound to the catalog by the same drift-guard assertion as `NodeSortName`.
-    */
-  val NodeNameLiteralSortName: String = "NodeNameLiteral"
-
-  /** Sorts whose unresolved quoted literal means "no such node", not a type
-    * error: a bare node slot (`Node`) and the `named` name literal
-    * (`NodeNameLiteral`). Both carry a node name that is not in the tree, so a
-    * bind failure homogeneous in these sorts is `QueryProblem.UnknownReferences`.
-    * The `has_id` id-literal sort is excluded: a malformed id is a genuine
-    * `QueryProblem.TypeCheckFailed`, and a well-formed-but-absent id parses and
-    * evaluates false.
-    */
-  val NodeReferenceSortNames: Set[String] = Set(NodeSortName, NodeNameLiteralSortName)
-
-  /** Maps from `vql.error.QueryError.ModelValidationError`.
-    *
-    * The `RuntimeModel` does not satisfy the `TypeCatalog` contract:
-    * a declared function or predicate has no dispatcher implementation,
-    * or a `DomainType` has no registered element set. This is an
-    * infrastructure / wiring error in `RiskTreeKnowledgeBase`, not a
-    * user query error.
-    *
-    * Example: Register declares `lec: (Asset, Loss) → Probability` in
-    * the catalog but the `RuntimeDispatcher` omits `lec` from its
-    * `functionSymbols` set. `FolModel(catalog, model)` validation
-    * catches this before any query is evaluated.
-    *
-    * Projects onto `InternalFault`, which carries only a trace — HTTP 500.
-    */
-  final case class FolModelValidationFailure(errors: List[String])
-    extends FolQueryFailure:
-    override def logMessage: String =
-      s"Runtime model validation failed: ${errors.mkString("; ")}"
-    override def origin: FailureOrigin = FailureOrigin.Service
-
-  /** Maps from `vql.error.QueryError.EvaluationError` / `UnboundVariableError`.
-    *
-    * Catch-all for unexpected evaluation-phase failures that occur after
-    * binding succeeds. These indicate internal errors (dispatcher bugs,
-    * resource exhaustion) rather than user query mistakes.
-    *
-    * Example: The dispatcher's `evalFunction("p95", args)` throws because
-    * simulation data is corrupted, surfacing as
-    * `EvaluationError("Division by zero", phase="function:p95")`.
-    *
-    * Projects onto `InternalFault`, which carries only a trace — HTTP 500.
-    */
-  final case class FolEvaluationFailure(message: String, phase: String)
-    extends FolQueryFailure:
-    override def logMessage: String = s"Evaluation failed in $phase: $message"
-    override def origin: FailureOrigin = FailureOrigin.Service
-
-  /** The wiring fault an engine error stands for, when
-    * `QueryProblem.fromQueryError` finds no refusal the caller can act on.
-    *
-    * The engine's refusals of the query itself never reach here, because the
-    * caller reads `QueryProblem.fromQueryError` first. Their arm keeps the
-    * match total and records the engine's message as an evaluation failure.
-    */
-  def wiringFault(err: QueryError): FolQueryFailure = err match
-    case e: QueryError.ModelValidationError => FolModelValidationFailure(e.errors)
-    case e: QueryError.EvaluationError      => FolEvaluationFailure(e.message, e.phase)
-    case e: QueryError.UnboundVariableError => FolEvaluationFailure(e.message, "unbound_variable")
-    case e                                  => FolEvaluationFailure(e.message, "refusal")

@@ -33,7 +33,21 @@ configured limit as `PositiveInt`; approved 2026-11-11. Step 5.2 landed at
 `FolQueryFailure.wiringFault`, which keeps today's two wiring leaves. The
 parser-message log limit moved to `Failure`'s log rendering. The service-level
 test pins a refused bind, because the service receives a parsed query. Approved
-2026-11-11.
+2026-11-11. On 2026-11-11 the scope was extended to the query path
+(`UES-D-18`, `UES-D-19`, `UES-D-20`). Steps 5.6 and 5.7 wait on a release of
+the engine, `vague-quantifier-logic`. Steps 5.3, 5.4 and 5.5 need nothing from
+that release and proceed meanwhile (ruled 2026-11-11). Phase 5 and the plan
+close after steps 5.6 and 5.7 land. Step 5.3 landed at 0.18.19, approved
+2026-11-11 with these deviations from its text: `QueryPosition.Unknown()` is
+written with parentheses as the other wire enums' cases are; `QueryProblem`'s
+companion holds the JSON codec and the schema of a non-empty list, which refuse
+an empty array; `QueryService.refused` is an effect that fails with the new
+`QueryService.rejected(problem)` or dies, and the controller maps `resolve`'s
+refusal through `rejected`; `resolve` throws `IllegalStateException` on the two
+outcomes the parser cannot produce; the answer-variable sentence is in
+`QueryProblem.describe`, which `ErrorMessages.query` delegates to; and
+`QuerySort`'s prism law replaces the drift test in this step.
+`FieldProblem.code` maps the new case to `NOT_SUPPORTED`.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -291,7 +305,28 @@ enum QueryProblem:
   …
   /** The query names answer variables, the `(y)` suffix, and this service
     * evaluates Boolean queries only. */
-  case AnswerVariablesNotSupported(variables: List[String])   // beside NotQuantifiable(message: String)
+  case AnswerVariablesNotSupported(variables: NonEmptyList[Positioned[QueryVariable]])   // beside NotQuantifiable(message: String)
+
+/** Where in the submitted query text a refusal points. Every query refusal
+  * carries one. `Unknown` is the named case for a refusal the engine reports
+  * with no position, so a missing position is a value a reader sees and not an
+  * absent field (UES-D-20). */
+enum QueryPosition:
+  case At(offset: NonNegativeInt)
+  case Unknown
+
+/** A refused part of a query beside its position, as `Core` pairs a location
+  * with a problem. */
+final case class Positioned[P](position: QueryPosition, problem: P)
+
+// domain/data/iron/OpaqueTypes.scala — the engine's lexer emits a word from
+// StringUtil.alphanumeric, the ASCII set a-z, A-Z, 0-9, '_' and "'", and
+// VagueQueryParser.isIdentifier accepts a word as a variable when it starts with
+// a letter and holds no "'". No maximum length (TODO.md item 65).
+type QueryVariableConstraint = Match["^[A-Za-z][A-Za-z0-9_]*$"]
+type QueryVariableStr = String :| QueryVariableConstraint
+object QueryVariable:
+  opaque type QueryVariable = QueryVariableStr
 
 enum FieldProblem:
   …
@@ -960,8 +995,13 @@ variables, the `(y)` suffix `VagueQueryParser.parseAnswerVars` reads, is refused
 today by the engine's `validateAnswerTuple`, because register passes
 `answerTuple = Map.empty` at line 136 and has no answer-variable support;
 `QueryRequest.resolve` becomes `Either[QueryProblem, ParsedQuery]` and answers
-`QueryProblem.AnswerVariablesNotSupported(parsed.answerVars)` when that list is
-non-empty, before any knowledge base is built. A query breaking
+`QueryProblem.AnswerVariablesNotSupported(variables)` when that list is
+non-empty, before any knowledge base is built. `variables` is a
+`NonEmptyList[Positioned[QueryVariable]]`, each at `QueryPosition.Unknown`
+until the engine reports where the variable stands. A refusal naming no variable
+cannot be built,
+and every name carries the parser's identifier rule into the log line, the wire
+and the browser's decoder (ruled 2026-11-11). A query breaking
 `ParsedQuery.mk`'s two variable rules is `Unparseable` through step 5.2. Every
 other cause is a wiring fault: the dispatcher `Left`s in
 `RiskTreeKnowledgeBase.scala` (lines 163, 479 and 488) become
@@ -971,9 +1011,13 @@ are ruled out by the binder. So `FolEvaluationFailure` is a defect answered by
 carried its `phase`, is not added. `RejectionDetail.Query`'s comment counting
 `QueryProblem`'s cases is corrected, and `ErrorMessages.query` gains the arm.
 Grep: `FolQueryFailure`, `FolModelValidationFailure`, `FolEvaluationFailure`,
-`EnginePhase`. Test: `QueryServiceLiveSpec` pins the `require` on a model built
+`EnginePhase`. Deleting `FolQueryFailure` removes the home of its three
+sort-name constants, so this step adds `FolSymbols.QuerySort` (step 5.6's
+signature) and `RiskTreeKnowledgeBase` declares its catalog sorts from it;
+`QueryProblem.fromQueryError` and `MitigationScopeResolverLive` read
+`QuerySort.NodeReferences`. Test: `QueryServiceLiveSpec` pins the `require` on a model built
 from a tree, and pins a query with `(y)` as `Rejected` with
-`Query(AnswerVariablesNotSupported(List("y")))`; `ErrorMessagesSpec` pins the
+`Query(AnswerVariablesNotSupported(NonEmptyList(y)))`; `ErrorMessagesSpec` pins the
 arm's text.
 
 5.4 Row 56. `fitCheck` of §3.6 in `RiskTreeServiceLive`; `Simulator.scala` line
@@ -991,6 +1035,218 @@ build `Rejected` at `Service` with their present locations and problems
 `Rejected` at `Client`. The resolver's `fromValidation` takes the zone, as
 `toZIOValidation` does. Grep: `ValidationFailed`. Test: the
 resolver's suite pins row 57's and 58a's zones.
+
+5.6 Query refusals carry typed fields (`UES-D-18`). This step lands together
+with step 5.7, against the engine release that step consumes (`UES-D-19`). Today three of `QueryProblem`'s cases carry sentences the engine
+rendered, `TypeCheckFailed` and `UnknownReferences` as `List[String]` and
+`NotQuantifiable` as one `String`, and those sentences quote the caller's text
+into the log and onto the wire, against ADR-035's "backend messages must never
+reach the client". The engine already carries every value the sentences are
+built from: `BindError.details` is `BindErrorDetail`, one case per
+`TypeCheckError` with typed fields, and `UnknownConstantOrLiteralError` carries
+its `name`. Register takes the fields, refines each to the content type the
+engine's lexer and binder guarantee, and renders the sentence itself in
+`QueryProblem.describe`, the one renderer the log line and the query pane both
+read.
+
+The signatures:
+
+```scala
+// common/src/main/scala/com/risquanter/register/common/FolSymbols.scala
+/** The sorts the knowledge base's catalog declares. `symbol` is the `TypeId`
+  * the engine binds and reports back, a contract with the engine, so it is
+  * declared and not derived from the case name (ADR-037). */
+enum QuerySort(val symbol: String):
+  case Node                  extends QuerySort("Node")
+  case NodeNameLiteral       extends QuerySort("NodeNameLiteral")
+  case NodeIdLiteral         extends QuerySort("NodeIdLiteral")
+  case Mitigation            extends QuerySort("Mitigation")
+  case MitigationNameLiteral extends QuerySort("MitigationNameLiteral")
+  case MitigationIdLiteral   extends QuerySort("MitigationIdLiteral")
+  case Loss                  extends QuerySort("Loss")
+  case Probability           extends QuerySort("Probability")
+
+object QuerySort:
+  def fromSymbol(symbol: String): Option[QuerySort]
+  /** Sorts whose unreadable literal names a node the tree does not hold. */
+  val NodeReferences: Set[QuerySort] = Set(Node, NodeNameLiteral)
+
+// common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala
+/** A word the engine's lexer emits: StringUtil.alphanumeric, ASCII letters,
+  * digits, '_' and "'". A predicate, function or bound-variable name. */
+type QueryWordConstraint = Match["^[A-Za-z0-9_']+$"]
+type QueryWordStr = String :| QueryWordConstraint
+object QueryWord:
+  opaque type QueryWord = QueryWordStr
+
+/** A constant's source text: a word, a decimal the parser merged from two
+  * words, or the content of a quoted literal. The engine's lexer admits in a
+  * quoted literal only what a name, an identifier or a number can hold (step
+  * 5.7), and this is that alphabet joined with a word's. It excludes '<', '>',
+  * '&', '"', '`' and every control character. */
+type QueryLiteralConstraint = Match["^[A-Za-z0-9 /_.+'\\-]*$"]
+type QueryLiteralStr = String :| QueryLiteralConstraint
+object QueryLiteral:
+  opaque type QueryLiteral = QueryLiteralStr
+
+// common/src/main/scala/com/risquanter/register/http/errors/BindProblem.scala
+/** One reason the engine's binder refused a parsed query, with the values the
+  * sentence is built from. The engine's `BindErrorDetail`, refined; the two
+  * details a Boolean query over a validated model cannot reach are defects. */
+@jsonDiscriminator(BindProblem.TagField)
+enum BindProblem:
+  case UnknownPredicate(name: QueryWord)
+  case UnknownFunction(name: QueryWord)
+  case ArityMismatch(symbol: QueryWord, expected: NonNegativeInt, actual: NonNegativeInt)
+  case UnknownConstant(text: QueryLiteral)
+  case UnreadableLiteral(text: QueryLiteral, sort: QuerySort)
+  case SortMismatch(site: MismatchSite, expected: QuerySort, actual: QuerySort)   // MismatchSite: step 5.7
+  case ConflictingSorts(variable: QueryWord, left: QuerySort, right: QuerySort)
+  case UnconstrainedVariable(variable: QueryVariable)
+  case NotQuantifiable(sort: QuerySort)
+
+object BindProblem:
+  final val TagField = "kind"
+  /** The detail as register's value, or the defect a detail no query can reach is. */
+  def fromDetail(detail: BindErrorDetail): Either[String, BindProblem]
+  /** A literal of a node-reference sort, or an unknown constant: the query
+    * names something the tree does not hold. */
+  def namesAbsentNode(problem: BindProblem): Boolean
+
+// common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala
+enum QueryProblem:
+  case Unparseable(problem: Positioned[ParseProblem])                       // ParseProblem: step 5.7
+  case Unbound(problems: NonEmptyList[Positioned[BindProblem]])
+  case AnswerVariablesNotSupported(variables: NonEmptyList[Positioned[QueryVariable]])
+```
+
+The family search. `QuerySort` joins the query-language closed sets in
+`FolSymbols.scala`, whose member `ValueFunction` declares its `symbol` the same
+way. It replaces `FolQueryFailure`'s three sort-name constants and the eight
+`TypeId("…")` literals in `RiskTreeKnowledgeBase`, which declares each sort as
+`TypeId(QuerySort.X.symbol)`. The copy in `common` and the catalog are then one
+declaration, and the drift test becomes the prism law
+`fromSymbol(s.symbol) == Some(s)`. `QueryWord` and `QueryLiteral` join the Iron
+refinement aliases in `OpaqueTypes.scala` beside `QueryVariable`, as opaque
+types following `SafeName`'s pattern there. Their JSON codecs sit in their
+objects and their Tapir schemas in `IronTapirCodecs.scala` beside
+`Schema[SafeName.SafeName]`. `QueryVariable` is the subset of `QueryWord` the
+parser admits as a variable. The two stay distinct types, because an answer
+variable is refined by the parser's rule and a bound-variable name in a bind
+detail only by the lexer's (ADR-018). `BindProblem` joins the wire payload enums
+in `http/errors/` beside `QueryProblem`, whose discriminator and schema pattern
+it copies. It restates `BindErrorDetail`'s cases, which live in the engine and
+carry primitives, and no register type denotes them. `ScopeResolutionFailure`
+in `MitigationScopeResolver.scala` restates the same details under other names
+(`UnknownNode`, `MalformedNodeId`, `TypeError(String)`,
+`MalformedPredicate(String)`), so it is deleted and `ScopeOutcome.Failed`
+carries `NonEmptyChunk[BindProblem]`. `MismatchSite` is the typed form of
+`TypeMismatch.context` and is written in step 5.7.
+
+`NonNegativeInt` is the existing refinement for an arity. The literal texts are
+the caller's own query text, and their length is the open question in TODO.md
+item 65.
+
+What each engine error becomes:
+
+| Engine error | Register value |
+|---|---|
+| `BindError(details)` | `Unbound(details.map(fromDetail))`; a `Left` dies |
+| `UnknownConstantOrLiteralError(name)` | `Unbound(NonEmptyList(UnknownConstant(name)))` |
+| `DomainNotFoundError` | a defect: the engine raises it only for a type with no registered domain, which `FolModel`'s validation excludes, so after step 5.3's model check it is unreachable (`UES-D-9`) |
+| `BindErrorDetail.UnboundAnswerVar` | a defect: `QueryRequest.resolve` refuses every answer variable before the bind |
+| `BindErrorDetail.UnexpectedFreeVar` | a defect: only `bindSatisfyingFormula` raises it, and a stored targeting predicate has exactly one free variable by its create-time check |
+| a sort symbol `QuerySort.fromSymbol` does not know | a defect: the catalog is declared from `QuerySort` |
+| a name or text that does not refine | a defect: the types state what the lexer and binder emit |
+
+The defects are `ZIO.die(new IllegalStateException(…))` at the two effectful
+call sites, `QueryService.refused` and `MitigationScopeResolverLive`. The pure
+`fromDetail` returns the `Left` they die on. In the scope resolver the five
+`InternalError` arms are defects by the same rule, because each is a state a
+predicate this service validated and stored cannot reach. `TypeError` and
+`MalformedPredicate` become the `BindProblem` cases their detail is, because a
+stored predicate can fail to bind after a catalog change, and that drift stays
+the per-mitigation log signal ADR-002 names.
+
+`ValidationErrorCode` is derived. An `Unbound` whose every problem
+`namesAbsentNode` is `UNKNOWN_REFERENCE`, and any other `Unbound` is
+`BIND_FAILED`. `DOMAIN_NOT_QUANTIFIABLE` loses its producer and is deleted (§5).
+`QueryProblem.describe` gains one template per `BindProblem` case, and
+`ErrorMessages.query` delegates to it unchanged. Grep: `UnknownReferences`,
+`TypeCheckFailed`, `NotQuantifiable(message`, `ScopeResolutionFailure`,
+`DOMAIN_NOT_QUANTIFIABLE`, `.rendered`, `NodeReferenceSortNames`. Test:
+`BindProblemSpec` pins `fromDetail` for every `BindErrorDetail` case, including
+the two that are `Left`, the JSON round trip, and that the decoder refuses a
+text holding a newline and an unknown sort. `OpaqueTypesSpec` pins `QueryWord`
+and `QueryLiteral`. `QueryProblemFromQueryErrorSpec`, `QueryServiceLiveSpec`,
+`MitigationScopeResolverSpec`, `FailureSpec`, `WireErrorSpec`,
+`GlobalErrorSpec`, `PublishedDiscriminatorSpec` and `QueryEndpointSpec`'s H3
+assert the typed values. `ErrorMessagesSpec` pins each template.
+`RiskTreeKnowledgeBaseSpec`'s drift test becomes `QuerySort`'s prism law.
+
+5.7 The parse refusals and the type-mismatch site carry typed fields
+(`UES-D-19`). The engine builds them from fixed templates today and returns
+only the finished string. The templates are about a dozen in
+`VagueQueryParser`, two in `Lexer`, about fifteen in the ported formula parser,
+which `VagueQueryParser.parse` catches as any `Exception`, the two variable rules
+of `ParsedQuery.mk`, and `TypeMismatch.context`, which `QueryBinder` builds in
+one of three shapes. The foundation parser's `parser.ParseError`, which
+`TargetingPredicate.create` and `MitigationScopeResolverLive` read, is an enum
+already, and its three cases carry their detail as `String`.
+
+The engine release this step consumes is planned in the engine repository,
+`vague-quantifier-logic`, under that repository's rules, and states its own
+signatures. Two plan stubs there carry it, written 2026-11-11 on the user's
+approval. Each is a stub and not yet an approved plan of that repository.
+`docs/PLAN-typed-refusals.md` holds
+the work this plan waits on. `docs/PLAN-refusal-positions.md` holds the
+analysis of how far the engine can report a position, which this plan does not
+wait on. What register
+requires of it, adapted from this plan's rules rather than copied:
+
+- every refusal a caller can cause is a closed set with one case per template,
+  and each case carries the values its sentence is built from as typed fields;
+- a sentence is derived from those fields, as `BindErrorDetail.rendered` and
+  `parser.ParseError.message` are derived today, and is never the only carrier;
+- a field the engine can type narrowly is typed: a token by its kind, a parse
+  context from the parser's fixed set of contexts, a type-mismatch site as a
+  variable, a constant or a function's return;
+- the lexer admits in a quoted literal only the alphabet a name, an identifier
+  or a number can hold, about `[A-Za-z0-9 /_.+-]`, and refuses any other
+  character as its own parse refusal. The literal branch of `Lexer.lex` is a
+  Scala addition with no OCaml counterpart, so the ported core is untouched;
+- a token's text crosses only for a word or a literal. Punctuation and a known
+  operator cross as a case of a closed set. An unknown operator run, a stray
+  character and a refused literal cross as a kind, with no text;
+- a position crosses wherever the engine has one, and its absence is explicit;
+- the parser's catch-all `case e: Exception` is narrowed to the parser's own
+  failure types, so an exception that is not a parse refusal stays a defect;
+- the ported core keeps every message word for word (the engine's ADR-007 C12)
+  and gains the typed kind as an element-type refinement (C13).
+
+Register's half is a structural translation, one arm per engine case, with no
+reading of message text. `QueryProblem.Unparseable(message, position)` is
+replaced by typed parse problems, and `BindProblem.SortMismatch` carries its
+`MismatchSite`. `FieldProblem.TargetingPredicateUnparseable` carries the same
+typed parse problem, because a targeting predicate is query-language text from
+the caller refused at the same parser. The comment on
+`TargetingPredicate.create` that says no refusal may carry the parser's text is
+rewritten to state `UES-D-20`. Every refusal is a `Positioned` value: an engine position becomes
+`QueryPosition.At`, and a refusal the engine reports with none becomes
+`QueryPosition.Unknown`, which `QueryProblem.describe` renders as no position
+clause. Register computes no position itself. `Failure`'s 300-character bound
+stays and applies to the rendered sentence of any query refusal, because the
+log line still repeats the caller's words and literals (OWASP Logging Cheat
+Sheet, "Limit the size of the user input value used to create the log
+message"). The query pane's in-browser check reads `QueryRequest.resolve` and
+renders through `ErrorMessages.query`, in place of the engine's `formatted`
+text, so the pane and the server show one sentence for one refusal.
+`vqlEngineVersion` in `build.sbt` moves to the release. Steps 5.6 and 5.7 land
+together against that release, so `QueryProblem` changes on the wire once.
+
+Register's signatures for this step are written from the engine plan's
+signatures once that plan is approved, and presented then. Until that, this
+step's exact signatures are the plan's one open item.
 
 Acceptance: compile, the four tiers, BATS suites A and C.
 
@@ -1039,6 +1295,8 @@ reclassified, and each is a BATS assertion to update:
 | 26, a query breaking `ParsedQuery.mk`'s variable rules | 500 `InternalFault` | 422 `Query(Unparseable)` | 5.2 |
 | 59b, a query naming answer variables | 500 `InternalFault` | 422 `Query(AnswerVariablesNotSupported)` | 5.3 |
 | 56 | 422 at simulation | 422 at create and update; unreachable at simulation | 5.4 |
+| 26, an engine `DomainNotFoundError` | 422 `Query(NotQuantifiable)` | 500: unreachable after the model check, a defect | 5.6 |
+| 26, a bind refusal | 422 `Query(UnknownReferences)` or `Query(TypeCheckFailed)` carrying sentences | 422 `Query(Unbound)` carrying typed `BindProblem`s; the code stays `UNKNOWN_REFERENCE` or `BIND_FAILED` | 5.6 |
 | 57 | 422 | 500, `Rejected` at `Service` | 5.5 |
 | 58a | 422 | 500 | 5.5 |
 | 49 to 51 untranslated | 500 at INFO | unreachable: a compile error | 3.1 |
@@ -1047,6 +1305,15 @@ The published schema gains the enum cases `FieldName.Ttl`, `FieldName.IdleTimeou
 `ExpectedInput.Json`, `ExpectedInput.Interval`, `ValueFormat.StoreSegment`,
 `FieldProblem.Query`, `FieldProblem.StoredNodeKindDiffers`, four `NotFoundKind`
 cases, `Capability.PinnedReads` and `QueryProblem.AnswerVariablesNotSupported`.
+Step 5.6 changes `QueryProblem` on the wire, and every client is sent it. It
+gains `Unbound` and the `BindProblem` enum with its nine cases, and it loses
+`UnknownReferences`, `TypeCheckFailed` and `NotQuantifiable`.
+`ValidationErrorCode` loses `DOMAIN_NOT_QUANTIFIABLE`. Step 5.7 replaces
+`Unparseable`'s fields with typed parse problems, and
+`FieldProblem.TargetingPredicateUnparseable` gains the same typed field. The
+two steps land together, so the wire changes once. No client other than the query pane
+reads these, and the pane renders them through `QueryProblem.describe` in
+`common`, so the server and the pane change in one release.
 No client is sent any but `Capability.PinnedReads`,
 `QueryProblem.AnswerVariablesNotSupported` and `FieldProblem.Query`'s wire form,
 which is `RejectionDetail.Query` unchanged. Four cases are removed:
@@ -1287,6 +1554,106 @@ presented then. Ruled when the check has run.
 Row 1, the decode-failure handler, is out of this plan's scope by the user's
 ruling of 2026-11-09 and stays as it is.
 
+### UES-D-18 — query refusals carry typed fields, not the engine's sentences — RULED 2026-11-11
+
+**Ruled 2026-11-11: the plan's scope extends to the query path.** A refused
+query carries the values its sentence is built from, refined to the content
+type the engine guarantees, and register renders the sentence. The same
+principles as the rest of the plan apply: every case is a closed set, every
+field is refined, a state no validated input reaches is a defect (`UES-D-9`),
+and a type restating another's cases is merged into it. The answer variables are
+a `NonEmptyList[QueryVariable]`, because an empty list would be a refusal that
+names nothing and must not be constructible. Step 5.6 applies the ruling to
+what the engine exposes today. Step 5.7 applies it to the parse refusals and
+the type-mismatch site, which the engine exposes only as strings. The
+alternative recovers structure by matching the engine's sentences against their
+templates. It was not chosen, because a reworded engine message would then
+break the classification with nothing failing to compile. The maximum length
+of the caller's text is left out of this plan and recorded as TODO.md item 65.
+
+### UES-D-19 — where the engine half of step 5.7 is done — RULED 2026-11-11
+
+**Ruled 2026-11-11: Option A.** The engine adapts this plan's error-typing
+rules, not necessarily verbatim. The goal is compatibility and consistency:
+the engine's error types keep their own root, and processing anything that
+comes from the engine is a structural translation in register. Step 5.7 states
+what register requires of the release. The option text below is kept as
+presented.
+
+**Goal.** Step 5.7 needs the engine to return its parse refusals, its two
+variable rules and its type-mismatch site as typed values. The engine is the
+sibling repository `vague-quantifier-logic`, released to Maven Central as
+`com.risquanter:vql-engine` and pinned in `build.sbt` at
+`vqlEngineVersion = "0.17.0"`. That repository has its own decision records,
+its own plans in `docs/` and its own working instructions. Its ADR-007
+preserves the ported parser core: characteristic C12 maps OCaml's
+`failwith "message"` to `throw new Exception("message")` with the message kept
+verbatim, and §131 says a change that breaks a characteristic needs explicit
+approval. The ported formula parser is where about fifteen of the templates
+live.
+
+**Option A — the engine work is part of this plan.** An engine plan is written
+in `vague-quantifier-logic/docs/` under that repository's rules. It adds a
+typed kind to each parser failure while keeping every message verbatim, which
+C13's element-type refinement admits and C12 still holds by. It also narrows
+`VagueQueryParser.parse`'s `case e: Exception` to the parser's own failure
+types. The engine is released, register bumps `vqlEngineVersion`, and steps
+5.6 and 5.7 then land against it. First-party artifacts are exempt from the
+14-day cooldown (ADR-020 §10). You see this plan's close wait on an engine
+release you run. In exchange, no query refusal crosses as a sentence.
+
+**Option B — step 5.6 lands now, and step 5.7 waits on a separate engine plan.**
+Step 5.6 ships with `SortMismatch(expected, actual)` without its site, and with
+`Unparseable(message, position)` unchanged. The engine work becomes its own
+plan in that repository, and register consumes its release in a continuation
+section of this plan. You see this plan close sooner, with two fields still
+carrying sentences until the continuation lands.
+
+**Recommendation, the plan author's: Option A**, because the ruling extends the
+scope to these paths and Option B leaves exactly the kind of text the ruling
+removes. It holds only if you approve work in the engine repository under its
+own controls, and the C12 reading stated above.
+
+### UES-D-20 — what of the caller's query text a refusal may carry — RULED 2026-11-11
+
+**Ruled 2026-11-11.** A refusal is structured and never carries the caller's
+whole input or a sentence a backend composed. Two risks motivate that. A value
+repeated to a client can be executed by a client that renders it unsafely. A
+value repeated into a log reaches a wider audience than the caller and may be
+confidential. A refusal of query-language text may still carry values extracted
+from that text, because of what the text is made of once the engine's lexer
+has read it:
+
+| Piece of the query | Content | How a refusal carries it |
+|---|---|---|
+| a word: predicate, function, variable, bare constant | `[A-Za-z0-9_']` | as text, in a typed field |
+| a quoted literal | the alphabet a name, an identifier or a number can hold | as text, in a typed field |
+| punctuation, a known operator | a closed set | as a case, never as text |
+| anything else | an unknown operator run, a stray character, a literal holding a refused character | as a kind and a position, never as text |
+
+The reasons it is sound. A query's vocabulary is resource names, which cross
+the client boundary in both directions (ADR-036), so ordinary use holds no
+secret. A secret typed into a query is the user's mistake, the service cannot
+prevent it, and `QueryServiceLive` already records an accepted query's text in
+its trace span. The answer returns only to the caller who sent the text. The
+defence against injection is the sink and not the syntax: the response is
+zio-json output, the pane writes through `textContent`, and no returned field
+is fed to a parser (OWASP Injection Prevention Cheat Sheet, Rule #2; ADR-029
+§2). The typed fields are the second layer (ADR-029 §1). The log is the one
+unstructured sink, `logback.xml`'s `%msg%n`, so the literal alphabet excludes
+every control character and the logged sentence keeps a length bound.
+
+Every query refusal carries a `QueryPosition`, and `Unknown` is its named case
+for a refusal the engine reports without one. The engine reports a position at
+one of its fourteen parse-error sites today, computed by re-rendering the
+leftover tokens, and none for a bind error. How far the engine can fill it is
+an analysis in the engine repository, independent of this plan.
+
+One character is left to the sinks: the apostrophe, which the ported lexer
+admits in a word and register's vocabulary never uses. It matters only where a
+client writes a field unencoded into a single-quoted attribute or a script
+string, which ADR-029 §4 already forbids.
+
 ---
 
 ## 7. ADR alignment
@@ -1303,7 +1670,9 @@ ruling of 2026-11-09 and stays as it is.
 | ADR-036 (confidential identifiers) | `Diagnostic.WorkspaceRef`, `BranchChoice.fromBranchRef` | Compliant. A `WorkspaceId` appears only in a diagnostic, which never crosses; the projection's fold that read a `WorkspaceId` moves to the construction site so the projection never holds one. |
 | ADR-038 (response wire shapes) | the wire enums' new cases | Compliant. No response shape changes; the cases are declared on the enum that owns them with derived codecs. |
 | ADR-004a and ADR-007 (persistence, branches) | the compare-and-set outcomes as return values | Compliant. The single-writer rule and the branch operations are unchanged; what changes is that a refused compare-and-set is an answer the caller reads rather than a failure it catches. |
-| ADR-028 (query pane) | rows 26 and 59 | **Amended.** The appendix's sub-portfolio example says "Answer variable `y` projects matching portfolio IDs"; after Phase 5.3 the service answers 422 `AnswerVariablesNotSupported` to it, so the example gains one sentence saying the service does not yet serve answer variables and naming `PLAN-QAV-QUERY-ANSWER-VARIABLES.md`. The engine's rendered messages still reach the pane through `QueryProblem`. The user gave the go on 2026-11-10. The sentence is written in step 5.3, because it states that step's answer and is false until it lands. |
+| ADR-028 (query pane) | rows 26 and 59 | **Amended.** The appendix's sub-portfolio example says "Answer variable `y` projects matching portfolio IDs"; after Phase 5.3 the service answers 422 `AnswerVariablesNotSupported` to it, so the example gains one sentence saying the service does not yet serve answer variables and naming `PLAN-QAV-QUERY-ANSWER-VARIABLES.md`. After step 5.6 the pane shows register's own templates over the engine's typed fields, not the engine's rendered messages (`UES-D-18`). The user gave the go on 2026-11-10. The sentence is written in step 5.3, because it states that step's answer and is false until it lands. |
+| ADR-035 (error leakage) | what of the caller's text a refusal may carry | **To be amended.** A new section states `UES-D-20`: the two risks, the four kinds of query text and how a refusal carries each, and the conditions. The user gave the go on the wording of `UES-D-20` on 2026-11-11. Written in step 5.7, because it describes the literal alphabet and the typed fields and is false until they land. |
+| ADR-029 (injection defence) | §3's parser-boundary table | **To be amended with ADR-035**, on the same go. One new row: a query refusal's fields as an outgoing boundary, guarded by zio-json, `textContent`, the typed fields and the log line's bound. The `VagueQueryParser.parse` row gains the literal alphabet. The two records then bear on the same fields, so step 5.7 also writes the reconciliation into both under a heading naming the other, adds the Layer 3 row "ADR-035 × ADR-029" to `.claude/skills/adr-constraints/SKILL.md`, and adds ADR-035 to that skill's Layer 1 entry for the query language path. |
 
 `.claude/skills/adr-constraints/SKILL.md`'s Layer 3 row "ADR-039 × ADR-010"
 names the two failures as `Unanswered` and `Rejected`, amended 2026-11-10.

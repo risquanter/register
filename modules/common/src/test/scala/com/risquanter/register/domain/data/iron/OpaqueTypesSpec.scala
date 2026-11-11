@@ -174,7 +174,25 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
         )
       }
     ),
-    
+
+    suite("QueryVariable opaque type")(
+      test("accepts a name the query parser accepts as a variable") {
+        assertTrue(
+          QueryVariable.fromString("y").map(_.value) == Right("y"),
+          QueryVariable.fromString("node_2").map(_.value) == Right("node_2")
+        )
+      },
+      test("refuses an empty name, a leading digit or underscore, an apostrophe and a non-ASCII letter") {
+        assertTrue(
+          QueryVariable.fromString("").isLeft,
+          QueryVariable.fromString("2x").isLeft,
+          QueryVariable.fromString("_x").isLeft,
+          QueryVariable.fromString("x'").isLeft,
+          QueryVariable.fromString("é").isLeft
+        )
+      }
+    ),
+
     suite("Email opaque type")(
       test("can be created from SafeShortStr") {
         val email: Email.Email = Email.Email("test@example.com".refineUnsafe)

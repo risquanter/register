@@ -34,6 +34,40 @@ object FolSymbols:
     def fromSymbol(symbol: String): Option[ValueFunction] =
       ValueFunction.values.find(_.symbol == symbol)
 
+  /** The sorts the knowledge base's catalog declares.
+    *
+    * `symbol` is the type name the engine binds and reports back in a bind
+    * failure, so it is a contract with the engine and is declared rather than
+    * derived from the case name (ADR-037). The catalog declares each sort from
+    * this enum, so the two cannot drift.
+    */
+  enum QuerySort(val symbol: String):
+    case Node                  extends QuerySort("Node")
+    case NodeNameLiteral       extends QuerySort("NodeNameLiteral")
+    case NodeIdLiteral         extends QuerySort("NodeIdLiteral")
+    case Mitigation            extends QuerySort("Mitigation")
+    case MitigationNameLiteral extends QuerySort("MitigationNameLiteral")
+    case MitigationIdLiteral   extends QuerySort("MitigationIdLiteral")
+    case Loss                  extends QuerySort("Loss")
+    case Probability           extends QuerySort("Probability")
+
+  object QuerySort:
+    /** The sort a reported type name names, if it names one.
+      *
+      * {{{
+      * fromSymbol("NodeNameLiteral") // Some(NodeNameLiteral)
+      * fromSymbol("Asset")           // None
+      * }}}
+      */
+    def fromSymbol(symbol: String): Option[QuerySort] =
+      QuerySort.values.find(_.symbol == symbol)
+
+    /** Sorts whose unreadable literal names a node the tree does not hold: a
+      * bare node slot and the `named_risk` name literal. The id-literal sort is
+      * not one of them, because a malformed id is a type error and a
+      * well-formed absent id binds and evaluates false. */
+    val NodeReferences: Set[QuerySort] = Set(Node, NodeNameLiteral)
+
   /** A manually maintained mirror of the predicate symbol names declared in the
     * `RiskTreeKnowledgeBase` catalog, plus its function symbols and its two
     * constants, which are read from `ValueFunction` and `ValuationBasis` rather

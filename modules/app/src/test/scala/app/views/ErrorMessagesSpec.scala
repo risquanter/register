@@ -6,9 +6,10 @@ import sttp.model.StatusCode
 import app.components.{FormInputs, MergeMessages}
 import app.core.{LocalProblem, RequestFailure}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode}
-import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, ScenarioName, SeedVarId, TelemetryPlaceholders, TraceId, TreeId}
+import zio.prelude.NonEmptyList
+import com.risquanter.register.domain.data.iron.{BranchChoice, QueryVariable, SafeName, ScenarioName, SeedVarId, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
-import com.risquanter.register.http.errors.{Capability, NotFoundKind, RejectionDetail, WireError}
+import com.risquanter.register.http.errors.{Capability, NotFoundKind, Positioned, QueryPosition, QueryProblem, RejectionDetail, WireError}
 import com.risquanter.register.http.responses.{MergeConflictEntry, TreeLabel, TreeMetadataFields, Versions}
 import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, treeId as treeIdOf, unsafeGet}
 
@@ -27,7 +28,19 @@ object ErrorMessagesSpec extends ZIOSpecDefault:
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
-    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite, summaryHeadingSuite, mergeConflictSuite, notFoundSuite)
+    suite("ErrorMessages")(viewFailedSuite, viewFailedLinesSuite, traceOfSuite, summaryHeadingSuite, mergeConflictSuite, notFoundSuite, querySuite)
+
+  // ── refused-query sentences ───────────────────────────────────────────────
+
+  private val querySuite =
+    suite("ErrorMessages.query")(
+      test("a query naming answer variables says the service answers yes-or-no queries and names them") {
+        val y = QueryVariable.fromString("y").toOption.get
+        val problem = QueryProblem.AnswerVariablesNotSupported(NonEmptyList(Positioned(QueryPosition.Unknown(), y)))
+        assertTrue(ErrorMessages.query(problem) ==
+          "This service answers yes-or-no queries only and does not return answer variables yet: y")
+      }
+    )
 
   // ── absence sentences ─────────────────────────────────────────────────────
 

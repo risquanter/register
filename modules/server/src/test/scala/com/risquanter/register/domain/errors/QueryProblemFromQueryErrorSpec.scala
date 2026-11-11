@@ -1,17 +1,19 @@
 package com.risquanter.register.domain.errors
 
+import zio.Exit
 import zio.prelude.NonEmptyList
 import zio.test.*
 
 import vql.error.QueryError as QE
 import vql.error.BindErrorDetail
 
+import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.http.errors.QueryProblem
 import com.risquanter.register.services.QueryService
 
 /** Tests for `QueryProblem.fromQueryError`, which reads the engine's
   * `QueryError` as the refusal a caller can act on, and for
-  * `QueryService.refused`, which turns that reading into a failure.
+  * `QueryService.refused`, which fails with that refusal or dies on a fault.
   */
 object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
 
@@ -53,14 +55,14 @@ object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
   private val bindSuite = suite("BindError classification")(
     test("every detail an unresolved node → UnknownReferences carrying the rendered messages") {
       val err = QE.BindError(List(
-        unparseable("Foo", FolQueryFailure.NodeSortName),
-        unparseable("Bar", FolQueryFailure.NodeSortName)
+        unparseable("Foo", QuerySort.Node.symbol),
+        unparseable("Bar", QuerySort.Node.symbol)
       ))
       assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.UnknownReferences(err.messages)))
     },
     test("an unresolved node beside a genuine type error → TypeCheckFailed") {
       val err = QE.BindError(List(
-        unparseable("Foo", FolQueryFailure.NodeSortName),
+        unparseable("Foo", QuerySort.Node.symbol),
         BindErrorDetail.ArityMismatch(
           symbol = "leaf", expected = 1, actual = 2,
           rendered = "arity mismatch for 'leaf': expected 1, actual 2"
@@ -71,24 +73,24 @@ object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
     test("a name literal naming no node → UnknownReferences") {
       // named_risk(x, "Nonexistent") fails on the NodeNameLiteral sort, which is
       // the same missing node as a name in a node slot.
-      val err = QE.BindError(List(unparseable("Nonexistent", FolQueryFailure.NodeNameLiteralSortName)))
+      val err = QE.BindError(List(unparseable("Nonexistent", QuerySort.NodeNameLiteral.symbol)))
       assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.UnknownReferences(err.messages)))
     },
     test("a node slot and a name literal both unresolved → UnknownReferences") {
       val err = QE.BindError(List(
-        unparseable("Foo", FolQueryFailure.NodeSortName),
-        unparseable("Bar", FolQueryFailure.NodeNameLiteralSortName)
+        unparseable("Foo", QuerySort.Node.symbol),
+        unparseable("Bar", QuerySort.NodeNameLiteral.symbol)
       ))
       assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.UnknownReferences(err.messages)))
     },
     test("a malformed id literal → TypeCheckFailed") {
       // risk_id(x, "not-an-id") is a type error, so NodeIdLiteral is not a
       // node-reference sort.
-      val err = QE.BindError(List(unparseable("not-an-id", "NodeIdLiteral")))
+      val err = QE.BindError(List(unparseable("not-an-id", QuerySort.NodeIdLiteral.symbol)))
       assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.TypeCheckFailed(err.messages)))
     },
     test("a non-node literal → TypeCheckFailed") {
-      val err = QE.BindError(List(unparseable("notaloss", "Loss")))
+      val err = QE.BindError(List(unparseable("notaloss", QuerySort.Loss.symbol)))
       assertTrue(QueryProblem.fromQueryError(err) == Some(QueryProblem.TypeCheckFailed(err.messages)))
     },
     test("an unknown constant or literal → UnknownReferences") {
@@ -128,26 +130,31 @@ object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
 
   // ── QueryService.refused ────────────────────────────────────────────
 
+  /** The defect `refused` dies with, when it dies with one. */
+  private def diesWithIllegalState(err: QE) =
+    QueryService.refused(err).exit.map(exit =>
+      assertTrue(exit.causeOption.flatMap(_.dieOption) match
+        case Some(_: IllegalStateException) => true
+        case _                              => false))
+
   private val refusedSuite = suite("QueryService.refused")(
     test("a parse failure is Rejected at Client at the whole request") {
       val err = QE.ParseError("Expected '}'", "Q[>=]^{2/3 x", Some(14))
-      assertTrue(QueryService.refused(err) == Failure.rejected(
-        TrustZone.Client,
-        NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable("Expected '}'", Some(14))))),
-        Nil
-      ))
+      QueryService.refused(err).exit.map(exit =>
+        assertTrue(exit == Exit.fail(Failure.rejected(
+          TrustZone.Client,
+          NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable("Expected '}'", Some(14))))),
+          Nil
+        ))))
     },
-    test("a model that does not satisfy its catalog is a model-validation fault") {
-      val err = QE.ModelValidationError(List("Missing function implementation: lec"))
-      assertTrue(QueryService.refused(err) == FolQueryFailure.FolModelValidationFailure(List("Missing function implementation: lec")))
+    test("a model that does not satisfy its catalog is a defect") {
+      diesWithIllegalState(QE.ModelValidationError(List("Missing function implementation: lec")))
     },
-    test("an evaluation failure keeps its message and phase") {
-      val err = QE.EvaluationError("Division by zero", "scope_eval")
-      assertTrue(QueryService.refused(err) == FolQueryFailure.FolEvaluationFailure("Division by zero", "scope_eval"))
+    test("an evaluation failure is a defect") {
+      diesWithIllegalState(QE.EvaluationError("Division by zero", "scope_eval"))
     },
-    test("an unbound variable is an evaluation fault") {
-      val err = QE.UnboundVariableError("x", Set("y", "z"))
-      assertTrue(QueryService.refused(err) == FolQueryFailure.FolEvaluationFailure(err.message, "unbound_variable"))
+    test("an unbound variable is a defect") {
+      diesWithIllegalState(QE.UnboundVariableError("x", Set("y", "z")))
     }
   )
 

@@ -3,7 +3,7 @@ package com.risquanter.register.http.codecs
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
 import zio.json.{DecoderOps, EncoderOps}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, QueryVariable, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
 /**
@@ -274,6 +274,11 @@ object IronTapirCodecs {
   /** Schema for SafeName.SafeName for JSON body derivation. */
   given Schema[SafeName.SafeName] = Schema.string.map[SafeName.SafeName](
     (s: String) => SafeName.fromString(s).toOption
+  )(_.value)
+
+  /** Schema for QueryVariable.QueryVariable, which a refused query's payload carries. */
+  given Schema[QueryVariable.QueryVariable] = Schema.string.map[QueryVariable.QueryVariable](
+    (s: String) => QueryVariable.fromString(s).toOption
   )(_.value)
 
   /** Schema for DistributionType for JSON body derivation. */

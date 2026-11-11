@@ -19,9 +19,9 @@ enum RejectionDetail:
   /** Field-level failures, one entry per independent problem. */
   case Fields(errors: List[ValidationError])
 
-  /** A query the engine refused. `QueryProblem` keeps all four of its cases,
-    * including `Unparseable`'s character offset, which a flat `ValidationError`
-    * triple has nowhere to carry.
+  /** A query the service refused. `QueryProblem` keeps every one of its cases,
+    * including `Unparseable`'s character offset and the answer variables a
+    * query named, which a flat `ValidationError` has nowhere to carry.
     */
   case Query(problem: QueryProblem)
 

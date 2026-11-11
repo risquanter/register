@@ -22,6 +22,8 @@ import com.risquanter.register.testcontainers.IrminCompose
   *      internal identifier (ADR-035, ADR-036)
   * H3 — unknown quoted node name returns 422 with an UnknownReferences problem
   *      naming the reference that did not resolve
+  * H4 — a query naming an answer variable returns 422 with an
+  *      AnswerVariablesNotSupported problem naming the variable
   *
   * A refused query answers 422 rather than 400 because a well-formed request
   * body is being rejected on its content, not on its shape.
@@ -157,6 +159,35 @@ object QueryEndpointSpec extends ZIOSpecDefault:
           assertTrue(refusal.detail match
             case RejectionDetail.Query(QueryProblem.UnknownReferences(messages)) =>
               messages.exists(_.contains("NonExistentNode"))
+            case _ => false)
+      },
+      test("H4: a query naming an answer variable returns 422 AnswerVariablesNotSupported naming it") {
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(demoTreeRequest)
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+          treeId     = bootstrap.tree.id.value
+
+          queryResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
+            .body(QueryRequest("""Q[>=]^{1/2} x (child_of(x, y), leaf(x)) (y)"""))
+            .response(asStringAlways)
+            .send(client.backend)
+          rawBody    = queryResp.body
+          refusal   <- ZIO.fromEither(
+            rawBody.fromJson[WireError.ValidationRejected]
+              .left.map(err => s"Failed to decode a query rejection: $err\nBody was: $rawBody")
+          )
+        yield assertTrue(queryResp.code.code == 422) &&
+          assertTrue(refusal.detail match
+            case RejectionDetail.Query(QueryProblem.AnswerVariablesNotSupported(variables)) =>
+              variables.toList.map(_.problem.value) == List("y")
             case _ => false)
       }
     ).provideLayerShared(harnessLayer) @@
