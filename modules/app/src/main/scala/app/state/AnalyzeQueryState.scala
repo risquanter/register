@@ -29,8 +29,8 @@ import vql.parser.VagueQueryParser
 final class AnalyzeQueryState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
-  userIdAccessor: () => Option[UserId.Authenticated] = () => None,
-  branchAccessor: () => BranchChoice = () => BranchChoice.Main
+  userIdAccessor: () => Option[UserId.Authenticated],
+  branchAccessor: () => BranchChoice
 ) extends WorkspaceQueryEndpoints:
 
   // ── Query input ───────────────────────────────────────────────

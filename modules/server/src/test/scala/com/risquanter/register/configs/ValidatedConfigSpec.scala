@@ -2,6 +2,7 @@ package com.risquanter.register.configs
 
 import zio.*
 import zio.config.magnolia.deriveConfig
+import zio.config.typesafe.TypesafeConfigProvider
 import zio.test.*
 import zio.test.Assertion.*
 
@@ -23,6 +24,16 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
 
   private val spiceDbConfig =
     deriveConfig[SpiceDbConfig].nested("register", "spicedb")
+
+  /** Every SpiceDB setting, so a test that varies the url or the token fails
+    * for that reason alone. The last two are the defaults application.conf
+    * lists. */
+  private def spiceDbEntries(url: String, token: String): Seq[(String, String)] = Seq(
+    "register.spicedb.url"            -> url,
+    "register.spicedb.token"          -> token,
+    "register.spicedb.consistency"    -> "minimize-latency",
+    "register.spicedb.timeoutSeconds" -> "10"
+  )
 
   private val simulationConfig =
     deriveConfig[SimulationConfig].nested("register", "simulation")
@@ -167,38 +178,41 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
       }
     },
     test("loads SpiceDbConfig with http URL (mesh mTLS)") {
-      withConfig(
-        "register.spicedb.url"   -> "http://spicedb.svc.cluster.local:8080",
-        "register.spicedb.token" -> "some-pre-shared-key"
-      ) {
+      withConfig(spiceDbEntries("http://spicedb.svc.cluster.local:8080", "some-pre-shared-key")*) {
         ZIO.config(spiceDbConfig).map(config =>
           assertTrue(config.url.value.toString == "http://spicedb.svc.cluster.local:8080")
         )
       }
     },
     test("loads SpiceDbConfig with https URL") {
-      withConfig(
-        "register.spicedb.url"   -> "https://spicedb.example.com:443",
-        "register.spicedb.token" -> "some-pre-shared-key"
-      ) {
+      withConfig(spiceDbEntries("https://spicedb.example.com:443", "some-pre-shared-key")*) {
         ZIO.config(spiceDbConfig).map(config =>
           assertTrue(config.url.value.toString == "https://spicedb.example.com:443")
         )
       }
     },
+    test("application.conf lists the SpiceDB consistency and timeout defaults") {
+      // The url and the token have no in-file default, so the map supplies
+      // them and application.conf supplies the rest.
+      val provider =
+        ConfigProvider.fromMap(Map(
+          "register.spicedb.url"   -> "http://spicedb.svc.cluster.local:8080",
+          "register.spicedb.token" -> "some-pre-shared-key"
+        )).orElse(TypesafeConfigProvider.fromResourcePath())
+      ZIO.config(spiceDbConfig).withConfigProvider(provider).map(config =>
+        assertTrue(
+          config.consistency == SpiceDbConsistency.MinimizeLatency,
+          (config.timeoutSeconds: Int) == 10
+        )
+      )
+    },
     test("rejects invalid SpiceDb URL") {
-      withConfig(
-        "register.spicedb.url"   -> "not-a-url",
-        "register.spicedb.token" -> "some-pre-shared-key"
-      ) {
+      withConfig(spiceDbEntries("not-a-url", "some-pre-shared-key")*) {
         ZIO.config(spiceDbConfig).exit.map(exit => assert(exit)(fails(anything)))
       }
     },
     test("rejects blank SpiceDb token") {
-      withConfig(
-        "register.spicedb.url"   -> "http://spicedb.svc.cluster.local:8080",
-        "register.spicedb.token" -> "   "
-      ) {
+      withConfig(spiceDbEntries("http://spicedb.svc.cluster.local:8080", "   ")*) {
         ZIO.config(spiceDbConfig).exit.map(exit => assert(exit)(fails(anything)))
       }
     }

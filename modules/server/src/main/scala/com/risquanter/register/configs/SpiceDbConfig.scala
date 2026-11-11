@@ -2,7 +2,7 @@ package com.risquanter.register.configs
 
 import zio.Config
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
-import com.risquanter.register.domain.data.iron.{ExternalTokenStr, PositiveInt, IronConstants, MeshServiceUrl}
+import com.risquanter.register.domain.data.iron.{ExternalTokenStr, PositiveInt, MeshServiceUrl}
 import com.risquanter.register.domain.data.iron.MeshServiceUrl.*
 import com.risquanter.register.domain.errors.{ErrorLocation, ValidationError}
 import com.risquanter.register.domain.data.iron.ValidationUtil
@@ -47,7 +47,7 @@ object SpiceDbToken:
 //                      Approximately 5 ms overhead. Required for environments where
 //                      immediate revocation visibility is a compliance obligation.
 //
-// Default: MinimizeLatency
+// The default is listed in `application.conf`.
 enum SpiceDbConsistency:
   case MinimizeLatency
   case FullyConsistent
@@ -70,8 +70,8 @@ object SpiceDbConsistency:
   *
   * @param url            SpiceDB gRPC-gateway REST API endpoint (http or https); transport security provided by service mesh mTLS
   * @param token          Pre-shared key or token sent as HTTP Authorization Bearer header
-  * @param consistency    ZedToken cache freshness policy (default: minimize-latency)
-  * @param timeoutSeconds Per-request timeout in seconds (default: 10)
+  * @param consistency    ZedToken cache freshness policy, default listed in `application.conf`
+  * @param timeoutSeconds Per-request timeout in seconds, default listed in `application.conf`
   *
   * @see ADR-001-appendix.md, "External-System Output Boundary Constraints": ExternalTokenStr PrintableAscii injection guard
   * @see ADR-022: SpiceDbToken credential class design (R1–R8)
@@ -79,8 +79,8 @@ object SpiceDbConsistency:
 final case class SpiceDbConfig(
   url:            MeshServiceUrl.MeshServiceUrl,
   token:          SpiceDbToken,
-  consistency:    SpiceDbConsistency = SpiceDbConsistency.MinimizeLatency,
-  timeoutSeconds: PositiveInt = IronConstants.Ten
+  consistency:    SpiceDbConsistency,
+  timeoutSeconds: PositiveInt
 )
 
 object SpiceDbConfig:
