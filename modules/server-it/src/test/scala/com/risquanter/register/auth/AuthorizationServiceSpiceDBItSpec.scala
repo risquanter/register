@@ -1,11 +1,12 @@
 package com.risquanter.register.auth
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl, TreeId, UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, Core, ErrorLocation, Failure, OutageMode, PeerZone}
+import com.risquanter.register.domain.errors.{Core, DenialKind, Diagnostic, ErrorLocation, Failure, OutageMode, PeerZone, TrustZone}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.SpiceDbCompose
 import com.risquanter.register.auth.ResourceRef.asResource
@@ -52,9 +53,16 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
 
   /** How SpiceDB failed to answer, when a call failed as an outage at the
     * authorization zone; `None` for any other outcome. */
-  private def outageModeOf[A](outcome: Either[AuthError | Failure, A]): Option[OutageMode] = outcome match
+  private def outageModeOf[A](outcome: Either[Failure, A]): Option[OutageMode] = outcome match
     case Left(Failure.Unanswered(Core(PeerZone.Authorization, errors, _))) => Some(errors.head._2)
     case _                                                                => None
+
+  /** The denial SpiceDB's refusal of `permission` on `resource` to `user`
+    * produces: at the authorization zone, naming the principal for the log. */
+  private def denied(user: UserId.Authenticated, permission: Permission, resource: ResourceRef): Failure =
+    Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
+      NonEmptyList(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
+      List(Diagnostic.Principal(user, permission, resource))))
 
   // ─── Isolated-config helper ─────────────────────────────────────────────────
 
@@ -78,31 +86,20 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
       ).map(_ => assertCompletes)
     },
 
-    // ── T-S2: Denied check returns AuthForbidden ────────────────────────────
-    test("T-S2 — denied check returns AuthForbidden with populated fields") {
+    // ── T-S2: Denied check is AccessDenied naming the principal ─────────────
+    test("T-S2 — denied check is AccessDenied at the authorization zone, naming the principal") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(bob, Permission.ViewWorkspace, ws1.asResource)
-      ).either.map {
-        case Left(err: AuthForbidden) =>
-          assertTrue(
-            err.userId       == SpiceDbCompose.bobUuid,
-            err.permission   == "view_workspace",
-            err.resourceType == "workspace",
-            err.resourceId   == SpiceDbCompose.ws1Id
-          )
-        case other =>
-          assertTrue(false)
-      }
+      ).either.map(outcome =>
+        assertTrue(outcome == Left(denied(bob, Permission.ViewWorkspace, ws1.asResource))))
     },
 
-    // ── T-S3: Insufficient permission returns AuthForbidden ─────────────────
+    // ── T-S3: Insufficient permission is AccessDenied ───────────────────────
     test("T-S3 — viewer cannot design_write (insufficient permission)") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(carol, Permission.DesignWrite, ws1.asResource)
-      ).either.map {
-        case Left(_: AuthForbidden) => assertCompletes
-        case other                  => assertTrue(false)
-      }
+      ).either.map(outcome =>
+        assertTrue(outcome == Left(denied(carol, Permission.DesignWrite, ws1.asResource))))
     },
 
     // ── T-S4: Schema inheritance (owner_user → view_tree via workspace) ─────
@@ -157,10 +154,8 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
     test("T-S9 — anonymous sentinel UUID (00000000-...) has no permissions") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(sentinel, Permission.ViewWorkspace, ws1.asResource)
-      ).either.map {
-        case Left(_: AuthForbidden) => assertCompletes
-        case other                  => assertTrue(false)
-      }
+      ).either.map(outcome =>
+        assertTrue(outcome == Left(denied(sentinel, Permission.ViewWorkspace, ws1.asResource))))
     },
 
     // ── T-S10: BootstrapProvisionerSpiceDB.recordOwnership writes a checkable tuple

@@ -6,11 +6,6 @@ import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
 import com.risquanter.register.domain.errors.FolQueryFailure.*
-// An internal error name collides with the wire case that carries it. The
-// rename is the one sanctioned use of a non-plain import (ADR-011 §2), and it
-// keeps `fromAppError`'s arms reading left-to-right: internal name in, wire name
-// out.
-import com.risquanter.register.domain.errors.AccessDenied as AppAccessDenied
 
 /** The only error type that crosses to a client.
   *
@@ -152,12 +147,6 @@ object WireError:
       case FolUnknownReference(messages)       => queryRejected(QueryProblem.UnknownReferences(messages))
       case FolBindFailure(errors)              => queryRejected(QueryProblem.TypeCheckFailed(errors))
       case FolDomainNotQuantifiable(message)   => queryRejected(QueryProblem.NotQuantifiable(message))
-
-      // Refused. The internal reason is dropped from both, so a denial this
-      // service decided and one the authorization service decided look
-      // identical, and neither discloses whether the resource exists.
-      case AppAccessDenied(_)                  => WireError.AccessDenied(t)
-      case AuthForbidden(_, _, _, _)           => WireError.AccessDenied(t)
 
       // Capability absent
       case ScenariosNotSupported(_)            => WireError.NotSupported(Capability.Scenarios, t)

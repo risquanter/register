@@ -265,6 +265,21 @@ object FailureSpec extends ZIOSpecDefault:
         val storeDown = Failure.Unanswered(Core(PeerZone.Store, one(OutageMode.Status(StatusCode.ServiceUnavailable)), Nil))
         assertTrue(authDown.toWire(t, TreeScope.NoTree) == storeDown.toWire(t, TreeScope.NoTree))
       },
+      // A denial at the mesh header and one the authorization service decided
+      // must not be told apart by the caller, so neither discloses whether the
+      // resource exists or which layer refused.
+      test("an absent identity header and a permission not held are indistinguishable on the wire") {
+        val t          = TelemetryPlaceholders.UnlinkedTrace
+        val noIdentity = Failure.AccessDenied(Core(TrustZone.MeshHeader,
+          NonEmptyList(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
+        val notHeld    = Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
+          one(DenialKind.PermissionNotHeld),
+          List(Diagnostic.Principal(user, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId)))))
+        assertTrue(
+          noIdentity.toWire(t, TreeScope.NoTree) == WireError.AccessDenied(t),
+          notHeld.toWire(t, TreeScope.NoTree) == WireError.AccessDenied(t)
+        )
+      },
       test("a wire case naming one problem carries the first entry's") {
         val t       = TelemetryPlaceholders.UnlinkedTrace
         val failure = Failure.Conflict(Core(

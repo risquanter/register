@@ -2,10 +2,8 @@ package com.risquanter.register.domain.data.iron
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import zio.json.*
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AppError, AuthError, AuthForbidden}
 
 /** Tests for the auth identity types.
   *
@@ -163,20 +161,5 @@ object AuthTypesSpec extends ZIOSpecDefault:
           // The compiler ensures wsId: WorkspaceId and treeId: TreeId are not interchangeable.
         }
       )
-    ),
-    suite("AuthError hierarchy")(
-      test("AuthForbidden logMessage formats structured message") {
-        val err = AuthForbidden(
-          userId       = validUuid,
-          permission   = "design_write",
-          resourceType = "risk_tree",
-          resourceId   = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-        )
-        assertTrue(err.logMessage == s"Access denied: user=$validUuid permission=design_write resource=risk_tree:01ARZ3NDEKTSV4RRFFQ69G5FAV")
-      },
-      test("AuthForbidden is an AppError") {
-        val err: AppError = AuthForbidden("u", "p", "r", "i")
-        assertTrue(err.isInstanceOf[AuthError])
-      }
     )
   )

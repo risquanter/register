@@ -9,7 +9,7 @@ import sttp.monad.MonadError
 import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken}
 import com.risquanter.register.domain.data.iron.{IronConstants, MeshServiceUrl, UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, Core, ErrorLocation, Failure, OutageMode, PeerZone}
+import com.risquanter.register.domain.errors.{Core, ErrorLocation, Failure, OutageMode, PeerZone}
 
 /** Unit tests for the BootstrapProvisionerSpiceDB WriteRelationships adapter.
   *
@@ -23,10 +23,10 @@ object BootstrapProvisionerSpiceDBSpec extends ZIOSpecDefault:
 
   // ─── Fixtures ───────────────────────────────────────────────────────────────
 
-  private val aliceUuid = "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf"
+  private val aliceUuid: String           = "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf"
   private val alice: UserId.Authenticated = UserId.fromString(aliceUuid).toOption.get
 
-  private val ws1Id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+  private val ws1Id: String = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
   private val ws1: WorkspaceId = WorkspaceId.fromString(ws1Id).toOption.get
 
   private val testConfig: SpiceDbConfig = SpiceDbConfig(
@@ -72,7 +72,7 @@ object BootstrapProvisionerSpiceDBSpec extends ZIOSpecDefault:
       .thenRespond(Response("""{"writtenAt":{"token":"test-zed-token"}}""", StatusCode.Ok))
 
   /** Whether the write failed as SpiceDB not answering, in the given way. */
-  private def failsAsOutage(outcome: Either[AuthError | Failure, Unit], mode: OutageMode): TestResult =
+  private def failsAsOutage(outcome: Either[Failure, Unit], mode: OutageMode): TestResult =
     assertTrue(outcome.left.toOption.exists {
       case Failure.Unanswered(Core(PeerZone.Authorization, errors, _)) => errors.head._2 == mode
       case _                                                          => false

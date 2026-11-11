@@ -18,8 +18,10 @@ an unavailable cache and the boundary logs the failure once. BATS suites A
 and C passed at 0.18.12, which closes Phase 3. Phase 4 step 4.1 landed at
 0.18.13, with `Diagnostic.KeyUnresolved` added for row 14 (§3.3) and the row 17
 values built by `RiskTreeRepository.treeAbsent`, which dies on a branch that is
-not one of the workspace's, per `UES-D-9`; approved 2026-11-11. The
-file inventory is
+not one of the workspace's, per `UES-D-9`; approved 2026-11-11. Step 4.2
+landed at 0.18.14, with `UserContextExtractor` narrowed to `IO[Failure, A]`
+because the leaf it failed with is deleted in this step; approved 2026-11-11.
+The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
 The supporting record `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-ERROR-PATHS.md`

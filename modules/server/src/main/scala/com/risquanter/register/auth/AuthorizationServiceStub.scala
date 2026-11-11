@@ -2,7 +2,7 @@ package com.risquanter.register.auth
 
 import zio.{IO, ZIO, ZLayer}
 import com.risquanter.register.domain.data.iron.UserId
-import com.risquanter.register.domain.errors.{AuthError, AuthForbidden}
+import com.risquanter.register.domain.errors.Failure
 
 /** Set-backed stub for unit tests. Allow/deny by explicit (user, permission, resource) set.
   * No live SpiceDB required; inject via ZLayer in test scope.
@@ -17,14 +17,9 @@ final class AuthorizationServiceStub(
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef
-  ): IO[AuthError, Checked[P]] =
+  ): IO[Failure, Checked[P]] =
     if allowed.contains((user, permission, resource)) then ZIO.succeed(Checked[P]())
-    else ZIO.fail(AuthForbidden(
-      userId       = user.value,
-      permission   = permission.zedName,
-      resourceType = resource.resourceType.zedType,
-      resourceId   = resource.resourceId.value
-    ))
+    else ZIO.fail(permissionNotHeld(user, permission, resource))
 
 object AuthorizationServiceStub:
 

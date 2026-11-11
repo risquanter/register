@@ -3,7 +3,7 @@ package com.risquanter.register.auth
 import zio.IO
 import zio.json.JsonEncoder
 import com.risquanter.register.domain.data.iron.{UserId, SafeId, TreeId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, Failure}
+import com.risquanter.register.domain.errors.Failure
 
 /** What a proof may witness: a SpiceDB permission that `check()` evaluated, or
   * a lifecycle marker standing in where no resource or no user exists to check.
@@ -102,10 +102,11 @@ trait AuthorizationService:
   /** Check whether `user` has `permission` on `resource`.
     *
     * Fails the ZIO effect — callers use flatMap, never fold/map (fail-closed).
-    * - PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
-    * - Connectivity / timeout        → `Unanswered` at the authorization zone
+    * - Anything but a plain grant      → `AccessDenied` at the authorization zone,
+    *   naming the principal for the log
+    * - Connectivity / timeout          → `Unanswered` at the authorization zone
     *   (answered as a dependency outage)
-    * - An answer outside the protocol → `Rejected` at the authorization zone
+    * - An answer outside the protocol  → `Rejected` at the authorization zone
     *
     * @see ADR-024: Fail-Closed by Default
     */
@@ -113,4 +114,4 @@ trait AuthorizationService:
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef
-  ): IO[AuthError | Failure, Checked[P]]
+  ): IO[Failure, Checked[P]]

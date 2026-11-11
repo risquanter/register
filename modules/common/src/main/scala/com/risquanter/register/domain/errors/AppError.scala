@@ -95,11 +95,6 @@ case class SimulationFailure(simulationId: String, cause: Throwable) extends Dom
   override def origin: FailureOrigin = FailureOrigin.Service
 }
 
-/** Authorization failure for disabled/forbidden operations */
-case class AccessDenied(reason: String) extends DomainError:
-  override def logMessage: String = reason
-  override def origin: FailureOrigin = FailureOrigin.Caller
-
 /** Scenarios are unavailable in this deployment (repository.type=in-memory has no
   * Irmin to hold branches). A deliberate, expected condition — not a server
   * malfunction — so it gets its own type, which projects onto `NotSupported`
@@ -112,28 +107,6 @@ case class ScenariosNotSupported(reason: String) extends DomainError {
   override def logMessage: String = s"Scenarios not supported: $reason"
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
-
-// ============================================================================
-// Authorization Errors (ADR-024: Externalized Authorization / PEP Pattern)
-// ============================================================================
-
-sealed trait AuthError extends AppError
-
-/** SpiceDB returned PERMISSIONSHIP_NO_PERMISSION — explicit deny.
-  * HTTP layer maps this to 403 Forbidden.
-  * userId is the JWT sub claim value (UUID string), safe for structured audit logs.
-  *
-  * @see ADR-024: Fail-Closed by Default
-  */
-case class AuthForbidden(
-  userId:       String,
-  permission:   String,
-  resourceType: String,
-  resourceId:   String
-) extends AuthError:
-  override def logMessage: String =
-    s"Access denied: user=$userId permission=$permission resource=$resourceType:$resourceId"
-  override def origin: FailureOrigin = FailureOrigin.Caller
 
 // ============================================================================
 // FOL Query Errors (ADR-028: Vague Quantifier Query Evaluation)

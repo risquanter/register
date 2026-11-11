@@ -8,7 +8,7 @@ import sttp.model.StatusCode
 import sttp.tapir.EndpointOutput
 
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName, TelemetryPlaceholders, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 import com.risquanter.register.http.endpoints.BaseEndpoint
@@ -26,8 +26,8 @@ object WireErrorSpec extends ZIOSpecDefault:
   private object Endpoints extends BaseEndpoint
 
   private val treeId: TreeId        = TreeId.fromString("01HQ8K3F7XJ2M4N5P6R7S8T9V1").toOption.get
-  private val scenario             = ScenarioName.fromString("feature-1").toOption.get
-  private val trace                 = TelemetryPlaceholders.UnlinkedTrace
+  private val scenario: ScenarioName.ScenarioName = ScenarioName.fromString("feature-1").toOption.get
+  private val trace: TraceId                      = TelemetryPlaceholders.UnlinkedTrace
 
   /** A ULID is 26 characters of Crockford base32, which is the shape every
     * confidential internal identifier in this codebase takes. The negative
@@ -158,9 +158,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             FolUnknownReference(List("x"))                         -> "InternalFault",
             FolBindFailure(List("x"))                              -> "InternalFault",
             FolDomainNotQuantifiable("x")                          -> "InternalFault",
-            // Refused
-            AccessDenied("no")                                     -> "AccessDenied",
-            AuthForbidden("u", "read", "tree", "t1")               -> "AccessDenied",
             // Capability absent
             ScenariosNotSupported("in-memory")                     -> "NotSupported",
             // Faults
@@ -172,7 +169,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 11)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 9)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope
@@ -266,18 +263,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             absences.forall(a => a.toJson.fromJson[WireError.NotFound] == Right(a)),
             pinned.toJson.fromJson[WireError.NotSupported] == Right(pinned)
           )
-        }
-      ),
-      suite("indistinguishable outcomes really are identical")(
-        test("both refusal paths serialise to the same bytes") {
-          val explicit  = WireError.fromAppError(AccessDenied("policy says no"), trace, TreeScope.NoTree)
-          val forbidden = WireError.fromAppError(AuthForbidden("u", "read", "tree", "t1"), trace, TreeScope.NoTree)
-
-          val encoded = List(explicit, forbidden).map {
-            case denied: WireError.AccessDenied => denied.toJson
-            case other                          => throw MatchError(other)
-          }
-          assertTrue(encoded.distinct.size == 1)
         }
       )
     )

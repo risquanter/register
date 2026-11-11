@@ -1,16 +1,22 @@
 package com.risquanter.register.auth
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
-import zio.test.Assertion.*
 import com.risquanter.register.configs.AuthMode
 import com.risquanter.register.domain.data.iron.UserId
-import com.risquanter.register.domain.errors.AccessDenied
+import com.risquanter.register.domain.errors.{Core, DenialKind, ErrorLocation, Failure, RequestHeaderName, TrustZone}
 
 object UserContextExtractorSpec extends ZIOSpecDefault:
 
-  private val validUuid = "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf"
-  private val validUserId = UserId.fromString(validUuid).toOption.get
+  private val validUuid: String                  = "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf"
+  private val validUserId: UserId.Authenticated = UserId.fromString(validUuid).toOption.get
+
+  /** The refusal an absent identity header produces: at the mesh header, naming
+    * the header and nothing else. */
+  private val identityAbsent: Failure =
+    Failure.AccessDenied(Core(TrustZone.MeshHeader,
+      NonEmptyList(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
 
   def spec = suite("UserContextExtractor")(
     suite("UserId.Anonymous — capability-only identity")(
@@ -53,17 +59,10 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
           result <- UserContextExtractor.requirePresent.extract(Some(validUserId))
         yield assertTrue(result == validUserId)
       },
-      test("refuses the request, naming the mesh bypass in the log text, when the header is absent") {
+      test("refuses the request at the mesh header when the header is absent") {
         for
           result <- UserContextExtractor.requirePresent.extract(None).either
-        yield result match
-          case Left(err: AccessDenied) =>
-            assertTrue(
-              err.logMessage.contains("Missing x-user-id header"),
-              err.logMessage.contains("mesh bypass")
-            )
-          case other =>
-            assertTrue(false)
+        yield assertTrue(result == Left(identityAbsent))
       },
       // ADR-012 §7 T4 — requirePresent must NEVER return UserId.Anonymous.
       test("requirePresent never returns UserId.Anonymous for a real userId") {
@@ -99,17 +98,10 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
           result <- UserContextExtractor.requirePresent.requireAuthenticated(Some(validUserId))
         yield assertTrue(result == validUserId)
       },
-      test("refuses the request when the header is absent") {
+      test("refuses the request at the mesh header when the header is absent") {
         for
           result <- UserContextExtractor.requirePresent.requireAuthenticated(None).either
-        yield result match
-          case Left(err: AccessDenied) =>
-            assertTrue(
-              err.logMessage.contains("Missing x-user-id header"),
-              err.logMessage.contains("mesh bypass")
-            )
-          case other =>
-            assertTrue(false)
+        yield assertTrue(result == Left(identityAbsent))
       }
     ),
     suite("logStartupMode")(

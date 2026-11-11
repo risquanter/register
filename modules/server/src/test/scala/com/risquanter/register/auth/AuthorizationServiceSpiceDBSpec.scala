@@ -1,6 +1,7 @@
 package com.risquanter.register.auth
 
 import zio.*
+import zio.prelude.NonEmptyList
 import zio.test.*
 import sttp.client3.*
 import sttp.client3.testing.SttpBackendStub
@@ -9,7 +10,7 @@ import sttp.monad.MonadError
 import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId, IronConstants, MeshServiceUrl}
-import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, Core, ErrorLocation, ExpectedInput, Failure, FieldProblem, OutageMode, PeerZone, TrustZone}
+import com.risquanter.register.domain.errors.{Core, DenialKind, Diagnostic, ErrorLocation, ExpectedInput, Failure, FieldProblem, OutageMode, PeerZone, TrustZone}
 import com.risquanter.register.telemetry.TelemetryLive
 
 /** Unit tests for AuthorizationServiceSpiceDB HTTP adapter (T-U1 through T-U11).
@@ -22,13 +23,19 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
 
   // ─── Fixtures ───────────────────────────────────────────────────────────────
 
-  private val aliceUuid = "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf"
+  private val aliceUuid: String           = "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf"
   private val alice: UserId.Authenticated = UserId.fromString(aliceUuid).toOption.get
 
-  private val ws1Id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-  private val ws1: WorkspaceId = WorkspaceId.fromString(ws1Id).toOption.get
+  private val ws1: WorkspaceId = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
   // Construct directly — asResource extension is in ResourceRef companion but requires explicit import
   private val ws1Ref: ResourceRef = ResourceRef(ResourceType.Workspace, ws1.toSafeId)
+
+  /** The denial SpiceDB's refusal of alice's `view_workspace` on ws1 produces:
+    * at the authorization zone, naming the principal for the log. */
+  private val aliceDenied: Failure =
+    Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
+      NonEmptyList(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
+      List(Diagnostic.Principal(alice, Permission.ViewWorkspace, ws1Ref))))
 
   private val testConfig: SpiceDbConfig = SpiceDbConfig(
     url         = MeshServiceUrl.fromString("http://spicedb-test:50051").toOption.get,
@@ -53,20 +60,20 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
 
   /** How SpiceDB failed to answer, when the failure is an outage at the
     * authorization zone; `None` for anything else. */
-  private def outageModeOf(error: AuthError | Failure): Option[OutageMode] = error match
+  private def outageModeOf(error: Failure): Option[OutageMode] = error match
     case Failure.Unanswered(Core(PeerZone.Authorization, errors, _)) => Some(errors.head._2)
     case _                                                          => None
 
-  private def failsAsOutage[A](outcome: Either[AuthError | Failure, A], mode: OutageMode): TestResult =
+  private def failsAsOutage[A](outcome: Either[Failure, A], mode: OutageMode): TestResult =
     assertTrue(outcome.left.toOption.flatMap(outageModeOf).contains(mode))
 
   /** What this service refused in SpiceDB's answer, when the failure is a
     * refusal at the authorization zone; `None` for anything else. */
-  private def refusalOf(error: AuthError | Failure): Option[FieldProblem] = error match
+  private def refusalOf(error: Failure): Option[FieldProblem] = error match
     case Failure.Rejected(Core(TrustZone.Peer(PeerZone.Authorization), errors, _)) => Some(errors.head._2)
     case _                                                                          => None
 
-  private def failsAsRefusal[A](outcome: Either[AuthError | Failure, A], expected: ExpectedInput): TestResult =
+  private def failsAsRefusal[A](outcome: Either[Failure, A], expected: ExpectedInput): TestResult =
     assertTrue(outcome.left.toOption.flatMap(refusalOf).contains(FieldProblem.Unreadable(expected)))
 
   private def serviceLayer(stub: SttpBackend[Task, Any]): ZLayer[Any, Throwable, AuthorizationService] =
@@ -89,20 +96,10 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
       serviceLayer(stubWith("""{"permissionship":"PERMISSIONSHIP_HAS_PERMISSION"}"""))
     ),
 
-    test("T-U2 — PERMISSIONSHIP_NO_PERMISSION maps to AuthForbidden") {
+    test("T-U2 — PERMISSIONSHIP_NO_PERMISSION is AccessDenied at the authorization zone, naming the principal") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(alice, Permission.ViewWorkspace, ws1Ref)
-      ).either.map {
-        case Left(err: AuthForbidden) =>
-          assertTrue(
-            err.userId       == aliceUuid,
-            err.permission   == "view_workspace",
-            err.resourceType == "workspace",
-            err.resourceId   == ws1Id
-          )
-        case other =>
-          assertTrue(false)
-      }
+      ).either.map(outcome => assertTrue(outcome == Left(aliceDenied)))
     }.provide(
       serviceLayer(stubWith("""{"permissionship":"PERMISSIONSHIP_NO_PERMISSION"}"""))
     ),
@@ -110,10 +107,7 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
     test("T-U3 — PERMISSIONSHIP_UNSPECIFIED treated as deny (fail-closed)") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(alice, Permission.ViewWorkspace, ws1Ref)
-      ).either.map {
-        case Left(_: AuthForbidden) => assertCompletes
-        case other                  => assertTrue(false)
-      }
+      ).either.map(outcome => assertTrue(outcome == Left(aliceDenied)))
     }.provide(
       serviceLayer(stubWith("""{"permissionship":"PERMISSIONSHIP_UNSPECIFIED"}"""))
     ),
@@ -126,7 +120,7 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
       serviceLayer(stubWith("""{"code":16,"message":"UNAUTHENTICATED"}""", code = 401))
     ),
 
-    test("T-U5 — HTTP 5xx is an outage with that status (fail-closed, not AuthForbidden)") {
+    test("T-U5 — HTTP 5xx is an outage with that status (fail-closed, not a denial)") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(alice, Permission.ViewWorkspace, ws1Ref)
       ).either.map(failsAsOutage(_, OutageMode.Status(StatusCode.ServiceUnavailable)))
@@ -199,10 +193,7 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
     test("T-U11 — PERMISSIONSHIP_CONDITIONAL_PERMISSION treated as deny (no caveats are evaluated)") {
       ZIO.serviceWithZIO[AuthorizationService](
         _.check(alice, Permission.ViewWorkspace, ws1Ref)
-      ).either.map {
-        case Left(_: AuthForbidden) => assertCompletes
-        case other                  => assertTrue(false)
-      }
+      ).either.map(outcome => assertTrue(outcome == Left(aliceDenied)))
     }.provide(
       serviceLayer(stubWith("""{"permissionship":"PERMISSIONSHIP_CONDITIONAL_PERMISSION"}"""))
     )

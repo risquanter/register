@@ -204,10 +204,10 @@ logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created"
 
 ```scala
 // BAD: 403 versus 404 tells the caller the resource exists
-case TreeNotInWorkspace(_, _) => WireError.AccessDenied(trace)
+Failure.AccessDenied(Core(TrustZone.Client, NonEmptyList(requestField(FieldName.Id) -> DenialKind.PermissionNotHeld), diagnostics))
 
 // GOOD: one opaque status for both, so neither answer distinguishes them
-case TreeNotInWorkspace(_, _) => WireError.NotFound(NotFoundKind.Unknown(), trace)
+Failure.NotFound(Core(TrustZone.Client, NonEmptyList(requestField(FieldName.Id) -> NotFoundKind.Unknown()), diagnostics))
 ```
 
 ### ❌ An Error Shape Outside the Declared Output

@@ -16,8 +16,8 @@ import scala.concurrent.duration.FiniteDuration
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency}
 import com.risquanter.register.domain.data.iron.{UserId, SafeId}
 import com.risquanter.register.domain.errors.{
-  AuthError, AuthForbidden, Core, Diagnostic, ErrorLocation, ExpectedInput, Failure, FieldProblem, OutageMode,
-  PeerZone, TrustZone, ValidationError
+  Core, DenialKind, Diagnostic, ErrorLocation, ExpectedInput, Failure, FieldProblem, OutageMode, PeerZone,
+  TrustZone, ValidationError
 }
 
 // ─── SpiceDB REST API request/response types (package-private) ───────────────
@@ -94,6 +94,12 @@ private def authorizationRefusal(expected: ExpectedInput, diagnostics: List[Diag
     diagnostics
   )
 
+/** SpiceDB answered that `user` does not hold `permission` on `resource`. */
+private def permissionNotHeld(user: UserId.Authenticated, permission: Permission, resource: ResourceRef): Failure =
+  Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
+    NonEmptyList(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
+    List(Diagnostic.Principal(user, permission, resource))))
+
 /** A transport exception's own text, for the log, when it has one. */
 private def peerMessage(e: Throwable): List[Diagnostic] =
   Option(e.getMessage).map(Diagnostic.PeerMessage(_)).toList
@@ -138,7 +144,7 @@ final class AuthorizationServiceSpiceDB private (
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef
-  ): IO[AuthError | Failure, Checked[P]] =
+  ): IO[Failure, Checked[P]] =
     tracing.span("spicedb.check", SpanKind.CLIENT) {
       for
         // No userId in trace attributes — avoid PII in trace backends that
@@ -167,7 +173,7 @@ final class AuthorizationServiceSpiceDB private (
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef
-  ): IO[AuthError | Failure, Checked[P]] =
+  ): IO[Failure, Checked[P]] =
     val body = SpiceDbCheckRequest(
       resource    = SpiceDbObjectRef.Resource(resource.resourceType, resource.resourceId),
       permission  = permission,
@@ -192,12 +198,7 @@ final class AuthorizationServiceSpiceDB private (
               // Anything but a plain grant is an explicit denial (fail-closed):
               // this service evaluates no caveats, so a conditional answer
               // grants nothing.
-              ZIO.fail(AuthForbidden(
-                userId       = user.value,
-                permission   = permission.zedName,
-                resourceType = resource.resourceType.zedType,
-                resourceId   = resource.resourceId.value
-              ))
+              ZIO.fail(permissionNotHeld(user, permission, resource))
           }
         else
           ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
@@ -218,15 +219,15 @@ final class AuthorizationServiceSpiceDB private (
   // ─── Telemetry ────────────────────────────────────────────────────────────
 
   private def recordCheckMetrics[P <: Permission, A](
-    outcome:    Either[AuthError | Failure, A],
+    outcome:    Either[Failure, A],
     permission: P,
     resource:   ResourceRef,
     latencyMs:  Double
   ): UIO[Unit] =
     val resultLabel = outcome match
-      case Right(_)               => "allowed"
-      case Left(_: AuthForbidden) => "denied"
-      case Left(_: Failure)       => "error"
+      case Right(_)                       => "allowed"
+      case Left(Failure.AccessDenied(_))  => "denied"
+      case Left(_)                        => "error"
     val attrs = Attributes(
       Attribute.string("result",        resultLabel),
       Attribute.string("permission",    permission.zedName),
@@ -238,13 +239,13 @@ final class AuthorizationServiceSpiceDB private (
     user:       UserId.Authenticated,
     permission: P,
     resource:   ResourceRef,
-    outcome:    Either[AuthError | Failure, A],
+    outcome:    Either[Failure, A],
     latencyMs:  Long
   ): UIO[Unit] =
     val resultStr = outcome match
-      case Right(_)               => "allowed"
-      case Left(_: AuthForbidden) => "denied"
-      case Left(f: Failure)       => s"error reason=${f.logMessage}"
+      case Right(_)                       => "allowed"
+      case Left(Failure.AccessDenied(_))  => "denied"
+      case Left(f)                        => s"error reason=${f.logMessage}"
     // user.value — explicit PII opt-in; this is the designated audit log context.
     // user.toString would produce UserId(***) — PII is redacted for general logs.
     ZIO.logInfo(

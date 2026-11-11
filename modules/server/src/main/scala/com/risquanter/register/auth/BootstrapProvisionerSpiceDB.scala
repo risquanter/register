@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import com.risquanter.register.configs.SpiceDbConfig
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, Failure, OutageMode}
+import com.risquanter.register.domain.errors.{Failure, OutageMode}
 
 // ─── SpiceDB WriteRelationships request types (file-private) ─────────────────
 // SpiceDbObjectRef / SpiceDbSubjectRef and their encoders are shared with
@@ -42,10 +42,9 @@ private given JsonEncoder[SpiceDbWriteRequest] = DeriveJsonEncoder.gen
   * `workspace` definitions — it cannot write arbitrary access grants.
   *
   * Fail-closed on all transport and SpiceDB-side errors: any failure mode is
-  * an `Unanswered` at the authorization zone (never
-  * [[com.risquanter.register.domain.errors.AuthForbidden]] — a rejected write
-  * means service-account misconfiguration, not a user-level denial), which
-  * fails the enclosing bootstrap request.
+  * an `Unanswered` at the authorization zone (never an `AccessDenied` — a
+  * rejected write means service-account misconfiguration, not a user-level
+  * denial), which fails the enclosing bootstrap request.
   *
   * @see ADR-024 §7 — resource lifecycle write clarification
   */
@@ -62,7 +61,7 @@ final class BootstrapProvisionerSpiceDB private (
   override def recordOwnership(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
-  ): IO[AuthError | Failure, Unit] =
+  ): IO[Failure, Unit] =
     for
       outcome <- sendWriteRequest(userId, workspaceId).either
       _       <- logWriteResult(userId, workspaceId, outcome)

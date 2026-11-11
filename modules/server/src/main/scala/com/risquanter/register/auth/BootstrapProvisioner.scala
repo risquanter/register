@@ -2,7 +2,7 @@ package com.risquanter.register.auth
 
 import zio.{IO, UIO, ZIO}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, Failure}
+import com.risquanter.register.domain.errors.Failure
 
 /** Records workspace ownership in SpiceDB as part of workspace creation.
   *
@@ -34,7 +34,7 @@ trait BootstrapProvisioner:
   def recordOwnership(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
-  ): IO[AuthError | Failure, Unit]
+  ): IO[Failure, Unit]
 
   /** Produce a compile-time proof for resource-creation operations.
     *
@@ -58,7 +58,7 @@ trait BootstrapProvisioner:
 
 object BootstrapProvisioner:
   val noOp: BootstrapProvisioner = new BootstrapProvisioner:
-    def recordOwnership(userId: UserId.Authenticated, workspaceId: WorkspaceId): IO[AuthError | Failure, Unit] =
+    def recordOwnership(userId: UserId.Authenticated, workspaceId: WorkspaceId): IO[Failure, Unit] =
       ZIO.unit
     def bootstrapToken(): UIO[Checked[LifecycleMarker.Bootstrap.type]] =
       ZIO.succeed(Checked[LifecycleMarker.Bootstrap.type]())

@@ -2,7 +2,7 @@ package com.risquanter.register.auth
 
 import zio.{IO, Ref, UIO, ZIO, ZLayer}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{AuthError, Failure, OutageMode}
+import com.risquanter.register.domain.errors.{Failure, OutageMode}
 
 /** Recording stub for unit tests.
   *
@@ -25,7 +25,7 @@ final class BootstrapProvisionerStub private (
   def recordOwnership(
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
-  ): IO[AuthError | Failure, Unit] =
+  ): IO[Failure, Unit] =
     if shouldFail then ZIO.fail(authorizationOutage(OutageMode.ConnectionRefused, Nil))
     else callsRef.update(_ :+ (userId, workspaceId))
 

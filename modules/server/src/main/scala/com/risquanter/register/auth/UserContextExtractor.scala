@@ -1,10 +1,11 @@
 package com.risquanter.register.auth
 
 import zio.{IO, UIO, ZIO}
+import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.configs.AuthMode
 import com.risquanter.register.domain.data.iron.{UserId, UuidStr}
-import com.risquanter.register.domain.errors.{AccessDenied, AppError}
+import com.risquanter.register.domain.errors.{Core, DenialKind, ErrorLocation, Failure, RequestHeaderName, TrustZone}
 
 /** Extracts a validated UserId from the mesh-injected x-user-id claim header.
   *
@@ -17,8 +18,8 @@ import com.risquanter.register.domain.errors.{AccessDenied, AppError}
   * @see ADR-012 §7 — Mesh Trust Assumptions
   */
 trait UserContextExtractor:
-  def extract(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId]
-  def requireAuthenticated(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated]
+  def extract(maybeUserId: Option[UserId.Authenticated]): IO[Failure, UserId]
+  def requireAuthenticated(maybeUserId: Option[UserId.Authenticated]): IO[Failure, UserId.Authenticated]
 
 object UserContextExtractor:
 
@@ -77,32 +78,36 @@ object UserContextExtractor:
     * UserId.Anonymous cannot be passed to authz.check() — compile-time enforced (ADR-012 §7 T4).
     */
   val noOp: UserContextExtractor = new UserContextExtractor:
-    def extract(m: Option[UserId.Authenticated]): IO[AppError, UserId] =
+    def extract(m: Option[UserId.Authenticated]): IO[Failure, UserId] =
       ZIO.succeed(UserId.Anonymous)
-    def requireAuthenticated(m: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated] =
+    def requireAuthenticated(m: Option[UserId.Authenticated]): IO[Failure, UserId.Authenticated] =
       ZIO.succeed(m.getOrElse(sentinelAuthenticated))
+
+  /** The identity header the route requires was absent: the request did not pass
+    * an authenticating waypoint, or its user is not signed in. */
+  private val identityAbsent: Failure =
+    Failure.AccessDenied(Core(TrustZone.MeshHeader,
+      NonEmptyList(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
 
   /** identity / fine-grained mode — header must be present.
     *
     * If absent: the request either did not pass through an authenticated waypoint
     * (mesh bypass) or the user is unauthenticated. Both cases fail closed, as a
-    * refusal rather than as a dependency outage — nothing this service depends
-    * on has failed, so the caller is refused rather than told to retry.
-    * No JWT parsing needed — the mesh has already done all signature/expiry validation.
+    * refusal at the mesh header rather than as a dependency outage — nothing this
+    * service depends on has failed, so the caller is refused rather than told to
+    * retry. No JWT parsing needed — the mesh has already done all signature/expiry
+    * validation.
     *
-    * Which of the two it was stays in the log: the refusal's text is this
-    * service's own and the projection drops it, so the caller is told only that
-    * access was refused (ADR-035 §2).
+    * The two cases are indistinguishable here, so the log records only that the
+    * header was absent, and the caller is told only that access was refused
+    * (ADR-035 §2).
     *
     * @see ADR-012: Claim Header Injection (required external header stripping config)
     */
   val requirePresent: UserContextExtractor = new UserContextExtractor:
-    def extract(m: Option[UserId.Authenticated]): IO[AppError, UserId] =
+    def extract(m: Option[UserId.Authenticated]): IO[Failure, UserId] =
       requireAuthenticated(m)
-    def requireAuthenticated(m: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated] =
+    def requireAuthenticated(m: Option[UserId.Authenticated]): IO[Failure, UserId.Authenticated] =
       m match
         case Some(userId) => ZIO.succeed(userId)
-        case None =>
-          ZIO.fail(AccessDenied(
-            "Missing x-user-id header — unauthenticated request or mesh bypass detected"
-          ))
+        case None         => ZIO.fail(identityAbsent)
