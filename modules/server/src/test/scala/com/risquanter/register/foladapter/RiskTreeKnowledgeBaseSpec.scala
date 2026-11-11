@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.common.ValuationBasis
+import com.risquanter.register.common.FolSymbols.ValueFunction
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
@@ -22,7 +23,7 @@ import vql.semantics.VagueSemantics
 import vql.typed.{Value, TypeId, FolModel, QueryBinder, TypeCheckError}
 
 /** Tests for [[RiskTreeKnowledgeBase]] — the bridge between register's domain
-  * model and the fol-engine typed evaluation pipeline.
+  * model and the vql-engine typed evaluation pipeline.
   *
   * Covers:
   *   - Percentile computation (edge cases, monotonicity, boundary values)
@@ -146,8 +147,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private val kb = kbInherent(tree, results)
 
   private val nodeSort                  = RiskTreeKnowledgeBase.NodeSort
-  private val lossSort                  = TypeId("Loss")
-  private val probSort                  = TypeId("Probability")
+  private val lossSort                  = RiskTreeKnowledgeBase.LossSort
+  private val probSort                  = RiskTreeKnowledgeBase.ProbabilitySort
   private val nodeNameLiteralSort       = RiskTreeKnowledgeBase.NodeNameLiteralSort
   private val nodeIdLiteralSort         = RiskTreeKnowledgeBase.NodeIdLiteralSort
   private val mitigationSort            = RiskTreeKnowledgeBase.MitigationSort
@@ -679,11 +680,20 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         baseline.subsetOf(kb.reservedFolNames)
       )
     },
+    test("every value function's symbol reads back as that function, and the catalog declares each") {
+      // The prism law of FolSymbols.ValueFunction: symbol builds the name and
+      // fromSymbol parses it back.
+      assertTrue(
+        ValueFunction.values.forall(f => ValueFunction.fromSymbol(f.symbol) == Some(f)),
+        ValueFunction.fromSymbol("leaf").isEmpty,
+        ValueFunction.values.map(f => vql.typed.SymbolName(f.symbol)).toSet.subsetOf(kb.catalog.functions.keySet)
+      )
+    },
     test("node-reference sort discriminators match the classifier's names") {
       // Drift guard for the bind-error classifier's sort-name literals in
       // `common` (FolQueryFailure.NodeSortName / NodeNameLiteralSortName), which
       // it compares against UnparseableConstant.sortName to classify a
-      // nonexistent-node reference as UNKNOWN_REFERENCE. The catalog is
+      // nonexistent-node reference as QueryProblem.UnknownReferences. The catalog is
       // server-side and off `common`'s dependency graph, so those literals are
       // manual mirrors of the catalog sorts, held here where both are visible —
       // change one without the other and this goes red.

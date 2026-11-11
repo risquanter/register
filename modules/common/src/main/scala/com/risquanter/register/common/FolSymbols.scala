@@ -12,10 +12,32 @@ package com.risquanter.register.common
   */
 object FolSymbols:
 
-  /** A manually maintained mirror of the predicate and function symbol names
-    * declared in the `RiskTreeKnowledgeBase` catalog, plus the catalog's two
-    * constants, which are the `ValuationBasis` symbols and are read from that
-    * enum rather than restated. The mirror lives in `common` because the
+  /** The query language's value functions: the figures a query reads off a node.
+    *
+    * `symbol` is the name the query engine binds, so it is declared rather than
+    * derived from the case name: renaming a case must not silently rename a
+    * keyword of the query language (ADR-037).
+    */
+  enum ValueFunction(val symbol: String):
+    case P95 extends ValueFunction("p95")
+    case P99 extends ValueFunction("p99")
+    case Lec extends ValueFunction("lec")
+
+  object ValueFunction:
+    /** The value function a bound symbol names, if it names one.
+      *
+      * {{{
+      * fromSymbol("p95")  // Some(P95)
+      * fromSymbol("leaf") // None
+      * }}}
+      */
+    def fromSymbol(symbol: String): Option[ValueFunction] =
+      ValueFunction.values.find(_.symbol == symbol)
+
+  /** A manually maintained mirror of the predicate symbol names declared in the
+    * `RiskTreeKnowledgeBase` catalog, plus its function symbols and its two
+    * constants, which are read from `ValueFunction` and `ValuationBasis` rather
+    * than restated. The mirror lives in `common` because the
     * DTO-boundary gate needs it here, where the `server`-side catalog is not on
     * the dependency graph and its symbol union cannot be computed. The C4 test
     * in `RiskTreeKnowledgeBaseSpec` guards the mirror against drift — it
@@ -26,7 +48,5 @@ object FolSymbols:
     // predicates
     "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
     "gt_loss", "gt_prob", "eq", "named_risk", "risk_id",
-    "named_mitigation", "mitigation_id", "mitigate", "mitigated", "unmitigated",
-    // functions
-    "p95", "p99", "lec"
-  ) ++ ValuationBasis.values.map(_.symbol)
+    "named_mitigation", "mitigation_id", "mitigate", "mitigated", "unmitigated"
+  ) ++ ValueFunction.values.map(_.symbol) ++ ValuationBasis.values.map(_.symbol)

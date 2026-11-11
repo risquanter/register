@@ -8,6 +8,7 @@ import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, Probabili
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.common.{FolSymbols, ValuationBasis}
+import com.risquanter.register.common.FolSymbols.ValueFunction
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given
 
 import vql.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, Value}
@@ -90,8 +91,8 @@ class RiskTreeKnowledgeBase(
   // ── Sort declarations ──────────────────────────────────────────────
 
   val nodeSort: TypeId                  = RiskTreeKnowledgeBase.NodeSort
-  val lossSort: TypeId                  = TypeId("Loss")
-  val probabilitySort: TypeId           = TypeId("Probability")
+  val lossSort: TypeId                  = RiskTreeKnowledgeBase.LossSort
+  val probabilitySort: TypeId           = RiskTreeKnowledgeBase.ProbabilitySort
   val nodeNameLiteralSort: TypeId       = RiskTreeKnowledgeBase.NodeNameLiteralSort
   val nodeIdLiteralSort: TypeId         = RiskTreeKnowledgeBase.NodeIdLiteralSort
   val mitigationSort: TypeId            = RiskTreeKnowledgeBase.MitigationSort
@@ -170,8 +171,8 @@ class RiskTreeKnowledgeBase(
       s"no precomputed results for selection '$sel' (referencedSelections omitted it)"
     )
 
-  private def lookupResult(rs: Map[NodeId, LossDistribution], id: NodeId, ctx: String): Either[String, LossDistribution] =
-    rs.get(id).toRight(s"$ctx: no simulation result for node '${id.value}'")
+  private def lookupResult(rs: Map[NodeId, LossDistribution], id: NodeId, fn: ValueFunction): Either[String, LossDistribution] =
+    rs.get(id).toRight(s"${fn.symbol}: no simulation result for node '${id.value}'")
 
   /** Union of every resolved mitigation scope. `mitigated(x)` reads this set and
     * `unmitigated(x)` its complement, so `unmitigated ≡ ¬mitigated` holds by
@@ -203,29 +204,29 @@ class RiskTreeKnowledgeBase(
 
   val dispatcher: MapDispatcher = MapDispatcher(
     functions = Map(
-      SymbolName("p95") -> { args =>
+      SymbolName(ValueFunction.P95.symbol) -> { args =>
         for
           id  <- args(0).extract[NodeId]
           sel <- selectionOf(args(1))
           rs  <- resultsFor(sel)
-          r   <- lookupResult(rs, id, "p95")
+          r   <- lookupResult(rs, id, ValueFunction.P95)
         yield percentile(r, QuantileLevel.P95.probability)
       },
-      SymbolName("p99") -> { args =>
+      SymbolName(ValueFunction.P99.symbol) -> { args =>
         for
           id  <- args(0).extract[NodeId]
           sel <- selectionOf(args(1))
           rs  <- resultsFor(sel)
-          r   <- lookupResult(rs, id, "p99")
+          r   <- lookupResult(rs, id, ValueFunction.P99)
         yield percentile(r, QuantileLevel.P99.probability)
       },
-      SymbolName("lec") -> { args =>
+      SymbolName(ValueFunction.Lec.symbol) -> { args =>
         for
           id        <- args(0).extract[NodeId]
           threshold <- args(1).extract[Long]
           sel       <- selectionOf(args(2))
           rs        <- resultsFor(sel)
-          r         <- lookupResult(rs, id, "lec")
+          r         <- lookupResult(rs, id, ValueFunction.Lec)
         yield r.probOfExceedance(threshold)
       }
     ),
@@ -371,8 +372,8 @@ object RiskTreeKnowledgeBase:
 
     val nodeSort                  = NodeSort
     val mitigationSort            = MitigationSort
-    val lossSort                  = TypeId("Loss")
-    val probabilitySort           = TypeId("Probability")
+    val lossSort                  = LossSort
+    val probabilitySort           = ProbabilitySort
     val nodeNameLiteralSort       = NodeNameLiteralSort
     val nodeIdLiteralSort         = NodeIdLiteralSort
     val mitigationNameLiteralSort = MitigationNameLiteralSort
@@ -396,9 +397,9 @@ object RiskTreeKnowledgeBase:
       // literal validators below, not as pre-registered constants.
       constants = ValuationBasis.values.map(_.symbol -> mitigationSort).toMap,
       functions = Map(
-        SymbolName("p95") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
-        SymbolName("p99") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
-        SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort, mitigationSort), probabilitySort)
+        SymbolName(ValueFunction.P95.symbol) -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+        SymbolName(ValueFunction.P99.symbol) -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+        SymbolName(ValueFunction.Lec.symbol) -> FunctionSig(List(nodeSort, lossSort, mitigationSort), probabilitySort)
       ),
       predicates = Map(
         SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
@@ -467,6 +468,14 @@ object RiskTreeKnowledgeBase:
   /** Value sort for a mitigation reference written as a quoted ID literal
     * (`mitigation_id(m, "01H…")`). Carrier: `MitigationId` via `fromString`. */
   val MitigationIdLiteralSort: TypeId = TypeId("MitigationIdLiteral")
+
+  /** Value sort for monetary loss figures, the result of `p95` and `p99`.
+    * Carrier: `Long`. */
+  val LossSort: TypeId = TypeId("Loss")
+
+  /** Value sort for exceedance probabilities, the result of `lec`. Carrier:
+    * `Double`. */
+  val ProbabilitySort: TypeId = TypeId("Probability")
 
   /** Consumer carrier for the node sort (ADR-015 §2): the engine holds the
     * register `NodeId` opaquely in `Value.raw`; this lifts it back out. A

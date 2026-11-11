@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntity
 import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.common.ValuationBasis
+import com.risquanter.register.common.FolSymbols.ValueFunction
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, ScopeResolutionContext, ResolvedScopes}
@@ -173,8 +174,6 @@ object QueryServiceLive:
   */
 object MitigationSelectionScan:
 
-  private val valueFunctions: Set[String] = Set("p95", "p99", "lec")
-
   def referenced(bound: BoundQuery, tree: RiskTree): Set[MitigationSelection] =
     lazy val everyMitigation: Set[MitigationSelection] =
       tree.mitigations
@@ -187,17 +186,18 @@ object MitigationSelectionScan:
       case BoundTerm.VarRef(BoundVar(_, sort)) if sort == RiskTreeKnowledgeBase.MitigationSort => everyMitigation
       case _ => Set.empty
 
-    def selectionSlot(fn: String, args: List[BoundTerm]): Option[BoundTerm] = fn match
-      case "p95" | "p99" => args.lift(1)
-      case "lec"         => args.lift(2)
-      case _             => None
+    // The mitigation slot's position in each value function's catalog signature.
+    def selectionSlot(fn: ValueFunction, args: List[BoundTerm]): Option[BoundTerm] = fn match
+      case ValueFunction.P95 | ValueFunction.P99 => args.lift(1)
+      case ValueFunction.Lec                     => args.lift(2)
 
     def fromTerm(term: BoundTerm): Set[MitigationSelection] = term match
       case BoundTerm.FnApp(name, args, _) =>
         val here =
-          if valueFunctions.contains(name.value) then
-            selectionSlot(name.value, args).map(fromSlot).getOrElse(Set.empty)
-          else Set.empty
+          ValueFunction.fromSymbol(name.value)
+            .flatMap(selectionSlot(_, args))
+            .map(fromSlot)
+            .getOrElse(Set.empty)
         here ++ args.flatMap(fromTerm).toSet
       case _ => Set.empty
 

@@ -104,3 +104,10 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala
 - build.sbt
 - modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala
+- modules/app/src/main/scala/app/state/AnalyzeQueryState.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala
+- modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala
+- modules/common/src/main/scala/com/risquanter/register/common/ValueFunction.scala
+- modules/app/src/main/scala/app/Main.scala
+- modules/server/src/main/scala/com/risquanter/register/configs/SpiceDbConfig.scala
+- modules/server/src/main/resources/application.conf
