@@ -103,3 +103,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/infra/persistence/QuillMappings.scala
 - modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala
 - build.sbt
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/MergeRefusal.scala

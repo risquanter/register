@@ -10,7 +10,9 @@ Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
 version 0.18.6, step 2.3 at version 0.18.7, and step 2.4 at version 0.18.8.
 BATS suite A passed at version 0.18.8, which closes Phase 2. Phase 3 step 3.1
 landed at version 0.18.9, with `IrminWriteOutcome.Refused` carrying an optional
-head (§3.5). Step 3.2 landed at version 0.18.10. The
+head (§3.5). Step 3.2 landed at version 0.18.10, and step 3.3 at 0.18.11 with
+`Diagnostic.StoreRefusal` added for row 22 (§3.3) and `logAnnotations` keeping
+every value of a repeated key. The
 file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -323,6 +325,8 @@ enum Diagnostic:
   case PeerMessage(text: String)                                  // peer_message: an exception's, driver's or fitter's own text
   case PeerBody(text: String)                                     // peer_body: an HTTP body this service could not read
   case GraphQlPath(path: List[String])                            // graphql_path
+  case StoreRefusal(entries: NonEmptyList[(ErrorLocation, FieldProblem)])
+                                                                  // store_refusal: the store refusal a merge conflict was built from
 
 object Diagnostic:
   /** The log key and rendered value of one entry. Total over the enum. */
@@ -336,7 +340,12 @@ raw primitive is the correct type for text whose only use is a log line
 types, which is one of the two facts `UES-D-13` turns on. The list of cases is
 derived from the record §9's diagnostics column; a row that needs an entry the
 list lacks adds a case in its step, and that addition is listed in the step's
-report.
+report. Step 3.3 added `StoreRefusal` for row 22, approved 2026-11-11: the
+merge guard's conflict carries the listing's refused entries, typed rather than
+as text, and the guard's separate `logError` goes. The same approval made
+`logAnnotations` join the values of diagnostics that render under one key,
+because `.toMap` kept only the last `tree_id` of a refusal naming several
+trees.
 
 ### 3.4 What is derived, once
 

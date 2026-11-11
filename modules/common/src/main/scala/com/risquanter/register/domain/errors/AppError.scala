@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import java.time.{Duration, Instant}
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{CommitHash, Revision, ScenarioName, TreeId, ValidationMessages, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{CommitHash, Revision, TreeId, ValidationMessages, WorkspaceId}
 import vql.error.{BindErrorDetail, QueryError}
 
 /** Who a failure is attributable to, which decides the level its log line is
@@ -219,22 +219,6 @@ case class TreeAbsentAtRevision(wsId: WorkspaceId, treeId: TreeId, rev: Revision
 case class VersionConflict(treeId: TreeId, expected: CommitHash, actual: CommitHash) extends DomainError {
   override def logMessage: String =
     s"Version conflict on tree ${treeId.value}: expected ${expected.value}, found ${actual.value}"
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
-/** Branch merge conflict — requires user intervention. Names the scenario,
-  * never the Irmin `BranchRef`, which embeds the `WorkspaceId` (ADR-036). A
-  * merge always targets a scenario, so main is not a reachable value here and
-  * the scenario's own name is the precise type.
-  *
-  * `refusal` is a closed set rather than composed prose, so the remedy the
-  * browser offers is chosen from the case and not parsed out of a sentence, and
-  * no repository text can reach a client through it. The log line renders the
-  * same value through `MergeRefusal.describe`.
-  */
-case class MergeConflict(scenario: ScenarioName.ScenarioName, refusal: MergeRefusal) extends DomainError {
-  override def logMessage: String =
-    s"Merge conflict on scenario ${scenario.value}: ${MergeRefusal.describe(refusal)}"
   override def origin: FailureOrigin = FailureOrigin.Caller
 }
 

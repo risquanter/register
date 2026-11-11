@@ -86,7 +86,8 @@ object FailureSpec extends ZIOSpecDefault:
     Diagnostic.RawValue("bad segment!")             -> Set("raw_value"),
     Diagnostic.PeerMessage("driver said no")        -> Set("peer_message"),
     Diagnostic.PeerBody("<html>")                   -> Set("peer_body"),
-    Diagnostic.GraphQlPath(List("main", "tree"))    -> Set("graphql_path")
+    Diagnostic.GraphQlPath(List("main", "tree"))    -> Set("graphql_path"),
+    Diagnostic.StoreRefusal(one(FieldProblem.Required)) -> Set("store_refusal")
   )
 
   def spec = suite("FailureSpec")(
@@ -118,6 +119,18 @@ object FailureSpec extends ZIOSpecDefault:
       },
       test("each diagnostic renders exactly its own keys") {
         assertTrue(everyDiagnostic.forall((d, expected) => Diagnostic.render(d).map(_._1).toSet == expected))
+      },
+      test("diagnostics under one key keep every value, in order") {
+        val other   = TreeId(safeId("failure-spec-tree-2"))
+        val failure = Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyList(nameRequired),
+                        List(Diagnostic.TreeRef(treeId), Diagnostic.TreeRef(other)))
+        assertTrue(failure.logAnnotations.get("tree_id") == Some(s"${treeId.value},${other.value}"))
+      },
+      test("a store refusal renders each entry's location and problem, in order") {
+        val second = ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Probability), FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval))
+        val entries = NonEmptyList(nameRequired, second).map(e => (e.location, e.problem))
+        assertTrue(Diagnostic.render(Diagnostic.StoreRefusal(entries)) ==
+          List("store_refusal" -> s"${ValidationError.describe(nameRequired)}; ${ValidationError.describe(second)}"))
       }
     ),
     suite("logMessage")(

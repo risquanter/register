@@ -219,7 +219,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             AuthForbidden("u", "read", "tree", "t1")               -> "AccessDenied",
             // Conflicts
             VersionConflict(treeId, commit, otherCommit)           -> "Conflict",
-            MergeConflict(scenario, MergeRefusal.BranchesConflict()) -> "Conflict",
             SimulationNotCached(treeId)                            -> "Conflict",
             // Capability absent
             ScenariosNotSupported("in-memory")                     -> "NotSupported",
@@ -232,7 +231,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 18)
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 17)
         },
         test("with a tree in scope, the five content failures name that tree instead") {
           // The same five leaves the table above reads with no tree. The scope

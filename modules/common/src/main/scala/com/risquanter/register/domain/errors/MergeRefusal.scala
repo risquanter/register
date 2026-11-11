@@ -13,7 +13,7 @@ import com.risquanter.register.http.responses.MergeConflictEntry
   * know which case it is and the values that go with it. Free text could carry
   * an internal path or a repository message, and a case drawn from a closed set
   * cannot (ADR-035). The same value serves the server's log line, which renders
-  * it through `MergeConflict.logMessage`.
+  * it through `ConflictKind.describe`.
   */
 @jsonDiscriminator(MergeRefusal.TagField)
 enum MergeRefusal:

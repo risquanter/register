@@ -82,10 +82,11 @@ object Failure:
       view(f).entries.toList.mkString(s"${f.productPrefix}: ", "; ", "")
 
     /** The structured fields for the log line: every diagnostic rendered, plus
-      * `trust_zone`. */
+      * `trust_zone`. Diagnostics rendering under one key keep every value,
+      * joined by commas in order, so a refusal of two trees names both. */
     def logAnnotations: Map[String, String] =
       val v = view(f)
-      v.diagnostics.flatMap(Diagnostic.render).toMap + (ZoneKey -> zoneValue(v.zone))
+      v.diagnostics.flatMap(Diagnostic.render).groupMapReduce(_._1)(_._2)(_ + "," + _) + (ZoneKey -> zoneValue(v.zone))
 
   /** The one way a `Validation` becomes a failure. */
   def rejected(zone: TrustZone, errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =

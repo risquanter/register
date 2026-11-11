@@ -15,9 +15,9 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, ContentHash, MergeStagingRef, SafeName, StoreBranch, TreeId, NodeId, MitigationId}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, MergeConflict, PeerZone, TrustZone, ValidationFailed
+  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, MergeRefusal, PeerZone, TrustZone, ValidationFailed
 }
-import com.risquanter.register.http.errors.NotFoundKind
+import com.risquanter.register.http.errors.{ConflictKind, NotFoundKind}
 import com.risquanter.register.http.responses.{HistoryOperation, MergeConflictEntry, MergePreviewStatus, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
@@ -166,6 +166,16 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
   private def writeMit(wsId: WorkspaceId, mit: MitigationId, label: String, likelihood: Double, branch: BranchRef = BranchRef.Main) =
     IrminClient.set(mitPath(wsId, mit), mitigation(mit, label, likelihood).toJson, blobMessage(wsId), branch)
 
+  /** The caller's merge conflict a merge failed with, when it failed with one. */
+  private def conflictOf(exit: Exit[Any, Any]): Option[Failure] =
+    exit.causeOption.flatMap(_.failureOption).collect { case f @ Failure.Conflict(Core(TrustZone.Client, _, _)) => f }
+
+  /** The scenario and refusal the merge conflict names. */
+  private def mergeRefusalOf(exit: Exit[Any, Any]): Option[(ScenarioName.ScenarioName, MergeRefusal)] =
+    exit.causeOption.flatMap(_.failureOption).collect {
+      case Failure.Conflict(Core(TrustZone.Client, errors, _)) => errors.head
+    }.collect { case (_, ConflictKind.MergeRefused(scenario, refusal)) => (scenario, refusal) }
+
   /** Whether a listed branch is a merge's staging branch. */
   private def isStaging(branch: StoreBranch): Boolean = branch match
     case _: MergeStagingRef => true
@@ -216,7 +226,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       )
     },
 
-    test("same node edited differently on both sides: preview names exactly that node, merge refuses with MergeConflict, main untouched") {
+    test("same node edited differently on both sides: preview names exactly that node, merge refuses with the Conflicts refusal, main untouched") {
       val scenario = scenarioName("merge-conflict")
       for
         (wsId, branch, _) <- seedAndFork("merge-ws-conflict", scenario)
@@ -231,8 +241,11 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
           case MergePreviewStatus.Conflicts(List(MergeConflictEntry.NodeConflict(tree, node, _, fields))) =>
             tree.id == treeId && node == nodeA && fields == List(FieldName.Probability)
           case _ => false,
-        a.exists(_.contains("0.65"))
-      ) && assert(mergeExit)(fails(isSubtype[MergeConflict](anything)))
+        a.exists(_.contains("0.65")),
+        mergeRefusalOf(mergeExit) match
+          case Some((named, MergeRefusal.Conflicts(_))) => named == scenario
+          case _                                       => false
+      )
     },
 
     test("saves of different nodes through the repository on both branches: preview Clean, merge keeps both, meta carries the merge time, history shows one Merge") {
@@ -306,7 +319,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       )
     },
 
-    test("same mitigation edited differently on both sides: preview names exactly that mitigation path, merge refuses with MergeConflict, main untouched") {
+    test("same mitigation edited differently on both sides: preview names exactly that mitigation path, merge refuses with the Conflicts refusal, main untouched") {
       val scenario = scenarioName("merge-mit-conflict")
       for
         (wsId, branch, _) <- seedAndFork("merge-ws-mit-conflict", scenario,
@@ -322,8 +335,11 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
           case MergePreviewStatus.Conflicts(List(MergeConflictEntry.MitigationConflict(tree, mit, _, fields))) =>
             tree.id == treeId && mit == mitM && fields == List(FieldName.Spec)
           case _ => false,
-        m.exists(_.contains("0.25"))
-      ) && assert(mergeExit)(fails(isSubtype[MergeConflict](anything)))
+        m.exists(_.contains("0.25")),
+        mergeRefusalOf(mergeExit) match
+          case Some((named, MergeRefusal.Conflicts(_))) => named == scenario
+          case _                                       => false
+      )
     },
 
     test("resolution as ordinary edit: bringing the conflicted node to byte agreement makes preview Clean and the merge succeed") {
@@ -370,7 +386,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         mergeExit <- svc.merge(wsId, scenario).exit
         after     <- mainHeadHash
       yield
-        val failure = mergeExit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
+        val failure = conflictOf(mergeExit)
         assertTrue(
           failure.exists(_.logMessage.contains("duplicate node name(s)")),
           failure.exists(_.logMessage.contains("Gamma")),
@@ -395,7 +411,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
         after     <- mainHeadHash
         remaining <- IrminClient.branches
       yield
-        val failure = mergeExit.causeOption.flatMap(_.failureOption).collect { case m: MergeConflict => m }
+        val failure = conflictOf(mergeExit)
         assertTrue(
           failure.exists(_.logMessage.contains("the merge was not applied")),
           // The merge is assembled on a staging branch and published only once

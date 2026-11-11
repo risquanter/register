@@ -189,7 +189,6 @@ object WireError:
 
       // Conflicts
       case VersionConflict(_, _, _)            => WireError.Conflict(ConflictKind.StaleVersion(), t)
-      case MergeConflict(scenario, refusal)    => WireError.Conflict(ConflictKind.MergeRefused(scenario, refusal), t)
       case SimulationNotCached(treeId)         => WireError.Conflict(ConflictKind.SimulationRequired(treeId), t)
 
       // Capability absent

@@ -2,8 +2,10 @@ package com.risquanter.register.domain.errors
 
 import java.time.Instant
 
+import zio.prelude.NonEmptyList
+
 import com.risquanter.register.auth.{Permission, ResourceRef}
-import com.risquanter.register.domain.data.iron.{CommitHash, Revision, TreeId, UserId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{CommitHash, Revision, TreeId, UserId, ValidationMessages, WorkspaceId}
 import com.risquanter.register.infra.irmin.model.IrminPath
 
 /** One log-only entry on a failure. Each case fixes its log key and the type of
@@ -41,6 +43,10 @@ enum Diagnostic:
 
   case GraphQlPath(path: List[String])
 
+  /** The entries of the store refusal a conflict was built from: each refused
+    * value's location and problem. */
+  case StoreRefusal(entries: NonEmptyList[(ErrorLocation, FieldProblem)])
+
 object Diagnostic:
   /** The log key and rendered value of one entry. Total over the enum. The keys
     * are a contract with the log pipeline, so each is declared here once and
@@ -64,6 +70,9 @@ object Diagnostic:
     case PeerMessage(text)       => List("peer_message" -> text)
     case PeerBody(text)          => List("peer_body" -> text)
     case GraphQlPath(path)       => List("graphql_path" -> path.mkString("."))
+    case StoreRefusal(entries)   =>
+      List("store_refusal" -> entries.toList.map((location, problem) =>
+        s"[${ErrorLocation.describe(location)}] ${ValidationMessages.render(problem)}").mkString("; "))
 
   private def revision(rev: Revision): String = rev match
     case Revision.Head(branch) => s"head of ${branch.toBranchRef}"

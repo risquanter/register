@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.{Mitigation, RiskLeaf, RiskNode, Risk
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, MergeStagingRef, MitigationId, NodeId, PositiveInt, Revision, SafeId, SafeName, TreeId, ValidationUtil}
 import com.risquanter.register.domain.errors.{
   AppError, Core, Diagnostic, Failure, ErrorLocation, ErrorSubject, FieldName, FieldProblem,
-  MergeConflict, MergeRefusal, PeerZone, TrustZone, ValidationFailed, ValidationError
+  MergeRefusal, PeerZone, TrustZone, ValidationFailed, ValidationError
 }
 import com.risquanter.register.http.errors.{ConflictKind, NotFoundKind}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewStatus, TreeLabel, TreeMetadataFields, Versions}
@@ -146,7 +146,7 @@ object ConflictFields:
   * either branch after the scan cannot reach it. The patched Irmin backend
   * (see `IrminClient.mergeCommit`) is the backstop for a conflict the
   * pre-check did not name: the merge itself returns `Conflicted`, which is
-  * mapped to the domain `MergeConflict` here.
+  * answered here as the caller's `Conflict` with `BranchesConflict`.
   *
   * The pre-check compares full persisted contents byte-for-byte between main,
   * the scenario, and their lowest common ancestor — the storage relation of
@@ -173,7 +173,7 @@ trait ScenarioMergeService:
   /** Merge the scenario into main via Irmin's native three-way merge.
     *
     * @return main's new head commit
-    * @see MergeConflict — pre-check found conflicting values (409), or Irmin
+    * @see Failure.Conflict with `ConflictKind.MergeRefused` — pre-check found conflicting values (409), or Irmin
     *      refused the merge of the two commits the scan compared
     * @see ValidationFailed NOT_FOUND — the scenario does not exist
     */
@@ -211,7 +211,8 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                             ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(name)))))
       at           <- Clock.instant
       result       <- scan(wsId, branch, scenarioHead, at)
-      _            <- ZIO.foreachDiscard(result.verdict.refusal)(refusal => ZIO.fail(MergeConflict(name, refusal)))
+      _            <- ZIO.foreachDiscard(result.verdict.refusal)(refusal =>
+                        ZIO.fail(scenarioConflict(ConflictKind.MergeRefused(name, refusal), Nil)))
       // The head the merge is assembled against and published against is the
       // one the scan compared, so a save on main after the scan moves main and
       // the publish refuses rather than overwriting it. A scenario branch can
@@ -265,7 +266,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       head    <- ZIO.acquireReleaseWith(
                    irmin.createBranchAt(staging, mainBefore).flatMap {
                      case IrminWriteOutcome.Applied    => ZIO.unit
-                     case IrminWriteOutcome.Refused(_) => ZIO.fail(scenarioConflict(ConflictKind.MergeAlreadyRunning(name)))
+                     case IrminWriteOutcome.Refused(_) => ZIO.fail(scenarioConflict(ConflictKind.MergeAlreadyRunning(name), Nil))
                    }
                  )(_ =>
                    // Best effort: the staging branch is unreachable once main
@@ -282,7 +283,10 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                                }
                      merge  <- irmin.mergeCommit(scenarioHead, staging, mergedMessage).flatMap {
                                  case IrminMergeOutcome.Merged(commit) => ZIO.succeed(commit)
-                                 case IrminMergeOutcome.Conflicted(_)  => ZIO.fail(MergeConflict(name, MergeRefusal.BranchesConflict()))
+                                 case IrminMergeOutcome.Conflicted(reason) =>
+                                   ZIO.fail(scenarioConflict(
+                                     ConflictKind.MergeRefused(name, MergeRefusal.BranchesConflict()),
+                                     List(Diagnostic.PeerMessage(reason))))
                                }
                      last   <- ZIO.foldLeft(metadataToWrite)(merge) { case (_, (comparison, merged)) =>
                                  irmin.set(WorkspaceStoragePaths.of(wsId, comparison.path), merged.toJson, mergedMessage, staging)
@@ -291,7 +295,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                      _      <- guardStagedState(wsId, name, staged)
                      _      <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged).flatMap {
                                  case IrminWriteOutcome.Applied    => ZIO.unit
-                                 case IrminWriteOutcome.Refused(_) => ZIO.fail(scenarioConflict(ConflictKind.MergeTargetMoved(name)))
+                                 case IrminWriteOutcome.Refused(_) => ZIO.fail(scenarioConflict(ConflictKind.MergeTargetMoved(name), Nil))
                                }
                    yield staged
                  }
@@ -309,9 +313,9 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * `staged` is on the staging branch and nothing has been published to main,
     * so a failure needs no repair: the caller discards the staging branch and
     * main is untouched. The listing's refusal names each refused tree, and those
-    * trees are what the conflict names. The refusal's own text goes to the log
-    * and nowhere else. A refusal naming no tree is about the listing itself and
-    * fails the merge as it is.
+    * trees are what the conflict names. The refusal's entries go to the
+    * conflict's diagnostics and nowhere else. A refusal naming no tree is about
+    * the listing itself and fails the merge as it is.
     */
   private def guardStagedState(
     wsId: WorkspaceId,
@@ -319,12 +323,13 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     staged: CommitHash
   ): IO[AppError | Failure, Unit] =
     repo.getAllForWorkspace(wsId, Revision.At(staged)).unit.catchSome {
-      case refusal @ Failure.Rejected(Core(TrustZone.Peer(PeerZone.Store), _, diagnostics)) =>
+      case refusal @ Failure.Rejected(Core(TrustZone.Peer(PeerZone.Store), entries, diagnostics)) =>
         diagnostics.collect { case Diagnostic.TreeRef(id) => id } match
           case Nil   => ZIO.fail(refusal)
           case trees =>
-            ZIO.logError(s"merge guard rejected ${staged.value} for scenario ${scenario.value}: ${refusal.logMessage}") *>
-              ZIO.fail(MergeConflict(scenario, MergeRefusal.InvariantBroken(trees)))
+            ZIO.fail(scenarioConflict(
+              ConflictKind.MergeRefused(scenario, MergeRefusal.InvariantBroken(trees)),
+              List(Diagnostic.StoreRefusal(entries))))
     }
 
   // ── conflict scan ────────────────────────────────────────────────────────
@@ -483,10 +488,10 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   private def storeRefusal(errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =
     Failure.rejected(TrustZone.Peer(PeerZone.Store), errors, diagnostics)
 
-  /** A refused write on the scenario's merge as the caller's conflict, located at
-    * the scenario the request names. */
-  private def scenarioConflict(kind: ConflictKind): Failure =
-    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(ErrorLocation.requestField(FieldName.Scenario) -> kind), Nil))
+  /** A refused merge of the scenario as the caller's conflict, located at the
+    * scenario the request names. */
+  private def scenarioConflict(kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(ErrorLocation.requestField(FieldName.Scenario) -> kind), diagnostics))
 
   /** Fetch, for every candidate path, the contents at main's head and at the
     * scenario's head as the scan observed them, and at the merge base. Every
