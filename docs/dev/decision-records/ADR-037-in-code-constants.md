@@ -57,11 +57,10 @@ enum ValuationBasis(val symbol: String):
 A value that is not one of a set becomes a named value in the companion of the type that owns it, documenting where the value comes from:
 
 ```scala
-object FolQueryFailure:
-  /** The `TypeId.value` the engine crosses in `BindErrorDetail.UnparseableConstant.sortName`
-    * for a node-sort literal. Bound to the catalog by a drift-guard assertion.
-    */
-  val NodeSortName: String = "Node"
+object DistributionShape:
+  /** The confidence level the lognormal bounds are read at. Fixed by the BCG
+    * method rather than configurable. */
+  val LognormalConfidenceInterval: Double = 0.90
 ```
 
 Every constant is either owned or shared, and the two tests below decide which.
@@ -194,7 +193,7 @@ div(cls := "banner", ErrorMessages.workspaceExpired(lifetime))
 | `ScenarioSourceDto` | Closed set, derived codec, tag key as a named constant |
 | `LeafSimContent`'s raw projection | Declared spellings — the bytes are a hash preimage, which owes stability rather than agreement with a decoder |
 | `ValuationBasis` | Declared spelling — contract with the query engine |
-| `FolQueryFailure.NodeSortName` | Single constant in its owner's companion, origin documented |
+| `DistributionShape.LognormalConfidenceInterval` | Single constant in its owner's companion, origin documented |
 | `IronConstants` | Shared object of values of shared refined types, kept together for reuse |
 | `WireError` | Closed set carrying the status per case |
 | `ErrorMessages`, `MergeMessages` | Named user-facing text, parameterised as functions |

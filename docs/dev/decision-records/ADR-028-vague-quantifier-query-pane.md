@@ -4,16 +4,6 @@
 **Date:** 2026-03-14  
 **Tags:** query-language, simulation, fol, integration
 
-> **Update 2026-04-30 — syntax aligned with current implementation.**
-> Numeric comparison predicates are sort-tagged (`gt_loss(Loss,Loss)`,
-> `gt_prob(Probability,Probability)`) rather than untyped infix `>`/`<`.
-> Available simulation-backed functions are `p95`, `p99`, `lec` (the
-> earlier `p50`/`p90` listing was never implemented). All examples in
-> this document and the appendix have been updated. Node-name and node-id
-> literals are delivered: a quoted literal binds through the `named_risk(x, "…")`
-> predicate (name) or `risk_id(x, "…")` predicate (id), each over a dedicated
-> node-reference sort with its own bind-time literal validator.
-
 ---
 
 ## Context
@@ -25,12 +15,14 @@
   (quantiles, exceedance probabilities), and checking a proportional
   threshold — they cannot be answered by a single LEC fetch
 - A standalone library (**vql-engine**, repo `risquanter/vql-engine`) implements first-order
-  logic with vague quantifiers (Fermüller, Hofer & Ortiz, FQAS 2017); it
-  provides a parser, an FOL evaluator, and a `KnowledgeSource` abstraction
-  but has no web API
+  logic with vague quantifiers (Fermüller, Hofer & Ortiz, FQAS 2017). It
+  provides a parser and a many-sorted typed pipeline: a consumer declares its
+  sorts and symbols in a `TypeCatalog`, backs them with a `RuntimeModel`, and
+  evaluates through `VagueSemantics.evaluateTyped`. It has no web API
 - The register's simulation engine produces `LossDistribution` results
   (outcomes, quantiles, exceedance probabilities) that must be queryable
-  through the FOL evaluator without modifying the library's core types
+  through the evaluator, and the library must stay free of any register
+  concept so that it remains a general-purpose engine
 
 ---
 
@@ -38,69 +30,74 @@
 
 ### 1. Server-Side Evaluation (Architecture)
 
-The vql-engine library is a JVM dependency of the `server`
-module. Queries are evaluated server-side with direct access to the
-simulation cache. Client-side (Scala.js) evaluation was ruled out due to
-JVM-only dependencies (Commons Math), large data transfer requirements,
-and the absence of Scala.js testing in the library.
+Queries are evaluated in the `server` module, with direct access to the
+simulation cache. The library is cross-built for the JVM and Scala.js, and
+the `common` module parses query text with it on both sides
+(`QueryRequest.resolve`). Evaluation stays on the server because it reads
+every referenced node's simulation results, which the browser does not hold
+and which are too large to transfer per query.
 
-### 2. Custom Interpretation via `RiskTreeKnowledgeBase` (Option X)
+### 2. A Register-Side Schema and Dispatcher via `RiskTreeKnowledgeBase`
 
-A register-side class `RiskTreeKnowledgeBase(tree, results)` builds the
-FOL `Model` by:
-1. Populating a standard `KnowledgeBase` with structural facts (tree
-   topology, node types)
-2. Calling `KnowledgeSourceModel.toModel()` to get the base interpretation
-3. Augmenting the interpretation with simulation-backed **functions**
-   (`p95`, `p99`, `lec`) and typed **comparison predicates** (`gt_loss`,
-   `gt_prob`) — see DD-2 in the appendix for the typed-many-sorted
-   rationale that replaced the earlier untyped `>`/`<` operators
-4. Overriding `getFunction` to parse numeric literals in query strings
+register declares its query language to the library and backs it with its
+own data. The library holds no register concept. `RiskTreeKnowledgeBase`
+does both halves:
+
+1. `RiskTreeKnowledgeBase.schemaFor(tree)` builds the `TypeCatalog`: the
+   sorts (`Node` and `Mitigation` are quantifiable, `Loss`, `Probability`
+   and the four reference-literal sorts are not), the `inherent`/`residual`
+   constants, the signatures of the value functions `p95`, `p99` and `lec`,
+   the signatures of the predicates, and one literal validator per sort.
+   A quoted node or mitigation reference resolves through its sort's
+   validator at bind time, so a name or id is never interpolated into
+   anything.
+2. The class builds the `RuntimeModel`: one domain of `Value`s per
+   quantifiable sort, and a `MapDispatcher` that decides each predicate and
+   computes each value function. Structural predicates read the tree's
+   `TreeIndex`. Value functions read the precomputed results for the
+   selection their trailing `Mitigation` argument names. Mitigation
+   predicates read the resolved scopes. Every argument is read with
+   `extract[A]`, never cast.
 
 ```scala
-class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistribution]):
+val catalog: TypeCatalog = TypeCatalog.unsafe(
+  types = Set(TypeDecl.DomainType(nodeSort), TypeDecl.ValueType(lossSort), /* … */),
+  constants = ValuationBasis.values.map(_.symbol -> mitigationSort).toMap,
+  functions = Map(
+    SymbolName(ValueFunction.P95.symbol) -> FunctionSig(List(nodeSort, mitigationSort), lossSort) /* … */),
+  predicates = Map(
+    SymbolName("gt_loss") -> PredicateSig(List(lossSort, lossSort)) /* … */),
+  literalValidators = Map(
+    nodeSort -> ((s: String) => riskNameToId.get(s)),
+    lossSort -> ((s: String) => s.toLongOption.filter(_ >= 0L)) /* … */)
+)
 
-  private val kb = KnowledgeBase.builder
-    .addRelation("leaf", 1).addRelation("portfolio", 1)
-    .addRelation("child_of", 2).addRelation("descendant_of", 2)
-    .addRelation("leaf_descendant_of", 2)
-    // ... populate from tree ...
-    .build()
-
-  private val source = KnowledgeSource.fromKnowledgeBase(kb)
-
-  def toModel(): Model[Any] =
-    val base = KnowledgeSourceModel.toModel(source)
-    val simFunctions = Map(
-      "p95" -> { case List(id: String) =>
-        calculateQuantiles(results(id))("P95").toLong },
-      "lec" -> { case List(id: String, t: Long) =>
-        results(id).probOfExceedance(t) }
-    )
-    val comparisons = Map(">" -> { case List(a: Number, b: Number) =>
-      a.doubleValue > b.doubleValue }, /* <, >=, <= */)
-
-    val augmented = new Interpretation[Any](
-      base.interpretation.domain,
-      base.interpretation.funcInterp ++ simFunctions,
-      base.interpretation.predInterp ++ comparisons
-    ) {
-      override def getFunction(name: String): List[Any] => Any =
-        funcInterp.getOrElse(name,
-          if name.forall(_.isDigit) then _ => name.toLong
-          else _ => throw Exception(s"Unknown: $name"))
-    }
-    Model(augmented)
+val dispatcher: MapDispatcher = MapDispatcher(
+  functions = Map(SymbolName(ValueFunction.P95.symbol) -> { args =>
+    for
+      id  <- args(0).extract[NodeId]
+      sel <- selectionOf(args(1))
+      rs  <- resultsFor(sel)
+      r   <- lookupResult(rs, id, ValueFunction.P95)
+    yield percentile(r, QuantileLevel.P95.probability)
+  } /* … */),
+  predicates = Map(SymbolName("gt_loss") -> { args =>
+    for a <- args(0).extract[Long]; b <- args(1).extract[Long] yield a > b
+  } /* … */)
+)
 ```
 
-**Key property:** Zero changes to the vql-engine library.
-Thresholds live in the query syntax (`gt_loss(p95(x, "inherent"), 5000000)`),
-making queries self-describing.
+**Key property:** the library knows nothing about risks, trees or
+simulations. Everything register-specific is a catalog entry or a dispatcher
+arm in register. Thresholds live in the query syntax
+(`gt_loss(p95(x, "inherent"), 5000000)`), making queries self-describing.
 
-### 3. Materialised Tree Relations (Transitive Closure)
+### 3. Tree Relations as Primitive Predicates (Transitive Closure)
 
 FOL cannot express transitive closure. Instead, `RiskTreeKnowledgeBase`
-pre-computes tree relationships during KB construction:
+offers the tree's relationships as primitive predicates, each decided from
+the `TreeIndex` when the evaluator asks. `descendant_of(x, y)` walks `x`'s
+parent chain upward, which costs the tree's depth:
 
 | Relation | Arity | Semantics |
 |---|---|---|
@@ -125,14 +122,21 @@ reports, `leaf_descendant_of(x, y)` for all leaf descendants).
 
 ### 4. Query Validation Before Evaluation
 
-The `Model[Any]` layer is untyped — `Interpretation[Any]` does not
-prevent a user from writing `gt_loss(leaf_1, leaf_2)`. The server validates
-the parsed `VagueQuery` AST before evaluation:
+A query is checked twice before any value is computed, and both checks run
+in the library against register's declarations:
 
-- Function symbols (`p95`, `lec`) must have correct arity
-- Comparison predicates must receive function-valued terms
-- Range predicates must reference known relations
-- Unknown symbols produce a 400 response listing available predicates
+- **At the request boundary.** `QueryRequest.resolve` parses the text with
+  `VagueQueryParser.parse`. A parse failure, and a query naming answer
+  variables, are refused there.
+- **At bind time.** `VagueSemantics.evaluateTyped` binds the parsed query
+  against the catalog before it evaluates. Every symbol must be declared,
+  with the right arity and argument sorts, so `gt_loss(lec(x, 1000000, "inherent"), 0.05)`
+  — a probability compared as a loss — is refused before evaluation.
+  A quoted node reference no validator accepts is refused as an unknown
+  reference. Quantifying over a value sort such as `Loss` is refused as a
+  type error.
+
+Each refusal answers 422 with a structured `QueryProblem` naming its kind.
 
 ### 5. Model Built Per-Query from Current Tree State
 
@@ -173,31 +177,31 @@ POST /query { "query": "Q[>=]^{2/3} x (leaf(x), high_p95(x))",
 POST /query { "query": "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, \"inherent\"), 5000000))" }
 ```
 
-### ❌ Modifying Library Traits for Register-Specific Concerns
+### ❌ Putting a Register Concept into the Library
 
 ```scala
-// BAD: adding register-specific hook to library's KnowledgeSource
-trait KnowledgeSource:
-  def evaluate(relation: String, args: List[RelationValue]): Option[RelationValue]
+// BAD: a register-specific symbol or type inside vql-engine
+object VagueSemantics:
+  def p95(node: NodeId, results: Map[NodeId, LossDistribution]): Long = ???
 ```
 
 ```scala
-// GOOD: augment interpretation in register server, library stays general
-val augmented = new Interpretation[Any](domain, baseFuncs ++ simFuncs, basePreds ++ comparisons) { ... }
+// GOOD: register declares the symbol and backs it with a dispatcher arm
+functions = Map(SymbolName(ValueFunction.P95.symbol) -> FunctionSig(List(nodeSort, mitigationSort), lossSort))
+SymbolName(ValueFunction.P95.symbol) -> { args => /* extract, look up, compute */ }
 ```
 
-### ❌ Quantifying Over Mixed Domain Without Range Constraint
+### ❌ Reading a Dispatcher Argument by Cast
 
 ```scala
-// BAD: nested ∀y over full domain (includes numeric literals) — runtime errors
-"Q[>=]^{2/3} x (leaf(x), ∀y. gt_loss(p95(y), 5000000))"
-// p95(5000000) → NoSuchElementException
+// BAD: the carrier is assumed; a wrong sort surfaces as ClassCastException
+SymbolName("gt_loss") -> { args => Right(args(0).raw.asInstanceOf[Long] > args(1).raw.asInstanceOf[Long]) }
 ```
 
 ```scala
-// GOOD: range predicate constrains iteration to valid elements
-"Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, \"inherent\"), 5000000))"
-// x bound by range predicate leaf(x) — only node IDs
+// GOOD: extract[A] returns a typed failure the evaluator reports
+SymbolName("gt_loss") -> { args =>
+  for a <- args(0).extract[Long]; b <- args(1).extract[Long] yield a > b }
 ```
 
 ### ❌ Querying All Nodes When Leaves Are Intended
@@ -220,12 +224,14 @@ val augmented = new Interpretation[Any](domain, baseFuncs ++ simFuncs, basePreds
 
 | Location | Pattern |
 |----------|---------|
-| `server/.../foladapter/RiskTreeKnowledgeBase` | KB construction + Model augmentation (DD-2, DD-3) |
-| `server/.../services/QueryService` | Parse → validate → build model → evaluate → QueryResponse |
+| `server/.../foladapter/RiskTreeKnowledgeBase` | `schemaFor` builds the catalog; the class builds the runtime model and dispatcher |
+| `server/.../services/QueryServiceLive` | Load tree → resolve scopes → bind for referenced selections → precompute results → build model → `evaluateTyped` |
+| `server/.../foladapter/QueryResponseBuilder` | Evaluation output → `QueryResponse` |
 | `server/.../http/controllers/QueryController` | Endpoint wiring |
-| `common/.../http/endpoints/WorkspaceEndpoints` | `POST /w/{key}/risk-trees/{treeId}/query` |
+| `common/.../http/endpoints/WorkspaceQueryEndpoints` | `POST /w/{key}/risk-trees/{treeId}/query` |
+| `common/.../http/requests/QueryRequest` | Query request body; `resolve` parses it at the boundary |
 | `common/.../http/responses/QueryResponse` | Shared response type (JVM + JS) |
-| `common/.../http/requests/QueryRequest` | Query request body |
+| `common/.../http/errors/QueryProblem` | The structured refusal a 422 carries |
 | `app/.../views/AnalyzeView` | Query textarea, result card, tree highlights |
 
 ---
@@ -237,10 +243,9 @@ The following alternatives were evaluated during design:
 | Option | Description | Verdict |
 |---|---|---|
 | **Materialised Booleans** | Pre-compute `high_p95(x)` with thresholds in request params | Rejected: queries not self-describing, predicate proliferation |
-| **Extend `RelationValue`** | Add `NumLong`/`NumDouble` to library's enum | Rejected: invasive library change, migration burden |
-| **`KnowledgeSource.evaluate` hook** | Add computed-predicate method to library trait | Rejected: register-specific concern in general-purpose library |
+| **Register symbols in the library** | Add risk-specific functions or a computed-predicate hook to vql-engine | Rejected: register-specific concern in a general-purpose library |
 | **Threshold-grid materialisation** | Pre-compute at fixed thresholds | Rejected: loses precision for arbitrary user thresholds |
-| **Option X (chosen)** | Custom `Interpretation` augmenting base model | Accepted: zero library changes, self-describing queries, simulation functions wired directly |
+| **Register-side schema and dispatcher (chosen)** | `TypeCatalog` and `MapDispatcher` declared in register | Accepted: the library stays general, queries are self-describing and sort-checked, simulation functions are wired directly |
 
 See [ADR-028 Appendix](ADR-028-appendix-technical-design.md) for
 detailed component design and scalability analysis.

@@ -8,38 +8,35 @@
 ## 1. FOL Terminology Reference
 
 This section defines the FOL concepts used throughout the design. All
-map directly to types in the vql-engine codebase.
+map directly to types in the vql-engine typed pipeline (`vql.typed`).
 
 | Concept | Definition | Code type | Example |
 |---|---|---|---|
-| **Domain** ($D$) | Set of all things we can talk about | `Domain[Any]` | `{leaf_1, leaf_2, portfolio_A, 5000000}` |
-| **Term** | Expression denoting a domain element | `Term` | Variable `x`, constant `leaf_1`, function `p95(x, "inherent")` |
-| **Formula** | Expression evaluating to true/false | `Formula[FOL]` | `gt_loss(p95(x, "inherent"), 5000000)`, `leaf(x)` |
-| **Interpretation** ($I$) | Maps symbols to actual computations | `Interpretation[Any]` | `"p95" → calculateQuantiles(results(id))("P95")` |
-| **Model** ($M$) | Domain + Interpretation | `Model[Any]` | The complete package for evaluating formulas |
-| **Valuation** ($v$) | Assigns values to variables | `Valuation[Any]` | $\{x \mapsto \text{leaf\_3}\}$ |
-| **Satisfaction** | $M, v \models \varphi$ — formula holds | `FOLSemantics.holds()` | `M, {x ↦ leaf_3} ⊨ gt_loss(p95(x, "inherent"), 5000000)` → true |
+| **Sort** | The kind of a value; quantifiable (a domain type) or not (a value type) | `TypeId`, declared as `TypeDecl.DomainType` / `TypeDecl.ValueType` | `Node`, `Mitigation` quantifiable; `Loss`, `Probability` not |
+| **Catalog** | The declared sorts, constants, symbol signatures and per-sort literal validators | `TypeCatalog` | `p95 : (Node, Mitigation) → Loss` |
+| **Term** | Expression denoting a value | `Term`, bound as `BoundTerm` | Variable `x`, literal `5000000`, function `p95(x, "inherent")` |
+| **Formula** | Expression evaluating to true/false | `Formula[FOL]`, bound as `BoundFormula` | `gt_loss(p95(x, "inherent"), 5000000)`, `leaf(x)` |
+| **Domain** | The elements of one quantifiable sort | `RuntimeModel.domains(sort): Set[Value]` | every `Value(Node, nodeId)` in the tree |
+| **Dispatcher** | Decides each predicate and computes each function | `RuntimeDispatcher` (`MapDispatcher`) | `"p95" → unconditionalQuantile(results(sel)(id), 0.95)` |
+| **Model** | Catalog paired with a runtime model, validated once | `FolModel` | The complete package for evaluating queries |
 
 ### Evaluation Trace
 
 For query: `Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))`
 
 ```
-For each element d in range {d | leaf(d) holds} :
-  v = {x ↦ d}
+Bind against the catalog:
+  x : Node                       ← inferred from leaf's signature
+  p95(x, "inherent") : Loss      ← "inherent" is a Mitigation-sort constant
+  5000000 : Loss                 ← Loss's literal validator parses it to 5000000L
 
-  1. Evaluate term p95(x, "inherent"):
-     x is variable → v(x) = d
-     p95 is function → I("p95")(d) = 7200000       ← simulation code runs
+Range: every d in domain(Node) for which the dispatcher says leaf(d)
 
-  2. Evaluate term 5000000:
-     5000000 is constant → I.getFunction("5000000")() = 5000000
-                                                        ← numeric literal parse
+For each d in the range, x ↦ d:
+  1. p95(d, inherent)            → dispatcher: quantile of the inherent results = 7200000
+  2. gt_loss(7200000, 5000000)   → dispatcher: 7200000 > 5000000 = true
 
-  3. Evaluate atom gt_loss(7200000, 5000000):
-     > gt_loss is predicate → I("gt_loss")(7200000, 5000000) = true
-
-Count satisfying / total → proportion → check quantifier threshold
+Count satisfying / range size → proportion → check quantifier threshold
 ```
 
 ---
@@ -80,7 +77,7 @@ A bound `∃m : mitigation` variable in a value function's selection slot denote
 single-mitigation `Selected` valuation; `named_mitigation`/`mitigation_id`
 constrain which mitigation.
 
-### Simulation-Backed Functions (via `Interpretation` augmentation)
+### Simulation-Backed Functions (dispatcher functions)
 
 The trailing `Mitigation`-sort argument selects the valuation the function reads:
 the `inherent`/`residual` constants or a bound `∃m : mitigation` variable.
@@ -91,40 +88,35 @@ the `inherent`/`residual` constants or a bound `∃m : mitigation` variable.
 | `p99(x, m)` | 2 | `LECGenerator.unconditionalQuantile(results(m)(x), 0.99)` | Long (Loss sort) |
 | `lec(x, t, m)` | 3 | `results(m)(x).probOfExceedance(t)` | Double (Probability sort) |
 
-> **Status note (2026-04-30):** earlier drafts of this ADR also listed `p50`
-> and `p90`. Those were never implemented and have been removed. If they
-> are needed, add them as new entries in `RiskTreeKnowledgeBase.catalog`
-> alongside `p95`/`p99`.
+A further value function is a new `ValueFunction` case, a catalog signature
+and a dispatcher arm.
 
-### Comparison Predicates (typed, via `Interpretation` augmentation)
+### Comparison Predicates (sort-tagged)
 
 | Symbol | Arity | Sorts | Semantics |
 |---|---|---|---|
 | `gt_loss(a, b)` | 2 | `(Loss, Loss)` | `a > b` (Long) |
 | `gt_prob(a, b)` | 2 | `(Probability, Probability)` | `a > b` (Double) |
 
-> **Status note (2026-04-30):** earlier drafts described untyped infix
-> operators `>(a, b)`, `<(a, b)`, `>=(a, b)`, `<=(a, b)`. The implementation
-> uses sort-tagged predicates (`gt_loss`, `gt_prob`) instead, because the
-> `fol.typed` many-sorted pipeline rejects mixing `Loss` and `Probability`
-> at the type-check stage — catching bugs like
-> `gt_loss(lec(x, 1000000, "inherent"), 0.05)` (loss vs probability) before evaluation.
-> The `<`/`>=`/`<=` variants have not been added yet; if needed, follow
-> the same naming pattern (`lt_loss`, `gte_loss`, etc.).
+Each comparison names the sort it compares, so the binder refuses a
+comparison across sorts — `gt_loss(lec(x, 1000000, "inherent"), 0.05)`
+compares a probability as a loss — before evaluation. A further comparison
+follows the same naming pattern (`lt_loss`, `gte_loss`).
 
-### Numeric Literal Resolution
+### Literal Resolution
 
-The augmented `Interpretation` overrides `getFunction` to parse numeric
-strings as Long values at evaluation time. When the evaluator encounters
-`Term.Const("5000000")`, it calls `getFunction("5000000")` which returns
-`_ => 5000000L`. This reuses the existing pattern from
-`FOLSemantics.integerModel`.
+A literal in a query resolves at bind time through the literal validator the
+catalog declares for the sort the literal's position expects. `5000000` in a
+`Loss` position parses through `s.toLongOption.filter(_ >= 0L)` to
+`5000000L`. A quoted name in a `Node` position resolves through
+`riskNameToId.get`. A literal no validator accepts is refused before
+evaluation.
 
 ---
 
-## 3. Tree Relation Materialisation
+## 3. Tree Relations as Primitive Predicates
 
-### Why Pre-Compute Transitive Relations
+### Why Offer Transitive Relations as Predicates
 
 FOL cannot express transitive closure finitely. The query
 `descendant_of(x, portfolio_A)` would require:
@@ -135,24 +127,27 @@ child_of(x, A) ∨ ∃z.(child_of(z, A) ∧ child_of(x, z))
               ∨ ...   // unbounded for arbitrary depth
 ```
 
-Instead, `RiskTreeKnowledgeBase` walks the in-memory tree once and
-materialises all ancestor-descendant pairs as flat facts.
+Instead, `RiskTreeKnowledgeBase` offers `descendant_of` and
+`leaf_descendant_of` as primitive predicates, decided from the tree's
+`TreeIndex` when the evaluator asks.
 
-### Construction Algorithm
+### Decision Procedure
 
 ```scala
-private def allDescendants(nodeId: NodeId): Set[NodeId] =
-  val children = tree.childrenOf(nodeId)
-  children ++ children.flatMap(allDescendants)
-
-// For each node, materialise descendant_of and leaf_descendant_of
-for
-  node <- tree.allNodes
-  desc <- allDescendants(node.id)
-do
-  kb.addFact("descendant_of", desc, node.id)
-  if tree.isLeaf(desc) then
-    kb.addFact("leaf_descendant_of", desc, node.id)
+SymbolName("descendant_of") -> { args =>
+  for
+    desc     <- args(0).extract[NodeId]
+    ancestor <- args(1).extract[NodeId]
+  // Walk desc's parent chain upward (O(depth)); isAncestor is reflexive,
+  // so desc != ancestor keeps descendant_of strict.
+  yield desc != ancestor && index.isAncestor(ancestor, desc)
+},
+SymbolName("leaf_descendant_of") -> { args =>
+  for
+    desc     <- args(0).extract[NodeId]
+    ancestor <- args(1).extract[NodeId]
+  yield desc != ancestor && index.isAncestor(ancestor, desc) && leafIdSet.contains(desc)
+}
 ```
 
 ### Double-Counting Prevention
@@ -172,69 +167,43 @@ counting nodes, checking node types).
 
 ## 4. Scalability Analysis
 
-### KB Size by Tree Size
+### Model Size by Tree Size
 
-For a tree with $N$ nodes, depth $d$, and branching factor $b$:
+For a tree with $N$ nodes, depth $d$ and $M$ mitigations, the runtime model
+holds no materialised facts. It holds one domain element per node and per
+mitigation, the tree's `TreeIndex`, the precomputed results per referenced
+selection, and the resolved mitigation scopes:
 
-| Relation | Fact count | 1K nodes | 10K nodes |
-|---|---|---|---|
-| `leaf` | $\leq N$ | ≤ 1,000 | ≤ 10,000 |
-| `portfolio` | $\leq N$ | ≤ 1,000 | ≤ 10,000 |
-| `child_of` | $N - 1$ | 999 | 9,999 |
-| `descendant_of` | $O(N \times d)$ balanced, $O(N^2/2)$ worst | ~5,000 | ~50,000 |
-| `leaf_descendant_of` | $\leq$ `descendant_of` | ~3,000 | ~30,000 |
-
-At 10K nodes with ~100K total facts: a few MB of `Set[RelationTuple]`,
-builds in single-digit milliseconds. `Set.contains` lookups are O(1).
+| Part | Size |
+|---|---|
+| `Node` domain | $N$ values |
+| `Mitigation` domain | $M$ values |
+| Structural predicates | decided from `TreeIndex`; `child_of` reads a child list, `descendant_of` walks at most $d$ parents |
+| Results | one `LossDistribution` per node per referenced selection |
 
 ### When Scale Becomes a Concern
 
-The `InMemoryKnowledgeSource` stores facts in `Set[RelationTuple]` and
-resolves predicates via `source.contains(relation, tuple)`. This is a
-full-set membership check and scales well to hundreds of thousands of
-facts.
-
-For trees exceeding ~50K nodes (where `descendant_of` produces millions
-of facts), the KB construction time and memory become relevant. The
-mitigation is an **indexed knowledge source** that replaces
-`Set[RelationTuple]` with position-keyed maps:
-
-```scala
-class IndexedKnowledgeSource(kb: KnowledgeBase) extends KnowledgeSource:
-  // Index: relation → position → value → matching tuples
-  private val index: Map[String, Map[Int, Map[RelationValue, Set[RelationTuple]]]] =
-    buildIndex(kb)
-
-  def contains(relation: String, tuple: RelationTuple): Boolean =
-    // O(1) lookup via first-position index
-    index.get(relation)
-      .flatMap(_.get(0))
-      .flatMap(_.get(tuple(0)))
-      .exists(_.contains(tuple))
-```
-
-The `KnowledgeSource` trait abstracts this — the evaluator calls the same
-interface regardless of the backing implementation. At current scale
-(≤1K nodes) this is premature; the note is recorded here for future
-reference.
+A structural predicate costs at most $O(d)$ per call, so the model's size
+grows with $N$ and $M$ alone. The quantity that grows with query shape is
+the number of predicate calls: range extraction enumerates the whole `Node`
+domain, and each nested quantifier multiplies the enumeration by its sort's
+domain size.
 
 ### Query Evaluation Cost
 
 Per query, the dominant costs are:
 
-1. **Simulation cache validation** — `resolver.ensureCached` checks
-   `Ref`-based cache; O(1) per node if already cached
-2. **KB construction** — tree traversal + fact insertion; O(N × d)
-3. **Range extraction** — `RangeExtractor` queries the KB; O(range size)
-4. **Scope evaluation** — for each element in range, evaluate formula
-   against model; O(range size × formula complexity)
-5. **Simulation function calls** — `calculateQuantiles` or
-   `probOfExceedance` per element; O(nTrials) for TreeMap lookup
-
-For a 1K-node tree with 500 leaves, a typical query evaluates ~500
-scope formulas with one simulation function call each. At ~1ms per
-`probOfExceedance` (TreeMap.rangeFrom on 100K entries), total scope
-evaluation is ~500ms. KB construction is negligible (<10ms).
+1. **Scope resolution** — `MitigationScopeResolver.resolve`, memoized per
+   `(treeId, branch, commit)`
+2. **Result precomputation** — `CachedResultResolver.ensureCachedAll` per
+   referenced selection; content-addressed, so a cached leaf costs a lookup
+3. **Range extraction** — every element of the quantified sort's domain is
+   tested against the range formula; O(N × range-formula cost)
+4. **Scope evaluation** — for each element in the range, the scope formula
+   is evaluated; register evaluates with `SamplingParams.exact`, so every
+   range element is visited
+5. **Value function calls** — `unconditionalQuantile` or `probOfExceedance`
+   per element
 
 ---
 
@@ -266,19 +235,30 @@ parameters.
   "rangeSize": 25,
   "sampleSize": 25,
   "satisfyingCount": 18,
-  "matchingNodeIds": ["cyber", "hardware", "..."],
+  "satisfyingNodeIds": ["01HX…", "01HY…", "..."],
   "queryEcho": "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, \"inherent\"), 5000000))"
 }
 ```
 
 ### Error Responses
 
-| Status | Cause | Body |
-|---|---|---|
-| 400 | Parse error | `{ "error": "parse_error", "detail": "...", "position": 14 }` |
-| 400 | Unknown symbol | `{ "error": "unknown_symbol", "symbol": "p96", "available": ["p95","p99","lec"] }` |
-| 404 | Tree not found | Standard workspace 404 |
-| 409 | Simulation not cached | `{ "error": "simulation_required", "detail": "Run simulation before querying" }` |
+A query the service refuses on its content answers 422 with
+`WireError.ValidationRejected`, whose detail is `RejectionDetail.Query`
+carrying one `QueryProblem`:
+
+| `QueryProblem` case | Cause |
+|---|---|
+| `Unparseable` | The text does not parse |
+| `UnknownReferences` | Every bind error is a quoted node reference no literal validator accepts |
+| `TypeCheckFailed` | Any other bind error: an unknown symbol, a wrong arity, arguments of the wrong sort, a quantifier over a value sort |
+| `NotQuantifiable` | The evaluator finds no registered domain for the quantified sort |
+| `AnswerVariablesNotSupported` | The query names answer variables |
+
+A refusal answers 422 rather than 400 because a well-formed request body is
+rejected on its content. Every other failure — a malformed body, an unknown
+workspace or tree — takes the workspace endpoints' shared error shape
+(ADR-010, ADR-035). Results are computed on demand, so no response asks the
+caller to run a simulation first.
 
 ---
 
@@ -288,36 +268,38 @@ parameters.
 
 Location: `server/.../foladapter/RiskTreeKnowledgeBase.scala`
 
-Constructed from `(RiskTree, Map[NodeId, LossDistribution])`. Owns KB
-building + `Interpretation` augmentation. Single public method:
-`toModel(): Model[Any]`. Also exposes `source: KnowledgeSource` for the
-vague quantifier pipeline (range extraction needs the source, scope
-evaluation needs the model).
+`RiskTreeKnowledgeBase.schemaFor(tree)` builds the tree-derived `Schema`:
+the `TypeCatalog` and the name-to-id maps its literal validators close over.
+The class is constructed from that schema, the results per referenced
+`MitigationSelection`, and the resolved mitigation scopes. It exposes
+`catalog` and `model: RuntimeModel`, which the service pairs into a
+`FolModel`.
 
 ### `QueryService`
 
-Location: `server/.../services/QueryService.scala`
+Location: `server/.../services/QueryServiceLive.scala`
 
 ZIO service. Single method:
 
 ```scala
-def evaluate(key: WorkspaceKey, treeId: TreeId, query: String): Task[QueryResponse]
+def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, QueryResponse]
 ```
 
-Steps:
-1. Parse query string → `VagueQuery` (or fail 400)
-2. Validate symbols against known schema (or fail 400)
-3. Load tree from workspace
-4. Ensure simulations cached → `Map[NodeId, LossDistribution]` (or fail 409)
-5. Build `RiskTreeKnowledgeBase(tree, results)`
-6. Call `RangeExtractor.extractRange` + `ScopeEvaluator.evaluateSample`
-7. Apply quantifier check
-8. Map to `QueryResponse` via `QueryResponse.from(...)` (outbound validation boundary)
+The text arrives already parsed: `QueryRequest.resolve` parsed it at the
+request boundary. Steps:
+1. Load the tree and the commit it resolved to
+2. Resolve every mitigation's scope for that tree version
+3. Build the schema and bind against its catalog to learn which selections
+   the query references
+4. Precompute one result map per referenced selection
+5. Build `RiskTreeKnowledgeBase(schema, resultsBySelection, appliedScopes)`
+6. Pair catalog and model as a `FolModel`; a mismatch is a wiring defect
+7. Evaluate with `VagueSemantics.evaluateTyped`; a refusal becomes a
+   `QueryProblem`
+8. Map the output to `QueryResponse` via `QueryResponseBuilder.from`
 
-Note: step 6 calls library components directly rather than
-`VagueSemantics.holds()`, because `evaluateSample` returns the satisfying
-element set (needed for `matchingNodeIds` in the response), whereas
-`holds()` discards element identities.
+`evaluateTyped` returns the satisfying elements as well as the estimate,
+which is what `satisfyingNodeIds` in the response is read from.
 
 ### `QueryController`
 
@@ -332,10 +314,10 @@ Wires endpoint to service. Auth check via `AuthorizationService`.
 ### State Extensions (`AnalyzeQueryState`)
 
 ```
-queryInput       : Var[String]                        ← exists
-queryResult      : Var[LoadState[QueryResponse]]     ← new
-matchingNodeIds  : Signal[Set[NodeId]]                ← derived from queryResult
-isExecuting      : Signal[Boolean]                    ← derived from queryResult
+queryInput         : Var[String]
+queryResult        : Var[LoadState[QueryResponse]]
+satisfyingNodeIds  : Signal[Set[NodeId]]              ← derived from queryResult
+isExecuting        : Signal[Boolean]                  ← derived from queryResult
 ```
 
 ### View Additions

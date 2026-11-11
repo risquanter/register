@@ -116,7 +116,7 @@ Which signal answers which question and at what level (ADR-002), and what a mess
 **Always:** ADR-028 · ADR-029
 Where evaluation runs, how the model is built, and what is validated before evaluation (ADR-028); and that query text is user input reaching a parser (ADR-029).
 
-**Also:** ADR-014 if simulation results are needed · ADR-034 if mitigation selections are referenced · ADR-017 if tree size bounds the work.
+**Also:** ADR-014 if simulation results are needed · ADR-034 if mitigation selections are referenced · ADR-017 if tree size bounds the work · the engine's own records, when a change depends on how vql-engine parses, binds or reports a refusal. They are routed by `vql-adr-constraints` in the sibling checkout (`/home/danago/projects/vague-quantifier-logic/.claude/skills/vql-adr-constraints/SKILL.md`), whose Layer 4 lists the register records that depend on an engine decision.
 
 ---
 
