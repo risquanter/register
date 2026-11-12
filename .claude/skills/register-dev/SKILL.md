@@ -247,6 +247,10 @@ Before a phase, step or plan is reported done:
 - every module touched compiles, and its tests run green — no failure excused;
 - the new behaviour has tests: the happy path, every validation constraint that
   can reject input, and every error branch;
+- every type, enum case, field and method the plan added since its base commit
+  has had the family search run against the code at the end of the step, and
+  the step's report names, for each one the step added, the existing type it
+  reuses or the statement that none holds the same data;
 - no test assertion was weakened, disabled, renamed or deleted to get there;
 - the decision records that bear on the change were reviewed after the
   implementation, not only before it (`adr-constraints`);
