@@ -9,7 +9,13 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
   // Helper to create OpenProbability arrays from raw doubles for testing
   private def probArray(values: Double*): Array[OpenProbability] =
     values.toArray.map(_.refineUnsafe[OpenProbabilityConstraint])
-  
+
+  /** Whether the wrapper's own checks refused the inputs with a reason naming `text`. */
+  private def refusedFor(result: Either[MetalogFitRefusal, MetalogDistribution], text: String): Boolean =
+    result match
+      case Left(MetalogFitRefusal.InputsRefused(reasons)) => reasons.exists(_.contains(text))
+      case _                                              => false
+
   def spec = suite("MetalogDistributionSpec")(
     suite("fromPercentiles - valid inputs")(
       test("successfully fits simple 3-point distribution") {
@@ -122,13 +128,12 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
     
     suite("fromPercentiles - zero quantile in lower-bounded mode")(
       // Lower-bounded mode applies Keelin's transform z = ln(x - L). With
-      // L = 0.0 that is ln(x), so a quantile of exactly 0 reaches ln(0) = -inf
-      // and neither the fitter nor validateBounds guards against it. The fit
-      // then fails and the failure is returned on the error channel, rather
-      // than producing non-finite coefficients a caller could mistake for a
-      // real distribution. An anchor's `PositiveDouble` loss refuses a zero quantile
-      // before simulation; this covers the library edge directly.
-      test("a zero quantile fails the fit rather than fitting to nonsense") {
+      // L = 0.0 that is ln(x), so a quantile of exactly 0 has no finite
+      // transform. The fitter refuses a quantile on its bound as malformed
+      // input, which is returned as its own case. An anchor's `PositiveDouble`
+      // loss excludes a zero quantile before any fit, so a caller fitting a
+      // shape treats this case as a defect. This covers the library edge directly.
+      test("a zero quantile is the fitter's malformed-input refusal") {
         val percentiles = probArray(0.1, 0.5, 0.9)
         val quantiles = Array(0.0, 50.0, 200.0)
 
@@ -140,7 +145,9 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
           upper = None
         )
 
-        assertTrue(result.isLeft)
+        assertTrue(result match
+          case Left(MetalogFitRefusal.InputsMalformed(_)) => true
+          case _                                          => false)
       }
     ),
 
@@ -152,7 +159,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("empty"), _ => false))
+        assertTrue(refusedFor(result,"empty"))
       },
       
       test("rejects unsorted percentiles") {
@@ -162,7 +169,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("sorted"), _ => false))
+        assertTrue(refusedFor(result,"sorted"))
       },
       
       test("rejects mismatched array lengths") {
@@ -172,7 +179,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("same length"), _ => false))
+        assertTrue(refusedFor(result,"same length"))
       },
       
       test("rejects terms exceeding data points") {
@@ -182,7 +189,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 5, lower = None, upper = None)  // Terms > 3!
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("exceed"), _ => false))
+        assertTrue(refusedFor(result,"exceed"))
       },
       
       test("rejects invalid bounds (lower >= upper)") {
@@ -198,7 +205,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         )
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("Lower bound"), _ => false))
+        assertTrue(refusedFor(result,"Lower bound"))
       },
       
       test("rejects invalid bounds (lower == upper)") {
@@ -234,7 +241,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("(0.0, 1.0)"), _ => false))
+        assertTrue(refusedFor(result,"(0.0, 1.0)"))
       },
       
       test("rejects percentiles > 1") {
@@ -244,7 +251,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 3, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("(0.0, 1.0)"), _ => false))
+        assertTrue(refusedFor(result,"(0.0, 1.0)"))
       },
       
       test("rejects non-positive terms") {
@@ -254,7 +261,7 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentilesUnsafe(percentiles, quantiles, terms = 0, lower = None, upper = None)
         
         assertTrue(result.isLeft) &&
-        assertTrue(result.fold(err => err.message.contains("positive"), _ => false))
+        assertTrue(refusedFor(result,"positive"))
       }
     ),
     

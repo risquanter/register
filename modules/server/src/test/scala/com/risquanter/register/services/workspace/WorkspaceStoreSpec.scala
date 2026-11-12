@@ -16,7 +16,6 @@ import com.risquanter.register.domain.errors.{
   ValidationError, ValueRange
 }
 import com.risquanter.register.http.errors.{NotFoundKind, TreeScope, WireError}
-import zio.prelude.NonEmptyList
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
@@ -55,7 +54,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     * carrying the resolve-failure marker and no identifier. */
   private val keyUnresolved: Failure = Failure.NotFound(Core(
     TrustZone.Client,
-    NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
+    NonEmptyChunk(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
     List(Diagnostic.KeyUnresolved)
   ))
 
@@ -63,7 +62,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
     * tree id, with both identifiers as diagnostics. */
   private def treeOutside(wsId: WorkspaceId, treeId: TreeId): Failure = Failure.NotFound(Core(
     TrustZone.Client,
-    NonEmptyList(ErrorLocation.requestField(FieldName.Id) -> NotFoundKind.Unknown()),
+    NonEmptyChunk(ErrorLocation.requestField(FieldName.Id) -> NotFoundKind.Unknown()),
     List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeId))
   ))
 
@@ -77,7 +76,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
   private def treesAtLimit(limit: Int): Failure =
     Failure.rejected(
       TrustZone.Client,
-      NonEmptyList(ValidationError(
+      NonEmptyChunk(ValidationError(
         ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
         FieldProblem.MaxTreesReached(NonNegativeInt.count(limit))
       )),
@@ -112,7 +111,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         exit  <- store.resolve(key).exit
       yield assert(exit)(fails(equalTo(Failure.Expired(Core(
         TrustZone.Client,
-        NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
+        NonEmptyChunk(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
           ExpiryDetail(ExpiryCause.Inactivity, testConfig.ttl, testConfig.idleTimeout)),
         List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.ExpiredAt(ws.lastAccessedAt.plus(testConfig.idleTimeout)))
       )))))
@@ -322,7 +321,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         exit  <- store.create(Some(id)).exit
       yield assert(exit)(fails(equalTo(Failure.rejected(
         TrustZone.Client,
-        NonEmptyList(ValidationError(
+        NonEmptyChunk(ValidationError(
           ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id))),
         Nil
       ))))
@@ -346,7 +345,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         exit  <- store.create(None).exit
       yield assert(exit)(fails(equalTo(Failure.rejected(
         TrustZone.Service,
-        NonEmptyList(ValidationError(
+        NonEmptyChunk(ValidationError(
           ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
           FieldProblem.OutOfRange(ValueRange.SeedEntityId)
         )),

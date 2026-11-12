@@ -4,7 +4,6 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import zio.json.*
-import zio.prelude.NonEmptyList
 
 import java.time.Instant
 import io.github.iltotore.iron.*
@@ -63,7 +62,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
 
   /** The caller's conflict a refused merge of a scenario answers. */
   private def scenarioConflict(kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
-    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(ErrorLocation.requestField(FieldName.Scenario) -> kind), diagnostics))
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyChunk(ErrorLocation.requestField(FieldName.Scenario) -> kind), diagnostics))
 
   /** The conflict a merge failed with, when it failed with one. */
   private def conflictOf(exit: Exit[Any, Any]): Option[Failure] =
@@ -260,8 +259,8 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
   /** The listing's refusal of the staged state: the store holds a tree whose
     * root id names no node, and the refusal names that tree. */
   /** The one refused value in `stagedRefusal`. */
-  private val stagedEntries: NonEmptyList[(ErrorLocation, FieldProblem)] =
-    NonEmptyList(
+  private val stagedEntries: NonEmptyChunk[(ErrorLocation, FieldProblem)] =
+    NonEmptyChunk(
       ErrorLocation.Field(ErrorSubject.Tree(treeIdOf("guard-tree")), FieldName.RootId) ->
         FieldProblem.RootIdNotFound(nodeIdOf(9))
     )
@@ -304,7 +303,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
         },
         test("a store that does not answer passes through untranslated") {
           val outage: Failure =
-            Failure.Unanswered(Core(PeerZone.Store, NonEmptyList((ErrorLocation.Whole, OutageMode.Protocol)), Nil))
+            Failure.Unanswered(Core(PeerZone.Store, NonEmptyChunk((ErrorLocation.Whole, OutageMode.Protocol)), Nil))
           service(ZIO.fail(outage))
             .flatMap(_.merge(ws("ws-other-error"), name("draft-v1")).exit)
             .map(exit => assert(exit)(fails(equalTo(outage))))
@@ -651,7 +650,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
           // a conflict.
           val listingRefusal = Failure.Rejected(Core(
             TrustZone.Peer(PeerZone.Store),
-            NonEmptyList(ErrorLocation.Whole -> FieldProblem.WrongFormat(ValueFormat.Ulid)),
+            NonEmptyChunk(ErrorLocation.Whole -> FieldProblem.WrongFormat(ValueFormat.Ulid)),
             List(Diagnostic.RawValue("not-a-ulid"))
           ))
           for
@@ -794,7 +793,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
               // sees the same opaque 500 as any other storage failure
               exit.causeOption.flatMap(_.failureOption).contains(Failure.NotFound(Core(
                 TrustZone.Peer(PeerZone.Store),
-                NonEmptyList(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
+                NonEmptyChunk(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
                 Nil
               ))),
               calls.isEmpty

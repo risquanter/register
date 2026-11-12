@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.NonEmptyChunk
 import zio.json.{JsonCodec, DeriveJsonCodec, DecoderOps, JsonDecoder, JsonEncoder, jsonField}
-import zio.prelude.{NonEmptyList, Validation}
+import zio.prelude.Validation
 import io.github.iltotore.iron.autoRefine
 import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
@@ -190,10 +190,10 @@ object RiskLeaf {
   /** A stored leaf read back, refined at `subject` with every refusal kept as a
     * value. Text that is not the raw form's JSON is one refusal of the whole,
     * which includes a stored shape its own gate refuses (ADR-039). */
-  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyList[ValidationError], RiskLeaf] =
+  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyChunk[ValidationError], RiskLeaf] =
     json.fromJson[RiskLeafRaw] match
-      case Left(_)    => Left(NonEmptyList(RiskNode.unreadable))
-      case Right(raw) => fromRaw(raw, subject).toEither.left.map(errors => NonEmptyList(errors.head, errors.tail*))
+      case Left(_)    => Left(NonEmptyChunk(RiskNode.unreadable))
+      case Right(raw) => fromRaw(raw, subject).toEither
 
   /** Decodes through `fromRaw`, so a decoded leaf is refined exactly as a
     * constructed one, and reports at the request. */
@@ -370,10 +370,10 @@ object RiskPortfolio {
   /** A stored portfolio read back, refined at `subject` with every refusal kept
     * as a value. Text that is not the raw form's JSON is one refusal of the
     * whole (ADR-039). */
-  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyList[ValidationError], RiskPortfolio] =
+  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyChunk[ValidationError], RiskPortfolio] =
     json.fromJson[RiskPortfolioRaw] match
-      case Left(_)    => Left(NonEmptyList(RiskNode.unreadable))
-      case Right(raw) => fromRaw(raw, subject).toEither.left.map(errors => NonEmptyList(errors.head, errors.tail*))
+      case Left(_)    => Left(NonEmptyChunk(RiskNode.unreadable))
+      case Right(raw) => fromRaw(raw, subject).toEither
 
   /** Decodes through `fromRaw`, so a decoded portfolio is refined exactly as a
     * constructed one, and reports at the request. */

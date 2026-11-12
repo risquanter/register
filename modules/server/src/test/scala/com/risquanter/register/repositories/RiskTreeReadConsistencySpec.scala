@@ -4,7 +4,6 @@ import zio.*
 import zio.json.*
 import zio.test.*
 import zio.test.Assertion.*
-import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
@@ -219,7 +218,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         exit              <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).exit
       yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
         TrustZone.Peer(PeerZone.Store),
-        NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Id) -> NotFoundKind.MetadataAbsent()),
+        NonEmptyChunk(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Id) -> NotFoundKind.MetadataAbsent()),
         Nil
       )))))
     },
@@ -233,7 +232,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         exit              <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).exit
       yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
         TrustZone.Peer(PeerZone.Store),
-        NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
+        NonEmptyChunk(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
         Nil
       )))))
     },
@@ -277,7 +276,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       yield assertTrue(
         exit.causeOption.flatMap(_.failureOption).contains(Failure.NotFound(Core(
           TrustZone.Peer(PeerZone.Store),
-          NonEmptyList(ErrorLocation.Field(ErrorSubject.ExistingNode(leaf1Id), FieldName.Id) -> NotFoundKind.StoredValueAbsent()),
+          NonEmptyChunk(ErrorLocation.Field(ErrorSubject.ExistingNode(leaf1Id), FieldName.Id) -> NotFoundKind.StoredValueAbsent()),
           List(Diagnostic.StoragePath(leafPath))
         ))),
         leafPath.value.contains(wsId.value)
@@ -295,7 +294,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       yield assertTrue(
         exit.causeOption.flatMap(_.failureOption).contains(Failure.NotFound(Core(
           TrustZone.Peer(PeerZone.Store),
-          NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
+          NonEmptyChunk(ErrorLocation.Field(ErrorSubject.Tree(treeIdF), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
           Nil
         )))
       )
@@ -311,7 +310,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       yield assertTrue(
         exit.causeOption.flatMap(_.failureOption).contains(Failure.Rejected(Core(
           TrustZone.Peer(PeerZone.Store),
-          NonEmptyList(
+          NonEmptyChunk(
             ErrorLocation.nodeField(leaf1Id, FieldName.Name)        -> FieldProblem.Required,
             ErrorLocation.nodeField(leaf1Id, FieldName.Probability) -> FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)
           ),
@@ -426,7 +425,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
   private def treeAbsentAt(location: ErrorLocation, kind: NotFoundKind, rev: Revision): Failure =
     Failure.NotFound(Core(
       TrustZone.Client,
-      NonEmptyList(location -> kind),
+      NonEmptyChunk(location -> kind),
       List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeIdF), Diagnostic.RevisionRead(rev))
     ))
 

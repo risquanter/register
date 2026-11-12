@@ -1,16 +1,38 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.metalog.{Metalog, QPFitter}
+import zio.NonEmptyChunk
+
+import com.risquanter.metalog.{Metalog, MetalogInfeasibleException, QPFitter}
 import com.risquanter.register.domain.data.iron.{OpenProbability, PositiveInt}
+import com.risquanter.register.domain.errors.Diagnostic
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 /**
- * Validation error for Metalog distribution creation.
+ * Validation error for Lognormal distribution creation.
  */
 case class ValidationError(errors: List[String]) {
   def message: String = errors.mkString("; ")
 }
+
+/** Why a metalog was not fitted: this wrapper's own refusal of the inputs, or
+  * one case per exception the fitter throws, so a caller can tell each apart.
+  * The text is the wrapper's or the fitter's own, for a log line.
+  */
+enum MetalogFitRefusal:
+  /** This wrapper's own checks refused the inputs before any fit. */
+  case InputsRefused(reasons: NonEmptyChunk[String])
+
+  /** No strictly increasing metalog with the requested terms passes through
+    * the points (the fitter's `MetalogInfeasibleException`). */
+  case Infeasible(fitterText: String)
+
+  /** The fitter called the inputs malformed (its `IllegalArgumentException`). */
+  case InputsMalformed(fitterText: String)
+
+  /** The solver stopped before an optimum (the fitter's
+    * `IllegalStateException`). */
+  case SolverStopped(fitterText: String)
 
 /**
  * Scala wrapper around metalog-distribution's Metalog implementation.
@@ -59,24 +81,24 @@ object MetalogDistribution {
    * The underlying QPFitter library requires strict (0,1) bounds - 0.0 and 1.0 are not valid.
    * 
    * Validates inputs before calling metalog-distribution's QPFitter to provide
-   * better error messages and defensive testing against library changes.
-   * 
+   * better error messages and defensive testing against library changes. Every
+   * exception the fitter throws is returned as its own case rather than
+   * thrown, so the caller decides which ones its inputs can reach.
+   *
    * @param percentiles Probabilities in (0, 1) (exclusive), must be sorted ascending
    * @param quantiles Corresponding quantile values
    * @param terms Number of terms in the Metalog expansion
    * @param lower Optional lower bound for bounded distribution
    * @param upper Optional upper bound for bounded distribution
-   * @return Either validation error or fitted Metalog distribution
-   * 
+   * @return Either the refusal or the fitted Metalog distribution
+   *
    * @example
    * {{{
    * val percentiles: Array[OpenProbability] = Array(0.05, 0.5, 0.95).map(_.refineUnsafe)
-   * val quantiles = Array(1000.0, 5000.0, 25000.0)
-   *
-   * MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3, lower = None, upper = None) match {
-   *   case Right(metalog) => println(s"P95 loss: ${metalog.quantile(0.95)}")
-   *   case Left(err) => println(s"Validation failed: ${err.message}")
-   * }
+   * MetalogDistribution.fromPercentiles(percentiles, Array(1000.0, 5000.0, 25000.0), terms = 3, lower = None, upper = None)
+   * // Right(MetalogDistribution(…))
+   * MetalogDistribution.fromPercentiles(percentiles, Array(0.0, 50.0, 200.0), terms = 3, lower = Some(0.0), upper = None)
+   * // Left(InputsMalformed("…")): a quantile on the lower bound
    * }}}
    */
   def fromPercentiles(
@@ -85,7 +107,7 @@ object MetalogDistribution {
     terms: PositiveInt,
     lower: Option[Double],
     upper: Option[Double]
-  ): Either[ValidationError, MetalogDistribution] = {
+  ): Either[MetalogFitRefusal, MetalogDistribution] = {
     
     // Collect all validation errors
     val validations = List(
@@ -95,28 +117,30 @@ object MetalogDistribution {
       validateBounds(lower, upper)
     ).collect { case Left(err) => err }
     
-    if (validations.nonEmpty) {
-      Left(ValidationError(validations))
-    } else {
-      // All validations passed, attempt to fit
-      try {
-        // Iron refined types need explicit mapping for Arrays due to invariance
-        val pVals: Array[Double] = percentiles.map(p => p: Double)
-        val builder = QPFitter.`with`(pVals, quantiles, terms)
-        
-        val withBounds = (lower, upper) match {
-          case (Some(l), Some(u)) => builder.lower(l).upper(u)
-          case (Some(l), None)    => builder.lower(l)
-          case (None, Some(u))    => builder.upper(u)
-          case (None, None)       => builder
+    NonEmptyChunk.fromIterableOption(validations) match {
+      case Some(reasons) => Left(MetalogFitRefusal.InputsRefused(reasons))
+      case None =>
+        try {
+          // Iron refined types need explicit mapping for Arrays due to invariance
+          val pVals: Array[Double] = percentiles.map(p => p: Double)
+          val builder = QPFitter.`with`(pVals, quantiles, terms)
+
+          val withBounds = (lower, upper) match {
+            case (Some(l), Some(u)) => builder.lower(l).upper(u)
+            case (Some(l), None)    => builder.lower(l)
+            case (None, Some(u))    => builder.upper(u)
+            case (None, None)       => builder
+          }
+
+          Right(MetalogDistribution(withBounds.fit()))
+        } catch {
+          // The three exceptions the fitter declares, each its own case, so a
+          // caller can tell an author's infeasible anchors from this service's
+          // fault. Anything else the fitter throws propagates (ADR-033).
+          case e: MetalogInfeasibleException => Left(MetalogFitRefusal.Infeasible(Diagnostic.textOf(e)))
+          case e: IllegalArgumentException   => Left(MetalogFitRefusal.InputsMalformed(Diagnostic.textOf(e)))
+          case e: IllegalStateException      => Left(MetalogFitRefusal.SolverStopped(Diagnostic.textOf(e)))
         }
-        
-        val metalog = withBounds.fit()
-        Right(MetalogDistribution(metalog))
-      } catch {
-        case e: Exception => 
-          Left(ValidationError(List(s"QPFitter failed: ${e.getMessage}")))
-      }
     }
   }
   
@@ -127,16 +151,16 @@ object MetalogDistribution {
   def fromPercentilesUnsafe(
     percentiles: Array[Double],
     quantiles: Array[Double],
-    terms: Int = 4,
+    terms: Int,
     lower: Option[Double],
     upper: Option[Double]
-  ): Either[ValidationError, MetalogDistribution] = {
-    
+  ): Either[MetalogFitRefusal, MetalogDistribution] = {
+
     // Validate percentiles are in (0,1) before refining (exclusive bounds per QPFitter)
     if (percentiles.exists(p => p <= 0.0 || p >= 1.0)) {
-      Left(ValidationError(List("All percentiles must be in (0.0, 1.0)")))
+      Left(MetalogFitRefusal.InputsRefused(NonEmptyChunk("All percentiles must be in (0.0, 1.0)")))
     } else if (terms <= 0) {
-      Left(ValidationError(List("Terms must be positive")))
+      Left(MetalogFitRefusal.InputsRefused(NonEmptyChunk("Terms must be positive")))
     } else {
       // Cast to refined array (unsafe but validated above)
       val refinedPercentiles: Array[OpenProbability] = percentiles.asInstanceOf[Array[OpenProbability]]

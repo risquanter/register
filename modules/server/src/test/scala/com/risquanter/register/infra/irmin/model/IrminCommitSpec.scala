@@ -1,7 +1,7 @@
 package com.risquanter.register.infra.irmin.model
 
 import java.time.Instant
-import zio.prelude.NonEmptyList
+import zio.NonEmptyChunk
 import zio.test.*
 
 import com.risquanter.register.domain.data.iron.WorkspaceId
@@ -45,11 +45,11 @@ object IrminCommitSpec extends ZIOSpecDefault:
         )
       },
       test("a hash one digit short is refused as a commit hash") {
-        assertTrue(IrminCommit.refine(IrminCommit.Raw(shortHash, validHash, Nil, rawInfo)) == Left(NonEmptyList(hashRefusal)))
+        assertTrue(IrminCommit.refine(IrminCommit.Raw(shortHash, validHash, Nil, rawInfo)) == Left(NonEmptyChunk(hashRefusal)))
       },
       test("every value that does not refine is refused, and the refusals accumulate") {
         val refused = IrminCommit.refine(IrminCommit.Raw(shortHash, shortHash, List(validHash, shortHash), IrminInfo.Raw("0", "hello")))
-        assertTrue(refused == Left(NonEmptyList(hashRefusal, hashRefusal, hashRefusal, unreadable(ExpectedInput.Declared))))
+        assertTrue(refused == Left(NonEmptyChunk(hashRefusal, hashRefusal, hashRefusal, unreadable(ExpectedInput.Declared))))
       }
     ),
     suite("IrminInfo.refine")(
@@ -59,15 +59,15 @@ object IrminCommitSpec extends ZIOSpecDefault:
       },
       test("a date that is not a whole number is refused as one") {
         assertTrue(IrminInfo.refine(IrminInfo.Raw("2026-01-01T00:00:00Z", CommitMessage.render(message))) ==
-          Left(NonEmptyList(unreadable(ExpectedInput.WholeNumber))))
+          Left(NonEmptyChunk(unreadable(ExpectedInput.WholeNumber))))
       },
       test("a whole number outside an instant's range is refused as the instant the reader declares") {
         assertTrue(IrminInfo.refine(IrminInfo.Raw(Long.MaxValue.toString, CommitMessage.render(message))) ==
-          Left(NonEmptyList(unreadable(ExpectedInput.Declared))))
+          Left(NonEmptyChunk(unreadable(ExpectedInput.Declared))))
       },
       test("the date's and the message's refusals accumulate") {
         assertTrue(IrminInfo.refine(IrminInfo.Raw("yesterday", "hello")) ==
-          Left(NonEmptyList(unreadable(ExpectedInput.WholeNumber), unreadable(ExpectedInput.Declared))))
+          Left(NonEmptyChunk(unreadable(ExpectedInput.WholeNumber), unreadable(ExpectedInput.Declared))))
       }
     )
   )

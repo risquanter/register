@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.errors
 
 import zio.*
-import zio.prelude.{NonEmptyList, Validation}
+import zio.prelude.Validation
 
 /** The bridge from an accumulated `Validation` to an effect.
   *
@@ -24,5 +24,5 @@ object ValidationExtensions:
       * written without saying where the refused value came from. */
     def toZIOValidation(zone: TrustZone): IO[Failure, A] =
       ZIO.fromEither(
-        v.toEither.left.map(errors => Failure.rejected(zone, NonEmptyList(errors.head, errors.tail*), Nil))
+        v.toEither.left.map(errors => Failure.rejected(zone, errors, Nil))
       )

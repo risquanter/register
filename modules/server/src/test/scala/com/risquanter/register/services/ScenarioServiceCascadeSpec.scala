@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -29,7 +28,7 @@ object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
   private def staleHeadConflict(scenario: ScenarioName.ScenarioName, expected: CommitHash, actual: Option[CommitHash]): Failure =
     Failure.Conflict(Core(
       TrustZone.Client,
-      NonEmptyList(ErrorLocation.Header(RequestHeaderName.IfMatch) -> ConflictKind.ScenarioHeadStale(scenario)),
+      NonEmptyChunk(ErrorLocation.Header(RequestHeaderName.IfMatch) -> ConflictKind.ScenarioHeadStale(scenario)),
       List(Diagnostic.ExpectedHead(expected), Diagnostic.ActualHead(actual))))
 
   override def spec = suite("ScenarioService.cascadeDeleteScenarios")(

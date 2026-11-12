@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.domain.errors.{AppError, ErrorLocation, Failure, FieldProblem, TrustZone, ValidationError}
@@ -51,7 +50,7 @@ object QueryService:
     * }}}
     */
   def rejected(problem: QueryProblem): Failure =
-    Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(problem))), Nil)
+    Failure.rejected(TrustZone.Client, NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Query(problem))), Nil)
 
   /** The failure an engine error is: the caller's refused query, or a defect
     * when the error is a fault in how this service wired the knowledge base,

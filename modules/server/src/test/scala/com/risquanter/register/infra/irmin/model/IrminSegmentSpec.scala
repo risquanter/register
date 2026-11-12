@@ -1,6 +1,6 @@
 package com.risquanter.register.infra.irmin.model
 
-import zio.prelude.NonEmptyList
+import zio.NonEmptyChunk
 import zio.test.*
 
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError, ValueFormat}
@@ -9,8 +9,8 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, Valid
   * refusal that says it is not. */
 object IrminSegmentSpec extends ZIOSpecDefault:
 
-  private val refusal: NonEmptyList[ValidationError] =
-    NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.WrongFormat(ValueFormat.StoreSegment)))
+  private val refusal: NonEmptyChunk[ValidationError] =
+    NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.WrongFormat(ValueFormat.StoreSegment)))
 
   def spec = suite("IrminSegment.from")(
     test("a name of segment characters is a segment holding that name") {

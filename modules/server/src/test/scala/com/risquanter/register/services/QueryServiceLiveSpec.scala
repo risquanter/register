@@ -17,7 +17,6 @@ import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{
   BranchRef, CommitHash, NodeId, MitigationId, Revision, SafeName, SeedEntityId, SeedVarId, TreeId, WorkspaceId
 }
-import zio.prelude.NonEmptyList
 
 import com.risquanter.register.domain.errors.{
   AppError, ErrorLocation, ErrorSubject, Failure, FieldProblem, SimulationFailure, TrustZone, ValidationError
@@ -230,7 +229,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
         exit <- svc.evaluate(WorkspaceId(safeId("qsl-ws")), tree.id, parsed, entity, BranchRef.Main).exit
       yield assertTrue(exit.causeOption.flatMap(_.failureOption) == Some(Failure.rejected(
         TrustZone.Client,
-        NonEmptyList(ValidationError(
+        NonEmptyChunk(ValidationError(
           ErrorLocation.Whole,
           FieldProblem.Query(QueryProblem.UnknownReferences(List("cannot parse 'NoSuchNode' as NodeNameLiteral")))
         )),

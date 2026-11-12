@@ -4,7 +4,7 @@ Plan code `UES`. Decisions in this document are labelled `UES-D-<n>`.
 
 **Status.** Written 2026-11-09 at version 0.17.2. Base commit `ebbe5615`, the
 commit before step 0.1. `UES-D-1` to `UES-D-15` are
-ruled, `UES-D-16` is withdrawn and `UES-D-17` to `UES-D-20` are ruled. No decision is open. Phase 0 steps 0.1 and 0.2 landed, at versions 0.18.1 and 0.18.2.
+ruled, `UES-D-16` is withdrawn and `UES-D-17` to `UES-D-22` are ruled. No decision is open. Phase 0 steps 0.1 and 0.2 landed, at versions 0.18.1 and 0.18.2.
 Phase 0 step 0.3 and Phase 1 steps 1.1 to 1.3 landed together, at version 0.18.3.
 Phase 1 step 1.4 landed at version 0.18.4, which closes Phase 1. Phase 2 steps
 2.1 and 2.5 landed together, at version 0.18.5. Phase 2 step 2.2 landed at
@@ -49,6 +49,15 @@ outcomes the parser cannot produce; the answer-variable sentence is in
 `QueryProblem.describe`, which `ErrorMessages.query` delegates to; and
 `QuerySort`'s prism law replaces the drift test in this step.
 `FieldProblem.code` maps the new case to `NOT_SUPPORTED`.
+Step 5.4 landed at 0.18.20, approved 2026-11-12, together with `UES-D-21`'s
+`NonEmptyChunk` errors and `UES-D-22`'s fitter cases on metalog-distribution
+0.10.1. With it landed `Failure.unanswered` and `Diagnostic.peerMessage`, which
+replace the three outage helpers and the three exception-text conversions the
+audit of `ebbe5615..934f7b0c` found, and `Diagnostic.textOf`, the one rule
+both `peerMessage` and the fitter's text read. 0.10.1 moved the demo figures,
+so the enterprise demo's Q7 asks at least 9/10 and its Q7b about 3/4, and the
+simple demo's Q5 is unsatisfied. `MetalogDistribution.ValidationError` stays,
+serving the lognormal fitter alone.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -691,7 +700,7 @@ The distribution fit moves to the write (row 56, `UES-D-8`):
 
 ```scala
 // services/RiskTreeServiceLive.scala
-private def fitCheck(leaf: RiskLeaf, subject: ErrorSubject): Validation[ValidationError, Unit]
+private def fitCheck(leaf: RiskLeaf, subject: ErrorSubject): Validation[(ValidationError, Diagnostic), Unit]
 ```
 
 It runs on every leaf a create or update adds or changes, as the last step of
@@ -1022,7 +1031,32 @@ from a tree, and pins a query with `(y)` as `Rejected` with
 arm's text.
 
 5.4 Row 56. `fitCheck` of §3.6 in `RiskTreeServiceLive`; `Simulator.scala` line
-197 becomes a `require`. Test:
+197 becomes a `require`. The step writes these besides `fitCheck` (approved
+2026-11-12):
+
+```scala
+// services/helper/Simulator.scala — the one fit, run at write and at simulation
+private[services] final case class FitRefusal(problem: FieldProblem, diagnostic: String)
+private[services] def fit(shape: DistributionShape): Either[FitRefusal, (Distribution, DistributionParams)]
+private def createDistributionWithParams(leaf: RiskLeaf): UIO[(Distribution, DistributionParams)]
+private[services] def createSamplerFromLeaf(leaf: RiskLeaf, seedEntityId: SeedEntityId.SeedEntityId, seed3: Long = 0L, seed4: Long = 0L): UIO[(RiskSampler, NodeProvenance)]
+
+// services/RiskTreeServiceLive.scala
+private def rejectedUnlessFit(tree: Validation[ValidationError, RiskTree], fits: Validation[(ValidationError, Diagnostic), Unit]): IO[Failure, RiskTree]
+private def changedLeaves(nodes: Seq[RiskNode], stored: TreeIndex): Seq[RiskLeaf]
+
+// domain/errors/Failure.scala — the split of per-refusal diagnostics, also read by WorkspaceStorePostgres.toRecord
+def rejectedWithDiagnostics(zone: TrustZone, refusals: NonEmptyChunk[(ValidationError, List[Diagnostic])]): Failure
+
+// http/requests/RiskTreeRequests.scala — each leaf keeps the subject that names it
+ResolvedCreate.leaves: Map[SafeName.SafeName, SubmittedLeaf]          // replaces leafOccurrenceAndShape
+ResolvedUpdate.existingLeaves: Map[SafeName.SafeName, ExistingLeaf]   // replaces existingLeafOccurrenceAndShape
+ResolvedUpdate.addedLeaves: Map[SafeName.SafeName, SubmittedLeaf]     // replaces addedLeafOccurrenceAndShape
+```
+
+A create checks every leaf. An update checks the leaves `changedLeaves` returns.
+No other step builds a `Rejected` from refusals that each carry their own
+diagnostics, so `rejectedWithDiagnostics` has these two callers. Test:
 `RiskTreeServiceLiveSpec` pins a create with an unfit metalog as `Rejected` at
 `Client` at `Field(NodeAtIndex(Leaves, i), DistributionType)` accumulated with a
 second leaf's error; `SimulatorSpec` pins that an unfit leaf at simulation is a
@@ -1654,6 +1688,49 @@ One character is left to the sinks: the apostrophe, which the ported lexer
 admits in a word and register's vocabulary never uses. It matters only where a
 client writes a field unencoded into a single-quoted attribute or a script
 string, which ADR-029 §4 already forbids.
+
+### UES-D-21 — a failure's errors are a `NonEmptyChunk` — RULED 2026-11-12
+
+**Ruled 2026-11-12.** `Core.errors` and the error list `Failure.rejected` takes
+are `zio.NonEmptyChunk`, the type `Validation.toEither` reports its accumulated
+errors in. A `Validation` then becomes a `Failure` with no conversion, and the
+`NonEmptyList(errors.head, errors.tail*)` rebuild written at each such site
+goes. The refining functions this plan added that feed `Failure.rejected`
+return `NonEmptyChunk` for the same reason.
+
+### UES-D-22 — the fit check is designed against metalog-distribution 0.10.1 — RULED 2026-11-12
+
+**Ruled 2026-11-12.** metalog-distribution 0.9.0 refuses no anchors that
+`QuantileAnchors.create` admits: its solve returns coefficients without checking
+the solver's state. The library source at 07f6f72 throws
+`MetalogInfeasibleException` when no strictly increasing metalog with the
+requested terms fits, and the user publishes it as 0.10.1. Step 5.4 is designed
+against that source, which `build.sbt` pins as 0.10.1.
+
+**Ruled 2026-11-12: every fitter exception is handled like the engine's errors
+in step 5.6, one row each, and no two are merged.** `fromPercentiles` returns
+each as its own `Left`, beside its own refusal of the inputs, in this closed
+set:
+
+```scala
+enum MetalogFitRefusal:
+  case InputsRefused(reasons: NonEmptyChunk[String])
+  case Infeasible(fitterText: String)
+  case InputsMalformed(fitterText: String)
+  case SolverStopped(fitterText: String)
+```
+
+Its two callers, `Simulator.fit` and `DistributionPreviewService`, decide what
+each case is. A defect is an `IllegalStateException` naming the case, thrown by
+the pure `Simulator.fit` and raised by `ZIO.die` in the preview.
+`MetalogDistributionSpec` pins each case a direct call can reach.
+
+| Case | Register value |
+|---|---|
+| `Infeasible` (`MetalogInfeasibleException`) | `Rejected` at `Client` with `MetalogFitFailed` at the leaf's distribution, the fitter's text as `PeerMessage` |
+| `InputsMalformed` (`IllegalArgumentException`) | a defect: `QuantileAnchors.create` with its `PositiveDouble` losses excludes every input the fitter calls malformed |
+| `SolverStopped` (`IllegalStateException`) | a defect: the solver stopped before an optimum, which the fitter itself calls a library-side failure |
+| `InputsRefused` | a defect: a shape's anchors are sorted, in (0, 1) and no fewer than its terms |
 
 ---
 

@@ -5,7 +5,7 @@ import java.time.{Duration, Instant}
 import scala.compiletime.testing.typeChecks
 
 import sttp.model.StatusCode
-import zio.prelude.NonEmptyList
+import zio.NonEmptyChunk
 import zio.test.*
 
 import com.risquanter.register.auth.{Permission, ResourceRef, ResourceType}
@@ -43,10 +43,10 @@ object FailureSpec extends ZIOSpecDefault:
     ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.Required)
 
   private def rejectedAt(zone: TrustZone): Failure =
-    Failure.rejected(zone, NonEmptyList(nameRequired), Nil)
+    Failure.rejected(zone, NonEmptyChunk(nameRequired), Nil)
 
-  private def one[P](problem: P): NonEmptyList[(ErrorLocation, P)] =
-    NonEmptyList((ErrorLocation.Whole, problem))
+  private def one[P](problem: P): NonEmptyChunk[(ErrorLocation, P)] =
+    NonEmptyChunk((ErrorLocation.Whole, problem))
 
   private val everyZone: List[TrustZone] = List(
     TrustZone.Client,
@@ -114,7 +114,7 @@ object FailureSpec extends ZIOSpecDefault:
         assertTrue(values.forall(_.isDefined), values.distinct.size == everyZone.size)
       },
       test("carries every diagnostic's keys") {
-        val failure = Failure.rejected(TrustZone.Client, NonEmptyList(nameRequired), everyDiagnostic.map(_._1))
+        val failure = Failure.rejected(TrustZone.Client, NonEmptyChunk(nameRequired), everyDiagnostic.map(_._1))
         val keys    = failure.logAnnotations.keySet
         assertTrue(everyDiagnostic.forall((_, expected) => expected.subsetOf(keys)))
       },
@@ -123,13 +123,13 @@ object FailureSpec extends ZIOSpecDefault:
       },
       test("diagnostics under one key keep every value, in order") {
         val other   = TreeId(safeId("failure-spec-tree-2"))
-        val failure = Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyList(nameRequired),
+        val failure = Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyChunk(nameRequired),
                         List(Diagnostic.TreeRef(treeId), Diagnostic.TreeRef(other)))
         assertTrue(failure.logAnnotations.get("tree_id") == Some(s"${treeId.value},${other.value}"))
       },
       test("a store refusal renders each entry's location and problem, in order") {
         val second = ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Probability), FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval))
-        val entries = NonEmptyList(nameRequired, second).map(e => (e.location, e.problem))
+        val entries = NonEmptyChunk(nameRequired, second).map(e => (e.location, e.problem))
         assertTrue(Diagnostic.render(Diagnostic.StoreRefusal(entries)) ==
           List("store_refusal" -> s"${ValidationError.describe(nameRequired)}; ${ValidationError.describe(second)}"))
       },
@@ -141,7 +141,7 @@ object FailureSpec extends ZIOSpecDefault:
     suite("logMessage")(
       test("renders every element of a two-element list, in order, after the variant's name") {
         val second  = ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Probability), FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval))
-        val failure = Failure.rejected(TrustZone.Client, NonEmptyList(nameRequired, second), Nil)
+        val failure = Failure.rejected(TrustZone.Client, NonEmptyChunk(nameRequired, second), Nil)
         assertTrue(failure.logMessage == s"Rejected: ${ValidationError.describe(nameRequired)}; ${ValidationError.describe(second)}")
       },
       test("names each variant and renders its problem through that payload's own text") {
@@ -190,7 +190,7 @@ object FailureSpec extends ZIOSpecDefault:
         val message = "x" * 400
         val failure = Failure.rejected(
           TrustZone.Client,
-          NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable(message, Some(2))))),
+          NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable(message, Some(2))))),
           Nil
         )
         val trace = TelemetryPlaceholders.UnlinkedTrace
@@ -255,7 +255,7 @@ object FailureSpec extends ZIOSpecDefault:
       test("a refusal of the caller's content names the tree in scope, and passes every entry through") {
         val t       = TelemetryPlaceholders.UnlinkedTrace
         val second  = ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Probability), FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval))
-        val failure = Failure.rejected(TrustZone.Client, NonEmptyList(nameRequired, second), List(Diagnostic.TreeRef(treeId)))
+        val failure = Failure.rejected(TrustZone.Client, NonEmptyChunk(nameRequired, second), List(Diagnostic.TreeRef(treeId)))
         assertTrue(
           failure.toWire(t, TreeScope.InTree(treeId)) ==
             WireError.ValidationRejected(treeId, RejectionDetail.Fields(List(nameRequired, second)), t),
@@ -289,7 +289,7 @@ object FailureSpec extends ZIOSpecDefault:
       test("an absent identity header and a permission not held are indistinguishable on the wire") {
         val t          = TelemetryPlaceholders.UnlinkedTrace
         val noIdentity = Failure.AccessDenied(Core(TrustZone.MeshHeader,
-          NonEmptyList(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
+          NonEmptyChunk(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
         val notHeld    = Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
           one(DenialKind.PermissionNotHeld),
           List(Diagnostic.Principal(user, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId)))))
@@ -302,18 +302,37 @@ object FailureSpec extends ZIOSpecDefault:
         val t       = TelemetryPlaceholders.UnlinkedTrace
         val failure = Failure.Conflict(Core(
           TrustZone.Client,
-          NonEmptyList((ErrorLocation.Whole, ConflictKind.StaleVersion()), (ErrorLocation.Whole, ConflictKind.Rejected())),
+          NonEmptyChunk((ErrorLocation.Whole, ConflictKind.StaleVersion()), (ErrorLocation.Whole, ConflictKind.Rejected())),
           Nil))
         assertTrue(failure.toWire(t, TreeScope.NoTree) == WireError.Conflict(ConflictKind.StaleVersion(), t))
       }
     ),
     suite("rejected")(
       test("keeps each refusal's location and problem, in order") {
-        val failure = Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyList(nameRequired), List(Diagnostic.TreeRef(treeId)))
+        val failure = Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyChunk(nameRequired), List(Diagnostic.TreeRef(treeId)))
         assertTrue(failure == Failure.Rejected(Core(
           TrustZone.Peer(PeerZone.Store),
-          NonEmptyList((nameRequired.location, nameRequired.problem)),
+          NonEmptyChunk((nameRequired.location, nameRequired.problem)),
           List(Diagnostic.TreeRef(treeId)))))
+      }
+    ),
+    suite("unanswered")(
+      test("is one outage at the peer, located at the whole request, with the diagnostics given") {
+        val failure = Failure.unanswered(PeerZone.Authorization, OutageMode.ConnectionRefused, List(Diagnostic.TreeRef(treeId)))
+        assertTrue(failure == Failure.Unanswered(Core(
+          PeerZone.Authorization,
+          one(OutageMode.ConnectionRefused),
+          List(Diagnostic.TreeRef(treeId)))))
+      }
+    ),
+    suite("peerMessage")(
+      test("carries an exception's own text") {
+        assertTrue(Diagnostic.peerMessage(new java.io.IOException("connection reset")) ==
+          Diagnostic.PeerMessage("connection reset"))
+      },
+      test("names the exception when it carries no text") {
+        assertTrue(Diagnostic.peerMessage(new java.net.ConnectException()) ==
+          Diagnostic.PeerMessage("java.net.ConnectException"))
       }
     ),
     suite("zone types")(

@@ -2,7 +2,8 @@ package com.risquanter.register.repositories.model
 
 import java.time.Instant
 import zio.json.*
-import zio.prelude.{NonEmptyList, Validation}
+import zio.NonEmptyChunk
+import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, SafeName, SeedVarId, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
@@ -62,10 +63,10 @@ object TreeMetadata:
     * // Left: Required at tree.RootId and at tree.SeedVarHighWater
     * }}}
     */
-  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyList[ValidationError], TreeMetadata] =
+  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyChunk[ValidationError], TreeMetadata] =
     json.fromJson[Raw] match
       case Left(_) =>
-        Left(NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Json))))
+        Left(NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Json))))
       case Right(raw) =>
         def at(field: FieldName): ErrorLocation = ErrorLocation.Field(subject, field)
         def present[A](value: Option[A], field: FieldName): Validation[ValidationError, A] =
@@ -81,4 +82,3 @@ object TreeMetadata:
             TreeMetadata(id, name, rootId, highWater, raw.schemaVersion,
               Instant.ofEpochMilli(raw.createdAt), Instant.ofEpochMilli(raw.updatedAt)))
           .toEither
-          .left.map(errors => NonEmptyList(errors.head, errors.tail*))

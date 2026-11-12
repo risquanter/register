@@ -1,7 +1,6 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.telemetry.opentelemetry.tracing.Tracing
 import sttp.tapir.server.ServerEndpoint
 
@@ -114,7 +113,7 @@ class WorkspaceLifecycleController private (
                         ZIO.unless(scenarios.exists(_.name == name))(
                           ZIO.fail(Failure.rejected(
                             TrustZone.Client,
-                            NonEmptyList(ValidationError(ErrorLocation.Header(RequestHeaderName.Branch), FieldProblem.ScenarioNotFound(name))),
+                            NonEmptyChunk(ValidationError(ErrorLocation.Header(RequestHeaderName.Branch), FieldProblem.ScenarioNotFound(name))),
                             Nil
                           ))
                         )

@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 
 import java.time.Instant
@@ -101,11 +100,11 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
 
   /** The conflict a refused compare-and-set answers the caller with. */
   private def conflict(location: ErrorLocation, kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
-    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(location -> kind), diagnostics))
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyChunk(location -> kind), diagnostics))
 
   /** The caller's refusal of the request's `source`. */
   private def sourceRefused(problem: FieldProblem): Failure =
-    Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Source), problem)), Nil)
+    Failure.rejected(TrustZone.Client, NonEmptyChunk(ValidationError(ErrorLocation.requestField(FieldName.Source), problem)), Nil)
 
   /** The stale-head conflict a delete expecting `expected` answers when the head is `actual`. */
   private def staleHead(scenario: String, expected: CommitHash, actual: Option[CommitHash]): Failure =

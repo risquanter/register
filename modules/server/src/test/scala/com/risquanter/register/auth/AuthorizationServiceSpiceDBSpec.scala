@@ -1,7 +1,6 @@
 package com.risquanter.register.auth
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import sttp.client3.*
 import sttp.client3.testing.SttpBackendStub
@@ -34,7 +33,7 @@ object AuthorizationServiceSpiceDBSpec extends ZIOSpecDefault:
     * at the authorization zone, naming the principal for the log. */
   private val aliceDenied: Failure =
     Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
-      NonEmptyList(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
+      NonEmptyChunk(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
       List(Diagnostic.Principal(alice, Permission.ViewWorkspace, ws1Ref))))
 
   private val testConfig: SpiceDbConfig = SpiceDbConfig(

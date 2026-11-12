@@ -1,7 +1,7 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
-import zio.prelude.{NonEmptyList, Validation}
+import zio.prelude.Validation
 import java.sql.SQLException
 import java.time.{Duration, Instant, OffsetDateTime, ZoneOffset}
 import io.getquill.*
@@ -255,11 +255,7 @@ final class WorkspaceStorePostgres private (
   private def toRecord(row: WorkspaceRow): IO[Failure, WorkspaceRecord] =
     loadTrees(row.id).flatMap(treeIds =>
       ZIO.fromEither(refineRow(row, treeIds).toEither).mapError(refused =>
-        Failure.rejected(
-          TrustZone.Peer(PeerZone.Database),
-          NonEmptyList(refused.head._1, refused.tail.map(_._1)*),
-          refused.toList.map(_._2)
-        )
+        Failure.rejectedWithDiagnostics(TrustZone.Peer(PeerZone.Database), refused.map((e, d) => e -> List(d)))
       )
     )
 
@@ -267,7 +263,7 @@ final class WorkspaceStorePostgres private (
   private def seedEntityIdInUse(entityId: SeedEntityId.SeedEntityId): Failure =
     Failure.rejected(
       TrustZone.Client,
-      NonEmptyList(ValidationError(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(entityId))),
+      NonEmptyChunk(ValidationError(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(entityId))),
       Nil
     )
 
@@ -295,18 +291,13 @@ final class WorkspaceStorePostgres private (
       case Some(UniqueViolation) =>
         Failure.Conflict(Core(
           TrustZone.Peer(PeerZone.Database),
-          NonEmptyList(ErrorLocation.Whole -> ConflictKind.Rejected()),
-          List(Diagnostic.PeerMessage(messageOf(err)))
+          NonEmptyChunk(ErrorLocation.Whole -> ConflictKind.Rejected()),
+          List(Diagnostic.peerMessage(err))
         ))
-      case Some(state) if state.startsWith(ConnectionExceptionClass) => unanswered(OutageMode.ConnectionRefused, err)
-      case _                                                         => unanswered(OutageMode.Protocol, err)
-
-  private def unanswered(mode: OutageMode, err: Throwable): Failure =
-    Failure.Unanswered(Core(
-      PeerZone.Database,
-      NonEmptyList((ErrorLocation.Whole, mode)),
-      List(Diagnostic.PeerMessage(messageOf(err)))
-    ))
+      case Some(state) if state.startsWith(ConnectionExceptionClass) =>
+        Failure.unanswered(PeerZone.Database, OutageMode.ConnectionRefused, List(Diagnostic.peerMessage(err)))
+      case _ =>
+        Failure.unanswered(PeerZone.Database, OutageMode.Protocol, List(Diagnostic.peerMessage(err)))
 
   /** The SQL state a JDBC driver attaches to its failure, when it attaches one. */
   private def sqlState(err: Throwable): Option[String] = err match
@@ -319,9 +310,6 @@ final class WorkspaceStorePostgres private (
     case e: PSQLException if sqlState(e).contains(UniqueViolation) =>
       Option(e.getServerErrorMessage).flatMap(message => Option(message.getConstraint))
     case _ => None
-
-  private def messageOf(err: Throwable): String =
-    Option(err.getMessage).getOrElse(err.toString)
 
   /** Structured security event log with arbitrary key-value annotations. */
   private def logSecurity(event: WorkspaceStore.SecurityEvent, fields: (String, String)*)(msg: String): UIO[Unit] =
@@ -422,7 +410,7 @@ object WorkspaceStorePostgres:
 
     /** A Postgres interval's text as a duration, or one refusal at `location`
       * when the text is in none of the three forms Postgres renders. */
-    def parseInterval(value: String, location: ErrorLocation): Either[NonEmptyList[ValidationError], Duration] =
+    def parseInterval(value: String, location: ErrorLocation): Either[NonEmptyChunk[ValidationError], Duration] =
       val parsed = value match
         case VerboseIntervalPattern(days, hours, minutes, seconds) =>
           buildDuration(days, hours, minutes, seconds)
@@ -431,7 +419,7 @@ object WorkspaceStorePostgres:
         case DayOnlyIntervalPattern(days) =>
           buildDuration(days, "0", "0", "0")
         case _ => None
-      parsed.toRight(NonEmptyList(ValidationError(location, FieldProblem.Unreadable(ExpectedInput.Interval))))
+      parsed.toRight(NonEmptyChunk(ValidationError(location, FieldProblem.Unreadable(ExpectedInput.Interval))))
 
     private def buildDuration(days: String, hours: String, minutes: String, seconds: String): Option[Duration] =
       (days.toLongOption, hours.toLongOption, minutes.toLongOption) match

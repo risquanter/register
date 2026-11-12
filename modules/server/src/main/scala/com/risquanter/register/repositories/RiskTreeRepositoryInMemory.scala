@@ -2,7 +2,6 @@ package com.risquanter.register.repositories
 
 import zio.*
 import zio.json.EncoderOps
-import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{
@@ -36,7 +35,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       case BranchRef.Main => effect
       case _              => ZIO.fail(Failure.NotSupported(Core(
         TrustZone.Environment,
-        NonEmptyList(ErrorLocation.Header(RequestHeaderName.Branch) -> Capability.Scenarios),
+        NonEmptyChunk(ErrorLocation.Header(RequestHeaderName.Branch) -> Capability.Scenarios),
         Nil
       )))
 
@@ -56,7 +55,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       ZIO.succeed(db.putIfAbsent((wsId, riskTree.id), riskTree)).flatMap {
         case Some(_) => ZIO.fail(Failure.rejected(
           TrustZone.Client,
-          NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Id), FieldProblem.TreeIdAlreadyExists(riskTree.id))),
+          NonEmptyChunk(ValidationError(ErrorLocation.requestField(FieldName.Id), FieldProblem.TreeIdAlreadyExists(riskTree.id))),
           Nil
         ))
         case None    => ZIO.succeed(riskTree)
@@ -125,7 +124,7 @@ object RiskTreeRepositoryInMemory {
   /** This backend keeps no history, so a read pinned to a commit and a revert
     * to one are capabilities the deployment lacks. */
   private def pinnedReadsUnavailable(location: ErrorLocation): Failure =
-    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyList(location -> Capability.PinnedReads), Nil))
+    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyChunk(location -> Capability.PinnedReads), Nil))
 
   val layer: ZLayer[Any, Nothing, RiskTreeRepository] = ZLayer {
     ZIO.succeed(new RiskTreeRepositoryInMemory())

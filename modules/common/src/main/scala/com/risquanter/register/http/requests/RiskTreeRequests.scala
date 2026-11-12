@@ -105,25 +105,28 @@ object RiskTreeRequests {
     kind: NodeKind
   )
 
-  // Result of resolving a create request: all names refined, ids generated, topology validated, shapes gated.
-  // `nodes` is keyed by name for easy parent resolution in the service layer; `leafOccurrenceAndShape` carries the
-  // domain-validated occurrence probability paired with the loss distribution shape for each leaf.
+  /** A resolved create request: names refined, ids generated, topology
+    * validated, shapes gated. `nodes` and `leaves` are keyed by name for parent
+    * resolution in the service. Each leaf keeps the subject that names it in a
+    * later error. */
   final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
-    leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
+    leaves: Map[SafeName.SafeName, SubmittedLeaf],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )
 
-  // Result of resolving an update request: existing nodes keep caller ids, new nodes get generated ids.
-  // Shapes are gated here so the service does not repeat cross-field checks.
+  /** A resolved update request: existing nodes keep the caller's ids and new
+    * nodes get generated ones. Shapes are gated here, so the service does not
+    * repeat the cross-field checks. Each leaf keeps the subject that names it
+    * in a later error. */
   final case class ResolvedUpdate(
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
     added: Map[SafeName.SafeName, ResolvedNode],
-    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
-    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, DistributionShape)],
+    existingLeaves: Map[SafeName.SafeName, ExistingLeaf],
+    addedLeaves: Map[SafeName.SafeName, SubmittedLeaf],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )

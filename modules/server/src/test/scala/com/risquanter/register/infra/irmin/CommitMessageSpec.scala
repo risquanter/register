@@ -1,6 +1,6 @@
 package com.risquanter.register.infra.irmin
 
-import zio.prelude.NonEmptyList
+import zio.NonEmptyChunk
 import zio.test.*
 import com.risquanter.register.domain.data.iron.{ScenarioName, WorkspaceId}
 import com.risquanter.register.domain.errors.{ErrorLocation, ExpectedInput, FieldProblem, ValidationError, ValueFormat}
@@ -39,20 +39,20 @@ object CommitMessageSpec extends ZIOSpecDefault:
     },
     test("a message this server did not write is refused as the message the reader declares") {
       assertTrue(
-        CommitMessage.parse("some external commit") == Left(NonEmptyList(unreadable)),
-        CommitMessage.parse("") == Left(NonEmptyList(unreadable))
+        CommitMessage.parse("some external commit") == Left(NonEmptyChunk(unreadable)),
+        CommitMessage.parse("") == Left(NonEmptyChunk(unreadable))
       )
     },
     test("an identifier segment that does not refine carries the identifier's own refusal") {
       assertTrue(
         CommitMessage.parse(s"workspace:not-a-ulid:risk-tree:${tree.value}:update").left.map(_.map(_.problem)) ==
-          Left(NonEmptyList(FieldProblem.WrongFormat(ValueFormat.Ulid)))
+          Left(NonEmptyChunk(FieldProblem.WrongFormat(ValueFormat.Ulid)))
       )
     },
     test("a write kind outside the set, and a segment spelled otherwise than render spells it, are refused as declared") {
       assertTrue(
-        CommitMessage.parse(s"workspace:${ws.value}:risk-tree:${tree.value}:rename") == Left(NonEmptyList(unreadable)),
-        CommitMessage.parse(s"workspace:${ws.value}:merge-scenario:Draft-A") == Left(NonEmptyList(unreadable))
+        CommitMessage.parse(s"workspace:${ws.value}:risk-tree:${tree.value}:rename") == Left(NonEmptyChunk(unreadable)),
+        CommitMessage.parse(s"workspace:${ws.value}:merge-scenario:Draft-A") == Left(NonEmptyChunk(unreadable))
       )
     },
     test("the refusals of several segments accumulate") {

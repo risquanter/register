@@ -1,7 +1,8 @@
 package com.risquanter.register.infra.irmin.model
 
 import _root_.zio.json.*
-import _root_.zio.prelude.{NonEmptyList, Validation}
+import _root_.zio.NonEmptyChunk
+import _root_.zio.prelude.Validation
 
 import java.time.{DateTimeException, Instant}
 
@@ -50,14 +51,13 @@ object IrminInfo:
     * refine(Raw("0", "workspace:<ws>:risk-tree:<t>:update"))
     * // Right(IrminInfo(1970-01-01T00:00:00Z, TreeWritten(ws, t, Update)))
     * refine(Raw("yesterday", "hello"))
-    * // Left(NonEmptyList(ValidationError(Whole, Unreadable(WholeNumber)),
-    * //                  ValidationError(Whole, Unreadable(Declared))))
+    * // Left(NonEmptyChunk(ValidationError(Whole, Unreadable(WholeNumber)),
+    * //                   ValidationError(Whole, Unreadable(Declared))))
     * }}}
     */
-  def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminInfo] =
+  def refine(raw: Raw): Either[NonEmptyChunk[ValidationError], IrminInfo] =
     Validation.validateWith(refineDate(raw.date), ValidationUtil.toValidation(CommitMessage.parse(raw.message).left.map(_.toList)))(IrminInfo.apply)
       .toEither
-      .left.map(errors => NonEmptyList(errors.head, errors.tail*))
 
   private def refineDate(text: String): Validation[ValidationError, Instant] =
     text.trim.toLongOption match
@@ -110,11 +110,11 @@ object IrminCommit:
     * hash that is not a commit hash and each of the info's refusals.
     * {{{
     * refine(Raw("abc", "abc", Nil, IrminInfo.Raw("0", message)))
-    * // Left(NonEmptyList(ValidationError(Whole, WrongFormat(CommitHash)),
-    * //                  ValidationError(Whole, WrongFormat(CommitHash))))
+    * // Left(NonEmptyChunk(ValidationError(Whole, WrongFormat(CommitHash)),
+    * //                   ValidationError(Whole, WrongFormat(CommitHash))))
     * }}}
     */
-  def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminCommit] =
+  def refine(raw: Raw): Either[NonEmptyChunk[ValidationError], IrminCommit] =
     Validation.validateWith(
       refineHash(raw.hash),
       refineHash(raw.key),
@@ -122,7 +122,6 @@ object IrminCommit:
       ValidationUtil.toValidation(IrminInfo.refine(raw.info).left.map(_.toList))
     )(IrminCommit.apply)
       .toEither
-      .left.map(errors => NonEmptyList(errors.head, errors.tail*))
 
   private def refineHash(text: String): Validation[ValidationError, CommitHash] =
     ValidationUtil.toValidation(CommitHash.fromString(text, ErrorLocation.Whole))

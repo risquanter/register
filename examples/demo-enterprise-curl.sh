@@ -499,17 +499,17 @@ run_query \
 
 # Q7 — existential quantifier in scope: which portfolios harbour at least one severe child?
 # NOT SATISFIED by design: same unconditional-P95 effect applies to direct
-# children. 7/11 portfolios (64%) have at least one child clearing the $5M
-# bar — just short of the 3/4 threshold. Q7b uses the ~ quantifier to state
+# children. 8/11 portfolios (73%) have at least one child clearing the $5M
+# bar — short of the 9/10 threshold. Q7b uses the ~ quantifier to state
 # the same question at the proportion the data actually supports.
 run_query \
-  "Q7 (exists): Do at least 3/4 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
-  'Q[>=]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))'
+  "Q7 (exists): Do at least 9/10 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
+  'Q[>=]^{9/10} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))'
 
-# Q7b — same $5M threshold, proportion expressed as "about 2/3" (satisfied)
+# Q7b — same $5M threshold, proportion expressed as "about 3/4" (satisfied)
 run_query \
-  "Q7b (exists): Do about 2/3 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
-  'Q[~]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))'
+  "Q7b (exists): Do about 3/4 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
+  'Q[~]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))'
 
 # Q8 — universal quantifier in scope: are all direct children of most portfolios above a material floor?
 run_query \

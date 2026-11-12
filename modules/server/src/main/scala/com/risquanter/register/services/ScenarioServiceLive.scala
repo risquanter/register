@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash, MergeStagingRef, StoreBranch}
 import com.risquanter.register.domain.errors.{
@@ -60,7 +59,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
   /** A refused compare-and-set as the caller's conflict. */
   private def callerConflict(location: ErrorLocation, kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
-    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(location -> kind), diagnostics))
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyChunk(location -> kind), diagnostics))
 
   // ── source resolution ────────────────────────────────────────────────────
 
@@ -90,7 +89,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
   /** The caller's refusal of the request's `source`. */
   private def sourceRefused(problem: FieldProblem): Failure =
-    Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Source), problem)), Nil)
+    Failure.rejected(TrustZone.Client, NonEmptyChunk(ValidationError(ErrorLocation.requestField(FieldName.Source), problem)), Nil)
 
   /** Whether the commit lies in the history this workspace may fork from: the
     * shared main branch, or one of this workspace's own scenario branches.

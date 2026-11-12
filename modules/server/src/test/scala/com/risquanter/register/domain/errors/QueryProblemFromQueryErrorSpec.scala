@@ -1,7 +1,6 @@
 package com.risquanter.register.domain.errors
 
-import zio.Exit
-import zio.prelude.NonEmptyList
+import zio.{Exit, NonEmptyChunk}
 import zio.test.*
 
 import vql.error.QueryError as QE
@@ -143,7 +142,7 @@ object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
       QueryService.refused(err).exit.map(exit =>
         assertTrue(exit == Exit.fail(Failure.rejected(
           TrustZone.Client,
-          NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable("Expected '}'", Some(14))))),
+          NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable("Expected '}'", Some(14))))),
           Nil
         ))))
     },

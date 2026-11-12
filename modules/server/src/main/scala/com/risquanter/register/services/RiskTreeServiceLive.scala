@@ -1,7 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
+import zio.prelude.Validation
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.{Meter, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
@@ -9,13 +9,14 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError, SimulationFailure, AppError, Failure, TrustZone}
+import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationFailed, ValidationError, SimulationFailure, AppError, Failure, TrustZone}
+import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.services.RiskTreeServiceLive.{ErrorContext, Operation}
-import com.risquanter.register.services.helper.SeedVarIdAssigner
+import com.risquanter.register.services.helper.{SeedVarIdAssigner, Simulator}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Authority, Checked}
@@ -46,7 +47,7 @@ class RiskTreeServiceLive private (
   /** The caller's refusal of every refusal in `errors`, or nothing when there
     * are none. */
   private def refuseAll(errors: List[ValidationError]): IO[Failure, Unit] =
-    NonEmptyList.fromIterableOption(errors) match
+    NonEmptyChunk.fromIterableOption(errors) match
       case None          => ZIO.unit
       case Some(refused) => ZIO.fail(Failure.rejected(TrustZone.Client, refused, Nil))
 
@@ -61,7 +62,7 @@ class RiskTreeServiceLive private (
     for
       (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId))
-                .orElseFail(Failure.rejected(TrustZone.Client, NonEmptyList(nodeAbsent(nodeId)), Nil))
+                .orElseFail(Failure.rejected(TrustZone.Client, NonEmptyChunk(nodeAbsent(nodeId)), Nil))
     yield (tree, commit, node)
 
   /** Fetch tree and all requested nodes. With `omitAbsent = false`, fail with
@@ -272,7 +273,43 @@ class RiskTreeServiceLive private (
   // rather than an outcome a caller can act on. It dies instead of entering the
   // error channel, which carries only failures that have a wire case.
   }.orDie
-  
+
+  /** The leaf's shape fitted, or its refusal at the leaf's `DistributionType`
+    * paired with the fitter's own text for the log line, which never crosses
+    * (ADR-035).
+    *
+    * {{{
+    * fitCheck(unfitMetalog, ErrorSubject.NodeAtIndex(SubmittedCollection.Leaves, 1))
+    * // Failure((ValidationError(Field(NodeAtIndex(Leaves, 1), DistributionType), MetalogFitFailed), PeerMessage("Failed to fit Metalog: …")))
+    * }}}
+    */
+  private def fitCheck(leaf: RiskLeaf, subject: ErrorSubject): Validation[(ValidationError, Diagnostic), Unit] =
+    Simulator.fit(leaf.shape) match
+      case Right(_)      => Validation.succeed(())
+      case Left(refusal) =>
+        Validation.fail(
+          ValidationError(ErrorLocation.Field(subject, FieldName.DistributionType), refusal.problem) ->
+            Diagnostic.PeerMessage(refusal.diagnostic))
+
+  /** The tree, or one `Rejected` at `Client` carrying the tree's errors and every
+    * leaf's fit refusal, with the refusals' diagnostics. */
+  private def rejectedUnlessFit(
+    tree: Validation[ValidationError, RiskTree],
+    fits: Validation[(ValidationError, Diagnostic), Unit]
+  ): IO[Failure, RiskTree] =
+    ZIO.fromEither(
+      Validation.validateWith(tree.mapError(e => (e, List.empty[Diagnostic])), fits.mapError((e, d) => e -> List(d)))((t, _) => t).toEither
+    ).mapError(Failure.rejectedWithDiagnostics(TrustZone.Client, _))
+
+  /** The leaves an update adds, and the kept leaves whose shape differs from the
+    * stored one. */
+  private def changedLeaves(nodes: Seq[RiskNode], stored: TreeIndex): Seq[RiskLeaf] =
+    nodes.collect { case leaf: RiskLeaf => leaf }.filter(leaf =>
+      stored.nodes.get(leaf.id) match
+        case Some(storedLeaf: RiskLeaf) => storedLeaf.shape != leaf.shape
+        case Some(_: RiskPortfolio) | None => true
+    )
+
   /** Client-facing branch identity for the change-notification tag: `Main` or
     * the scenario name. Never the internal `BranchRef.toBranchRef` — that
     * embeds the WorkspaceId, which must not cross the client boundary
@@ -292,7 +329,7 @@ class RiskTreeServiceLive private (
   // Config CRUD - only persist, no execution
   /** A seed identifier the assigner refused, as the caller's refusal. */
   private def seedVarIdRefused(error: ValidationError): Failure =
-    Failure.rejected(TrustZone.Client, NonEmptyList(error), Nil)
+    Failure.rejected(TrustZone.Client, NonEmptyChunk(error), Nil)
 
   override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree] = {
     val operation = for {
@@ -304,17 +341,21 @@ class RiskTreeServiceLive private (
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(leafNamesOf(resolved.nodes), resolved.providedSeedVarIds, highWater = 0L))
         .mapError(seedVarIdRefused)
-      (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafOccurrenceAndShape, resolved.rootName, seedVarIds)
-      riskTree <- RiskTree.fromNodes(
-        id = treeId,
-        name = resolved.treeName,
-        nodes = nodes,
-        rootId = rootId,
-        seedVarHighWater = Some(seedVarHighWater),
-        // A tree is created from its node definition alone; mitigations are
-        // attached afterwards, never at creation.
-        mitigations = Nil
-      ).toZIOValidation(TrustZone.Client)
+      (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leaves.view.mapValues(l => (l.probability, l.shape)).toMap, resolved.rootName, seedVarIds)
+      riskTree <- rejectedUnlessFit(
+        RiskTree.fromNodes(
+          id = treeId,
+          name = resolved.treeName,
+          nodes = nodes,
+          rootId = rootId,
+          seedVarHighWater = Some(seedVarHighWater),
+          // A tree is created from its node definition alone; mitigations are
+          // attached afterwards, never at creation.
+          mitigations = Nil
+        ),
+        // `resolve` keys `leaves` by every leaf's name, so the lookup is total.
+        Validation.validateAll(nodes.collect { case leaf: RiskLeaf => fitCheck(leaf, resolved.leaves(leaf.name).subject) }).as(())
+      )
       persisted <- repo.create(wsId, riskTree, branch)
     } yield persisted
 
@@ -331,7 +372,12 @@ class RiskTreeServiceLive private (
       resolved <- RiskTreeUpdateRequest.resolve(req, oldTree.index, idGeneratorFrom(ids)).toZIOValidation(TrustZone.Client)
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
-      allLeafOccurrenceAndShape = resolved.existingLeafOccurrenceAndShape ++ resolved.addedLeafOccurrenceAndShape
+      allLeafOccurrenceAndShape =
+        resolved.existingLeaves.view.mapValues(l => (l.probability, l.shape)).toMap ++
+        resolved.addedLeaves.view.mapValues(l => (l.probability, l.shape)).toMap
+      leafSubjects =
+        resolved.existingLeaves.view.mapValues(_.subject).toMap ++
+        resolved.addedLeaves.view.mapValues(_.subject).toMap
       // Every leaf's seedVarId, from two sources. A leaf the update keeps carries
       // its stored seedVarId over, matched by node id, because a seedVarId is
       // immutable once assigned. A new leaf's is whatever the client supplied, or
@@ -350,20 +396,24 @@ class RiskTreeServiceLive private (
         ))
         .mapError(seedVarIdRefused)
       (nodes, rootId) <- buildNodes(allNodes, allLeafOccurrenceAndShape, resolved.rootName, seedVarIds)
-      riskTree <- RiskTree.fromNodes(
-        id = id,
-        name = resolved.treeName,
-        nodes = nodes,
-        rootId = rootId,
-        seedVarHighWater = Some(seedVarHighWater),
-        // Carried over from the tree being updated. ADR-017's
-        // omission-means-delete covers the node collection, which the request
-        // enumerates; `RiskTreeUpdateRequest` has no mitigation field at all, so
-        // an update cannot express "delete the mitigations" and must not imply
-        // it. The repository writes the whole subtree in one commit, so
-        // anything not passed here is deleted from the store.
-        mitigations = oldTree.mitigations
-      ).toZIOValidation(TrustZone.Client)
+      riskTree <- rejectedUnlessFit(
+        RiskTree.fromNodes(
+          id = id,
+          name = resolved.treeName,
+          nodes = nodes,
+          rootId = rootId,
+          seedVarHighWater = Some(seedVarHighWater),
+          // Carried over from the tree being updated. ADR-017's
+          // omission-means-delete covers the node collection, which the request
+          // enumerates; `RiskTreeUpdateRequest` has no mitigation field at all, so
+          // an update cannot express "delete the mitigations" and must not imply
+          // it. The repository writes the whole subtree in one commit, so
+          // anything not passed here is deleted from the store.
+          mitigations = oldTree.mitigations
+        ),
+        // `resolve` keys both leaf maps by every leaf's name, so the lookup is total.
+        Validation.validateAll(changedLeaves(nodes, oldTree.index).map(leaf => fitCheck(leaf, leafSubjects(leaf.name)))).as(())
+      )
       updated <- repo.update(wsId, id, _ => riskTree, branch)
       tag     <- clientBranch(wsId, branch)
       _ <- invalidationHandler.handleMutation(oldTree, updated, tag)

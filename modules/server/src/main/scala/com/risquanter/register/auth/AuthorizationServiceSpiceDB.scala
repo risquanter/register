@@ -3,7 +3,6 @@ package com.risquanter.register.auth
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
-import zio.prelude.NonEmptyList
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.{Meter, Counter, Histogram}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
@@ -78,31 +77,21 @@ private object Permissionship:
 private case class SpiceDbCheckResponse(permissionship: String)
 private given JsonDecoder[SpiceDbCheckResponse] = DeriveJsonDecoder.gen
 
-/** SpiceDB did not answer, in the given way. Shared by every SpiceDB adapter
-  * in this package: no authorization decision was obtained, so the request
-  * fails closed as a dependency outage. */
-private def authorizationOutage(mode: OutageMode, diagnostics: List[Diagnostic]): Failure =
-  Failure.Unanswered(Core(PeerZone.Authorization, NonEmptyList((ErrorLocation.Whole, mode)), diagnostics))
-
 /** SpiceDB answered with content this service refuses (ADR-039): a body that
   * is not the check response, or a permissionship outside the set the API
   * fixes. No authorization decision was obtained, so the request fails closed. */
 private def authorizationRefusal(expected: ExpectedInput, diagnostics: List[Diagnostic]): Failure =
   Failure.rejected(
     TrustZone.Peer(PeerZone.Authorization),
-    NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(expected))),
+    NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(expected))),
     diagnostics
   )
 
 /** SpiceDB answered that `user` does not hold `permission` on `resource`. */
 private def permissionNotHeld(user: UserId.Authenticated, permission: Permission, resource: ResourceRef): Failure =
   Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
-    NonEmptyList(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
+    NonEmptyChunk(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
     List(Diagnostic.Principal(user, permission, resource))))
-
-/** A transport exception's own text, for the log, when it has one. */
-private def peerMessage(e: Throwable): List[Diagnostic] =
-  Option(e.getMessage).map(Diagnostic.PeerMessage(_)).toList
 
 // ─── Live SpiceDB HTTP adapter ───────────────────────────────────────────────
 
@@ -188,7 +177,7 @@ final class AuthorizationServiceSpiceDB private (
       .response(asStringAlways)
       .readTimeout(timeout)
       .send(backend)
-      .mapError(e => authorizationOutage(OutageMode.ConnectionRefused, peerMessage(e)))
+      .mapError(e => Failure.unanswered(PeerZone.Authorization, OutageMode.ConnectionRefused, List(Diagnostic.peerMessage(e))))
       .flatMap { response =>
         if response.code.isSuccess then
           ZIO.fromEither(refineAnswer(response.body)).flatMap {
@@ -201,7 +190,7 @@ final class AuthorizationServiceSpiceDB private (
               ZIO.fail(permissionNotHeld(user, permission, resource))
           }
         else
-          ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
+          ZIO.fail(Failure.unanswered(PeerZone.Authorization, OutageMode.Status(response.code), Nil))
       }
 
   /** Refines the check response where SpiceDB's answer arrives (ADR-039): a

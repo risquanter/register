@@ -1,7 +1,6 @@
 package com.risquanter.register.auth
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import com.risquanter.register.configs.AuthMode
 import com.risquanter.register.domain.data.iron.UserId
@@ -16,7 +15,7 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
     * the header and nothing else. */
   private val identityAbsent: Failure =
     Failure.AccessDenied(Core(TrustZone.MeshHeader,
-      NonEmptyList(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
+      NonEmptyChunk(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
 
   def spec = suite("UserContextExtractor")(
     suite("UserId.Anonymous — capability-only identity")(

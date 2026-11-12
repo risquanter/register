@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import io.github.iltotore.iron.*
 
@@ -237,7 +236,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure, Option[(RiskTree, CommitHash)]] =
       if headReadFails then ZIO.fail(Failure.rejected(
         TrustZone.Peer(PeerZone.Store),
-        NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.DuplicateNodeName(SafeName.fromString("Restored Leaf").toOption.get, 2.refineUnsafe))),
+        NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.DuplicateNodeName(SafeName.fromString("Restored Leaf").toOption.get, 2.refineUnsafe))),
         Nil
       ))
       else ZIO.succeed(Some((revertedTree, CascadeTestStubs.stubCommit)))
@@ -321,7 +320,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private def duplicateName(name: String): Failure =
     Failure.rejected(
       TrustZone.Client,
-      NonEmptyList(ValidationError(
+      NonEmptyChunk(ValidationError(
         ErrorLocation.requestField(FieldName.Name),
         FieldProblem.TreeNameAlreadyExists(SafeName.fromString(name).toOption.get)
       )),

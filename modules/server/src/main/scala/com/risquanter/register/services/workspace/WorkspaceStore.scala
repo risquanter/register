@@ -2,7 +2,6 @@ package com.risquanter.register.services.workspace
 
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
-import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.{Expiry, WorkspaceRecord}
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, PositiveInt, WorkspaceKeySecret, TreeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{
@@ -83,7 +82,7 @@ trait WorkspaceStore:
       ws <- resolve(key)
       _  <- ZIO.unless(ws.trees.contains(treeId))(ZIO.fail(Failure.NotFound(Core(
               TrustZone.Client,
-              NonEmptyList(ErrorLocation.requestField(FieldName.Id) -> NotFoundKind.Unknown()),
+              NonEmptyChunk(ErrorLocation.requestField(FieldName.Id) -> NotFoundKind.Unknown()),
               List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.TreeRef(treeId))
             ))))
     yield ws
@@ -157,7 +156,7 @@ object WorkspaceStore:
   val workspaceNotFound: Failure =
     Failure.NotFound(Core(
       TrustZone.Client,
-      NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
+      NonEmptyChunk(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
       List(Diagnostic.KeyUnresolved)
     ))
 
@@ -165,7 +164,7 @@ object WorkspaceStore:
   def workspaceExpired(ws: WorkspaceRecord, expiry: Expiry): Failure =
     Failure.Expired(Core(
       TrustZone.Client,
-      NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> ExpiryDetail(expiry.cause, ws.ttl, ws.idleTimeout)),
+      NonEmptyChunk(ErrorLocation.requestField(FieldName.WorkspaceKey) -> ExpiryDetail(expiry.cause, ws.ttl, ws.idleTimeout)),
       List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.ExpiredAt(expiry.at))
     ))
 
@@ -176,7 +175,7 @@ object WorkspaceStore:
   def maxTreesReached(limit: PositiveInt): Failure =
     Failure.rejected(
       TrustZone.Client,
-      NonEmptyList(ValidationError(
+      NonEmptyChunk(ValidationError(
         ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
         FieldProblem.MaxTreesReached(NonNegativeInt.count(limit))
       )),

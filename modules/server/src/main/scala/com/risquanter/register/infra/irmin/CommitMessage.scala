@@ -1,6 +1,7 @@
 package com.risquanter.register.infra.irmin
 
-import zio.prelude.{NonEmptyList, Validation}
+import zio.NonEmptyChunk
+import zio.prelude.Validation
 
 import com.risquanter.register.domain.data.iron.{ScenarioName, TreeId, ValidationUtil, WorkspaceId}
 import com.risquanter.register.domain.errors.{ErrorLocation, ExpectedInput, FieldProblem, ValidationError}
@@ -60,10 +61,10 @@ object CommitMessage:
     * `parse` stays the inverse of `render`.
     * {{{
     * parse("workspace:<ws>:risk-tree:<t>:update") // Right(TreeWritten(ws, t, Update))
-    * parse("some external commit")                // Left(NonEmptyList(ValidationError(Whole, Unreadable(Declared))))
+    * parse("some external commit")                // Left(NonEmptyChunk(ValidationError(Whole, Unreadable(Declared))))
     * }}}
     */
-  def parse(message: String): Either[NonEmptyList[ValidationError], CommitMessage] =
+  def parse(message: String): Either[NonEmptyChunk[ValidationError], CommitMessage] =
     val parsed: Validation[ValidationError, CommitMessage] =
       message.split(Separator, -1).toList match
         case WorkspaceTag :: ws :: TreeTag :: tree :: kind :: Nil =>
@@ -78,7 +79,7 @@ object CommitMessage:
           scenarioMessage(ws, name, ScenarioMerged.apply)
         case _ =>
           Validation.fail(unreadable)
-    parsed.toEither.left.map(errors => NonEmptyList(errors.head, errors.tail*))
+    parsed.toEither
 
   private def scenarioMessage(
     ws: String,

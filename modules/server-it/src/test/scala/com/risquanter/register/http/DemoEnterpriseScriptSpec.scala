@@ -211,11 +211,10 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           q5   <- query(client, key, treeId)("""Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x, "inherent"), 50000000))""")
           // Q6: 2/21 leaves have >5% chance of exceeding $10M — satisfies <=1/4
           q6   <- query(client, key, treeId)("""Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000, "inherent"), 0.05))""")
-          // Q7: ~7-8/11 portfolios have a child with P95 > $5M — boundary against 3/4 bar
-          //      (asserts rangeSize only; satisfied flickers near 0.73)
-          q7   <- query(client, key, treeId)("""Q[>=]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))""")
-          // Q7b: same proportion satisfies the vague ~2/3 threshold (within tolerance)
-          q7b  <- query(client, key, treeId)("""Q[~]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))""")
+          // Q7: 8/11 portfolios have a child with P95 > $5M — short of the 9/10 bar
+          q7   <- query(client, key, treeId)("""Q[>=]^{9/10} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))""")
+          // Q7b: same proportion satisfies the vague ~3/4 threshold (within tolerance)
+          q7b  <- query(client, key, treeId)("""Q[~]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))""")
           // Q8: 10/11 portfolios have ALL direct children with P99 > $1M — satisfies >=1/2
           q8   <- query(client, key, treeId)("""Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y, "inherent"), 1000000)))""")
 
@@ -255,11 +254,11 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           assertTrue(q4b.rangeSize == 21, q4b.satisfied) &&       // 5/21=0.238 inside About(1/5,0.1)
           assertTrue(q5.rangeSize == 11, q5.satisfied) &&         // 0/11 sat Q[<=]^{1/3}
           assertTrue(q6.rangeSize == 21, q6.satisfied) &&         // 2/21=0.095 sat Q[<=]^{1/4}
-          assertTrue(q7.rangeSize == 11, !q7.satisfied) &&        // 7/11=0.636 < 0.75; margin 0.11 (was unstable pre-redesign)
-          assertTrue(q7b.rangeSize == 11, q7b.satisfied) &&       // 7/11=0.636 inside About(2/3,0.1) band [0.567,0.767]
+          assertTrue(q7.rangeSize == 11, !q7.satisfied) &&        // 8/11=0.727 < 9/10 bar (0.8 with tolerance); margin 0.07
+          assertTrue(q7b.rangeSize == 11, q7b.satisfied) &&       // 8/11=0.727 inside About(3/4,0.1) band [0.65,0.85]
           assertTrue(                                             // Q7b margin: ≥0.05 from both band edges
-            q7b.proportion >= (2.0 / 3 - 0.1) + 0.05,
-            q7b.proportion <= (2.0 / 3 + 0.1) - 0.05
+            q7b.proportion >= (3.0 / 4 - 0.1) + 0.05,
+            q7b.proportion <= (3.0 / 4 + 0.1) - 0.05
           ) &&
           assertTrue(q8.rangeSize == 11, q8.satisfied) &&         // 10/11=0.909 sat Q[>=]^{1/2}
           assertTrue(qa.rangeSize == 4, !qa.satisfied) &&         // 0/4

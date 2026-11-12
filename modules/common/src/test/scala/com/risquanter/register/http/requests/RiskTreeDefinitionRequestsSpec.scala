@@ -108,8 +108,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       result match {
         case Validation.Success(_, resolved) =>
-          val (_, shape) = resolved.leafOccurrenceAndShape.values.head
-          val bounds = shape match
+          val bounds = resolved.leaves.values.head.shape match
             case DistributionShape.Lognormal(b) => Some(((b.min: Long), (b.max: Long)))
             case _                              => None
           assertTrue(

@@ -1,14 +1,13 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 
 import com.risquanter.register.domain.data.{DistributionShape, DistributionParams}
 import com.risquanter.register.domain.data.iron.{MetalogTermCount, OpenProbability, OpenProbabilityConstraint, PositiveLong}
 import com.risquanter.register.domain.errors.{ErrorLocation, Failure, FieldProblem, TrustZone, ValidationError}
 import com.risquanter.register.http.responses.{DistributionPreviewPoint, DistributionPreviewResponse, PreviewFit}
-import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
+import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution, MetalogFitRefusal}
 
 /** Computes a sampled distribution preview curve from a gated distribution shape.
   *
@@ -68,7 +67,14 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
           lower       = Some(0.0),
           upper       = None
         )
-      ).mapError(_ => fitRefused(FieldProblem.MetalogFitFailed))
+      ).catchAll {
+        case MetalogFitRefusal.Infeasible(_) => ZIO.fail(fitRefused(FieldProblem.MetalogFitFailed))
+        // A gated shape's anchors pass the wrapper's checks and the fitter's
+        // input checks, and a solver that stops early is the fitter's fault.
+        case unreachable @ (MetalogFitRefusal.InputsRefused(_) | MetalogFitRefusal.InputsMalformed(_) |
+                            MetalogFitRefusal.SolverStopped(_)) =>
+          ZIO.die(new IllegalStateException(s"A metalog fit of a gated shape was refused: $unreachable"))
+      }
     yield DistributionPreviewResponse(PreviewFit.Metalog(resolvedTerms), sampleMetalog(metalog))
 
   private def previewLognormal(
@@ -86,7 +92,7 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
 
   /** The caller's shape refused because no curve fits it. */
   private def fitRefused(problem: FieldProblem): Failure =
-    Failure.rejected(TrustZone.Client, NonEmptyList(ValidationError(ErrorLocation.Whole, problem)), Nil)
+    Failure.rejected(TrustZone.Client, NonEmptyChunk(ValidationError(ErrorLocation.Whole, problem)), Nil)
 
   private def sampleMetalog(metalog: MetalogDistribution): Vector[DistributionPreviewPoint] =
     pGrid.map { p =>

@@ -2,7 +2,6 @@ package com.risquanter.register.http.controllers
 
 import zio.*
 import zio.json.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
@@ -78,7 +77,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
     * failure, which does.
     */
   private val authOutage: Failure =
-    Failure.Unanswered(Core(PeerZone.Authorization, NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused)), Nil))
+    Failure.Unanswered(Core(PeerZone.Authorization, NonEmptyChunk((ErrorLocation.Whole, OutageMode.ConnectionRefused)), Nil))
 
   private val wsId: WorkspaceId =
     WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
@@ -89,7 +88,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
     */
   private val expired: Failure = Failure.Expired(Core(
     TrustZone.Client,
-    NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
+    NonEmptyChunk(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
       ExpiryDetail(ExpiryCause.Inactivity, JDuration.ofHours(72), JDuration.ofHours(1))),
     List(Diagnostic.WorkspaceRef(wsId), Diagnostic.ExpiredAt(Instant.EPOCH))
   ))
@@ -97,7 +96,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
   /** A refusal of the caller's content, in the failure shape. Its message names
     * its own field, so the line a test reads can only be the line it wrote. */
   private def rejectedAt(zone: TrustZone, field: FieldName): Failure =
-    Failure.rejected(zone, NonEmptyList(ValidationError(ErrorLocation.requestField(field), FieldProblem.Required)), Nil)
+    Failure.rejected(zone, NonEmptyChunk(ValidationError(ErrorLocation.requestField(field), FieldProblem.Required)), Nil)
 
   private val clientRefusal: Failure = rejectedAt(TrustZone.Client, FieldName.Email)
   private val storeRefusal: Failure  = rejectedAt(TrustZone.Peer(PeerZone.Store), FieldName.Url)

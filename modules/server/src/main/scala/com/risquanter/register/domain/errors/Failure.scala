@@ -2,7 +2,7 @@ package com.risquanter.register.domain.errors
 
 import java.time.Duration
 
-import zio.prelude.NonEmptyList
+import zio.NonEmptyChunk
 
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{TraceId, ValidationMessages}
@@ -16,7 +16,7 @@ import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKi
   */
 final case class Core[Z, P](
   zone:        Z,
-  errors:      NonEmptyList[(ErrorLocation, P)],
+  errors:      NonEmptyChunk[(ErrorLocation, P)],
   diagnostics: List[Diagnostic]
 )
 
@@ -74,7 +74,7 @@ object Failure:
       * entry's location and problem. Never crosses to a client.
       *
       * {{{
-      * rejected(TrustZone.Client, NonEmptyList(ValidationError(requestField(FieldName.Name), FieldProblem.Required)), Nil).logMessage
+      * rejected(TrustZone.Client, NonEmptyChunk(ValidationError(requestField(FieldName.Name), FieldProblem.Required)), Nil).logMessage
       * // Rejected: [request.Name] A value is required
       * }}}
       */
@@ -89,8 +89,26 @@ object Failure:
       v.diagnostics.flatMap(Diagnostic.render).groupMapReduce(_._1)(_._2)(_ + "," + _) + (ZoneKey -> zoneValue(v.zone))
 
   /** The one way a `Validation` becomes a failure. */
-  def rejected(zone: TrustZone, errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =
+  def rejected(zone: TrustZone, errors: NonEmptyChunk[ValidationError], diagnostics: List[Diagnostic]): Failure =
     Rejected(Core(zone, errors.map(e => (e.location, e.problem)), diagnostics))
+
+  /** A peer that gave no answer, as one `Unanswered` located at the whole
+    * request. */
+  def unanswered(peer: PeerZone, mode: OutageMode, diagnostics: List[Diagnostic]): Failure =
+    Unanswered(Core(peer, NonEmptyChunk((ErrorLocation.Whole, mode)), diagnostics))
+
+  /** The refusals as one `Rejected` at `zone`, each refusal's diagnostics on the
+    * log line. A refusal with nothing to log carries `Nil`.
+    *
+    * {{{
+    * rejectedWithDiagnostics(TrustZone.Client, NonEmptyChunk(
+    *   ValidationError(treeName, FieldProblem.Required)               -> Nil,
+    *   ValidationError(leafShape, FieldProblem.MetalogFitFailed)      -> List(Diagnostic.PeerMessage("…"))))
+    * // Rejected at Client with both errors and the one PeerMessage
+    * }}}
+    */
+  def rejectedWithDiagnostics(zone: TrustZone, refusals: NonEmptyChunk[(ValidationError, List[Diagnostic])]): Failure =
+    rejected(zone, refusals.map(_._1), refusals.toList.flatMap(_._2))
 
   private def project(f: Failure, t: TraceId, scope: TreeScope): WireError = f match
     case Rejected(c) => c.zone match
@@ -132,7 +150,7 @@ object Failure:
     * refusal with no tree in scope is this service's defect and answers the
     * opaque fault. */
   private def rejectedOnWire(
-    errors: NonEmptyList[(ErrorLocation, FieldProblem)],
+    errors: NonEmptyChunk[(ErrorLocation, FieldProblem)],
     t:      TraceId,
     scope:  TreeScope
   ): WireError =
@@ -155,7 +173,7 @@ object Failure:
   private val ZoneKey = "trust_zone"
 
   /** What every derived value reads from a failure, taken once per variant. */
-  private final case class View(zone: TrustZone, entries: NonEmptyList[String], diagnostics: List[Diagnostic])
+  private final case class View(zone: TrustZone, entries: NonEmptyChunk[String], diagnostics: List[Diagnostic])
 
   private def view(f: Failure): View = f match
     case Rejected(c)     => View(c.zone, entries(c, logged), c.diagnostics)
@@ -166,7 +184,7 @@ object Failure:
     case Expired(c)      => View(c.zone, entries(c, ExpiryDetail.describe), c.diagnostics)
     case NotSupported(c) => View(c.zone, entries(c, Capability.describe), c.diagnostics)
 
-  private def entries[Z, P](core: Core[Z, P], describe: P => String): NonEmptyList[String] =
+  private def entries[Z, P](core: Core[Z, P], describe: P => String): NonEmptyChunk[String] =
     core.errors.map((location, problem) => s"[${ErrorLocation.describe(location)}] ${describe(problem)}")
 
   /** How much of a parser message reaches the log line.

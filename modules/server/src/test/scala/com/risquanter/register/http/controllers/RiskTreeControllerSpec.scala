@@ -1,7 +1,6 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -150,7 +149,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val name = SafeName.fromString("Duplicate Risk Portfolio").toOption.get
         program.assert(_ == Failure.rejected(
           TrustZone.Client,
-          NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.TreeNameAlreadyExists(name))),
+          NonEmptyChunk(ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.TreeNameAlreadyExists(name))),
           Nil
         )).provide(serviceLayer)
       }

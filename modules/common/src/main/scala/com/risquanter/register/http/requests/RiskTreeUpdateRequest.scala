@@ -50,15 +50,12 @@ object RiskTreeUpdateRequest:
             l.name -> ResolvedNode(newId(), l.name, l.parent, NodeKind.Leaf)
           }
 
-          val existingLeafOccurrenceAndShape = leaves.map(l => l.name -> (l.probability, l.shape)).toMap
-          val addedLeafOccurrenceAndShape = newLeaves.map(l => l.name -> (l.probability, l.shape)).toMap
-
           ResolvedUpdate(
             treeName = treeName,
             existing = (existingPortfolioNodes ++ existingLeafNodes).toMap,
             added = (addedPortfolioNodes ++ addedLeafNodes).toMap,
-            existingLeafOccurrenceAndShape = existingLeafOccurrenceAndShape,
-            addedLeafOccurrenceAndShape = addedLeafOccurrenceAndShape,
+            existingLeaves = leaves.map(l => l.name -> l).toMap,
+            addedLeaves = newLeaves.map(l => l.name -> l).toMap,
             providedSeedVarIds = providedSeeds.toMap,
             rootName = rootName
           )

@@ -115,3 +115,10 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala
 - modules/common/src/main/scala/com/risquanter/register/http/errors/BindProblem.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/QueryEndpointSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeDefinitionRequest.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeUpdateRequest.scala
+- modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/helper/SimulatorSpec.scala
+- modules/server/src/main/scala/com/risquanter/register/simulation/MetalogDistribution.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala

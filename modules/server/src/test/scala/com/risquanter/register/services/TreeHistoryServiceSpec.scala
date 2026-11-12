@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import java.time.Instant
 import io.github.iltotore.iron.*
@@ -98,7 +97,7 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
       },
       test("a store that does not answer fails the read with that value, not with a repository failure") {
         val outage: Failure =
-          Failure.Unanswered(Core(PeerZone.Store, NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused)), Nil))
+          Failure.Unanswered(Core(PeerZone.Store, NonEmptyChunk((ErrorLocation.Whole, OutageMode.ConnectionRefused)), Nil))
         for
           asked <- Ref.make(List.empty[Int])
           exit  <- TreeHistoryServiceLive(FakeHistoryIrmin(log, asked, Some(outage)))

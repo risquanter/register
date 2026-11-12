@@ -4,8 +4,8 @@ import zio.{IO, ZIO, Task}
 import zio.test.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
 import com.risquanter.register.domain.data.iron.{OpenProbability, Probability, PositiveInt, SeedEntityId, SeedVarId}
-import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, DistributionParams}
-import com.risquanter.register.domain.errors.{AppError, ErrorSubject}
+import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, DistributionParams, DistributionShape}
+import com.risquanter.register.domain.errors.{AppError, ErrorSubject, FieldProblem}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, metalogShape}
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
@@ -23,6 +23,18 @@ import io.github.iltotore.iron.autoRefine
   * assertions below a flat list to run against.
   */
 private object TestSimulator {
+
+  /** Four anchors no strictly increasing four-term metalog fits. The fit is
+    * bounded below at zero, so it fits `ln(loss)`. The losses are the
+    * exponentials of the heavy-tail anchors metalog-distribution's
+    * `QPFitterTest.fitterRejectsAnchorsNoMonotoneFitAdmits` pins as infeasible
+    * unbounded, which makes the bounded problem the same one. */
+  val unfitMetalog: DistributionShape.Metalog =
+    metalogShape(
+      Vector(0.05, 0.5, 0.9, 0.99),
+      Vector(math.exp(0.2), math.exp(2.0), math.exp(16.0), math.exp(120.0)),
+      Some(4)
+    )
 
   /** Simulate every sampler, at most `maxConcurrentSimulations` at a time. */
   def simulate(
@@ -541,6 +553,28 @@ object SimulatorSpec extends ZIOSpecDefault {
           (_, prov) <- Simulator.createSamplerFromLeaf(leaf, testEntity)
         } yield assertTrue(
           prov.distributionParams.asInstanceOf[DistributionParams.Metalog].terms == 9
+        )
+      }
+    ),
+
+    suite("fit")(
+
+      test("a metalog no monotone curve passes through is refused with MetalogFitFailed") {
+        assertTrue(Simulator.fit(TestSimulator.unfitMetalog).left.map(_.problem) == Left(FieldProblem.MetalogFitFailed))
+      },
+
+      test("a stored leaf no curve fits is a defect at simulation") {
+        val leaf = RiskLeaf.create(subject = ErrorSubject.Request,
+          id = idStr("unfit-stored"),
+          name = "Unfit Stored",
+          probability = 0.5,
+          shape = TestSimulator.unfitMetalog,
+          parentId = None,
+          seedVarId = 6L
+        ).toOption.get
+
+        Simulator.createSamplerFromLeaf(leaf, testEntity).exit.map(exit =>
+          assertTrue(exit.causeOption.exists(_.dieOption.exists(_.isInstanceOf[IllegalArgumentException])))
         )
       }
     )

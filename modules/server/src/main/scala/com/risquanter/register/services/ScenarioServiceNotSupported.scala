@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.{Core, Diagnostic, ErrorLocation, Failure, TrustZone}
@@ -19,7 +18,7 @@ object ScenarioServiceNotSupported extends ScenarioService:
   /** The deployment has no Irmin store, so it holds no branches. The sentence
     * names the setting that enables scenarios, for the operator's log. */
   private[services] val scenariosUnavailable: Failure =
-    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyList(ErrorLocation.Whole -> Capability.Scenarios),
+    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyChunk(ErrorLocation.Whole -> Capability.Scenarios),
       List(Diagnostic.PeerMessage("Scenarios require the Irmin backend (repository.type=irmin)"))))
 
   override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)

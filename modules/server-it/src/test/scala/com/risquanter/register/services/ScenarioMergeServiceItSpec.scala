@@ -4,7 +4,6 @@ import zio.*
 import zio.json.*
 import zio.test.*
 import zio.test.Assertion.*
-import zio.prelude.NonEmptyList
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -185,7 +184,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
       .someOrFail(Failure.NotFound(Core(
         TrustZone.Peer(PeerZone.Store),
-        NonEmptyList(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
+        NonEmptyChunk(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
         Nil
       )))
 
@@ -451,7 +450,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
       yield assertTrue(previewed == MergePreviewStatus.ScenarioMissing()) &&
         assert(mergeExit)(fails(equalTo(Failure.rejected(
           TrustZone.Client,
-          NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(scenario))),
+          NonEmptyChunk(ValidationError(ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(scenario))),
           Nil
         ))))
     }

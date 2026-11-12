@@ -1,7 +1,6 @@
 package com.risquanter.register.repositories
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, BranchRef, CommitHash, Revision, SafeName, SeedVarId, TreeId}
@@ -28,7 +27,7 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
 
   /** The failure a read or revert pinned to a commit produces, at `location`. */
   private def pinnedReadsUnavailable(location: ErrorLocation): Failure =
-    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyList(location -> Capability.PinnedReads), Nil))
+    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyChunk(location -> Capability.PinnedReads), Nil))
 
   /** A root portfolio holding one leaf. */
   private def minimalTree(tid: TreeId): RiskTree =
@@ -59,7 +58,7 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
       } yield assertTrue(
         exit.causeOption.flatMap(_.failureOption).contains(Failure.NotSupported(Core(
           TrustZone.Environment,
-          NonEmptyList(ErrorLocation.Header(RequestHeaderName.Branch) -> Capability.Scenarios),
+          NonEmptyChunk(ErrorLocation.Header(RequestHeaderName.Branch) -> Capability.Scenarios),
           Nil
         )))
       )
@@ -94,7 +93,7 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
       } yield assertTrue(
         exit.causeOption.flatMap(_.failureOption).contains(Failure.rejected(
           TrustZone.Client,
-          NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Id), FieldProblem.TreeIdAlreadyExists(someTree))),
+          NonEmptyChunk(ValidationError(ErrorLocation.requestField(FieldName.Id), FieldProblem.TreeIdAlreadyExists(someTree))),
           Nil
         ))
       )

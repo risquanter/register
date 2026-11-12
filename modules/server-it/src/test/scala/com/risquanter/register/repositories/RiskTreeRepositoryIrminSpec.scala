@@ -3,7 +3,6 @@ package com.risquanter.register.repositories
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
-import zio.prelude.NonEmptyList
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{SafeName, TreeId, WorkspaceId, SeedVarId, PositiveInt, BranchRef, Revision, Url}
@@ -324,7 +323,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         yield assertTrue(
           exit.causeOption.flatMap(_.failureOption).contains(Failure.Rejected(Core(
             TrustZone.Peer(PeerZone.Store),
-            NonEmptyList(
+            NonEmptyChunk(
               ErrorLocation.nodeField(nodeId("leaf-1"), FieldName.Name)        -> FieldProblem.Required,
               ErrorLocation.nodeField(nodeId("leaf-1"), FieldName.Probability) -> FieldProblem.OutOfRange(ValueRange.ClosedUnitInterval)
             ),
@@ -388,7 +387,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           exit  <- repo.getById(absentWs, tid, Revision.Head(BranchRef.Main)).exit
         yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
           TrustZone.Peer(PeerZone.Store),
-          NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(tid), FieldName.Id) -> NotFoundKind.MetadataAbsent()),
+          NonEmptyChunk(ErrorLocation.Field(ErrorSubject.Tree(tid), FieldName.Id) -> NotFoundKind.MetadataAbsent()),
           Nil
         )))))
       },
@@ -405,7 +404,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           exit  <- repo.getById(absentWs, tid, Revision.Head(BranchRef.Main)).exit
         yield assert(exit)(fails(equalTo(Failure.NotFound(Core(
           TrustZone.Peer(PeerZone.Store),
-          NonEmptyList(ErrorLocation.Field(ErrorSubject.Tree(tid), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
+          NonEmptyChunk(ErrorLocation.Field(ErrorSubject.Tree(tid), FieldName.Nodes) -> NotFoundKind.NodesAbsent()),
           Nil
         )))))
       }

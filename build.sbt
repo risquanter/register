@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.18.19"
+ThisBuild / version      := "0.18.20"
 ThisBuild / scalaVersion := "3.8.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -35,7 +35,7 @@ val ironVersion       = "3.2.2"
 val zioUlidVersion    = "1.3.1"
 val zioTelemetryVersion = "3.1.13"
 val openTelemetryVersion = "1.57.0"
-val metalogVersion    = "0.9.0"   // com.risquanter:metalog-distribution (Java)
+val metalogVersion    = "0.10.1"  // com.risquanter:metalog-distribution (Java)
 // First-party artifact (com.risquanter) — cooldown-exempt per ADR-020 §10
 // (first-party waiver, user-approved 2026-08-09). 0.17.0 (ADR-021) gives each
 // TypeCheckError variant its own BindErrorDetail case and drops the Other

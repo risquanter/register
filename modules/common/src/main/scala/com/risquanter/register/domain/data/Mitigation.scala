@@ -1,5 +1,6 @@
 package com.risquanter.register.domain.data
 
+import zio.NonEmptyChunk
 import zio.prelude.*
 import zio.json.{DecoderOps, JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec, jsonDiscriminator}
 import sttp.tapir.Schema
@@ -301,10 +302,10 @@ object Mitigation {
     * kept as a value. Text that is not the raw form's JSON is one refusal of the
     * whole, which includes a stored target or spec its own gate refuses
     * (ADR-039). */
-  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyList[ValidationError], Mitigation] =
+  def decodeValidated(json: String, subject: ErrorSubject): Either[NonEmptyChunk[ValidationError], Mitigation] =
     json.fromJson[Raw] match
-      case Left(_)    => Left(NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Json))))
-      case Right(raw) => fromRaw(raw, subject).toEither.left.map(errors => NonEmptyList(errors.head, errors.tail*))
+      case Left(_)    => Left(NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Unreadable(ExpectedInput.Json))))
+      case Right(raw) => fromRaw(raw, subject).toEither
 
   given codec: JsonCodec[Mitigation] = JsonCodec(
     JsonEncoder[Raw].contramap(m =>

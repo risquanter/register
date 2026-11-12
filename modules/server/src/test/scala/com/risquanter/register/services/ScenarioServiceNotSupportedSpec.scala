@@ -1,7 +1,6 @@
 package com.risquanter.register.services
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -23,7 +22,7 @@ object ScenarioServiceNotSupportedSpec extends ZIOSpecDefault:
   private val head: CommitHash                    = CommitHash.fromString("a" * 40).toOption.get
 
   private val scenariosUnavailable: Failure =
-    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyList(ErrorLocation.Whole -> Capability.Scenarios),
+    Failure.NotSupported(Core(TrustZone.Environment, NonEmptyChunk(ErrorLocation.Whole -> Capability.Scenarios),
       List(Diagnostic.PeerMessage("Scenarios require the Irmin backend (repository.type=irmin)"))))
 
   def spec = suite("ScenarioServiceNotSupported")(

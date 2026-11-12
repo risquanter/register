@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import zio.json.*
-import zio.prelude.{NonEmptyList, Validation}
+import zio.prelude.Validation
 import java.time.Instant
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.configs.IrminConfig
@@ -209,7 +209,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                         case None =>
                           ZIO.fail(Failure.rejected(
                             TrustZone.Client,
-                            NonEmptyList(ValidationError(ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(name))),
+                            NonEmptyChunk(ValidationError(ErrorLocation.requestField(FieldName.Scenario), FieldProblem.ScenarioNotFound(name))),
                             Nil
                           ))
       at           <- Clock.instant
@@ -228,7 +228,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                         case Some(head) => ZIO.succeed(head)
                         case None       => ZIO.fail(Failure.NotFound(Core(
                                              TrustZone.Peer(PeerZone.Store),
-                                             NonEmptyList(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
+                                             NonEmptyChunk(ErrorLocation.requestField(FieldName.Branch) -> NotFoundKind.BranchHeadAbsent()),
                                              Nil
                                            )))
       newHead      <- mergeOnStaging(wsId, name, scenarioHead, mainBefore, result.metadataToWrite)
@@ -454,7 +454,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
         for
           versions <- decodeVersions(comparison.versions)(RiskTreeRepositoryIrmin.decodeStoredNode(_, nodeId))
           fields   <- ZIO.fromEither(changedFields(versions)(ConflictFields.node))
-                        .mapError(refusal => storeRefusal(NonEmptyList(refusal), Nil))
+                        .mapError(refusal => storeRefusal(NonEmptyChunk(refusal), Nil))
         yield Left(MergeConflictEntry.NodeConflict(label, nodeId, versions, fields))
       case TreePath.Mitigation(_, mitigationId) =>
         decodeVersions(comparison.versions)(Mitigation.decodeValidated(_, ErrorSubject.Mitigation(mitigationId)))
@@ -484,17 +484,17 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
   /** The three Irmin contents decoded, or the store's content refused. Each
     * decoder locates its refusals at the value it reads, so the refusal names
     * that value. */
-  private def decodeVersions[A](versions: Versions[String])(decode: String => Either[NonEmptyList[ValidationError], A]): IO[Failure, Versions[A]] =
+  private def decodeVersions[A](versions: Versions[String])(decode: String => Either[NonEmptyChunk[ValidationError], A]): IO[Failure, Versions[A]] =
     ZIO.fromEither(versions.traverse(decode)).mapError(storeRefusal(_, Nil))
 
   /** Content the store returned that this service refuses (ADR-039). */
-  private def storeRefusal(errors: NonEmptyList[ValidationError], diagnostics: List[Diagnostic]): Failure =
+  private def storeRefusal(errors: NonEmptyChunk[ValidationError], diagnostics: List[Diagnostic]): Failure =
     Failure.rejected(TrustZone.Peer(PeerZone.Store), errors, diagnostics)
 
   /** A refused merge of the scenario as the caller's conflict, located at the
     * scenario the request names. */
   private def scenarioConflict(kind: ConflictKind, diagnostics: List[Diagnostic]): Failure =
-    Failure.Conflict(Core(TrustZone.Client, NonEmptyList(ErrorLocation.requestField(FieldName.Scenario) -> kind), diagnostics))
+    Failure.Conflict(Core(TrustZone.Client, NonEmptyChunk(ErrorLocation.requestField(FieldName.Scenario) -> kind), diagnostics))
 
   /** Fetch, for every candidate path, the contents at main's head and at the
     * scenario's head as the scan observed them, and at the merge base. Every
@@ -542,10 +542,10 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     val decoded = Validation.validateAll(nodeValues.map { case (treeId, nodeId, json) =>
       RiskTreeRepositoryIrmin.decodeStoredNode(json, nodeId) match
         case Right(node)  => Validation.succeed(treeId -> node.name)
-        case Left(errors) => Validation.failNonEmptyChunk(NonEmptyChunk(errors.head, errors.tail*))
+        case Left(errors) => Validation.failNonEmptyChunk(errors)
     })
     ZIO.fromEither(decoded.toEither)
-      .mapError(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), Nil))
+      .mapError(storeRefusal(_, Nil))
       .map { pairs =>
       pairs
         .groupMap(_._1)(_._2)
@@ -587,7 +587,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
     * the store holds what this code did not write. */
   private def refineListed[A](segment: IrminSegment)(wrap: SafeId.SafeId => A): IO[Failure, A] =
     ZIO.fromEither(ValidationUtil.refineId(segment.value, ErrorLocation.Whole).map(wrap))
-      .mapError(errors => storeRefusal(NonEmptyList(errors.head, errors.tail*), List(Diagnostic.RawValue(segment.value))))
+      .mapError(errors => storeRefusal(NonEmptyChunk(errors.head, errors.tail*), List(Diagnostic.RawValue(segment.value))))
 
 object ScenarioMergeServiceLive:
   val layer: ZLayer[IrminClient & RiskTreeRepository & IrminConfig, Nothing, ScenarioMergeService] =

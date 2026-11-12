@@ -87,7 +87,7 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
           // Q4: at least 2/3 of portfolios have ≥1 direct child with P95 > $1M (all 3 qualify)
           q4 <- query(client, key, treeId)("""Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 1000000)))""")
 
-          // Q5: at least 2/3 of portfolios have ALL direct children with P95 > $1M — satisfies >=1/2; margin=0.17 ✓
+          // Q5: only 1/3 of portfolios have ALL direct children with P95 > $1M — fails >=1/2; margin=0.17
           q5 <- query(client, key, treeId)("""Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y, "inherent"), 1000000)))""")
 
           // Q-S1: exactly 1/2 of IT Risk leaves (Cyber Breach) have P95 > $2M — meets >=1/2 bar
@@ -103,7 +103,7 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
           assertTrue(q2.rangeSize == 4, q2.satisfied) &&
           assertTrue(q3.rangeSize == 4, q3.satisfied) &&
           assertTrue(q4.rangeSize == 3, q4.satisfied) &&
-          assertTrue(q5.rangeSize == 3, q5.satisfied) &&         // 2/3≈67% sat Q[>=]^{1/2}; margin=0.17 ✓
+          assertTrue(q5.rangeSize == 3, !q5.satisfied) &&        // 1/3≈33% fails Q[>=]^{1/2}; margin=0.17
           assertTrue(qs1.rangeSize == 2, qs1.satisfied) &&
           assertTrue(qs2.rangeSize == 2, !qs2.satisfied) &&
           assertTrue(qs3.rangeSize == 2, qs3.satisfied)

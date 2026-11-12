@@ -3,7 +3,7 @@ package com.risquanter.register.infra.irmin.model
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import _root_.zio.json.*
-import _root_.zio.prelude.NonEmptyList
+import _root_.zio.NonEmptyChunk
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError, ValueFormat}
 
@@ -44,9 +44,9 @@ object IrminSegment:
 
   /** A name Irmin listed, refined where it arrives (ADR-039). A refused name
     * is the one refusal it states; the name itself is the caller's to log. */
-  def from(s: String): Either[NonEmptyList[ValidationError], IrminSegment] =
+  def from(s: String): Either[NonEmptyChunk[ValidationError], IrminSegment] =
     s.refineEither[IrminSegmentConstraint]
-      .left.map(_ => NonEmptyList(ValidationError(ErrorLocation.Whole, FieldProblem.WrongFormat(ValueFormat.StoreSegment))))
+      .left.map(_ => NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.WrongFormat(ValueFormat.StoreSegment))))
 
   /** Total: a ULID's characters, [0-9A-HJKMNP-TV-Z], are segment characters. */
   def of(id: SafeId.SafeId): IrminSegment =

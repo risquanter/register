@@ -1,7 +1,6 @@
 package com.risquanter.register.auth
 
-import zio.{IO, UIO, ZIO}
-import zio.prelude.NonEmptyList
+import zio.{IO, NonEmptyChunk, UIO, ZIO}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.configs.AuthMode
 import com.risquanter.register.domain.data.iron.{UserId, UuidStr}
@@ -87,7 +86,7 @@ object UserContextExtractor:
     * an authenticating waypoint, or its user is not signed in. */
   private val identityAbsent: Failure =
     Failure.AccessDenied(Core(TrustZone.MeshHeader,
-      NonEmptyList(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
+      NonEmptyChunk(ErrorLocation.Header(RequestHeaderName.UserId) -> DenialKind.IdentityAbsent), Nil))
 
   /** identity / fine-grained mode — header must be present.
     *

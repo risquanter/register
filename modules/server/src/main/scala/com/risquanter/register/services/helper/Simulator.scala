@@ -1,15 +1,15 @@
 package com.risquanter.register.services.helper
 
 import com.risquanter.register.BuildInfo
-import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution, SeedDerivation}
+import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, MetalogFitRefusal, Distribution, SeedDerivation}
 import com.risquanter.register.domain.data.{
   TrialId, Loss, RiskLeaf, NodeProvenance, DistributionShape, DistributionParams
 }
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{AppError, FieldProblem}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.simulation.LognormalHelper
-import zio.{IO, ZIO}
+import zio.{IO, UIO, ZIO}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron._
 
@@ -50,15 +50,15 @@ object Simulator {
       // Filter phase: identify successful trials (pure, sequential is fine)
       val n: Int = nTrials
       (0 until n).filter(trial => sampler.sampleOccurrence(trial.toLong)).toVector
-    }.orDie.flatMap { successfulTrials =>
-      if (successfulTrials.isEmpty) {
+    }.orDie.flatMap {
+      case Vector() =>
         ZIO.succeed(Map.empty[TrialId, Loss])
-      } else if (successfulTrials.size < 100 || parallelism <= 1) {
+      case successfulTrials if successfulTrials.size < 100 || parallelism <= 1 =>
         // Small workload: sequential is more efficient (avoid fiber overhead)
         ZIO.attempt {
           successfulTrials.map(trial => (trial, sampler.sampleLoss(trial.toLong))).toMap
         }.orDie
-      } else {
+      case successfulTrials =>
         // Large workload: parallel computation across batches
         val batchSize = math.max(1, successfulTrials.size / parallelism)
         val batches = successfulTrials.grouped(batchSize).toVector
@@ -69,7 +69,6 @@ object Simulator {
           }.orDie
         }.map(_.flatten.toMap)
          .withParallelism(parallelism)
-      }
     }
   }
 
@@ -85,7 +84,7 @@ object Simulator {
     seedEntityId: SeedEntityId.SeedEntityId,
     seed3: Long = 0L,
     seed4: Long = 0L
-  ): IO[AppError, (RiskSampler, NodeProvenance)] = {
+  ): UIO[(RiskSampler, NodeProvenance)] = {
     for {
       // Create distribution based on mode
       distAndParams <- createDistributionWithParams(leaf)
@@ -123,29 +122,26 @@ object Simulator {
     * third-party class and carries whatever it threw, so it is logged and never
     * sent (ADR-035).
     */
-  private final case class FitRefusal(
+  private[services] final case class FitRefusal(
     problem:    FieldProblem,
     diagnostic: String
   )
 
   /**
-   * Build the leaf's loss distribution and the record of what the fit ran with.
+   * The shape's loss distribution and the parameters the fit ran with, or the
+   * refusal of those parameters.
    *
-   * A numerical fit failure is the only refusal left. The shape carries its own
+   * A numerical fit failure is the only refusal. The shape carries its own
    * construction proof, so there is no absent field, no mode mismatch and no
    * out-of-range element to check — those states have no spelling in
-   * `DistributionShape`.
+   * `DistributionShape`. A tree write runs this on every leaf it adds or
+   * changes, and simulation runs it again on a stored leaf.
    */
-  private def createDistributionWithParams(leaf: RiskLeaf): IO[AppError, (Distribution, DistributionParams)] = {
-    // The leaf is persisted, so a refusal names it by identifier and the message
-    // carries only the reason.
-    def at(field: FieldName): ErrorLocation =
-      ErrorLocation.Field(ErrorSubject.ExistingNode(leaf.id), field)
-
+  private[services] def fit(shape: DistributionShape): Either[FitRefusal, (Distribution, DistributionParams)] = {
     // The parameters the fit runs with: the authored shape with every value the
     // system supplies filled in. One derivation, so the record cannot state a
     // term count or a confidence level the fit did not use.
-    val params = DistributionShape.resolve(leaf.shape)
+    val params = DistributionShape.resolve(shape)
 
     // Both fitters take the widened figures the record carries. The metalog
     // fitter re-checks the percentile interval on arrival, which is the
@@ -169,10 +165,7 @@ object Simulator {
             lower = Some(0.0), // Loss cannot be negative
             upper = None
           )
-          .left.map(error => FitRefusal(
-            FieldProblem.MetalogFitFailed,
-            s"Failed to fit Metalog: ${error.message}"
-          ))
+          .left.map(metalogRefusal)
 
       case DistributionParams.Lognormal(minLoss, maxLoss, _) =>
         LognormalHelper
@@ -183,19 +176,31 @@ object Simulator {
           ))
     }
 
-    ZIO
-      .fromEither(fitted.map(distribution => (distribution, params)))
-      // The diagnosis is written here because the failure cannot carry it: a
-      // `ValidationFailed` carries only closed cases, which cross to the client,
-      // so a reason put there would cross. At ordinary-traffic level, because a
-      // refused fit is a caller's input being correctly declined rather than an
-      // operational signal (ADR-002).
-      .tapError(refusal =>
-        ZIO.logInfo(s"Distribution fit refused for leaf ${leaf.id.value}: ${refusal.diagnostic}")
-      )
-      .mapError(refusal =>
-        ValidationFailed(List(ValidationError(at(FieldName.DistributionType), refusal.problem)))
-      )
+    fitted.map(distribution => (distribution, params))
   }
+
+  /** The caller's refusal for anchors no increasing metalog fits. Every other
+    * case is a defect: a shape's anchors are sorted, positive, in (0, 1) and no
+    * fewer than its terms, and the fit's only bound is 0, so the wrapper's checks
+    * and the fitter's malformed-input refusal cannot be reached, and a solver
+    * that stops early is the fitter's fault.
+    */
+  private def metalogRefusal(refusal: MetalogFitRefusal): FitRefusal = refusal match
+    case MetalogFitRefusal.Infeasible(text) =>
+      FitRefusal(FieldProblem.MetalogFitFailed, s"Failed to fit Metalog: $text")
+    case unreachable @ (MetalogFitRefusal.InputsRefused(_) | MetalogFitRefusal.InputsMalformed(_) |
+                        MetalogFitRefusal.SolverStopped(_)) =>
+      throw new IllegalStateException(s"A metalog fit of a valid shape was refused: $unreachable")
+
+  /** The stored leaf's distribution and its fit parameters. A tree write refuses
+    * a leaf no curve fits, so a stored leaf that does not fit is a defect. */
+  private def createDistributionWithParams(leaf: RiskLeaf): UIO[(Distribution, DistributionParams)] =
+    ZIO.attempt {
+      fit(leaf.shape) match
+        case Right(fitted) => fitted
+        case Left(refusal) =>
+          throw new IllegalArgumentException(
+            s"requirement failed: stored leaf ${leaf.id.value} has a shape no curve fits: ${refusal.diagnostic}")
+    }.orDie
 }
 

@@ -1,7 +1,6 @@
 package com.risquanter.register.auth
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 
 import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency, SpiceDbToken, TestConfigs}
@@ -61,7 +60,7 @@ object AuthorizationServiceSpiceDBItSpec extends ZIOSpecDefault:
     * produces: at the authorization zone, naming the principal for the log. */
   private def denied(user: UserId.Authenticated, permission: Permission, resource: ResourceRef): Failure =
     Failure.AccessDenied(Core(TrustZone.Peer(PeerZone.Authorization),
-      NonEmptyList(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
+      NonEmptyChunk(ErrorLocation.Whole -> DenialKind.PermissionNotHeld),
       List(Diagnostic.Principal(user, permission, resource))))
 
   // ─── Isolated-config helper ─────────────────────────────────────────────────

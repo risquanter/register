@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import com.risquanter.register.configs.SpiceDbConfig
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
-import com.risquanter.register.domain.errors.{Failure, OutageMode}
+import com.risquanter.register.domain.errors.{Diagnostic, Failure, OutageMode, PeerZone}
 
 // ─── SpiceDB WriteRelationships request types (file-private) ─────────────────
 // SpiceDbObjectRef / SpiceDbSubjectRef and their encoders are shared with
@@ -92,13 +92,13 @@ final class BootstrapProvisionerSpiceDB private (
       .response(asStringAlways)
       .readTimeout(timeout)
       .send(backend)
-      .mapError(e => authorizationOutage(OutageMode.ConnectionRefused, peerMessage(e)))
+      .mapError(e => Failure.unanswered(PeerZone.Authorization, OutageMode.ConnectionRefused, List(Diagnostic.peerMessage(e))))
       .flatMap { response =>
         // Success body ({"writtenAt":{"token":"..."}}) is intentionally ignored:
         // the app never does write-then-check (pure PEP; consistency is a
         // check-side config concern — see SpiceDbConsistency).
         if response.code.isSuccess then ZIO.unit
-        else ZIO.fail(authorizationOutage(OutageMode.Status(response.code), Nil))
+        else ZIO.fail(Failure.unanswered(PeerZone.Authorization, OutageMode.Status(response.code), Nil))
       }
 
   // user.value — explicit PII opt-in; ownership writes are audit-relevant

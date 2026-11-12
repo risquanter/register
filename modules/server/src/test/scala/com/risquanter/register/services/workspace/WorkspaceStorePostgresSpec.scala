@@ -8,7 +8,6 @@ import io.getquill.jdbczio.Quill
 import org.postgresql.ds.PGSimpleDataSource
 
 import zio.*
-import zio.prelude.NonEmptyList
 import zio.test.*
 import zio.test.Assertion.*
 
@@ -124,7 +123,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
           expiredAt.exists(at =>
             failure == Failure.Expired(Core(
               TrustZone.Client,
-              NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
+              NonEmptyChunk(ErrorLocation.requestField(FieldName.WorkspaceKey) ->
                 ExpiryDetail(ExpiryCause.Inactivity, storeConfig.ttl, storeConfig.idleTimeout)),
               List(Diagnostic.WorkspaceRef(ws.id), Diagnostic.ExpiredAt(at))
             ))),
@@ -141,7 +140,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         keyExit <- store.resolve(key).exit
       yield assert(keyExit)(fails(equalTo(Failure.NotFound(Core(
         TrustZone.Client,
-        NonEmptyList(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
+        NonEmptyChunk(ErrorLocation.requestField(FieldName.WorkspaceKey) -> NotFoundKind.Unknown()),
         List(Diagnostic.KeyUnresolved)
       )))))
     },
@@ -159,7 +158,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
       yield assertTrue(again.isRight, listed == List(first)) &&
         assert(exit)(fails(equalTo(Failure.rejected(
           TrustZone.Client,
-          NonEmptyList(ValidationError(
+          NonEmptyChunk(ValidationError(
             ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Trees),
             FieldProblem.MaxTreesReached(NonNegativeInt.count(1))
           )),
@@ -223,7 +222,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         exit  <- store.create(Some(id)).exit
       yield assert(exit)(fails(equalTo(Failure.rejected(
         TrustZone.Client,
-        NonEmptyList(ValidationError(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id))),
+        NonEmptyChunk(ValidationError(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id))),
         Nil
       ))))
     },
@@ -237,7 +236,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         exit  <- store.resolve(key).exit
       yield assert(exit)(fails(equalTo(Failure.Rejected(Core(
         TrustZone.Peer(PeerZone.Database),
-        NonEmptyList(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Ttl) -> FieldProblem.Unreadable(ExpectedInput.Interval)),
+        NonEmptyChunk(ErrorLocation.Field(ErrorSubject.Workspace, FieldName.Ttl) -> FieldProblem.Unreadable(ExpectedInput.Interval)),
         List(Diagnostic.RawValue("1 mon"))
       )))))
     },
@@ -247,7 +246,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         .provideLayer(unreachableStoreLayer)
         .map(outcome => assertTrue(outcome match
           case Left(Failure.Unanswered(Core(PeerZone.Database, errors, _))) =>
-            errors == NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused))
+            errors == NonEmptyChunk((ErrorLocation.Whole, OutageMode.ConnectionRefused))
           case _ => false
         ))
     },

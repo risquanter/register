@@ -2,7 +2,6 @@ package com.risquanter.register.infra.irmin
 
 import zio.*
 import _root_.zio.json.*
-import zio.prelude.NonEmptyList
 import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.client3.httpclient.zio.HttpClientZioBackend
@@ -251,8 +250,8 @@ final class IrminClientLive private (
     * whose body is kept for the log, or a body that did not decode. */
   private def parseError(error: ResponseException[String, String], status: StatusCode): Failure =
     error match
-      case HttpError(body, _)                => outage(OutageMode.Status(status), List(Diagnostic.PeerBody(body)))
-      case DeserializationException(body, _) => outage(OutageMode.Protocol, List(Diagnostic.PeerBody(body)))
+      case HttpError(body, _)                => Failure.unanswered(PeerZone.Store, OutageMode.Status(status), List(Diagnostic.PeerBody(body)))
+      case DeserializationException(body, _) => Failure.unanswered(PeerZone.Store, OutageMode.Protocol, List(Diagnostic.PeerBody(body)))
 
   /** Two kinds of failure reach this one channel and both become a `Failure`:
     * a typed failure this client already produced, and a raw exception thrown
@@ -261,20 +260,16 @@ final class IrminClientLive private (
     */
   private def mapNetworkError(error: Throwable | Failure): Failure = error match
     case f: Failure           => f
-    case _: JTimeoutException => outage(OutageMode.Timeout(config.timeout), Nil)
+    case _: JTimeoutException => Failure.unanswered(PeerZone.Store, OutageMode.Timeout(config.timeout), Nil)
     case e: java.io.IOException if Option(e.getMessage).exists(_.contains("timeout")) =>
-      outage(OutageMode.Timeout(config.timeout), Nil)
-    case e: Throwable         => outage(OutageMode.ConnectionRefused, Option(e.getMessage).map(Diagnostic.PeerMessage(_)).toList)
-
-  /** Irmin did not answer, in the given way. */
-  private def outage(mode: OutageMode, diagnostics: List[Diagnostic]): Failure =
-    Failure.Unanswered(Core(PeerZone.Store, NonEmptyList((ErrorLocation.Whole, mode)), diagnostics))
+      Failure.unanswered(PeerZone.Store, OutageMode.Timeout(config.timeout), Nil)
+    case e: Throwable         => Failure.unanswered(PeerZone.Store, OutageMode.ConnectionRefused, List(Diagnostic.peerMessage(e)))
 
   /** Irmin answered with GraphQL `errors` and no data: its messages and the
     * path they name are kept for the log. */
   private def graphQlFailure(errors: Option[List[GraphQLError]]): Failure =
     val (messages, path) = collectGraphQl(errors)
-    outage(OutageMode.Protocol, Diagnostic.PeerMessage(messages.mkString("; ")) :: path.map(Diagnostic.GraphQlPath(_)).toList)
+    Failure.unanswered(PeerZone.Store, OutageMode.Protocol, Diagnostic.PeerMessage(messages.mkString("; ")) :: path.map(Diagnostic.GraphQlPath(_)).toList)
 
   private def extractCommit(response: SetValueResponse): IO[Failure, IrminCommit] =
     response.data.flatMap(_.set) match
@@ -328,7 +323,7 @@ final class IrminClientLive private (
     * this service refuses, kept for the log. */
   private def refineBranch(name: String): IO[Failure, StoreBranch] =
     ZIO.fromEither(StoreBranch.fromString(name, ErrorLocation.Whole).left.map(refusals =>
-      Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyList(refusals.head, refusals.tail*), List(Diagnostic.RawValue(name)))))
+      Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyChunk(refusals.head, refusals.tail*), List(Diagnostic.RawValue(name)))))
 
   private def failWithError(errors: Option[List[GraphQLError]]): IO[Failure, IrminCommit] =
     ZIO.fail(graphQlFailure(errors))

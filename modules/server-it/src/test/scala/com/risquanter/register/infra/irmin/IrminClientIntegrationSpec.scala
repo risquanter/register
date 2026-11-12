@@ -2,7 +2,6 @@ package com.risquanter.register.infra.irmin
 
 import zio.*
 import zio.test.*
-import zio.prelude.NonEmptyList
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.infra.irmin.model.{IrminMergeOutcome, IrminPath, IrminTreeEntry, IrminWriteOutcome}
 import com.risquanter.register.domain.errors.{Core, ErrorLocation, Failure, OutageMode, PeerZone}
@@ -50,7 +49,7 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
           .flatMap(_.get[IrminClient].healthCheck.either)
       }.map {
         case Left(Failure.Unanswered(Core(PeerZone.Store, errors, _))) =>
-          assertTrue(errors == NonEmptyList((ErrorLocation.Whole, OutageMode.ConnectionRefused)))
+          assertTrue(errors == NonEmptyChunk((ErrorLocation.Whole, OutageMode.ConnectionRefused)))
         case _ => assertTrue(false)
       }
     },

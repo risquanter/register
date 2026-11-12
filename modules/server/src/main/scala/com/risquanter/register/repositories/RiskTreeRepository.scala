@@ -1,7 +1,6 @@
 package com.risquanter.register.repositories
 
 import zio.*
-import zio.prelude.NonEmptyList
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.errors.{
   Core, Diagnostic, ErrorLocation, Failure, RequestHeaderName, RequestQueryParam, TrustZone, ValidationError
@@ -59,7 +58,7 @@ object RiskTreeRepository:
   def treeAbsent(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[Failure, Nothing] =
     val diagnostics = List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeId), Diagnostic.RevisionRead(rev))
     def notFound(location: ErrorLocation, kind: NotFoundKind): IO[Failure, Nothing] =
-      ZIO.fail(Failure.NotFound(Core(TrustZone.Client, NonEmptyList(location -> kind), diagnostics)))
+      ZIO.fail(Failure.NotFound(Core(TrustZone.Client, NonEmptyChunk(location -> kind), diagnostics)))
     rev match
       case Revision.Head(branch) =>
         BranchChoice.fromBranchRef(wsId, branch) match

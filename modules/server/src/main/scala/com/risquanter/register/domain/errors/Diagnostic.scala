@@ -2,7 +2,7 @@ package com.risquanter.register.domain.errors
 
 import java.time.Instant
 
-import zio.prelude.NonEmptyList
+import zio.NonEmptyChunk
 
 import com.risquanter.register.auth.{Permission, ResourceRef}
 import com.risquanter.register.domain.data.iron.{CommitHash, Revision, TreeId, UserId, ValidationMessages, WorkspaceId}
@@ -45,7 +45,7 @@ enum Diagnostic:
 
   /** The entries of the store refusal a conflict was built from: each refused
     * value's location and problem. */
-  case StoreRefusal(entries: NonEmptyList[(ErrorLocation, FieldProblem)])
+  case StoreRefusal(entries: NonEmptyChunk[(ErrorLocation, FieldProblem)])
 
   /** A workspace key that resolved to no workspace. The marker selects a key
     * replayed after rotation, deletion or a guess alongside the workspace
@@ -53,6 +53,18 @@ enum Diagnostic:
   case KeyUnresolved
 
 object Diagnostic:
+  /** An exception's own text, or its class name and nothing else when it
+    * carries none, so a log line always says what was thrown.
+    *
+    * {{{
+    * textOf(new java.net.ConnectException())  // "java.net.ConnectException"
+    * }}}
+    */
+  def textOf(e: Throwable): String = Option(e.getMessage).getOrElse(e.toString)
+
+  /** The exception's `textOf`, as the entry an outage logs. */
+  def peerMessage(e: Throwable): Diagnostic = PeerMessage(textOf(e))
+
   /** The log key and rendered value of one entry. Total over the enum. The keys
     * are a contract with the log pipeline, so each is declared here once and
     * none follows a case name. */

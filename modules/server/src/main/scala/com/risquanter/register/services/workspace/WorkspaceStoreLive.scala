@@ -1,7 +1,6 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
-import zio.prelude.NonEmptyList
 import java.time.Instant
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.domain.data.WorkspaceRecord
@@ -108,7 +107,7 @@ final class WorkspaceStoreLive private (
         if state.byHash.values.exists(_.seedEntityId.value == id.value) then
           Left(Failure.rejected(
             TrustZone.Client,
-            NonEmptyList(ValidationError(
+            NonEmptyChunk(ValidationError(
               ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId), FieldProblem.SeedEntityIdInUse(id))),
             Nil
           ))
@@ -124,7 +123,7 @@ final class WorkspaceStoreLive private (
   private def seedEntityIdsExhausted(counter: Long): Failure =
     Failure.rejected(
       TrustZone.Service,
-      NonEmptyList(ValidationError(
+      NonEmptyChunk(ValidationError(
         ErrorLocation.Field(ErrorSubject.Workspace, FieldName.SeedEntityId),
         FieldProblem.OutOfRange(ValueRange.SeedEntityId)
       )),
