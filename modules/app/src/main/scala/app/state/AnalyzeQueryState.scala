@@ -7,11 +7,10 @@ import app.core.{RequestFailure, ViewFailure}
 import app.views.ErrorMessages
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
-import com.risquanter.register.http.errors.{RejectionDetail, WireError}
+import com.risquanter.register.http.errors.{QueryProblem, RejectionDetail, WireError}
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.http.responses.QueryResponse
-import vql.error.QueryError
-import vql.parser.VagueQueryParser
+import vql.logic.ParsedQuery
 
 /** Reactive state for the Analyze view query pane (ADR-028).
   *
@@ -41,34 +40,36 @@ final class AnalyzeQueryState(
 
   // ── Client-side parse validation ──────────────────────────────
   //
-  // VagueQueryParser.parse() runs in-browser (vql-engine cross-compiled
-  // to JS via common). Validation is triggered by:
+  // QueryRequest.resolve runs in-browser (vql-engine cross-compiled to JS via
+  // common), the same boundary the server parses through. Validation is
+  // triggered by:
   //   - Blur (always) — textarea loses focus
   //   - Run / Ctrl+Enter — executeQuery() validates before submitting
   //   - Keystroke debounce (300ms) — only when instantValidate is on
   //
-  // None when not yet validated or input is empty, Left(err) on syntax
-  // error, Right(parsed) on valid parse. The pane shows the engine's own
-  // error text, so the library error type is held as it is.
+  // None when not yet validated or input is empty, Left(problem) on a refused
+  // query, Right(parsed) on a query the service can answer. The refusal is
+  // rendered through ErrorMessages.query, so the pane and the server show one
+  // sentence for one refusal.
 
   /** When true, parse validation runs on every keystroke (debounced 300ms). */
   val instantValidate: Var[Boolean] = Var(false)
 
-  val parseResult: Var[Option[Either[QueryError, vql.logic.ParsedQuery]]] = Var(None)
+  val parseResult: Var[Option[Either[QueryProblem, ParsedQuery]]] = Var(None)
 
   /** Run the parser against the current input and update parseResult. */
   def validateNow(): Unit =
     val text = queryInput.now()
     parseResult.set(
       if text.trim.isEmpty then None
-      else Some(VagueQueryParser.parse(text))
+      else Some(QueryRequest.resolve(QueryRequest(text)))
     )
 
-  /** Syntax error message for display, None when not yet validated or valid. */
+  /** The refusal's sentence for display, None when not yet validated or valid. */
   val parseError: Signal[Option[String]] =
     parseResult.signal.map {
-      case Some(Left(err)) => Some(err.formatted)
-      case _               => None
+      case Some(Left(problem)) => Some(ErrorMessages.query(problem))
+      case _                   => None
     }
 
   /** True when the last validation passed. */
@@ -230,7 +231,7 @@ final class AnalyzeQueryState(
     if queryText.trim.isEmpty then ()
     else
       // Validate client-side first — update parseResult for UI feedback
-      val parsed = VagueQueryParser.parse(queryText)
+      val parsed = QueryRequest.resolve(QueryRequest(queryText))
       parseResult.set(Some(parsed))
       parsed match
         case Left(_) => () // Parse error — displayed via parseResult, do not submit

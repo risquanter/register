@@ -6,7 +6,7 @@ import zio.NonEmptyChunk
 
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{TraceId, ValidationMessages}
-import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, QueryProblem, RejectionDetail, TreeScope, WireError}
+import com.risquanter.register.http.errors.{Capability, ConflictKind, NotFoundKind, RejectionDetail, TreeScope, WireError}
 
 /** The fields every failure carries. `Z` is the zone type a variant admits and
   * `P` the problem type its list holds; a variant fixes both and adds nothing.
@@ -187,26 +187,26 @@ object Failure:
   private def entries[Z, P](core: Core[Z, P], describe: P => String): NonEmptyChunk[String] =
     core.errors.map((location, problem) => s"[${ErrorLocation.describe(location)}] ${describe(problem)}")
 
-  /** How much of a parser message reaches the log line.
+  /** How much of a refused query's sentence reaches the log line.
     *
-    * The parser's "unexpected tokens" message renders every remaining token, so
-    * its length follows the submitted query, which is bounded only by the 8 MiB
-    * request-body cap. One line per failed request is written synchronously to
-    * standard output, so an unbounded message makes a request's log cost scale
-    * with its body. 300 characters is chosen here as enough to identify where a
-    * query stopped parsing while keeping the line a fixed cost.
+    * A query refusal's sentence repeats the caller's words and literals, and a
+    * trailing-tokens refusal names every remaining token, so its length follows
+    * the submitted query, which is bounded only by the 8 MiB request-body cap.
+    * One line per failed request is written synchronously to standard output,
+    * so an unbounded sentence makes a request's log cost scale with its body.
+    * 300 characters is chosen here as enough to identify where a query was
+    * refused while keeping the line a fixed cost.
     *
-    * The full message still crosses to the caller who sent the query, because
+    * The full refusal still crosses to the caller who sent the query, because
     * it is their own text coming back.
     */
   private val LoggedMessageLimit: Int = 300
 
-  /** A refused problem's sentence for the log line, with a parser message cut
-    * to `LoggedMessageLimit`. */
+  /** A refused problem's sentence for the log line, with a query refusal's
+    * sentence cut to `LoggedMessageLimit`. */
   private def logged(problem: FieldProblem): String = problem match
-    case FieldProblem.Query(QueryProblem.Unparseable(message, position)) =>
-      ValidationMessages.render(FieldProblem.Query(QueryProblem.Unparseable(bounded(message), position)))
-    case other => ValidationMessages.render(other)
+    case FieldProblem.Query(_) => bounded(ValidationMessages.render(problem))
+    case other                 => ValidationMessages.render(other)
 
   private def bounded(message: String): String =
     if message.length <= LoggedMessageLimit then message

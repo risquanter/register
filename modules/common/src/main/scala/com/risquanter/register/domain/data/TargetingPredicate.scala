@@ -8,8 +8,9 @@ import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, TargetingSource}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.http.errors.{ParseProblem, Positioned}
 
-import parser.FOLParser
+import parser.{FOLParser, ParseError}
 import logic.{Formula, FOL, FOLUtil}
 import vql.fragment.{Fragment, FragmentCheck, FragmentViolation}
 
@@ -54,8 +55,12 @@ object TargetingPredicate:
     *    4. exactly one free variable (the target variable);
     *    5. no `mitigate` / `mitigated` predicate.
     *
-    * No refusal carries the parser's own text or the names it found: both are
-    * the user's typed input coming back, which no refusal may carry (ADR-035).
+    * A parse refusal carries the parser's typed refusal at its position, and
+    * never the parser's sentence or the whole text. Of the caller's text it
+    * holds only words and literal contents within their alphabets; an
+    * operator or punctuation crosses as a case, and anything else as a kind
+    * with no text (ADR-035). A parser refusal that does not translate is a
+    * defect and throws.
     */
   def create(source: String): Validation[ValidationError, TargetingPredicate] =
     val gate: Either[ValidationError, (TargetingSource, Formula[FOL])] =
@@ -64,7 +69,7 @@ object TargetingPredicate:
           .refineEither[MinLength[1] & MaxLength[256]]
           .left.map(_ => err(FieldProblem.LengthOutOfRange(MinSourceLength, MaxSourceLength)))
         formula <- FOLParser.parse(refined)
-          .left.map(_ => err(FieldProblem.TargetingPredicateUnparseable))
+          .left.map(error => err(FieldProblem.TargetingPredicateUnparseable(parseProblem(error))))
       yield (refined, formula)
 
     Validation.fromEither(gate).flatMap { case (refined, formula) =>
@@ -77,6 +82,11 @@ object TargetingPredicate:
 
   private def err(problem: FieldProblem): ValidationError =
     ValidationError(location, problem)
+
+  private def parseProblem(error: ParseError): Positioned[ParseProblem] =
+    ParseProblem.fromFormulaError(error).fold(
+      reason => throw new IllegalStateException(s"The formula parser returned a refusal that does not translate: $reason"),
+      identity)
 
   private def checkFragment(formula: Formula[FOL]): Either[ValidationError, Unit] =
     FragmentCheck.check(formula, Fragment.Targeting)

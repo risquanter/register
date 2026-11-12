@@ -3,8 +3,10 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 import io.github.iltotore.iron.autoRefine
+import zio.prelude.NonEmptyList
 
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
+import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{
   RiskLeaf, RiskPortfolio, RiskNode, RiskTree,
@@ -15,13 +17,13 @@ import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{
-  BranchRef, CommitHash, NodeId, MitigationId, Revision, SafeName, SeedEntityId, SeedVarId, TreeId, WorkspaceId
+  BranchRef, CommitHash, NodeId, MitigationId, QueryLiteral, Revision, SafeName, SeedEntityId, SeedVarId, TreeId, WorkspaceId
 }
 
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, Failure, FieldProblem, TrustZone, ValidationError
 }
-import com.risquanter.register.http.errors.QueryProblem
+import com.risquanter.register.http.errors.{BindProblem, Positioned, QueryPosition, QueryProblem}
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry}
@@ -220,7 +222,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
           QueryServiceLive.layer
         )
     },
-    test("a query naming a node the tree does not hold is Rejected at Client with UnknownReferences") {
+    test("a query naming a node the tree does not hold is Rejected at Client with the literal its sort cannot read") {
       // The bind fails before any selection is computed, so the failing
       // resolver is never reached.
       given Checked[Authority] = TestChecked.value
@@ -232,7 +234,10 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
         TrustZone.Client,
         NonEmptyChunk(ValidationError(
           ErrorLocation.Whole,
-          FieldProblem.Query(QueryProblem.UnknownReferences(List("cannot parse 'NoSuchNode' as NodeNameLiteral")))
+          FieldProblem.Query(QueryProblem.Unbound(NonEmptyList(Positioned(
+            QueryPosition.Unknown(),
+            BindProblem.UnreadableLiteral(QueryLiteral.fromString("NoSuchNode").toOption.get, QuerySort.NodeNameLiteral)
+          ))))
         )),
         Nil
       ))))

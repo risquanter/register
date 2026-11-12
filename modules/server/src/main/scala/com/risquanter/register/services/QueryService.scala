@@ -45,8 +45,8 @@ object QueryService:
   /** The caller's refused query, located at the whole request.
     *
     * {{{
-    * rejected(QueryProblem.Unparseable("Expected '}'", Some(14)))
-    * // Rejected at Client: (Whole, Query(Unparseable("Expected '}'", Some(14))))
+    * rejected(QueryProblem.Unparseable(Positioned(QueryPosition.Unknown(), ParseProblem.ToleranceOutOfRange())))
+    * // Rejected at Client: (Whole, Query(Unparseable(Positioned(Unknown(), ToleranceOutOfRange()))))
     * }}}
     */
   def rejected(problem: QueryProblem): Failure =
@@ -54,12 +54,13 @@ object QueryService:
 
   /** The failure an engine error is: the caller's refused query, or a defect
     * when the error is a fault in how this service wired the knowledge base,
-    * which no query reaches (ADR-033 §5). */
+    * which no query reaches (ADR-033 §5). The defect names the engine case and
+    * no caller text beyond a variable name. */
   def refused(err: QueryError): IO[Failure, Nothing] =
     QueryProblem.fromQueryError(err) match
-      case Some(problem) => ZIO.fail(rejected(problem))
-      case None          =>
-        ZIO.die(new IllegalStateException(s"The query engine reported a fault in this service's knowledge base: ${err.formatted}"))
+      case Right(problem) => ZIO.fail(rejected(problem))
+      case Left(reason)   =>
+        ZIO.die(new IllegalStateException(s"The query engine reported a fault in this service's knowledge base: $reason"))
 
   def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): ZIO[QueryService, AppError | Failure, QueryResponse] =
     ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed, seedEntityId, branch))

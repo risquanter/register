@@ -165,6 +165,70 @@ apart. Both pass through the security headers and CORS.
 One answer remains Tapir's and carries a constant body: `405` for a method
 mismatch. It does not report a failure of this service.
 
+### 5. What of the Caller's Query Text a Refusal May Carry
+
+A refusal is structured. It never carries the caller's whole input, and it never
+carries a sentence a backend composed. Two risks are the reason. A value
+repeated to a client can be executed by a client that renders it unsafely. A
+value repeated into a log reaches a wider audience than the caller, and it may
+be confidential.
+
+A refusal of query-language text may still carry values taken from that text,
+because the engine's lexer fixes what the text is made of:
+
+| Piece of the query | Content | How a refusal carries it |
+|---|---|---|
+| a word: predicate, function, variable, bare constant | `[A-Za-z0-9_']` | as text, in a typed field (`QueryWord`, `QueryDecimal`) |
+| a quoted literal | `[A-Za-z0-9 /_.+-]`, the alphabet a name, an identifier or a number can hold | as text, in a typed field (`QueryLiteral`) |
+| punctuation, a known operator | a closed set | as a case of `QueryGrammarSymbol`, never as text |
+| anything else | an unknown operator run, a stray character, a literal holding a refused character | as a kind and a position, never as text |
+
+`QueryProblem` holds a query's refusal and `FieldProblem.TargetingPredicateUnparseable`
+a targeting predicate's. Both carry only the typed fields above, and this service
+renders the sentence from them in `QueryProblem.describe` and
+`ParseProblem.describe`. The log line and the query pane read that one renderer.
+
+Three facts make this sound:
+
+- A query's vocabulary is resource names, which cross the client boundary in
+  both directions (ADR-036), so ordinary use holds no secret. A secret typed
+  into a query is the user's mistake, which the service cannot prevent, and an
+  accepted query's text is already recorded in its trace span.
+- The answer returns only to the caller who sent the text.
+- The defence against injection is the sink and not the syntax. The response is
+  zio-json output, the query pane writes through `textContent`, and no returned
+  field is fed to a parser (ADR-029 §2). The typed fields are the second layer
+  (ADR-029 §1).
+
+The log is the one unstructured sink: `logback.xml` writes `%msg%n`. The literal
+alphabet therefore excludes every control character, and `Failure`'s log line
+cuts a query refusal's sentence to 300 characters, because a word has no length
+bound.
+
+Every query refusal carries a `QueryPosition`. `QueryPosition.Unknown()` is the
+case for a refusal the engine reports without one, and it renders as no
+position clause.
+
+An engine error that no validated query can reach is a defect, and the reason
+the service dies with goes to the log only. That reason names the engine's case,
+and the variable where the case has one, because the lexer bounds a variable. It
+never names `UnboundVariableError`'s bound variables, which hold caller text of
+any kind.
+
+The apostrophe is the one character left to the sinks. The lexer admits it in a
+word, and this service's vocabulary never uses it. It matters only where a client
+writes a field unencoded into a single-quoted attribute or a script string, which
+ADR-029 §4 already forbids.
+
+#### Reconciliation with ADR-029
+
+ADR-029 governs what may be built into a document an interpreter parses. This
+section governs what of a refused text may be repeated to the caller and into
+the log. The two bear on the same fields. ADR-029 §3's `VagueQueryParser.parse`
+row states the literal alphabet, and its "query refusal" row lists this
+section's guards on the outgoing direction. A change to the literal alphabet or
+to a refusal's fields is a change to both records.
+
 ---
 
 ## Code Smells
@@ -234,6 +298,9 @@ ValuedEndpointOutput(BaseEndpoint.internalFaultOut, WireError.InternalFault(trac
 | `WireDecodeFailureHandler` | A rejected input answers `RequestRejected` with the status the input decides |
 | `DefectCatchAllInterceptor` | A defect or escaped failure answers `InternalFault`, from inside the CORS interceptor |
 | `build.sbt` | `-Wconf:msg=match may not be exhaustive:error` promotes an inexhaustive match to a compile error |
+| `QueryProblem`, `ParseProblem`, `BindProblem` | A query refusal carries typed fields and this service's own sentence (§5) |
+| `OpaqueTypes.scala` — `QueryWord`, `QueryDecimal`, `QueryLiteral` | The alphabets of the query text a refusal may carry (§5) |
+| `Failure.logged` | A query refusal's sentence is cut to 300 characters in the log line (§5) |
 
 ---
 

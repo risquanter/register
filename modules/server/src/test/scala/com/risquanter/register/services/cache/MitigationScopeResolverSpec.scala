@@ -9,8 +9,10 @@ import com.risquanter.register.domain.data.{
   Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
   RelativeLikelihood, RelativeSeverity, ResultTransformSpec
 }
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}
+import com.risquanter.register.common.FolSymbols.QuerySort
+import com.risquanter.register.domain.data.iron.{NodeId, QueryLiteral, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}
 import com.risquanter.register.domain.errors.ErrorSubject
+import com.risquanter.register.http.errors.BindProblem
 import com.risquanter.register.testutil.TestHelpers
 
 /** Tests for [[MitigationScopeResolver]] — turning each mitigation's stored
@@ -29,6 +31,8 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
   //   └── Edge (leaf)
   //
   // leaves: Web, DB, Edge   portfolios: Servers, AppTier
+
+  private def literal(s: String): QueryLiteral.QueryLiteral = QueryLiteral.fromString(s).toOption.get
 
   private val serversId = nodeId("servers")
   private val appTierId = nodeId("apptier")
@@ -125,21 +129,21 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
           r   <- newResolver
           out <- r.resolve(ctx(rev1), mkTree(mStale, mOk))
         yield assertTrue(
-          out.outcomes(mStale.id) == ScopeOutcome.Failed(NonEmptyChunk(ScopeResolutionFailure.UnknownNode("Gone"))),
+          out.outcomes(mStale.id) == ScopeOutcome.Failed(NonEmptyChunk(BindProblem.UnreadableLiteral(literal("Gone"), QuerySort.Node))),
           out.appliedScopes(mStale.id) == Set.empty[NodeId],
           out.outcomes(mOk.id) == ScopeOutcome.Resolved(Set(webId, dbId, edgeId))
         )
       },
 
-      test("malformed id vs unknown name — risk_id(bad) is MalformedNodeId, named_risk(gone) is UnknownNode") {
+      test("malformed id vs unknown name — each is a literal its own sort cannot read") {
         val mBadId   = mit("m-badid", """risk_id(x, "not-an-id")""", resultSpec)
         val mBadName = mit("m-badname", """named_risk(x, "Gone")""", resultSpec)
         for
           r   <- newResolver
           out <- r.resolve(ctx(rev1), mkTree(mBadId, mBadName))
         yield assertTrue(
-          out.outcomes(mBadId.id)   == ScopeOutcome.Failed(NonEmptyChunk(ScopeResolutionFailure.MalformedNodeId("not-an-id"))),
-          out.outcomes(mBadName.id) == ScopeOutcome.Failed(NonEmptyChunk(ScopeResolutionFailure.UnknownNode("Gone")))
+          out.outcomes(mBadId.id)   == ScopeOutcome.Failed(NonEmptyChunk(BindProblem.UnreadableLiteral(literal("not-an-id"), QuerySort.NodeIdLiteral))),
+          out.outcomes(mBadName.id) == ScopeOutcome.Failed(NonEmptyChunk(BindProblem.UnreadableLiteral(literal("Gone"), QuerySort.NodeNameLiteral)))
         )
       },
 

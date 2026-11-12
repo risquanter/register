@@ -5,10 +5,11 @@ import zio.json.*
 import zio.prelude.NonEmptyList
 import zio.test.*
 
-import com.risquanter.register.domain.data.iron.QueryVariable
+import com.risquanter.register.common.FolSymbols.QuerySort
+import com.risquanter.register.domain.data.iron.{QueryLiteral, QueryVariable, QueryWord}
 
-/** The answer-variable refusal: its wire shape, the decoder's refusal of a
-  * payload that names no variable, and its sentence. */
+/** The query refusal's wire shape, the decoder's refusal of a payload that
+  * names nothing, and its sentences. */
 object QueryProblemSpec extends ZIOSpecDefault:
 
   private def variable(name: String): QueryVariable.QueryVariable =
@@ -18,6 +19,12 @@ object QueryProblemSpec extends ZIOSpecDefault:
     QueryProblem.AnswerVariablesNotSupported(NonEmptyList(
       Positioned(QueryPosition.Unknown(), variable("y")),
       Positioned(QueryPosition.Unknown(), variable("z"))
+    ))
+
+  private val unbound: QueryProblem =
+    QueryProblem.Unbound(NonEmptyList(
+      Positioned(QueryPosition.Unknown(), BindProblem.UnreadableLiteral(QueryLiteral.fromString("Cyber").toOption.get, QuerySort.NodeNameLiteral)),
+      Positioned(QueryPosition.Unknown(), BindProblem.UnknownPredicate(QuerySymbolName.Word(QueryWord.fromString("lef").toOption.get)))
     ))
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
@@ -48,7 +55,23 @@ object QueryProblemSpec extends ZIOSpecDefault:
           )
         }
       ),
+      suite("Unbound on the wire")(
+        test("round-trips through JSON") {
+          assertTrue(unbound.toJson.fromJson[QueryProblem] == Right(unbound))
+        },
+        test("a payload naming no bind problem does not decode") {
+          assertTrue("""{"kind":"Unbound","problems":[]}""".fromJson[QueryProblem].isLeft)
+        }
+      ),
       suite("describe")(
+        test("joins each bind problem's sentence") {
+          assertTrue(QueryProblem.describe(unbound) ==
+            "No node is named \"Cyber\" in this tree; The query uses 'lef' as a predicate, and no predicate has that name")
+        },
+        test("an unparseable query is its parse problem's sentence") {
+          val problem = QueryProblem.Unparseable(Positioned(QueryPosition.At(9), ParseProblem.Lexical(LexProblem.UnterminatedLiteral)))
+          assertTrue(QueryProblem.describe(problem) == "A quoted literal is not closed with '\"' (at character 9)")
+        },
         test("lists the variables and gives no position clause for an unknown position") {
           assertTrue(QueryProblem.describe(refusal) ==
             "This service answers yes-or-no queries only and does not return answer variables yet: y, z")

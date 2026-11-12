@@ -1,5 +1,10 @@
 package com.risquanter.register.common
 
+import lexer.GrammarSymbol
+import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
+import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
+
 /** FOL symbol names that are reserved by the vague-quantifier query engine.
   *
   * These names may not be used as risk-tree node names. If a node name
@@ -41,6 +46,7 @@ object FolSymbols:
     * derived from the case name (ADR-037). The catalog declares each sort from
     * this enum, so the two cannot drift.
     */
+  @jsonDiscriminator(QuerySort.TagField)
   enum QuerySort(val symbol: String):
     case Node                  extends QuerySort("Node")
     case NodeNameLiteral       extends QuerySort("NodeNameLiteral")
@@ -52,6 +58,19 @@ object FolSymbols:
     case Probability           extends QuerySort("Probability")
 
   object QuerySort:
+    /** The key naming which sort a payload states, read by the decoder and
+      * published in the schema. */
+    final val TagField = "kind"
+
+    // A sort crosses the wire inside a refused query's payload. Its wire
+    // spelling is the case name, which the codec derives; `symbol` is the
+    // engine's contract and is not what the wire carries.
+    given codec: JsonCodec[QuerySort] = DeriveJsonCodec.gen[QuerySort]
+
+    given schema: Schema[QuerySort] =
+      given Configuration = Configuration.default.withDiscriminator(TagField)
+      Schema.derived[QuerySort]
+
     /** The sort a reported type name names, if it names one.
       *
       * {{{
@@ -67,6 +86,78 @@ object FolSymbols:
       * not one of them, because a malformed id is a type error and a
       * well-formed absent id binds and evaluates false. */
     val NodeReferences: Set[QuerySort] = Set(Node, NodeNameLiteral)
+
+  /** The query language's punctuation and operators, as a refused query names
+    * one. The engine's `lexer.GrammarSymbol`, case for case.
+    *
+    * `text` is the symbol's spelling in query text, a contract with the query
+    * language, so it is declared rather than derived from the case name
+    * (ADR-037).
+    */
+  @jsonDiscriminator(QueryGrammarSymbol.TagField)
+  enum QueryGrammarSymbol(val text: String):
+    case LParen       extends QueryGrammarSymbol("(")
+    case RParen       extends QueryGrammarSymbol(")")
+    case LBracket     extends QueryGrammarSymbol("[")
+    case RBracket     extends QueryGrammarSymbol("]")
+    case LBrace       extends QueryGrammarSymbol("{")
+    case RBrace       extends QueryGrammarSymbol("}")
+    case Comma        extends QueryGrammarSymbol(",")
+    case Dot          extends QueryGrammarSymbol(".")
+    case And          extends QueryGrammarSymbol("/\\")
+    case Or           extends QueryGrammarSymbol("\\/")
+    case Implies      extends QueryGrammarSymbol("==>")
+    case Iff          extends QueryGrammarSymbol("<=>")
+    case Not          extends QueryGrammarSymbol("~")
+    case Equal        extends QueryGrammarSymbol("=")
+    case Less         extends QueryGrammarSymbol("<")
+    case LessEqual    extends QueryGrammarSymbol("<=")
+    case Greater      extends QueryGrammarSymbol(">")
+    case GreaterEqual extends QueryGrammarSymbol(">=")
+    case Cons         extends QueryGrammarSymbol("::")
+    case Plus         extends QueryGrammarSymbol("+")
+    case Minus        extends QueryGrammarSymbol("-")
+    case Times        extends QueryGrammarSymbol("*")
+    case Divide       extends QueryGrammarSymbol("/")
+    case Power        extends QueryGrammarSymbol("^")
+
+  object QueryGrammarSymbol:
+    /** The key naming which symbol a payload states, read by the decoder and
+      * published in the schema. */
+    final val TagField = "kind"
+
+    given codec: JsonCodec[QueryGrammarSymbol] = DeriveJsonCodec.gen[QueryGrammarSymbol]
+
+    given schema: Schema[QueryGrammarSymbol] =
+      given Configuration = Configuration.default.withDiscriminator(TagField)
+      Schema.derived[QueryGrammarSymbol]
+
+    /** The symbol the engine reported. */
+    def fromEngine(symbol: GrammarSymbol): QueryGrammarSymbol = symbol match
+      case GrammarSymbol.LParen       => LParen
+      case GrammarSymbol.RParen       => RParen
+      case GrammarSymbol.LBracket     => LBracket
+      case GrammarSymbol.RBracket     => RBracket
+      case GrammarSymbol.LBrace       => LBrace
+      case GrammarSymbol.RBrace       => RBrace
+      case GrammarSymbol.Comma        => Comma
+      case GrammarSymbol.Dot          => Dot
+      case GrammarSymbol.And          => And
+      case GrammarSymbol.Or           => Or
+      case GrammarSymbol.Implies      => Implies
+      case GrammarSymbol.Iff          => Iff
+      case GrammarSymbol.Not          => Not
+      case GrammarSymbol.Equal        => Equal
+      case GrammarSymbol.Less         => Less
+      case GrammarSymbol.LessEqual    => LessEqual
+      case GrammarSymbol.Greater      => Greater
+      case GrammarSymbol.GreaterEqual => GreaterEqual
+      case GrammarSymbol.Cons         => Cons
+      case GrammarSymbol.Plus         => Plus
+      case GrammarSymbol.Minus        => Minus
+      case GrammarSymbol.Times        => Times
+      case GrammarSymbol.Divide       => Divide
+      case GrammarSymbol.Power        => Power
 
   /** A manually maintained mirror of the predicate symbol names declared in the
     * `RiskTreeKnowledgeBase` catalog, plus its function symbols and its two

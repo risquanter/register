@@ -27,9 +27,10 @@ object QueryRequest:
     * naming answer variables, because the service evaluates yes-or-no queries
     * only. The controller turns the refusal into a failure.
     *
-    * The parser returns only refusals of the text, and it accepts a variable
-    * only under `QueryVariable`'s rule, so either other outcome is a defect and
-    * throws.
+    * The parser returns only refusals of the text, each typed to what its
+    * lexer emits, and it accepts a variable only under `QueryVariable`'s rule,
+    * so a refusal that does not translate and a variable that does not refine
+    * are defects and throw.
     *
     * {{{
     * resolve(QueryRequest("Q[>=]^{1/2} x (leaf(x), leaf(x)) (y)"))
@@ -39,8 +40,9 @@ object QueryRequest:
   def resolve(req: QueryRequest): Either[QueryProblem, ParsedQuery] =
     VagueQueryParser.parse(req.query) match
       case Left(err) =>
-        Left(QueryProblem.fromQueryError(err).getOrElse(
-          throw new IllegalStateException(s"The query parser returned an error that refuses no text: ${err.message}")))
+        Left(QueryProblem.fromQueryError(err).fold(
+          reason => throw new IllegalStateException(s"The query parser returned an error that refuses no text: $reason"),
+          identity))
       case Right(parsed) =>
         parsed.answerVars match
           case Nil          => Right(parsed)

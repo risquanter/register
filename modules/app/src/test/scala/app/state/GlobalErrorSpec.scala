@@ -1,6 +1,7 @@
 package app.state
 
 import java.time.Duration
+import io.github.iltotore.iron.autoRefine
 import zio.test.*
 import sttp.model.StatusCode
 
@@ -10,7 +11,8 @@ import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{ScenarioName, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors as E
 import com.risquanter.register.http.errors.{
-  Capability, ConflictKind, NotFoundKind, QueryProblem, RejectionDetail, WireError
+  Capability, ConflictKind, LexProblem, NotFoundKind, ParseProblem, Positioned, QueryPosition, QueryProblem, RejectionDetail,
+  WireError
 }
 
 /** Which failures the banner shows, and the sentence each failure gets where
@@ -23,6 +25,10 @@ import com.risquanter.register.http.errors.{
 object GlobalErrorSpec extends ZIOSpecDefault:
 
   private val trace: TraceId = TelemetryPlaceholders.UnlinkedTrace
+
+  /** A quoted literal left open, found at character 7. */
+  private val unparseable: QueryProblem =
+    QueryProblem.Unparseable(Positioned(QueryPosition.At(7), ParseProblem.Lexical(LexProblem.UnterminatedLiteral)))
 
   private val treeId: TreeId =
     TreeId.fromString("01HX9ABCDE0000000000000001").toOption.get
@@ -66,7 +72,7 @@ object GlobalErrorSpec extends ZIOSpecDefault:
           val perView = List(
             WireError.RequestRejected(fieldErrors, trace),
             WireError.ValidationRejected(treeId, RejectionDetail.Fields(fieldErrors), trace),
-            WireError.ValidationRejected(treeId, RejectionDetail.Query(QueryProblem.Unparseable("unexpected token", Some(7))), trace),
+            WireError.ValidationRejected(treeId, RejectionDetail.Query(unparseable), trace),
             WireError.NotFound(NotFoundKind.Unknown(), trace),
             WireError.NotFound(NotFoundKind.TreeNotAtCommit(), trace),
             WireError.AccessDenied(trace),
@@ -82,9 +88,8 @@ object GlobalErrorSpec extends ZIOSpecDefault:
       ),
       suite("the sentences shown where the action was taken")(
         test("a refused query names the problem and its position") {
-          val problem = QueryProblem.Unparseable("unexpected token", Some(7))
-          val message = ErrorMessages.wire(WireError.ValidationRejected(treeId, RejectionDetail.Query(problem), trace))
-          assertTrue(message.contains("unexpected token")) && assertTrue(message.contains("7"))
+          val message = ErrorMessages.wire(WireError.ValidationRejected(treeId, RejectionDetail.Query(unparseable), trace))
+          assertTrue(message.contains("quoted literal is not closed")) && assertTrue(message.contains("7"))
         },
         test("a conflict names the scenario it is about") {
           val conflict = ConflictKind.MergeAlreadyRunning(ScenarioName.fromString("draft-a").toOption.get)

@@ -113,8 +113,8 @@ Which signal answers which question and at what level (ADR-002), and what a mess
 
 ### Working on the query language path
 
-**Always:** ADR-028 · ADR-029
-Where evaluation runs, how the model is built, and what is validated before evaluation (ADR-028); and that query text is user input reaching a parser (ADR-029).
+**Always:** ADR-028 · ADR-029 · ADR-035
+Where evaluation runs, how the model is built, and what is validated before evaluation (ADR-028); that query text is user input reaching a parser (ADR-029); and what of that text a refusal may repeat to the caller and into the log (ADR-035 §5).
 
 **Also:** ADR-014 if simulation results are needed · ADR-034 if mitigation selections are referenced · ADR-017 if tree size bounds the work · the engine's own records, when a change depends on how vql-engine parses, binds or reports a refusal. They are routed by `vql-adr-constraints` in the sibling checkout (`/home/danago/projects/vague-quantifier-logic/.claude/skills/vql-adr-constraints/SKILL.md`), whose Layer 4 lists the register records that depend on an engine decision.
 
@@ -201,6 +201,7 @@ Read it as an index of collisions, not as a substitute for either record. Where 
 | ADR-038 × ADR-037 | ADR-037 §2 permits a declared spelling where the string contracts with something other than the serialiser, and that carve-out does **not** reach a server-sent event. An event is an operation outcome, so ADR-038 §2 governs it and the codec is derived; the hand-written `toWire` pair is non-conforming rather than a licensed exception. |
 | ADR-039 × ADR-001 | ADR-001 §2 says controllers and services "perform no validation", and a reader who knows it well reports a repository refining a stored value as duplicated validation. It is not: "service" there is the ZIO service, the in-process business logic, so the sentence binds code **inside** the trust region and says nothing about where the region ends. A repository straddles — trusting its caller's `TreeId`, distrusting the store's bytes. *Stated in ADR-039 §2 and in ADR-001's context.* |
 | ADR-039 × ADR-029 | The same boundary is crossed in both directions and each record governs one. ADR-029's parser-boundary table is egress: what may be built into a document sent out. ADR-039 is ingress: what must be refined on the way in. Reading ADR-029's Irmin row as covering the boundary leaves the return path with no rule, which is how store content reaches the domain unrefined. *Stated in ADR-029 §3 and ADR-039 §1.* |
+| ADR-035 × ADR-029 | A query refusal repeats the caller's words and literals, which reads as a backend message reaching the client against ADR-035's context. It is permitted because the lexer fixes their alphabets and the sinks are structured: the refusal carries typed fields and this service's own sentence, never the engine's. The literal alphabet is stated in both records, so widening it in the engine changes what ADR-035 §5 permits. *Stated in ADR-035 §5 and ADR-029 §3, each under a heading naming the other.* |
 | ADR-039 × ADR-010 | A peer that did not answer is `Unanswered`, and a peer whose answer this service refuses is `Rejected` at that peer's zone. Collapsing them into one error case is invisible: both read as the dependency failing. Only the first is retried or reported as an outage. ADR-010 gives the shape a failure takes; ADR-039 says these are two of them. *Stated in ADR-039 §4.* |
 | ADR-003 × ADR-032 | `seedVarId` is in the hashed projection and the node's name is not. That is what makes a rename free — it changes no figure and invalidates no cache entry — and it is also why a seed identifier must never be re-issued: two different risks sharing one would collide in the cache. *Stated in ADR-003 §2.* |
 

@@ -193,6 +193,60 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
       }
     ),
 
+    suite("QueryWord opaque type")(
+      // The engine's lexer alphabet is ASCII letters, digits, '_' and "'".
+      test("accepts a word the engine's lexer emits, apostrophe and leading digit included") {
+        assertTrue(
+          QueryWord.fromString("leaf").map(_.value) == Right("leaf"),
+          QueryWord.fromString("x'").map(_.value) == Right("x'"),
+          QueryWord.fromString("2_b").map(_.value) == Right("2_b")
+        )
+      },
+      test("refuses an empty word, a space, a dot, a markup character and a non-ASCII letter") {
+        assertTrue(
+          QueryWord.fromString("").isLeft,
+          QueryWord.fromString("a b").isLeft,
+          QueryWord.fromString("1.5").isLeft,
+          QueryWord.fromString("<b>").isLeft,
+          QueryWord.fromString("é").isLeft
+        )
+      }
+    ),
+
+    suite("QueryDecimal opaque type")(
+      test("accepts digits, a dot and digits") {
+        assertTrue(QueryDecimal.fromString("0.25").map(_.value) == Right("0.25"))
+      },
+      test("refuses a bare integer, a missing side and a sign") {
+        assertTrue(
+          QueryDecimal.fromString("25").isLeft,
+          QueryDecimal.fromString(".5").isLeft,
+          QueryDecimal.fromString("5.").isLeft,
+          QueryDecimal.fromString("-0.5").isLeft
+        )
+      }
+    ),
+
+    suite("QueryLiteral opaque type")(
+      test("accepts the literal alphabet, and the empty literal") {
+        assertTrue(
+          QueryLiteral.fromString("Cyber Attack").map(_.value) == Right("Cyber Attack"),
+          QueryLiteral.fromString("IT/Ops_1.2+x-y").map(_.value) == Right("IT/Ops_1.2+x-y"),
+          QueryLiteral.fromString("").map(_.value) == Right("")
+        )
+      },
+      test("refuses an apostrophe, a double quote, markup characters, a newline and a non-ASCII letter") {
+        assertTrue(
+          QueryLiteral.fromString("O'Brien").isLeft,
+          QueryLiteral.fromString("a\"b").isLeft,
+          QueryLiteral.fromString("<b>").isLeft,
+          QueryLiteral.fromString("a&b").isLeft,
+          QueryLiteral.fromString("a\nb").isLeft,
+          QueryLiteral.fromString("é").isLeft
+        )
+      }
+    ),
+
     suite("Email opaque type")(
       test("can be created from SafeShortStr") {
         val email: Email.Email = Email.Email("test@example.com".refineUnsafe)

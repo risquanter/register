@@ -4,18 +4,22 @@ import java.time.{Duration, Instant}
 
 import scala.compiletime.testing.typeChecks
 
+import io.github.iltotore.iron.autoRefine
 import sttp.model.StatusCode
 import zio.NonEmptyChunk
+import zio.prelude.NonEmptyList
 import zio.test.*
 
 import com.risquanter.register.auth.{Permission, ResourceRef, ResourceType}
+import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{
-  BranchChoice, CommitHash, NodeId, Revision, ScenarioName, TelemetryPlaceholders, TreeId, UserId,
-  ValidationMessages, WorkspaceId
+  BranchChoice, CommitHash, NodeId, QueryLiteral, QueryVariable, QueryWord, Revision, ScenarioName, TelemetryPlaceholders,
+  TreeId, UserId, ValidationMessages, WorkspaceId
 }
 import com.risquanter.register.http.errors.{
-  Capability, ConflictKind, NotFoundKind, QueryProblem, RejectionDetail, TreeScope, WireError
+  BindProblem, Capability, ConflictKind, LexProblem, NotFoundKind, ParseProblem, Positioned, QueryPosition, QueryProblem,
+  QuerySymbolName, QueryVariableName, RejectionDetail, TreeScope, WireError
 }
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.testutil.TestHelpers.safeId
@@ -41,6 +45,19 @@ object FailureSpec extends ZIOSpecDefault:
 
   private val nameRequired: ValidationError =
     ValidationError(ErrorLocation.requestField(FieldName.Name), FieldProblem.Required)
+
+  private def word(s: String): QueryWord.QueryWord = QueryWord.fromString(s).toOption.get
+
+  /** One refusal of each kind, from the parser, the binder and the answer-variable check. */
+  private val unparseable: QueryProblem =
+    QueryProblem.Unparseable(Positioned(QueryPosition.At(7), ParseProblem.Lexical(LexProblem.UnterminatedLiteral)))
+  private val unknownNode: QueryProblem =
+    QueryProblem.Unbound(NonEmptyList(Positioned(QueryPosition.Unknown(),
+      BindProblem.UnreadableLiteral(QueryLiteral.fromString("Cyber").toOption.get, QuerySort.NodeNameLiteral))))
+  private val unknownPredicate: QueryProblem =
+    QueryProblem.Unbound(NonEmptyList(Positioned(QueryPosition.Unknown(), BindProblem.UnknownPredicate(QuerySymbolName.Word(word("lef"))))))
+  private val answerVariables: QueryProblem =
+    QueryProblem.AnswerVariablesNotSupported(NonEmptyList(Positioned(QueryPosition.Unknown(), QueryVariable.fromString("y").toOption.get)))
 
   private def rejectedAt(zone: TrustZone): Failure =
     Failure.rejected(zone, NonEmptyChunk(nameRequired), Nil)
@@ -172,44 +189,49 @@ object FailureSpec extends ZIOSpecDefault:
                ConflictKind.MergeAlreadyRunning(scenario), ConflictKind.MergeTargetMoved(scenario),
                ConflictKind.ScenarioHeadStale(scenario)).map(ConflictKind.describe),
           Capability.values.toList.map(Capability.describe),
-          List(QueryProblem.Unparseable("m", Some(3)), QueryProblem.UnknownReferences(List("m")),
-               QueryProblem.TypeCheckFailed(List("m")), QueryProblem.NotQuantifiable("n")).map(QueryProblem.describe),
+          List(unparseable, unknownNode, unknownPredicate, answerVariables).map(QueryProblem.describe),
           List(ExpiryDetail(ExpiryCause.Lifetime, Duration.ofHours(72), Duration.ofMinutes(30)),
                ExpiryDetail(ExpiryCause.Inactivity, Duration.ofHours(72), Duration.ofMinutes(30))).map(ExpiryDetail.describe),
           List(FieldProblem.Unreadable(ExpectedInput.Json), FieldProblem.Unreadable(ExpectedInput.Interval),
                FieldProblem.WrongFormat(ValueFormat.StoreSegment), FieldProblem.StoredNodeKindDiffers,
-               FieldProblem.Query(QueryProblem.NotQuantifiable("n"))).map(ValidationMessages.render)
+               FieldProblem.Query(unknownPredicate)).map(ValidationMessages.render)
         )
         assertTrue(sentences.forall(s => s.forall(_.nonEmpty) && s.distinct.size == s.size))
       },
-      test("a refused query carries the engine's own sentence") {
-        val problem = QueryProblem.Unparseable("unexpected token", Some(7))
-        assertTrue(ValidationMessages.render(FieldProblem.Query(problem)) == "unexpected token (at character 7)")
+      test("a refused query carries this service's sentence, built from its fields") {
+        assertTrue(ValidationMessages.render(FieldProblem.Query(unparseable)) == "A quoted literal is not closed with '\"' (at character 7)")
       },
-      test("a parser message reaches the log line cut to 300 characters, and a tree's wire answer whole") {
-        val message = "x" * 400
+      test("a refused query's sentence reaches the log line cut to 300 characters, and a tree's wire answer whole") {
+        // The lexer bounds a word's characters and not its length, so a long
+        // variable name makes a sentence longer than the log line holds.
+        val problem = QueryProblem.Unparseable(Positioned(
+          QueryPosition.At(2),
+          ParseProblem.QuantifiedVariableNotInRange(QueryVariableName.Word(word("x" * 400)), Set.empty)
+        ))
+        val sentence = QueryProblem.describe(problem)
         val failure = Failure.rejected(
           TrustZone.Client,
-          NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable(message, Some(2))))),
+          NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.Query(problem))),
           Nil
         )
         val trace = TelemetryPlaceholders.UnlinkedTrace
         assertTrue(
+          sentence.length > 300,
           failure.logMessage ==
-            s"Rejected: [${ErrorLocation.describe(ErrorLocation.Whole)}] ${"x" * 300}… (message truncated) (at character 2)",
+            s"Rejected: [${ErrorLocation.describe(ErrorLocation.Whole)}] ${sentence.take(300)}… (message truncated)",
           failure.toWire(trace, TreeScope.InTree(treeId)) ==
-            WireError.ValidationRejected(treeId, RejectionDetail.Query(QueryProblem.Unparseable(message, Some(2))), trace),
+            WireError.ValidationRejected(treeId, RejectionDetail.Query(problem), trace),
           // A query runs only on a route naming a tree, so a refusal with none
           // in scope is this service's defect.
           failure.toWire(trace, TreeScope.NoTree) == WireError.InternalFault(trace)
         )
       },
-      test("a refused query is classified by the engine's refusal") {
+      test("a refused query is classified by its case, and a bind refusal by what its problems name") {
         assertTrue(
-          FieldProblem.code(FieldProblem.Query(QueryProblem.Unparseable("m", None))) == ValidationErrorCode.PARSE_ERROR,
-          FieldProblem.code(FieldProblem.Query(QueryProblem.UnknownReferences(Nil))) == ValidationErrorCode.UNKNOWN_REFERENCE,
-          FieldProblem.code(FieldProblem.Query(QueryProblem.TypeCheckFailed(Nil))) == ValidationErrorCode.BIND_FAILED,
-          FieldProblem.code(FieldProblem.Query(QueryProblem.NotQuantifiable("n"))) == ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE
+          FieldProblem.code(FieldProblem.Query(unparseable)) == ValidationErrorCode.PARSE_ERROR,
+          FieldProblem.code(FieldProblem.Query(unknownNode)) == ValidationErrorCode.UNKNOWN_REFERENCE,
+          FieldProblem.code(FieldProblem.Query(unknownPredicate)) == ValidationErrorCode.BIND_FAILED,
+          FieldProblem.code(FieldProblem.Query(answerVariables)) == ValidationErrorCode.NOT_SUPPORTED
         )
       },
       test("a tree subject names the tree") {
@@ -262,15 +284,14 @@ object FailureSpec extends ZIOSpecDefault:
           failure.toWire(t, TreeScope.NoTree) == WireError.RequestRejected(List(nameRequired, second), t)
         )
       },
-      test("one refused query keeps the engine's structure on its tree") {
+      test("one refused query keeps its typed fields on its tree") {
         val t       = TelemetryPlaceholders.UnlinkedTrace
-        val problem = QueryProblem.Unparseable("unexpected token", Some(7))
-        val failure = Failure.Rejected(Core(TrustZone.Client, one(FieldProblem.Query(problem)), Nil))
-        assertTrue(failure.toWire(t, TreeScope.InTree(treeId)) == WireError.ValidationRejected(treeId, RejectionDetail.Query(problem), t))
+        val failure = Failure.Rejected(Core(TrustZone.Client, one(FieldProblem.Query(unparseable)), Nil))
+        assertTrue(failure.toWire(t, TreeScope.InTree(treeId)) == WireError.ValidationRejected(treeId, RejectionDetail.Query(unparseable), t))
       },
       test("a refused query with no tree in scope is this service's defect") {
         val t       = TelemetryPlaceholders.UnlinkedTrace
-        val failure = Failure.Rejected(Core(TrustZone.Client, one(FieldProblem.Query(QueryProblem.NotQuantifiable("n"))), Nil))
+        val failure = Failure.Rejected(Core(TrustZone.Client, one(FieldProblem.Query(unknownPredicate)), Nil))
         assertTrue(failure.toWire(t, TreeScope.NoTree) == WireError.InternalFault(t))
       },
       // An unreachable authorization service answers as a dependency outage, so

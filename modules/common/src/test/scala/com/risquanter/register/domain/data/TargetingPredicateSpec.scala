@@ -4,6 +4,7 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{FieldProblem, ValidationErrorCode}
+import com.risquanter.register.http.errors.{LexProblem, ParseProblem, Positioned, QueryPosition, QueryToken}
 
 /** Boundary validation for the targeting sublanguage: a bare single-free-variable
   * FOL formula, in the targeting fragment (no quantifiers, no function terms),
@@ -14,6 +15,9 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
 
   private def firstCode(source: String): Option[ValidationErrorCode] =
     TargetingPredicate.create(source).toEither.swap.toOption.map(errs => FieldProblem.code(errs.head.problem))
+
+  private def firstProblem(source: String): Option[FieldProblem] =
+    TargetingPredicate.create(source).toEither.swap.toOption.map(_.head.problem)
 
   def spec = suite("TargetingPredicateSpec")(
     suite("accepts")(
@@ -33,6 +37,22 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       },
       test("malformed syntax (parse)") {
         assertTrue(firstCode("leaf(x") == Some(ValidationErrorCode.INVALID_FORMAT))
+      },
+      test("malformed syntax carries the formula parser's typed refusal, at the unknown position the parser reports it with") {
+        assertTrue(firstProblem("leaf(x") match
+          case Some(FieldProblem.TargetingPredicateUnparseable(Positioned(QueryPosition.Unknown(), ParseProblem.Formula(_)))) => true
+          case _ => false)
+      },
+      test("text after a whole formula is a trailing-tokens refusal naming the first token") {
+        assertTrue(firstProblem("leaf(x) leaf(y)") match
+          case Some(FieldProblem.TargetingPredicateUnparseable(Positioned(_, ParseProblem.TrailingTokens(QueryToken.Word(word), _)))) =>
+            word.value == "leaf"
+          case _ => false)
+      },
+      test("a literal holding a character outside its alphabet is a lexical refusal, with no text") {
+        assertTrue(firstProblem("""named_risk(x, "a<b")""") match
+          case Some(FieldProblem.TargetingPredicateUnparseable(Positioned(_, ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter)))) => true
+          case _ => false)
       },
       test("a quantifier (targeting fragment)") {
         assertTrue(firstCode("forall x . leaf(x)") == Some(ValidationErrorCode.CONSTRAINT_VIOLATION))

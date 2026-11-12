@@ -11,6 +11,7 @@ import com.risquanter.register.domain.errors.{AppError, Failure}
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.common.ValuationBasis
 import com.risquanter.register.common.FolSymbols.ValueFunction
+import com.risquanter.register.http.errors.BindProblem
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, ScopeResolutionContext, ResolvedScopes}
@@ -66,7 +67,7 @@ class QueryServiceLive private (
       ZIO.logWarning(
         s"MitigationScopeResolver: ${resolved.failures.size} mitigation(s) did not " +
         s"resolve against this tree version: " +
-        resolved.failures.map((id, errs) => s"${id.value} -> ${errs.mkString("[", ", ", "]")}").mkString("; ")
+        resolved.failures.map((id, errs) => s"${id.value} -> ${errs.map(BindProblem.describe).mkString("[", "; ", "]")}").mkString("; ")
       )
     ).unit
 

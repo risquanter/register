@@ -20,7 +20,8 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 import vql.parser.VagueQueryParser
 import vql.semantics.VagueSemantics
-import vql.typed.{Value, TypeId, FolModel, QueryBinder, TypeCheckError}
+import vql.error.TypeCheckError
+import vql.typed.{Value, TypeId, FolModel, QueryBinder}
 
 /** Tests for [[RiskTreeKnowledgeBase]] — the bridge between register's domain
   * model and the vql-engine typed evaluation pipeline.
@@ -738,7 +739,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       assertTrue(
         bound.isLeft,
         bound.left.toOption.exists(_.exists {
-          case TypeCheckError.UnparseableConstant(name, sort, _) => name == "IT Risk" && sort == nodeIdLiteralSort
+          case TypeCheckError.UnparseableConstant(name, sort, _) => name.value == "IT Risk" && sort == nodeIdLiteralSort
           case _                                                 => false
         })
       )
@@ -750,7 +751,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       assertTrue(
         bound.isLeft,
         bound.left.toOption.exists(_.exists {
-          case TypeCheckError.UnparseableConstant(name, sort, _) => name == cyberId.value && sort == nodeNameLiteralSort
+          case TypeCheckError.UnparseableConstant(name, sort, _) => name.value == cyberId.value.toString && sort == nodeNameLiteralSort
           case _                                                 => false
         })
       )

@@ -246,13 +246,14 @@ A query the service refuses on its content answers 422 with
 `WireError.ValidationRejected`, whose detail is `RejectionDetail.Query`
 carrying one `QueryProblem`:
 
-| `QueryProblem` case | Cause |
-|---|---|
-| `Unparseable` | The text does not parse |
-| `UnknownReferences` | Every bind error is a quoted node reference no literal validator accepts |
-| `TypeCheckFailed` | Any other bind error: an unknown symbol, a wrong arity, arguments of the wrong sort, a quantifier over a value sort |
-| `NotQuantifiable` | The evaluator finds no registered domain for the quantified sort |
-| `AnswerVariablesNotSupported` | The query names answer variables |
+| `QueryProblem` case | Cause | `ValidationErrorCode` |
+|---|---|---|
+| `Unparseable` | The text does not parse, or its range formula breaks a variable rule. It carries one typed `ParseProblem` at its `QueryPosition` | `PARSE_ERROR` |
+| `Unbound` | The text parses and does not bind against the tree's catalog. It carries every `BindProblem` the binder found | `UNKNOWN_REFERENCE` when every problem names a node the tree does not hold; `BIND_FAILED` otherwise |
+| `AnswerVariablesNotSupported` | The query names answer variables | `NOT_SUPPORTED` |
+
+The sentence the pane shows is rendered by this service from the typed fields
+(ADR-035 §5).
 
 A refusal answers 422 rather than 400 because a well-formed request body is
 rejected on its content. Every other failure — a malformed body, an unknown

@@ -123,3 +123,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/TargetingPredicate.scala

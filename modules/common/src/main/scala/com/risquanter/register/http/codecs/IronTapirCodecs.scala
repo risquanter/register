@@ -3,7 +3,7 @@ package com.risquanter.register.http.codecs
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
 import zio.json.{DecoderOps, EncoderOps}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, QueryVariable, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, QueryVariable, QueryWord, QueryDecimal, QueryLiteral, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
 /**
@@ -279,6 +279,21 @@ object IronTapirCodecs {
   /** Schema for QueryVariable.QueryVariable, which a refused query's payload carries. */
   given Schema[QueryVariable.QueryVariable] = Schema.string.map[QueryVariable.QueryVariable](
     (s: String) => QueryVariable.fromString(s).toOption
+  )(_.value)
+
+  /** Schema for QueryWord.QueryWord, which a refused query's payload carries. */
+  given Schema[QueryWord.QueryWord] = Schema.string.map[QueryWord.QueryWord](
+    (s: String) => QueryWord.fromString(s).toOption
+  )(_.value)
+
+  /** Schema for QueryDecimal.QueryDecimal, which a refused query's payload carries. */
+  given Schema[QueryDecimal.QueryDecimal] = Schema.string.map[QueryDecimal.QueryDecimal](
+    (s: String) => QueryDecimal.fromString(s).toOption
+  )(_.value)
+
+  /** Schema for QueryLiteral.QueryLiteral, which a refused query's payload carries. */
+  given Schema[QueryLiteral.QueryLiteral] = Schema.string.map[QueryLiteral.QueryLiteral](
+    (s: String) => QueryLiteral.fromString(s).toOption
   )(_.value)
 
   /** Schema for DistributionType for JSON body derivation. */

@@ -4,7 +4,8 @@ import zio.prelude.NonEmptyList
 import zio.test.*
 
 import com.risquanter.register.domain.data.iron.QueryVariable
-import com.risquanter.register.http.errors.{Positioned, QueryPosition, QueryProblem}
+import com.risquanter.register.common.FolSymbols.QueryGrammarSymbol
+import com.risquanter.register.http.errors.{LexProblem, ParseProblem, Positioned, QueryFound, QueryPosition, QueryProblem, QueryToken}
 
 /** `QueryRequest.resolve`, the boundary that parses query text and refuses a
   * query the service cannot answer. */
@@ -23,11 +24,18 @@ object QueryRequestSpec extends ZIOSpecDefault:
         assertTrue(result == Left(QueryProblem.AnswerVariablesNotSupported(
           NonEmptyList(Positioned(QueryPosition.Unknown(), y)))))
       },
-      test("text the parser refuses is Unparseable") {
+      test("text the parser refuses is Unparseable, carrying the token the parser found") {
         val result = QueryRequest.resolve(QueryRequest("Q[>=]^{1/2 x (leaf(x), leaf(x))"))
         assertTrue(result match
-          case Left(QueryProblem.Unparseable(_, _)) => true
-          case _                                    => false)
+          case Left(QueryProblem.Unparseable(Positioned(_, ParseProblem.SymbolExpected(QueryGrammarSymbol.RBrace, _, QueryFound.Token(QueryToken.Word(word)))))) =>
+            word.value == "x"
+          case _ => false)
+      },
+      test("a literal holding a character outside its alphabet is a lexical refusal") {
+        val result = QueryRequest.resolve(QueryRequest("""Q[>=]^{1/2} x (leaf(x), named_risk(x, "<b>"))"""))
+        assertTrue(result match
+          case Left(QueryProblem.Unparseable(Positioned(_, ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter)))) => true
+          case _ => false)
       }
     )
 

@@ -11,7 +11,12 @@ import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, MergeRefusal, RequestHeaderName,
   SubmittedCollection
 }
-import com.risquanter.register.http.errors.{ConflictKind, QueryProblem, RejectionDetail}
+import com.risquanter.register.common.FolSymbols.{QueryGrammarSymbol, QuerySort}
+import com.risquanter.register.http.errors.{
+  BindProblem, ConflictKind, LexProblem, MismatchSite, ParseContext, ParseProblem, QuantifierPart, QueryFound,
+  QueryPosition, QueryProblem, QuerySymbolName, QueryToken, QueryVariableName, RejectionDetail, SymbolKind,
+  SyntaxProblem
+}
 import com.risquanter.register.http.requests.{DistributionShapeRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.MergePreviewStatus
 
@@ -63,6 +68,21 @@ object PublishedDiscriminatorSpec extends ZIOSpecDefault {
     entry[MergeRefusal]("MergeRefusal"),
     entry[RejectionDetail]("RejectionDetail"),
     entry[QueryProblem]("QueryProblem"),
+    entry[QueryPosition]("QueryPosition"),
+    entry[ParseProblem]("ParseProblem"),
+    entry[SyntaxProblem]("SyntaxProblem"),
+    entry[LexProblem]("LexProblem"),
+    entry[QueryToken]("QueryToken"),
+    entry[QueryFound]("QueryFound"),
+    entry[QueryVariableName]("QueryVariableName"),
+    entry[QuantifierPart]("QuantifierPart"),
+    entry[ParseContext]("ParseContext"),
+    entry[BindProblem]("BindProblem"),
+    entry[QuerySymbolName]("QuerySymbolName"),
+    entry[SymbolKind]("SymbolKind"),
+    entry[MismatchSite]("MismatchSite"),
+    entry[QuerySort]("QuerySort"),
+    entry[QueryGrammarSymbol]("QueryGrammarSymbol"),
     entry[ScenarioSourceDto]("ScenarioSourceDto"),
     entry[MergePreviewStatus]("MergePreviewStatus")
   )

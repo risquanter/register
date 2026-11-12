@@ -11,7 +11,7 @@ import com.risquanter.register.domain.data.iron.{
   SafeName, ScenarioName, SeedEntityId, SeedVarId, TreeId, given
 }
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.http.errors.QueryProblem
+import com.risquanter.register.http.errors.{BindProblem, ParseProblem, Positioned, QueryProblem}
 
 /** The key naming which case a value is, read by every decoder in this file and
   * published in every schema. Stated once so the two cannot disagree. */
@@ -449,8 +449,8 @@ enum FieldProblem:
   case Unreadable(expected: ExpectedInput)
 
   /** The query engine refused the query text. Wraps the wire's own payload, so a
-    * refused query reaches the client as `RejectionDetail.Query` with the
-    * engine's structure intact. */
+    * refused query reaches the client as `RejectionDetail.Query` with its typed
+    * fields intact. */
   case Query(problem: QueryProblem)
 
   /** A validator the endpoint declares on the input refused the value, with no
@@ -525,7 +525,7 @@ enum FieldProblem:
   case MitigationEliminatesRisk
   case MitigationLowersMinLossBelowFloor(min: PositiveLong, minFactor: PositiveDouble)
   case MitigationLowersAnchorLossBelowFloor(min: PositiveDouble, minFactor: PositiveDouble)
-  case TargetingPredicateUnparseable
+  case TargetingPredicateUnparseable(problem: Positioned[ParseProblem])
   case TargetingQuantifierNotAllowed
   case TargetingFunctionNotAllowed
   case TargetingQuantifierDepthExceeded(limit: NonNegativeInt, found: NonNegativeInt)
@@ -616,7 +616,7 @@ object FieldProblem:
     case MitigationEliminatesRisk                   => ValidationErrorCode.CONSTRAINT_VIOLATION
     case MitigationLowersMinLossBelowFloor(_, _)    => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS
     case MitigationLowersAnchorLossBelowFloor(_, _) => ValidationErrorCode.INVALID_METALOG_PARAMS
-    case TargetingPredicateUnparseable              => ValidationErrorCode.INVALID_FORMAT
+    case TargetingPredicateUnparseable(_)           => ValidationErrorCode.INVALID_FORMAT
     case TargetingQuantifierNotAllowed              => ValidationErrorCode.CONSTRAINT_VIOLATION
     case TargetingFunctionNotAllowed                => ValidationErrorCode.CONSTRAINT_VIOLATION
     case TargetingQuantifierDepthExceeded(_, _)     => ValidationErrorCode.CONSTRAINT_VIOLATION
@@ -634,10 +634,12 @@ object FieldProblem:
     case WorkspaceHasNoContent                      => ValidationErrorCode.NOT_FOUND
     case Unspecified                                => ValidationErrorCode.CONSTRAINT_VIOLATION
 
-  /** The query codes, one per refusal of a query. */
+  /** The query codes. A bind refusal whose every problem names something the
+    * tree does not hold is an unknown reference, and any other is a failed
+    * bind. */
   private def queryCode(problem: QueryProblem): ValidationErrorCode = problem match
-    case QueryProblem.Unparseable(_, _)                => ValidationErrorCode.PARSE_ERROR
-    case QueryProblem.UnknownReferences(_)             => ValidationErrorCode.UNKNOWN_REFERENCE
-    case QueryProblem.TypeCheckFailed(_)               => ValidationErrorCode.BIND_FAILED
-    case QueryProblem.NotQuantifiable(_)               => ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE
-    case QueryProblem.AnswerVariablesNotSupported(_)   => ValidationErrorCode.NOT_SUPPORTED
+    case QueryProblem.Unparseable(_)                 => ValidationErrorCode.PARSE_ERROR
+    case QueryProblem.Unbound(problems) if problems.forall(p => BindProblem.namesAbsentNode(p.problem)) =>
+      ValidationErrorCode.UNKNOWN_REFERENCE
+    case QueryProblem.Unbound(_)                     => ValidationErrorCode.BIND_FAILED
+    case QueryProblem.AnswerVariablesNotSupported(_) => ValidationErrorCode.NOT_SUPPORTED

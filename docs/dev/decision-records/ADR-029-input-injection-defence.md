@@ -84,7 +84,8 @@ val result = riskNameToId.get(userInput)  // Set.contains / Map.get only
 
 | Boundary | Current guard |
 |---|---|
-| FOL `VagueQueryParser.parse` | Query text is user-typed; node references resolve at bind time through per-sort literal validators — `riskNameToId.get` for a name (`Node` / `NodeNameLiteral` sorts), `NodeId.fromString` for an id (`NodeIdLiteral`) — whitelist-constrained, never interpolated |
+| FOL `VagueQueryParser.parse` | Query text is user-typed. The engine's lexer admits in a quoted literal only `[A-Za-z0-9 /_.+-]`, the alphabet a name, an identifier or a number can hold, and refuses any other character as its own parse refusal. Node references resolve at bind time through per-sort literal validators — `riskNameToId.get` for a name (`Node` / `NodeNameLiteral` sorts), `NodeId.fromString` for an id (`NodeIdLiteral`) — whitelist-constrained, never interpolated |
+| A query refusal (`QueryProblem`, `FieldProblem.TargetingPredicateUnparseable`) | Outgoing to the caller and the log. Each field is typed to the alphabet the lexer guarantees (`QueryWord`, `QueryDecimal`, `QueryLiteral`) or is a case of a closed set, and the sentence is this service's own. The response is zio-json output, the query pane writes through `textContent`, no returned field is fed to a parser, and the log line cuts the sentence to 300 characters. ADR-035 §5 states what of the caller's text may be carried |
 | FOL `TargetingPredicate.create` | Mitigation targeting text is user-typed; length-bounded (1–256) then parsed via `FOLParser`, then restricted to the targeting fragment (no quantifiers, no function terms), a single free variable, and no mitigation-state predicate. `decode == create`, so no `TargetingPredicate` exists whose source was not validated; the parsed formula is derived state, never re-serialised or interpolated |
 | JDBC / Quill | Parameterised queries via typed DSL; no hand-rolled SQL |
 | Irmin GraphQL (`IrminQueries`) | **Approved alternative (§2).** Documents are built by interpolation, and every value interpolated into one is derived from an Iron-refined type and nothing else. Branch names (`BranchRefStr`, `MergeStagingRefStr`), paths (`IrminPath`) and commit hashes (`CommitHash`) carry refinements whose character classes exclude `"` and `\`. A stored node is zio-json output whose every string-bearing field is either refined — `SafeId`, `SafeName`, `NodeId` — or a compile-time literal, so neither `RiskLeaf` nor `RiskPortfolio` has a free-text field, and no user-supplied character that carries meaning in GraphQL can enter the document. The loss shape's mode spelling is the literal case, not a refined field: each case of `DistributionShape` states its own, and the serialiser writes it as the discriminator tag, so the value cannot originate with a caller at all. That is narrower than a refinement and reached by a different mechanism. Commit message and author are server-constructed, not user-supplied. `escapeGraphQLString` is the second layer over those free-text values and emits every character below U+0020. One interpolation in the branch **selector** is structure rather than a value and so could not move to `variables` even if the rest did: a read of a named branch aliases it as `main` so that every response decodes identically, and the choice between that aliased call and the bare `main` selector is a choice between two document shapes. The branch name inside it is an ordinary argument value |
@@ -107,6 +108,14 @@ refined on the way in, and a value that arrives and is then interpolated into a
 new document is subject to both — refined on ingress, then whitelist-constrained
 on egress. Neither direction implies the other: a store this service wrote to is
 still outside the process when it answers.
+
+#### Reconciliation with ADR-035
+
+A query refusal repeats values taken from the caller's text, and ADR-035 §5
+states which values and why. This record's two layers are what make that
+repetition safe. The sink is the primary guard (§2, §4), and the typed fields
+are the second layer (§1). The two records bear on the same fields, so a change
+to the literal alphabet or to a refusal's fields is a change to both.
 
 ### 4. Iron whitelisting is defence-in-depth, not the primary XSS guard
 

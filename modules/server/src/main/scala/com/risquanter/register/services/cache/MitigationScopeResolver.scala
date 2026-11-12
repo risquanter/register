@@ -3,6 +3,7 @@ package com.risquanter.register.services.cache
 import zio.{UIO, NonEmptyChunk}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
+import com.risquanter.register.http.errors.BindProblem
 
 /** Names the tree version whose scopes are resolved. The owning workspace is NOT
   * a field: one resolver instance exists per workspace
@@ -15,36 +16,20 @@ import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, Comm
   */
 final case class ScopeResolutionContext(treeId: TreeId, branch: BranchRef, revision: CommitHash)
 
-/** Why one mitigation's predicate did not resolve against this tree version. The
-  * user-actionable distinctions — a renamed/deleted node, a malformed id, a type
-  * error — stay separate; the structural and internal faults a create-validated
-  * predicate should never reach are collapsed, because they carry no end-user
-  * action.
-  */
-enum ScopeResolutionFailure:
-  /** A `named` / bare-`Node`-slot node name no longer resolves to a tree node. */
-  case UnknownNode(reference: String)
-  /** A `has_id` literal is not a well-formed node id. */
-  case MalformedNodeId(reference: String)
-  /** A symbol used at an incompatible or conflicting sort. */
-  case TypeError(detail: String)
-  /** A structural mismatch against the current catalog vocabulary. */
-  case MalformedPredicate(detail: String)
-  /** A re-parse or evaluation fault a bound predicate should never reach. */
-  case InternalError(detail: String)
-
 /** Per-mitigation resolution outcome: a coproduct with `toEither` and wrapper
   * projections only — no `map`/`flatMap`; it is a result, not a pipeline.
-  * `Failed` still contributes an empty applied scope (a stale predicate is a
-  * no-op for that mitigation, never a whole-request failure), so `scopeOrEmpty`
-  * is what the application algebra consumes and `failures` is the per-mitigation
-  * drift signal.
+  * `Failed` carries why the predicate no longer binds against this tree
+  * version, such as a quoted node that was renamed or deleted. It still
+  * contributes an empty applied scope (a stale predicate is a no-op for that
+  * mitigation, never a whole-request failure), so `scopeOrEmpty` is what the
+  * application algebra consumes and `failures` is the per-mitigation drift
+  * signal.
   */
 enum ScopeOutcome:
   case Resolved(scope: Set[NodeId])
-  case Failed(errors: NonEmptyChunk[ScopeResolutionFailure])
+  case Failed(errors: NonEmptyChunk[BindProblem])
 
-  def toEither: Either[NonEmptyChunk[ScopeResolutionFailure], Set[NodeId]] = this match
+  def toEither: Either[NonEmptyChunk[BindProblem], Set[NodeId]] = this match
     case Resolved(scope) => Right(scope)
     case Failed(errs)    => Left(errs)
 
@@ -52,7 +37,7 @@ enum ScopeOutcome:
     case Resolved(scope) => scope
     case Failed(_)       => Set.empty
 
-  def failures: Option[NonEmptyChunk[ScopeResolutionFailure]] = this match
+  def failures: Option[NonEmptyChunk[BindProblem]] = this match
     case Resolved(_)  => None
     case Failed(errs) => Some(errs)
 
@@ -68,14 +53,14 @@ final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
   def appliedScopes: Map[MitigationId, Set[NodeId]] =
     outcomes.view.mapValues(_.scopeOrEmpty).toMap
 
-  def failures: Map[MitigationId, NonEmptyChunk[ScopeResolutionFailure]] =
+  def failures: Map[MitigationId, NonEmptyChunk[BindProblem]] =
     outcomes.collect { case (id, ScopeOutcome.Failed(errs)) => id -> errs }
 
 trait MitigationScopeResolver:
   /** Resolve every mitigation's predicate to its applied node-id scope against
     * `tree`, memoized per tree version. `tree` must be the tree at
     * `context.revision`; the context names which version for cache identity. No
-    * error channel (`UIO`): every per-mitigation failure is isolated into the
-    * outcome map, and the results-free KB build plus the in-memory memo cannot
-    * fault. */
+    * error channel (`UIO`): every per-mitigation bind failure is isolated into
+    * the outcome map, and the results-free KB build plus the in-memory memo
+    * cannot fault. A state a stored predicate cannot reach is a defect. */
   def resolve(context: ScopeResolutionContext, tree: RiskTree): UIO[ResolvedScopes]

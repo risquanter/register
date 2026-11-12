@@ -2,13 +2,15 @@ package com.risquanter.register.http.errors
 
 import java.time.Duration as JDuration
 
+import io.github.iltotore.iron.autoRefine
 import zio.json.*
 import zio.test.*
 import sttp.model.StatusCode
 import sttp.tapir.EndpointOutput
 
 import com.risquanter.register.domain.data.ExpiryCause
-import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName, TelemetryPlaceholders, TraceId, TreeId}
+import com.risquanter.register.common.FolSymbols.QueryGrammarSymbol
+import com.risquanter.register.domain.data.iron.{BranchChoice, QueryWord, ScenarioName, TelemetryPlaceholders, TraceId, TreeId}
 import com.risquanter.register.domain.errors.*
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError.given
@@ -53,10 +55,20 @@ object WireErrorSpec extends ZIOSpecDefault:
     WireError.RequestRejected(List(fieldFailure), trace)
   private val validationRejected: WireError.ValidationRejected =
     WireError.ValidationRejected(treeId, RejectionDetail.Fields(List(fieldFailure)), trace)
+  /** `Q[>=]^{2/3 x …`: a word where the parser needed `}`. */
+  private val unparseable: QueryProblem =
+    QueryProblem.Unparseable(Positioned(
+      QueryPosition.At(4),
+      ParseProblem.SymbolExpected(
+        QueryGrammarSymbol.RBrace,
+        ParseContext.ToleranceOrEnd,
+        QueryFound.Token(QueryToken.Word(QueryWord.fromString("x").toOption.get))
+      )
+    ))
   private val queryRejected: WireError.ValidationRejected =
     WireError.ValidationRejected(
       treeId,
-      RejectionDetail.Query(QueryProblem.Unparseable("bad syntax", Some(4))),
+      RejectionDetail.Query(unparseable),
       trace
     )
   private val notFound: WireError.NotFound = WireError.NotFound(NotFoundKind.Unknown(), trace)
@@ -196,7 +208,7 @@ object WireErrorSpec extends ZIOSpecDefault:
               ValidationError(ErrorLocation.Field(ErrorSubject.Tree(treeId), FieldName.Ttl), FieldProblem.Unreadable(ExpectedInput.Json)),
               ValidationError(ErrorLocation.requestField(FieldName.IdleTimeout), FieldProblem.Unreadable(ExpectedInput.Interval)),
               ValidationError(ErrorLocation.Whole, FieldProblem.WrongFormat(ValueFormat.StoreSegment)),
-              ValidationError(ErrorLocation.Whole, FieldProblem.Query(QueryProblem.Unparseable("bad syntax", Some(4)))),
+              ValidationError(ErrorLocation.Whole, FieldProblem.Query(unparseable)),
               ValidationError(ErrorLocation.Whole, FieldProblem.StoredNodeKindDiffers)
             ),
             trace

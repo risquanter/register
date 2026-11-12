@@ -67,7 +67,8 @@ are narrowed, the latter to `UIO`, because every branch of it dies.
 step 6.1 deletes the function. `decorate`'s overflow at `MitigatedResult` is
 caused by the caller's mitigation and answers at `Client` with row 58b. The
 engine release steps 5.6 and 5.7 wait on, vql-engine 0.18.0, was published on
-2026-11-12.
+2026-11-12. Steps 5.6 and 5.7 landed together on 2026-11-12 against it, with
+the signatures and deviations stated at the end of step 5.7.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
@@ -1289,9 +1290,141 @@ text, so the pane and the server show one sentence for one refusal.
 `vqlEngineVersion` in `build.sbt` moves to the release. Steps 5.6 and 5.7 land
 together against that release, so `QueryProblem` changes on the wire once.
 
-Register's signatures for this step are written from the engine plan's
-signatures once that plan is approved, and presented then. Until that, this
-step's exact signatures are the plan's one open item.
+Register's signatures for steps 5.6 and 5.7, written against vql-engine 0.18.0
+and approved 2026-11-12. They replace step 5.6's block above where the two
+differ, because 0.18.0 replaced `BindErrorDetail` with `TypeCheckError` and
+types each name by its token class:
+
+```scala
+// common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala
+type QueryWordConstraint    = Match["^[A-Za-z0-9_']+$"]        // lexer.WordText
+type QueryDecimalConstraint = Match["^[0-9]+\\.[0-9]+$"]       // lexer.DecimalText
+type QueryLiteralConstraint = Match["^[A-Za-z0-9 /_.+\\-]*$"]  // lexer.LiteralText, the engine's literal alphabet
+object QueryWord:    opaque type QueryWord    = String :| QueryWordConstraint;    def fromString(s: String): Either[String, QueryWord]
+object QueryDecimal: opaque type QueryDecimal = String :| QueryDecimalConstraint; def fromString(s: String): Either[String, QueryDecimal]
+object QueryLiteral: opaque type QueryLiteral = String :| QueryLiteralConstraint; def fromString(s: String): Either[String, QueryLiteral]
+
+// common/src/main/scala/com/risquanter/register/common/FolSymbols.scala
+enum QueryGrammarSymbol(val text: String):   // the engine's lexer.GrammarSymbol, 24 cases
+  case LParen extends QueryGrammarSymbol("(")
+  // …
+  case Power  extends QueryGrammarSymbol("^")
+object QueryGrammarSymbol:
+  def fromEngine(symbol: GrammarSymbol): QueryGrammarSymbol
+// QuerySort gains @jsonDiscriminator("kind"), a derived codec and a discriminated schema.
+
+// common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala
+enum QueryPosition:
+  case At(offset: NonNegativeInt)
+  case Unknown()
+object QueryPosition:
+  def fromSource(position: SourcePosition): Either[String, QueryPosition]
+
+enum QueryToken:                 // lexer.TokenKind
+  case Word(text: QueryWord)
+  case Decimal(text: QueryDecimal)
+  case Literal(content: QueryLiteral)
+  case Symbol(symbol: QueryGrammarSymbol)
+  case UnknownOperator()
+  case StrayCharacter()
+
+enum QueryFound:                 // lexer.Found
+  case Token(token: QueryToken)
+  case EndOfInput()
+
+enum QueryVariableName:          // lexer.VariableText
+  case Word(text: QueryWord)
+  case Decimal(text: QueryDecimal)
+
+enum QuantifierPart: case Numerator, Denominator
+enum ParseContext:   case RangeFormula, ScopeFormula, AnswerVariables, EndOfAnswerVariables, Denominator, ToleranceOrEnd
+enum LexProblem:     case UnterminatedLiteral, NewlineInLiteral, RefusedLiteralCharacter
+
+enum SyntaxProblem:              // parser.SyntaxFailure
+  case FormulaExpected()
+  case QuantifierBodyExpected(found: QueryFound)
+  case AtomExpected(found: QueryFound)
+  case TermExpected(found: QueryFound)
+  case ClosingBracketExpected(bracket: QueryToken, found: QueryFound)
+  case NotAnInfixAtom()
+
+enum ParseProblem:               // vql.error.ParseRefusal, and the two range-formula rules of QueryError.ValidationProblem
+  case QuantifierExpected(found: List[QueryToken])
+  case UnknownQuantifierOperator(found: QueryToken)
+  case IntegerExpected(part: QuantifierPart, found: QueryFound)
+  case IntegerOutOfRange(part: QuantifierPart, digits: QueryWord)
+  case FractionOutOfRange(numerator: NonNegativeInt, denominator: NonNegativeInt)
+  case ToleranceOutOfRange()
+  case VariableExpected(found: QueryFound)
+  case AnswerVariableExpected(found: QueryFound)
+  case SymbolExpected(expected: QueryGrammarSymbol, before: ParseContext, found: QueryFound)
+  case TrailingTokens(first: QueryToken, rest: List[QueryToken])
+  case Formula(failure: SyntaxProblem)
+  case Lexical(failure: LexProblem)
+  case QuantifiedVariableNotInRange(variable: QueryVariableName, rangeVariables: Set[QueryVariableName])
+  case RangeVariablesNotAnswered(rangeVariables: Set[QueryVariableName], answerVariables: List[QueryVariableName])
+object ParseProblem:
+  def fromRefusal(refusal: ParseRefusal): Either[String, ParseProblem]
+  def fromValidation(problem: QueryError.ValidationProblem): Either[String, ParseProblem]
+  def fromFormulaError(error: FormulaParseError): Either[String, Positioned[ParseProblem]]
+  def describe(problem: Positioned[ParseProblem]): String
+
+object QueryProblem:
+  def fromQueryError(err: QueryError): Either[String, QueryProblem]
+
+// common/src/main/scala/com/risquanter/register/http/errors/BindProblem.scala
+enum QuerySymbolName:            // lexer.SymbolText
+  case Word(text: QueryWord)
+  case Decimal(text: QueryDecimal)
+  case Operator(symbol: QueryGrammarSymbol)
+enum SymbolKind: case Predicate, Function
+enum MismatchSite:               // vql.error.MismatchSite
+  case Variable(name: QueryVariableName)
+  case Constant(name: QueryLiteral)
+  case FunctionReturn(name: QuerySymbolName)
+
+enum BindProblem:                // vql.error.TypeCheckError
+  case UnknownPredicate(name: QuerySymbolName)
+  case UnknownFunction(name: QuerySymbolName)
+  case ArityMismatch(symbol: QuerySymbolName, symbolKind: SymbolKind, expected: NonNegativeInt, actual: NonNegativeInt)
+  case UnknownConstant(text: QueryLiteral)
+  case UnreadableLiteral(text: QueryLiteral, sort: QuerySort)
+  case SortMismatch(site: MismatchSite, expected: QuerySort, actual: QuerySort)
+  case ConflictingSorts(variable: QueryVariableName, left: QuerySort, right: QuerySort)
+  case UnconstrainedVariable(variable: QueryVariableName)
+  case NotQuantifiable(sort: QuerySort)
+object BindProblem:
+  def fromTypeCheckError(error: TypeCheckError): Either[String, BindProblem]
+  def namesAbsentNode(problem: BindProblem): Boolean
+  def describe(problem: BindProblem): String
+
+// common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala
+case TargetingPredicateUnparseable(problem: Positioned[ParseProblem])   // FieldProblem, code INVALID_FORMAT
+
+// server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala
+case Failed(failures: NonEmptyChunk[BindProblem])                       // ScopeOutcome
+```
+
+Every enum above carries `@jsonDiscriminator("kind")`, a derived codec and a
+discriminated schema. A `Left` from any `from…` function names the engine case
+and dies at its effectful caller or throws `IllegalStateException` in pure
+code (`UES-D-9`). The reason names a variable where the case has one, and never
+`UnboundVariableError`'s bound variables. The family search: the three text
+types join the Iron refinement aliases in `OpaqueTypes.scala` beside
+`QueryVariable`. `QueryGrammarSymbol` joins `FolSymbols.scala` beside
+`QuerySort`. The refusal enums join the wire payload enums in `http/errors/`
+beside `QueryProblem`. No register type denotes the same engine case.
+
+**Status: landed 2026-11-12 together with step 5.6, against vql-engine
+0.18.0.** The deviations from the echo, each approved 2026-11-12:
+`QueryFound.Token`'s field is `token` and `BindProblem.ArityMismatch`'s is
+`symbolKind`, because a field named `kind` is written beside the discriminator
+key `kind` and the JSON does not decode. `QueryVariableName` is declared in
+`QueryProblem.scala`, which both `ParseProblem` and `BindProblem` read.
+Each enum's `fromEngine` and sentence helpers are `private[errors]`, and
+`traverse`, the one list helper both files use, is package-private there. The
+ADR-028 appendix §5 table is rewritten to the three cases with their codes, read
+as part of the approval of the echo.
 
 Acceptance: compile, the four tiers, BATS suites A and C.
 
@@ -1759,8 +1892,8 @@ the pure `Simulator.fit` and raised by `ZIO.die` in the preview.
 | ADR-038 (response wire shapes) | the wire enums' new cases | Compliant. No response shape changes; the cases are declared on the enum that owns them with derived codecs. |
 | ADR-004a and ADR-007 (persistence, branches) | the compare-and-set outcomes as return values | Compliant. The single-writer rule and the branch operations are unchanged; what changes is that a refused compare-and-set is an answer the caller reads rather than a failure it catches. |
 | ADR-028 (query pane) | rows 26 and 59 | **Amended.** The appendix's sub-portfolio example says "Answer variable `y` projects matching portfolio IDs"; after Phase 5.3 the service answers 422 `AnswerVariablesNotSupported` to it, so the example gains one sentence saying the service does not yet serve answer variables and naming `PLAN-QAV-QUERY-ANSWER-VARIABLES.md`. After step 5.6 the pane shows register's own templates over the engine's typed fields, not the engine's rendered messages (`UES-D-18`). The user gave the go on 2026-11-10. The sentence is written in step 5.3, because it states that step's answer and is false until it lands. |
-| ADR-035 (error leakage) | what of the caller's text a refusal may carry | **To be amended.** A new section states `UES-D-20`: the two risks, the four kinds of query text and how a refusal carries each, and the conditions. The user gave the go on the wording of `UES-D-20` on 2026-11-11. Written in step 5.7, because it describes the literal alphabet and the typed fields and is false until they land. |
-| ADR-029 (injection defence) | §3's parser-boundary table | **To be amended with ADR-035**, on the same go. One new row: a query refusal's fields as an outgoing boundary, guarded by zio-json, `textContent`, the typed fields and the log line's bound. The `VagueQueryParser.parse` row gains the literal alphabet. The two records then bear on the same fields, so step 5.7 also writes the reconciliation into both under a heading naming the other, adds the Layer 3 row "ADR-035 × ADR-029" to `.claude/skills/adr-constraints/SKILL.md`, and adds ADR-035 to that skill's Layer 1 entry for the query language path. |
+| ADR-035 (error leakage) | what of the caller's text a refusal may carry | **Amended in step 5.7.** §5 states `UES-D-20`: the two risks, the four kinds of query text and how a refusal carries each, and the conditions. The user gave the go on the wording of `UES-D-20` on 2026-11-11. |
+| ADR-029 (injection defence) | §3's parser-boundary table | **Amended with ADR-035 in step 5.7**, on the same go. One new row: a query refusal's fields as an outgoing boundary, guarded by zio-json, `textContent`, the typed fields and the log line's bound. The `VagueQueryParser.parse` row gains the literal alphabet. The two records then bear on the same fields, so step 5.7 also writes the reconciliation into both under a heading naming the other, adds the Layer 3 row "ADR-035 × ADR-029" to `.claude/skills/adr-constraints/SKILL.md`, and adds ADR-035 to that skill's Layer 1 entry for the query language path. |
 
 `.claude/skills/adr-constraints/SKILL.md`'s Layer 3 row "ADR-039 × ADR-010"
 names the two failures as `Unanswered` and `Rejected`, amended 2026-11-10.

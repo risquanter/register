@@ -485,6 +485,66 @@ object QueryVariable:
   given JsonEncoder[QueryVariable] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[QueryVariable] = JsonDecoder[String].mapOrFail(fromString)
 
+// QueryWord: a word the query engine's lexer emits, one or more of the ASCII
+// letters, digits, '_' and "'". A predicate, function or variable name in a
+// formula is one. QueryVariable is the narrower rule the parser applies to a
+// quantified or answer variable.
+type QueryWordConstraint = Match["^[A-Za-z0-9_']+$"]
+type QueryWordStr = String :| QueryWordConstraint
+
+object QueryWord:
+  opaque type QueryWord = QueryWordStr
+
+  extension (w: QueryWord)
+    def value: QueryWordStr = w
+
+  /** The word a text is, or the reason it is not one. */
+  def fromString(s: String): Either[String, QueryWord] =
+    s.refineEither[QueryWordConstraint]
+
+  // A word crosses the wire inside a refused query's payload, and is refined
+  // again on decode (ADR-038).
+  given JsonEncoder[QueryWord] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[QueryWord] = JsonDecoder[String].mapOrFail(fromString)
+
+// QueryDecimal: a decimal number in query text, digits, '.', digits. The
+// engine's parser merges it from two digit words around a '.'.
+type QueryDecimalConstraint = Match["^[0-9]+\\.[0-9]+$"]
+type QueryDecimalStr = String :| QueryDecimalConstraint
+
+object QueryDecimal:
+  opaque type QueryDecimal = QueryDecimalStr
+
+  extension (d: QueryDecimal)
+    def value: QueryDecimalStr = d
+
+  /** The decimal a text is, or the reason it is not one. */
+  def fromString(s: String): Either[String, QueryDecimal] =
+    s.refineEither[QueryDecimalConstraint]
+
+  given JsonEncoder[QueryDecimal] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[QueryDecimal] = JsonDecoder[String].mapOrFail(fromString)
+
+// QueryLiteral: the content of a quoted literal in query text. The engine's
+// lexer refuses any other character in a literal, so the alphabet is the
+// ASCII letters, digits, space, '/', '_', '.', '+' and '-'. It excludes '<',
+// '>', '&', '"', "'", '`' and every control character. It may be empty.
+type QueryLiteralConstraint = Match["^[A-Za-z0-9 /_.+\\-]*$"]
+type QueryLiteralStr = String :| QueryLiteralConstraint
+
+object QueryLiteral:
+  opaque type QueryLiteral = QueryLiteralStr
+
+  extension (l: QueryLiteral)
+    def value: QueryLiteralStr = l
+
+  /** The literal content a text is, or the reason it is not one. */
+  def fromString(s: String): Either[String, QueryLiteral] =
+    s.refineEither[QueryLiteralConstraint]
+
+  given JsonEncoder[QueryLiteral] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[QueryLiteral] = JsonDecoder[String].mapOrFail(fromString)
+
 // Opaque type for emails
 object Email:
   opaque type Email = ValidEmail

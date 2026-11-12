@@ -218,8 +218,8 @@ object ErrorMessages:
     case Capability.PinnedReads =>
       "Reading a tree at a past point in its history is not available in this deployment."
 
-  /** The query pane's sentence, which is the one the server logs: the engine's
-    * messages are written for the person who typed the query. */
+  /** The query pane's sentence, which is the one the server logs, rendered
+    * from the refusal's typed fields. */
   def query(problem: QueryProblem): String = QueryProblem.describe(problem)
 
   def conflict(kind: ConflictKind): String = kind match

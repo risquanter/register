@@ -3,12 +3,12 @@ package com.risquanter.register.services.cache
 import zio.*
 import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, LeafStageSpec, TargetingPredicate}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash}
-import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given   // Extract[NodeId]
+import com.risquanter.register.http.errors.BindProblem
 
-import vql.typed.{QueryBinder, TypedSemantics, TypeCheckError, extract}
-import vql.error.QueryError
+import vql.typed.{QueryBinder, TypedSemantics, extract}
+import vql.error.TypeCheckError
 import _root_.parser.FOLParser
 import _root_.logic.FOLUtil
 
@@ -61,57 +61,35 @@ final case class MitigationScopeResolverLive(
 
   /** Re-parse (source is the only stored form) → bind against this tree version's
     * catalog → evaluate to the exact satisfying set → lift each `Value` to its
-    * `NodeId`. Bind is the tree-version-relative check that fails when a quoted
-    * node was renamed/deleted; parse and extract cannot fail for a
-    * create-validated predicate over the node sort, so their failure arms are
-    * `InternalError`. */
+    * `NodeId`. Bind is the tree-version-relative check: it fails when a quoted
+    * node was renamed or deleted, or when the catalog changed under a stored
+    * predicate, and that failure is the outcome. A predicate `TargetingPredicate.create`
+    * accepted re-parses, has one free variable and evaluates once bound, so a
+    * failure there, and a bind error that does not translate, is a defect and
+    * throws (ADR-033). */
   private def satisfyingIds(
     predicate: TargetingPredicate, kb: RiskTreeKnowledgeBase
-  ): Either[NonEmptyChunk[ScopeResolutionFailure], Set[NodeId]] =
+  ): Either[NonEmptyChunk[BindProblem], Set[NodeId]] =
     FOLParser.parse(predicate.source) match
       case Left(pe) =>
-        Left(NonEmptyChunk(ScopeResolutionFailure.InternalError(s"re-parse failed: ${pe.message}")))
+        defect(s"a stored targeting predicate does not re-parse: ${pe.getClass.getSimpleName}")
       case Right(formula) =>
         FOLUtil.fvFOL(formula).distinct match
           case variable :: Nil =>
             QueryBinder.bindSatisfyingFormula(formula, variable, kb.catalog) match
-              case Left(errs) =>
-                Left(
-                  NonEmptyChunk
-                    .fromIterableOption(errs.map(fromTypeCheckError))
-                    .getOrElse(NonEmptyChunk(ScopeResolutionFailure.InternalError("empty bind-error list")))
-                )
+              case Left(Nil) =>
+                defect("the binder refused a targeting predicate with no error")
+              case Left(head :: tail) =>
+                Left(NonEmptyChunk(bindProblem(head), tail.map(bindProblem)*))
               case Right((bound, boundVar)) =>
                 TypedSemantics.satisfyingSet(bound, boundVar, kb.model) match
-                  case Left(qe)      => Left(NonEmptyChunk(fromQueryError(qe)))
+                  case Left(qe)      => defect(s"a bound targeting predicate failed to evaluate: ${qe.getClass.getSimpleName}")
                   case Right(values) => Right(values.flatMap(_.extract[NodeId].toOption))
           case _ =>
-            // create guarantees exactly one free variable — unreachable
-            Left(NonEmptyChunk(ScopeResolutionFailure.InternalError(
-              "targeting predicate free-variable invariant violated")))
+            defect("a stored targeting predicate does not have exactly one free variable")
 
-  /** Engine bind error → register failure. The three user-actionable variants
-    * stay distinct; every structural fault a create-validated predicate cannot
-    * legitimately reach collapses to `MalformedPredicate`. */
-  private def fromTypeCheckError(e: TypeCheckError): ScopeResolutionFailure = e match
-    case TypeCheckError.UnparseableConstant(name, sort, _) =>
-      QuerySort.fromSymbol(sort.value) match
-        case Some(QuerySort.NodeIdLiteral)                     => ScopeResolutionFailure.MalformedNodeId(name)
-        case Some(s) if QuerySort.NodeReferences.contains(s)   => ScopeResolutionFailure.UnknownNode(name)
-        case _                                                 => ScopeResolutionFailure.MalformedPredicate(s"unparseable literal '$name' for sort '${sort.value}'")
-    case TypeCheckError.TypeMismatch(expected, actual, ctx)           => ScopeResolutionFailure.TypeError(s"$ctx: expected ${expected.value}, got ${actual.value}")
-    case TypeCheckError.ConflictingTypes(name, l, r)                  => ScopeResolutionFailure.TypeError(s"variable '$name' used at ${l.value} and ${r.value}")
-    case TypeCheckError.UnknownPredicate(name)                        => ScopeResolutionFailure.MalformedPredicate(s"unknown predicate '$name'")
-    case TypeCheckError.UnknownFunction(name)                         => ScopeResolutionFailure.MalformedPredicate(s"unknown function '$name'")
-    case TypeCheckError.ArityMismatch(sym, exp, act)                  => ScopeResolutionFailure.MalformedPredicate(s"arity mismatch for '$sym': expected $exp, got $act")
-    case TypeCheckError.UnknownConstantOrLiteral(name)                => ScopeResolutionFailure.MalformedPredicate(s"unknown constant or literal '$name'")
-    case TypeCheckError.UnconstrainedVar(name)                        => ScopeResolutionFailure.MalformedPredicate(s"unconstrained variable '$name'")
-    case TypeCheckError.UnexpectedFreeVar(name)                       => ScopeResolutionFailure.MalformedPredicate(s"unexpected free variable '$name'")
-    case TypeCheckError.TypeNotQuantifiable(name)                     => ScopeResolutionFailure.MalformedPredicate(s"non-quantifiable target sort '$name'")
-    case TypeCheckError.UnboundAnswerVar(name)                        => ScopeResolutionFailure.MalformedPredicate(s"unbound answer variable '$name'")
+  private def bindProblem(error: TypeCheckError): BindProblem =
+    BindProblem.fromTypeCheckError(error).fold(reason => defect(s"a targeting predicate's bind error does not translate: $reason"), identity)
 
-  /** Evaluation-phase `QueryError` is an internal wiring fault for a bound
-    * targeting predicate (no domain gap, no unbound var possible once bound), so
-    * it is `InternalError`, not a user-facing drift reason. */
-  private def fromQueryError(e: QueryError): ScopeResolutionFailure =
-    ScopeResolutionFailure.InternalError(e.formatted)
+  private def defect(reason: String): Nothing =
+    throw new IllegalStateException(reason)

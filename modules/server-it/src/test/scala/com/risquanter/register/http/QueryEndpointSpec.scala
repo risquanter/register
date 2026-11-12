@@ -6,7 +6,7 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
-import com.risquanter.register.http.errors.{QueryProblem, RejectionDetail, WireError}
+import com.risquanter.register.http.errors.{BindProblem, QueryProblem, RejectionDetail, WireError}
 import zio.json.*
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
@@ -20,8 +20,8 @@ import com.risquanter.register.testcontainers.IrminCompose
   * H2 — malformed (unterminated) quoted string returns 422 with an Unparseable
   *      problem; response body must not contain the workspace key or any
   *      internal identifier (ADR-035, ADR-036)
-  * H3 — unknown quoted node name returns 422 with an UnknownReferences problem
-  *      naming the reference that did not resolve
+  * H3 — unknown quoted node name returns 422 with an Unbound problem naming
+  *      the literal no node matches
   * H4 — a query naming an answer variable returns 422 with an
   *      AnswerVariablesNotSupported problem naming the variable
   *
@@ -126,12 +126,12 @@ object QueryEndpointSpec extends ZIOSpecDefault:
           )
         yield assertTrue(queryResp.code.code == 422) &&
           assertTrue(refusal.detail match
-            case RejectionDetail.Query(QueryProblem.Unparseable(_, _)) => true
-            case _                                                     => false) &&
+            case RejectionDetail.Query(QueryProblem.Unparseable(_)) => true
+            case _                                                  => false) &&
           // ADR-022 §4/§6: error body must not contain the workspace key
           assertTrue(!rawBody.contains(key))
       },
-      test("H3: unknown quoted node name returns 422 UnknownReferences") {
+      test("H3: unknown quoted node name returns 422 Unbound, naming the literal no node matches") {
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
@@ -157,8 +157,10 @@ object QueryEndpointSpec extends ZIOSpecDefault:
         yield assertTrue(queryResp.code.code == 422) &&
           // The unresolved name is listed, so the client can say which one.
           assertTrue(refusal.detail match
-            case RejectionDetail.Query(QueryProblem.UnknownReferences(messages)) =>
-              messages.exists(_.contains("NonExistentNode"))
+            case RejectionDetail.Query(QueryProblem.Unbound(problems)) =>
+              problems.toList.exists(_.problem match
+                case BindProblem.UnreadableLiteral(text, _) => text.value == "NonExistentNode"
+                case _                                      => false)
             case _ => false)
       },
       test("H4: a query naming an answer variable returns 422 AnswerVariablesNotSupported naming it") {

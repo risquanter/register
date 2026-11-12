@@ -17,7 +17,8 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 import vql.parser.VagueQueryParser
 import vql.semantics.VagueSemantics
-import vql.typed.{FolModel, QueryBinder, TypeCheckError}
+import vql.error.TypeCheckError
+import vql.typed.{FolModel, QueryBinder}
 
 /** Integration tests for the parse → bind path against a register-side
   * [[RiskTreeKnowledgeBase]] populated with quoted node-name literals.
@@ -126,7 +127,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         assertTrue(
           bound.isLeft,
           bound.left.toOption.exists(_.exists {
-            case TypeCheckError.UnparseableConstant(name, _, _) => name == "Nonexistent"
+            case TypeCheckError.UnparseableConstant(name, _, _) => name.value == "Nonexistent"
             case _                                              => false
           })
         )

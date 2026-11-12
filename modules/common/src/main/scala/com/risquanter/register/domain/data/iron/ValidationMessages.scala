@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data.iron
 
 import com.risquanter.register.domain.errors.{Alphabet, ExpectedInput, FieldProblem, ValueFormat, ValueRange}
-import com.risquanter.register.http.errors.QueryProblem
+import com.risquanter.register.http.errors.{ParseProblem, QueryProblem}
 
 /** The sentence for each refusal, shared across JVM and JS.
   *
@@ -120,7 +120,8 @@ object ValidationMessages:
       f"This mitigation reduces the minimum loss below 1, the smallest representable whole unit. The leaf's minimum loss is $min, so the smallest severity factor that still applies here is $minFactor%.3e (1 / $min)."
     case FieldProblem.MitigationLowersAnchorLossBelowFloor(min, minFactor) =>
       f"This mitigation reduces the smallest anchor loss to zero, below the positive floor an anchor loss must stay above. The leaf's smallest anchor loss is $min%.3e, so the smallest severity factor that still applies here is $minFactor%.3e."
-    case FieldProblem.TargetingPredicateUnparseable  => "Targeting predicate is not valid syntax"
+    case FieldProblem.TargetingPredicateUnparseable(problem) =>
+      s"Targeting predicate is not valid syntax: ${ParseProblem.describe(problem)}"
     case FieldProblem.TargetingQuantifierNotAllowed  => "Targeting predicates may not use quantifiers"
     case FieldProblem.TargetingFunctionNotAllowed    => "Targeting predicates may not use function application"
     case FieldProblem.TargetingQuantifierDepthExceeded(limit, found) =>
