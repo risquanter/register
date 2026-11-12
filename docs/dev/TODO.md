@@ -2478,6 +2478,16 @@ breaks: any test asserting an exact header list, and any test asserting a
 `/w/{key}/…` response carries the workspace header set and a non-workspace
 response does not, which is the assertion that currently exists nowhere.
 
+**The defect catch-all is missing too.** The harness does not append
+`DefectCatchAllInterceptor`, so a defect in the integration tier is answered by
+zio-http's own fold, a 500 whose plain-text body is the exception's message.
+That was observed on 2026-11-12: a run on a stale classpath answered 500 with
+the body `com/risquanter/metalog/MetalogInfeasibleException`. Production
+appends the interceptor, so a client there sees the opaque internal fault. No
+integration test checks that a defect answers the declared `InternalFault`
+shape. The work below installs it as well, appended as in
+`Application.startServer`, and adds that test.
+
 **Where the production order is stated.** `Application.startServer` carries a
 comment explaining that each `prependInterceptor` goes to the front, so the span
 interceptor ends up outermost and the security-headers interceptor stays the last
