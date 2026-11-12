@@ -5,11 +5,11 @@ import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Met
 import com.risquanter.register.domain.data.{
   TrialId, Loss, RiskLeaf, NodeProvenance, DistributionShape, DistributionParams
 }
-import com.risquanter.register.domain.errors.{AppError, FieldProblem}
+import com.risquanter.register.domain.errors.FieldProblem
 import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.simulation.LognormalHelper
-import zio.{IO, UIO, ZIO}
+import zio.{UIO, ZIO}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron._
 
@@ -41,7 +41,7 @@ object Simulator {
     sampler: RiskSampler,
     nTrials: PositiveInt,
     parallelism: PositiveInt = DefaultTrialParallelism
-  ): IO[AppError, Map[TrialId, Loss]] = {
+  ): UIO[Map[TrialId, Loss]] = {
     // Sampling is pure arithmetic over an already-validated distribution, so an
     // exception here is a broken invariant rather than an outcome a caller can
     // act on. Each attempt therefore dies instead of entering the error

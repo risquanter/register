@@ -10,7 +10,7 @@ import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, LECPoint, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, NodeId, BranchRef, Revision}
-import com.risquanter.register.domain.errors.AppError
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{LECCurvesResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
@@ -67,7 +67,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
     )
 
   /** Every leaf's and the root's outcomes, keyed by leaf name / RootKey. */
-  private def figures(resolver: CachedResultResolver)(tree: RiskTree, entity: SeedEntityId.SeedEntityId): IO[AppError, Map[String, Map[TrialId, Loss]]] =
+  private def figures(resolver: CachedResultResolver)(tree: RiskTree, entity: SeedEntityId.SeedEntityId): IO[Failure, Map[String, Map[TrialId, Loss]]] =
     val leaves = tree.nodes.collect { case l: RiskLeaf => l }
     for
       leafFigs <- ZIO.foreach(leaves)(l => resolver.ensureCached(tree, l.id, entity).map(r => l.name.value -> r.outcomes))

@@ -8,8 +8,9 @@ import com.risquanter.register.domain.errors.*
 
 /** The only error type that crosses to a client.
   *
-  * Projected from `AppError` by `fromAppError`, which is the single place a
-  * field stops crossing. There is no inverse: a client deserialises this type
+  * Projected from a `Failure` by `Failure.toWire`, and from an `AppError` by
+  * `fromAppError`; those are where a field stops crossing. There is no inverse:
+  * a client deserialises this type
   * and uses it, exactly as it does with a response type in `http/responses`
   * (ADR-035). A confidential identifier cannot appear in a response because no
   * case here declares one (ADR-036).
@@ -119,18 +120,9 @@ object WireError:
     // wire cases line up. The trace is not a field of the error: it is read
     // from the active span at the boundary that calls this, which is the only
     // place an effect exists to read it. `scope` arrives the same way and for
-    // the same reason.
+    // the same reason. No case of `AppError` names a tree, so no arm reads it.
     val t = trace
 
-    // A content rejection names its tree; a request-level one has none to name.
-    def rejected(detail: RejectionDetail, fallback: List[ValidationError]): WireError =
-      scope match
-        case TreeScope.InTree(tree) => ValidationRejected(tree, detail, t)
-        case TreeScope.NoTree       => RequestRejected(fallback, t)
-
     e match
-      // Content of a known tree, or a request that named none
-      case ValidationFailed(errors)            => rejected(RejectionDetail.Fields(errors), errors)
-
       // Faults: a client can act on none of them.
       case SimulationFailure(_, _)             => WireError.InternalFault(t)

@@ -122,3 +122,4 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/main/scala/com/risquanter/register/simulation/MetalogDistribution.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala

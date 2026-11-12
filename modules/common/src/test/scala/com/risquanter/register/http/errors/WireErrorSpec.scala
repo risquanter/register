@@ -146,10 +146,6 @@ object WireErrorSpec extends ZIOSpecDefault:
       suite("fromAppError maps every internal leaf type")(
         test("each leaf reaches the case assigned to it") {
           val mapping: List[(AppError, String)] = List(
-            // Rejected request. Read with no tree in scope, so the content
-            // failure answers at the request level; the test below reads it
-            // with a tree in scope.
-            ValidationFailed(Nil)                                  -> "RequestRejected",
             // Faults
             SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault"
           )
@@ -157,19 +153,7 @@ object WireErrorSpec extends ZIOSpecDefault:
           val wrong = mapping.filter { (error, expected) =>
             WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
           }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 2)
-        },
-        test("with a tree in scope, a content failure names that tree and carries its fields") {
-          // The scope is the only thing that differs from the table above, so
-          // this is what it decides.
-          val fields = WireError.fromAppError(
-            ValidationFailed(List(fieldFailure)), trace, TreeScope.InTree(treeId)
-          )
-          assertTrue(
-            fields == WireError.ValidationRejected(
-              treeId, RejectionDetail.Fields(List(fieldFailure)), trace
-            )
-          )
+          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 1)
         }
       ),
       suite("every case round-trips through its own codec")(

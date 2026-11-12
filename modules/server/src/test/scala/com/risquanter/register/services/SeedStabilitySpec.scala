@@ -44,7 +44,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   /** Resolve every leaf's and the root's outcomes, keyed by leaf name / RootKey. */
-  private def figures(tree: RiskTree, entity: SeedEntityId.SeedEntityId): ZIO[Env, AppError, Map[String, Map[TrialId, Loss]]] =
+  private def figures(tree: RiskTree, entity: SeedEntityId.SeedEntityId): ZIO[Env, Failure, Map[String, Map[TrialId, Loss]]] =
     ZIO.serviceWithZIO[CachedResultResolver] { resolver =>
       val leaves = tree.nodes.collect { case l: RiskLeaf => l }
       for

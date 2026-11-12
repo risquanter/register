@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, R
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone, TrustZone, ValidationError}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /** Content-addressed resolver: cache-aside, per-workspace isolation, leaf-only caching, orphan semantics, and the ADR-034 F mitigation fold. */
@@ -355,16 +355,54 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
 
     suite("error handling")(
 
-      test("fails when node not found in tree") {
+      test("a node the tree's index does not hold is Rejected at Service") {
         val invalidId = nodeId("nonexistent")
 
         for {
           resolver <- ZIO.service[CachedResultResolver]
-          result <- resolver.ensureCached(testTree, invalidId, testEntity).exit
-
+          result   <- resolver.ensureCached(testTree, invalidId, testEntity).flip
         } yield assertTrue(
-          // Should fail with some error
-          result.isFailure
+          result == Failure.rejected(TrustZone.Service, NonEmptyChunk(ValidationError(
+            ErrorLocation.nodeField(invalidId, FieldName.Id), FieldProblem.NodeNotInIndex)), Nil)
+        )
+      },
+
+      test("a portfolio whose children's losses overflow when summed is Rejected at the store's zone") {
+        // Both leaves occur in every trial and each loses about 4.8e18, so
+        // every trial's sum passes Long.MaxValue (about 9.22e18).
+        def hugeLeaf(id: String, seedVarId: Long): RiskNode = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
+          id = safeId(id).value.toString,
+          name = id,
+          probability = 1.0,
+          shape = lognormalShape(4_700_000_000_000_000_000L, 5_000_000_000_000_000_000L),
+          parentId = Some(nodeId("hugeRoot")),
+          seedVarId = seedVarId
+        ), "leaf")
+        val hugeRootId = nodeId("hugeRoot")
+        val hugeRoot: RiskNode = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
+          id = safeId("hugeRoot").value.toString,
+          name = "Huge Root",
+          childIds = Vector(safeId("huge1").value.toString, safeId("huge2").value.toString),
+          parentId = None
+        ), "portfolio")
+        val hugeTree = unsafeGet(
+          RiskTree.fromNodes(
+            id = treeId("huge-tree"),
+            name = SafeName.SafeName("Huge Tree".refineUnsafe),
+            nodes = Seq(hugeRoot, hugeLeaf("huge1", 1L), hugeLeaf("huge2", 2L)),
+            rootId = hugeRootId,
+            seedVarHighWater = None,
+            mitigations = Nil
+          ),
+          "Overflow fixture has invalid RiskTree"
+        )
+
+        for {
+          resolver <- ZIO.service[CachedResultResolver]
+          result   <- resolver.ensureCached(hugeTree, hugeRootId, testEntity).flip
+        } yield assertTrue(
+          result == Failure.rejected(TrustZone.Peer(PeerZone.Store), NonEmptyChunk(ValidationError(
+            ErrorLocation.nodeField(hugeRootId, FieldName.AggregatedLoss), FieldProblem.AggregatedLossOverflow)), Nil)
         )
       }
     ),

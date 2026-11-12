@@ -58,6 +58,16 @@ both `peerMessage` and the fitter's text read. 0.10.1 moved the demo figures,
 so the enterprise demo's Q7 asks at least 9/10 and its Q7b about 3/4, and the
 simple demo's Q5 is unsatisfied. `MetalogDistribution.ValidationError` stays,
 serving the lognormal fitter alone.
+Step 5.5 landed at 0.18.21, approved 2026-11-12, with these deviations from its
+text. The resolver's `fromValidation` is deleted, because with the zone added
+it was `toZIOValidation` line for line, and each site calls
+`.toZIOValidation(zone)`. `CachedResultResolver` and `Simulator.performTrials`
+are narrowed, the latter to `UIO`, because every branch of it dies.
+`WireError.fromAppError` keeps its `scope` parameter, which no arm reads, until
+step 6.1 deletes the function. `decorate`'s overflow at `MitigatedResult` is
+caused by the caller's mitigation and answers at `Client` with row 58b. The
+engine release steps 5.6 and 5.7 wait on, vql-engine 0.18.0, was published on
+2026-11-12.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 

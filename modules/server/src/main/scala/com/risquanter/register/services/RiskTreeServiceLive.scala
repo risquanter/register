@@ -9,7 +9,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationFailed, ValidationError, SimulationFailure, AppError, Failure, TrustZone}
+import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, SimulationFailure, AppError, Failure, TrustZone}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -137,8 +137,8 @@ class RiskTreeServiceLive private (
   /** Structured error context for metrics, from the failure that occurred.
     *
     * `error_type` is the failure's case name in every arm. The code and the
-    * field come from the first refusal for a `Rejected` or a `ValidationFailed`,
-    * and are fixed per case otherwise.
+    * field come from the first refusal for a `Rejected`, and are fixed per case
+    * otherwise.
     */
   private def extractErrorContext(error: AppError | Failure): ErrorContext =
     val errorType = error.getClass.getSimpleName
@@ -149,16 +149,6 @@ class RiskTreeServiceLive private (
           errorType = errorType,
           errorCode = FieldProblem.code(problem).code,
           errorField = Some(ErrorLocation.describe(location))
-        )
-
-      case ValidationFailed(errors) =>
-        val primaryError = errors.headOption.getOrElse(
-          ValidationError(ErrorLocation.Whole, FieldProblem.Unspecified)
-        )
-        ErrorContext(
-          errorType = errorType,
-          errorCode = FieldProblem.code(primaryError.problem).code,
-          errorField = Some(ErrorLocation.describe(primaryError.location))
         )
 
       case SimulationFailure(_, _) =>
@@ -546,7 +536,7 @@ object RiskTreeServiceLive {
     * 
     * Used to enrich metric attributes with error details for better observability.
     * 
-    * @param errorType High-level error category (ValidationFailed, Rejected, etc.)
+    * @param errorType High-level error category (Rejected, NotFound, etc.)
     * @param errorCode Specific error code (REQUIRED_FIELD, INVALID_RANGE, SIMULATION_ERROR, etc.)
     * @param errorField Optional field name that caused the error (for validation errors)
     */

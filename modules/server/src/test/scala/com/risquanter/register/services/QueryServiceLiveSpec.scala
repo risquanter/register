@@ -19,7 +19,7 @@ import com.risquanter.register.domain.data.iron.{
 }
 
 import com.risquanter.register.domain.errors.{
-  AppError, ErrorLocation, ErrorSubject, Failure, FieldProblem, SimulationFailure, TrustZone, ValidationError
+  ErrorLocation, ErrorSubject, Failure, FieldProblem, TrustZone, ValidationError
 }
 import com.risquanter.register.http.errors.QueryProblem
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
@@ -178,8 +178,9 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   private val entity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
   private val readCommit: CommitHash           = CommitHash.fromString("a" * 40).toOption.get
 
-  /** What the resolver fails with: a fault simulating a leaf. */
-  private val resolverFailure: AppError = SimulationFailure("qsl-tree", new RuntimeException("sampler failed"))
+  /** What the resolver fails with: a broken index guarantee, a fault of this service. */
+  private val resolverFailure: Failure = Failure.rejected(TrustZone.Service, NonEmptyChunk(ValidationError(
+    ErrorLocation.Whole, FieldProblem.LeafUnreachable)), Nil)
 
   /** A repository holding `tree` alone; `evaluate` only reads it. */
   private val oneTreeRepo: RiskTreeRepository = new RiskTreeRepository:
@@ -197,11 +198,11 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
     def ensureCached(
       tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean,
       selection: MitigationSelection, resolvedScopes: Map[MitigationId, Set[NodeId]]
-    ): IO[AppError, LossDistribution] = ZIO.fail(resolverFailure)
+    ): IO[Failure, LossDistribution] = ZIO.fail(resolverFailure)
     def ensureCachedAll(
       tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean,
       selection: MitigationSelection, resolvedScopes: Map[MitigationId, Set[NodeId]]
-    ): IO[AppError, Map[NodeId, LossDistribution]] = ZIO.fail(resolverFailure)
+    ): IO[Failure, Map[NodeId, LossDistribution]] = ZIO.fail(resolverFailure)
 
   private val serviceSuite = suite("QueryServiceLive.evaluate")(
     test("a failure computing a referenced selection reaches the caller as that failure") {

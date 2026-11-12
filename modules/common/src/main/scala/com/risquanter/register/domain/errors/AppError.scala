@@ -82,12 +82,6 @@ object ValidationError:
   def describe(error: ValidationError): String =
     s"[${ErrorLocation.describe(error.location)}] ${ValidationMessages.render(error.problem)}"
 
-/** Validation failure with accumulated structured errors */
-case class ValidationFailed(errors: List[ValidationError]) extends DomainError {
-  override def logMessage: String = errors.map(ValidationError.describe).mkString("; ")
-  override def origin: FailureOrigin = FailureOrigin.Caller
-}
-
 /** Simulation execution failure - wraps underlying cause with context */
 case class SimulationFailure(simulationId: String, cause: Throwable) extends DomainError {
   override def logMessage: String = s"Simulation $simulationId failed: ${cause.getMessage}"

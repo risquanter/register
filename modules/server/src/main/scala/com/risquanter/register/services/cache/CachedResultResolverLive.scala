@@ -1,7 +1,6 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import zio.prelude.Validation
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.{Meter, Histogram, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
@@ -11,7 +10,8 @@ import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, R
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId}
-import com.risquanter.register.domain.errors.{AppError, ErrorLocation, FieldName, FieldProblem, ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, Failure, FieldName, FieldProblem, PeerZone, TrustZone, ValidationError}
+import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.services.helper.Simulator
 
 /**
@@ -61,7 +61,7 @@ final case class CachedResultResolverLive(
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): IO[AppError, LossDistribution] =
+  ): IO[Failure, LossDistribution] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("tree_id", tree.id.value)
@@ -84,7 +84,7 @@ final case class CachedResultResolverLive(
     includeProvenance: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
-  ): IO[AppError, Map[NodeId, LossDistribution]] =
+  ): IO[Failure, Map[NodeId, LossDistribution]] =
     for {
       effective <- effectiveTreeOf(tree, selection, resolvedScopes)
       scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
@@ -101,13 +101,14 @@ final case class CachedResultResolverLive(
     * the tree so they drive the cache keys. `selection = Inherent` yields the input
     * tree revalidated through `RiskTree.fromNodes` — identical content, identical
     * hashes — so raw leaf simulations are shared with the un-mitigated path.
-    * ADR-010: a validation failure becomes typed `ValidationFailed`. */
+    * A mitigation the caller wrote that cannot be applied is `Rejected` at
+    * `Client` (ADR-010). */
   private def effectiveTreeOf(
     tree: RiskTree,
     selection: MitigationSelection,
     resolvedScopes: Map[MitigationId, Set[NodeId]]
-  ): IO[AppError, RiskTree] =
-    fromValidation(MitigationApplication.effectiveTree(tree, selection, resolvedScopes))
+  ): IO[Failure, RiskTree] =
+    MitigationApplication.effectiveTree(tree, selection, resolvedScopes).toZIOValidation(TrustZone.Client)
 
   private def distributionForId(
     tree: RiskTree,
@@ -116,10 +117,10 @@ final case class CachedResultResolverLive(
     nodeId: NodeId,
     seedEntityId: SeedEntityId.SeedEntityId,
     records: Map[NodeId, List[MitigationApplicationRecord]]
-  ): IO[AppError, LossDistribution] =
+  ): IO[Failure, LossDistribution] =
     ZIO.fromOption(tree.index.nodes.get(nodeId))
-      .orElseFail(ValidationFailed(List(ValidationError(
-        ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotInIndex))))
+      .orElseFail(Failure.rejected(TrustZone.Service, NonEmptyChunk(ValidationError(
+        ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotInIndex)), Nil))
       .flatMap(node => distributionOf(tree, hashes, cache, node, seedEntityId, records))
 
   private def distributionOf(
@@ -129,16 +130,17 @@ final case class CachedResultResolverLive(
     node: RiskNode,
     seedEntityId: SeedEntityId.SeedEntityId,
     records: Map[NodeId, List[MitigationApplicationRecord]]
-  ): IO[AppError, LossDistribution] =
+  ): IO[Failure, LossDistribution] =
     node match {
       case leaf: RiskLeaf =>
         for {
           content <- rawLeafResult(hashes, cache, leaf, seedEntityId)
           losses   = NodeLosses.leaf(leaf.id, content.outcomes, content.provenance)
           applied  = records.getOrElse(leaf.id, Nil)
-          value   <- fromValidation(LossDistribution.decorate(
+          // A layer refusal is caused by the mitigation the caller wrote.
+          value   <- LossDistribution.decorate(
                        losses.nodeId, losses.trials, Some(losses.provenance), applied,
-                       MitigationApplication.run(applied, _)))
+                       MitigationApplication.run(applied, _)).toZIOValidation(TrustZone.Client)
         } yield value
 
       case portfolio: RiskPortfolio =>
@@ -148,29 +150,27 @@ final case class CachedResultResolverLive(
           // foreachPar preserves list order (ADR-009 §4).
           childResults <- ZIO.foreachPar(portfolio.childIds.toList) { childId =>
             ZIO.fromOption(tree.index.nodes.get(childId))
-              .orElseFail(ValidationFailed(List(ValidationError(
-                ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds), FieldProblem.ChildNotFound(childId)))))
+              .orElseFail(Failure.rejected(TrustZone.Service, NonEmptyChunk(ValidationError(
+                ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds), FieldProblem.ChildNotFound(childId))), Nil))
               .flatMap(childNode => distributionOf(tree, hashes, cache, childNode, seedEntityId, records))
           }
           _ <- ZIO.when(childResults.isEmpty) {
-            ZIO.fail(ValidationFailed(List(ValidationError(
-              ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds), FieldProblem.PortfolioHasNoChildren(Nil)))))
+            ZIO.fail(Failure.rejected(TrustZone.Service, NonEmptyChunk(ValidationError(
+              ErrorLocation.nodeField(portfolio.id, FieldName.ChildIds), FieldProblem.PortfolioHasNoChildren(Nil))), Nil))
           }
           // ⊕ m(children), then f_P on top. The layer is applied outside the
           // aggregate claim, so a transformed portfolio keeps its children
           // (ADR-034 Decision 3). A portfolio carries no provenance of its own
-          // (ADR-003 §2).
-          losses  <- fromValidation(NodeLosses.portfolio(portfolio.id, childResults))
+          // (ADR-003 §2). An aggregate that overflows is a figure the stored
+          // tree's leaves produce, so it is refused at the store's zone; a
+          // layer refusal is the caller's mitigation.
+          losses  <- NodeLosses.portfolio(portfolio.id, childResults).toZIOValidation(TrustZone.Peer(PeerZone.Store))
           applied  = records.getOrElse(portfolio.id, Nil)
-          value   <- fromValidation(LossDistribution.decorate(
+          value   <- LossDistribution.decorate(
                        losses.nodeId, losses.trials, None, applied,
-                       MitigationApplication.run(applied, _)))
+                       MitigationApplication.run(applied, _)).toZIOValidation(TrustZone.Client)
         } yield value
     }
-
-  /** A `Validation` failure becomes a typed `ValidationFailed` (ADR-010). */
-  private def fromValidation[A](v: Validation[ValidationError, A]): IO[AppError, A] =
-    ZIO.fromEither(v.toEither).mapError(errs => ValidationFailed(errs.toList))
 
   /** Identity-free cached content for one effective leaf. Node identity is
     * attached one level above, since the same entry may serve any
@@ -180,11 +180,11 @@ final case class CachedResultResolverLive(
     cache: ContentCache,
     leaf: RiskLeaf,
     seedEntityId: SeedEntityId.SeedEntityId
-  ): IO[AppError, LeafSimResult] =
+  ): IO[Failure, LeafSimResult] =
     for {
       key <- ZIO.fromOption(hashes.get(leaf.id))
-        .orElseFail(ValidationFailed(List(ValidationError(
-          ErrorLocation.nodeField(leaf.id, FieldName.ContentHash), FieldProblem.LeafUnreachable))))
+        .orElseFail(Failure.rejected(TrustZone.Service, NonEmptyChunk(ValidationError(
+          ErrorLocation.nodeField(leaf.id, FieldName.ContentHash), FieldProblem.LeafUnreachable)), Nil))
       cached <- cache.get(key)
       result <- cached match {
         case Some(content) => ZIO.succeed(content)
@@ -197,7 +197,7 @@ final case class CachedResultResolverLive(
     key: ContentHash,
     leaf: RiskLeaf,
     seedEntityId: SeedEntityId.SeedEntityId
-  ): IO[AppError, LeafSimResult] =
+  ): IO[Failure, LeafSimResult] =
     tracing.span("simulateLeaf", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("node_id", leaf.id.value)
