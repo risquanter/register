@@ -100,10 +100,10 @@ A default a shared endpoint publishes for an omitted request parameter is part o
 
 ```scala
 // BAD
-final case class ErrorDetail(domain: String, requestId: Option[String] = None)
+final case class Versions[A](base: Option[A] = None, onMain: Option[A] = None, onScenario: Option[A] = None)
 
 // GOOD
-final case class ErrorDetail(domain: ErrorDomain, requestId: Option[RequestId])
+final case class Versions[A](base: Option[A], onMain: Option[A], onScenario: Option[A])
 ```
 
 A derived decoder reads an absent key as `None` without the default, so removing it does not make a serialised field required.
@@ -127,11 +127,12 @@ object ErrorMessages:
 
 ```scala
 // BAD: the same tag written at every construction site
-response(StatusCode.NotFound, "resource", NOT_FOUND, "Not found", "workspaces")
-response(StatusCode.Conflict, "scenario", MERGE_CONFLICT, msg, "scenarios")
+WireError.NotFound("unknown", trace)
+WireError.NotFound("tree-not-at-commit", trace)
 
 // GOOD: a closed set, matched exhaustively
-response(StatusCode.NotFound, Field.Resource, NOT_FOUND, "Not found", ErrorDomain.Workspaces)
+WireError.NotFound(NotFoundKind.Unknown(), trace)
+WireError.NotFound(NotFoundKind.TreeNotAtCommit(), trace)
 ```
 
 ### ❌ Hand-Written Codec Duplicating the Derived One

@@ -309,6 +309,6 @@ Report test results as **pass or fail only** — never report or act on test cou
 - **Service/repository signatures take Iron types, not raw primitives.** `def get(id: String)` in a service is a violation.
 - **Accumulate independent validation errors** with `Validation.validateWith` / `zipPar`, not `.flatMap`.
 - Semantically distinct IDs sharing an encoding get nominal `case class` wrappers (ADR-018). Credential types are `final class`, never `case class` (ADR-022; `WorkspaceKeySecret` is the reference).
-- Inexhaustive sealed-trait matches are compile **errors** (see `scalacOptions` in `build.sbt`) — new `AppError` subtypes must be handled everywhere they're matched.
+- Inexhaustive sealed-trait matches are compile **errors** (see `scalacOptions` in `build.sbt`) — a new `Failure` variant, `TrustZone` case or payload case must be handled everywhere it is matched.
 
 The constraints live in `docs/dev/decision-records/` and are read there; the adr-constraints skill routes to the records that bear on a given change.

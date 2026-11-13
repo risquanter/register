@@ -127,27 +127,29 @@ final case class IrminCommit(hash: String, key: String, parents: List[String], i
 final case class IrminCommit(hash: CommitHash, key: CommitHash, parents: List[CommitHash], info: IrminInfo)
 object IrminCommit:
   final case class Raw(hash: String, key: String, parents: List[String], info: IrminInfo.Raw)
-  def refine(raw: Raw): Either[NonEmptyList[ValidationError], IrminCommit]
+  def refine(raw: Raw): Either[NonEmptyChunk[ValidationError], IrminCommit]
 ```
 
 ### ❌ Flattening an accumulated validation at ingress
 
 ```scala
 // BAD — the structure exists and is discarded where it is richest
-.left.map(errors => RepositoryFailure(errors.map(ValidationError.describe).mkString("; ")))
+.left.map(errors => new IllegalStateException(errors.map(ValidationError.describe).mkString("; ")))
 
-// GOOD — the errors survive as values
-.left.map(errors => StoredValueRejected(boundary, path, errors))
+// GOOD — the errors survive as values, refused at the zone they came from
+.left.map(errors => Failure.rejected(TrustZone.Peer(PeerZone.Store), errors, Nil))
 ```
 
 ### ❌ Recovering a decision from a boundary error's text
 
 ```scala
 // BAD — the branch depends on a message another system wrote
-case RepositoryFailure(reason) if reason.contains("seed_entity_id") => ...
+case e: PSQLException if e.getMessage.contains("seed_entity_id") => ...
 
-// GOOD — the boundary classified it once, into a case
-case DuplicateSeedEntityId(id) => ...
+// GOOD — the branch reads the constraint name the driver reports as a field
+violatedConstraint(err) match
+  case Some(SeedEntityIdConstraint) => inUse
+  case _                            => classify(err)
 ```
 
 ---

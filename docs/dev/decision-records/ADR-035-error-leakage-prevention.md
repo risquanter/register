@@ -233,10 +233,10 @@ to a refusal's fields is a change to both records.
 
 ```scala
 // BAD: the backend's own text becomes the body
-case RepositoryFailure(reason) => (StatusCode.InternalServerError, reason)
+case Failure.Rejected(c) => (StatusCode.InternalServerError, c.diagnostics.mkString("; "))
 
-// GOOD: opaque case carrying only the trace; reason logged server-side
-case RepositoryFailure(_) => WireError.InternalFault(trace)
+// GOOD: opaque case carrying only the trace; the diagnostics reach the log line only
+case Failure.Rejected(Core(TrustZone.Peer(_), _, _)) => WireError.InternalFault(trace)
 ```
 
 ### ❌ Confidential Identifier in a Client-Visible Message

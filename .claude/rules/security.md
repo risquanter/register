@@ -61,7 +61,7 @@ capability identifiers (ADR-021).
 ## Error messages
 
 Error messages must never contain secrets, PII, or internal paths.
-Typed error channels (`ZIO` error channel, sealed `AppError` hierarchy) over
+Typed error channels (`ZIO` error channel, the `Failure` shape) over
 `getMessage` string matching (ADR-010, ADR-035).
 
 ## Internal identifiers — never accepted as input, never returned as output (hard rule, ADR-036)
