@@ -4,7 +4,7 @@ import zio.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 
 import com.risquanter.register.domain.data.iron.TraceId
-import com.risquanter.register.domain.errors.{AppError, Failure, FailureOrigin}
+import com.risquanter.register.domain.errors.{Failure, FailureOrigin}
 import com.risquanter.register.http.RequestSpanInterceptor
 import com.risquanter.register.http.errors.{TreeScope, WireError}
 import com.risquanter.register.telemetry.ActiveTrace
@@ -20,14 +20,11 @@ import com.risquanter.register.telemetry.ActiveTrace
   * Every line carries `trace_id`, which is the same identifier the response
   * body carries, so a failure a caller reports can be found in the log.
   */
-private def logProjectedFailure(error: AppError | Failure, trace: TraceId): UIO[Unit] =
-  val (origin, message, annotations) = error match
-    case e: AppError => (e.origin, e.logMessage, e.logAnnotations)
-    case f: Failure  => (f.origin, f.logMessage, f.logAnnotations)
-  val line: UIO[Unit] = origin match
-    case FailureOrigin.Caller  => ZIO.logInfo(message)
-    case FailureOrigin.Service => ZIO.logWarning(message)
-  (annotations + (RequestSpanInterceptor.TraceAnnotation -> trace.value)).foldRight(line) {
+private def logProjectedFailure(error: Failure, trace: TraceId): UIO[Unit] =
+  val line: UIO[Unit] = error.origin match
+    case FailureOrigin.Caller  => ZIO.logInfo(error.logMessage)
+    case FailureOrigin.Service => ZIO.logWarning(error.logMessage)
+  (error.logAnnotations + (RequestSpanInterceptor.TraceAnnotation -> trace.value)).foldRight(line) {
     case ((k, v), effect) => ZIO.logAnnotate(k, v)(effect)
   }
 
@@ -38,11 +35,8 @@ private def logProjectedFailure(error: AppError | Failure, trace: TraceId): UIO[
   * `Either[E, O]`, where `E` is the endpoint's declared error output. Every
   * controller method therefore ends in `.wireEither`, so the projection happens
   * once per method and in one expression.
-  *
-  * The error channel admits both failure types while the codebase moves from
-  * `AppError` to `Failure`; each is projected by its own projection.
   */
-extension [R, A](effect: ZIO[R, AppError | Failure, A])
+extension [R, A](effect: ZIO[R, Failure, A])
   /** Project the typed domain failure onto the wire type, naming the trace the
     * failing work ran under.
     *
@@ -61,12 +55,6 @@ extension [R, A](effect: ZIO[R, AppError | Failure, A])
       .map(Right(_))
       .catchAll(error =>
         ActiveTrace.id.flatMap(trace =>
-          logProjectedFailure(error, trace).as(Left(projectOntoWire(error, trace, scope)))
+          logProjectedFailure(error, trace).as(Left(error.toWire(trace, scope)))
         )
       )
-
-/** Each failure type by its own one-way projection. */
-private def projectOntoWire(error: AppError | Failure, trace: TraceId, scope: TreeScope): WireError =
-  error match
-    case e: AppError => WireError.fromAppError(e, trace, scope)
-    case f: Failure  => f.toWire(trace, scope)

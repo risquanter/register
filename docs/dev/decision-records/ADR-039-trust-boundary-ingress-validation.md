@@ -85,7 +85,7 @@ has just arrived from outside the process.
 def decodeStoredNode(json: String): Either[IngressRejection, RiskNode]
 
 // Inside — the caller's value was built in this process, so it is trusted
-def getById(wsId: WorkspaceId, id: TreeId): IO[AppError, Option[RiskTree]]
+def getById(wsId: WorkspaceId, id: TreeId): IO[Failure, Option[RiskTree]]
 ```
 
 ### 3. A composite goes through its smart constructor, not its field types alone

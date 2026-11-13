@@ -57,10 +57,6 @@ a `WireError` back into a `Failure`. No arm is a wildcard, and
 `-Wconf:msg=match may not be exhaustive:error` in `scalacOptions` makes a new
 variant or a new zone without an arm a **compile error**.
 
-The leaves of the `AppError` sealed trait that have not moved onto `Failure`
-project through `WireError.fromAppError`, which is exhaustive over them under
-the same compiler option.
-
 ### 2. Every Declared Status Is a Declared Case
 
 The shared error output lists one variant per wire case, each at its own status,
@@ -86,7 +82,7 @@ def wireEither(scope: TreeScope)(using Tracing): ZIO[R, Nothing, Either[WireErro
     .map(Right(_))
     .catchAll(error =>
       ActiveTrace.id.flatMap(trace =>
-        logProjectedFailure(error, trace).as(Left(projectOntoWire(error, trace, scope)))
+        logProjectedFailure(error, trace).as(Left(error.toWire(trace, scope)))
       )
     )
 ```
@@ -99,8 +95,8 @@ rather than merely quiet.
 
 ### 3. Message Discipline and the Opaque Status
 
-`AppError` is plain data, not a `Throwable`, so there is no inherited
-`getMessage` behind any text. Each error's `logMessage` is logged server-side
+`Failure` is plain data, not a `Throwable`, so there is no inherited
+`getMessage` behind any text. Each failure's `logMessage` is logged server-side
 (ADR-002) and never serialised.
 
 - A `Rejected` at `Peer(Store)` keeps the refused text as `Diagnostic.RawValue`, which reaches the log only; the wire case is `InternalFault`, which carries a trace and nothing else
@@ -246,13 +242,17 @@ case RepositoryFailure(_) => WireError.InternalFault(trace)
 ### ❌ Confidential Identifier in a Client-Visible Message
 
 ```scala
-// BAD: the wire-facing failure names an internal scoping identifier (ADR-036)
-ZIO.fail(ValidationFailed(List(ValidationError(
-  "scenario", NOT_FOUND, s"not found in workspace ${wsId.value}"))))
+// BAD: a wire payload case carries an internal scoping identifier (ADR-036)
+enum NotFoundKind:
+  case ScenarioAbsent(workspace: WorkspaceId, scenario: ScenarioName)
 
-// GOOD: message names only client-safe values
-ZIO.fail(ValidationFailed(List(ValidationError(
-  "scenario", NOT_FOUND, s"Scenario '${name.value}' not found"))))
+// GOOD: the payload names only client-safe values, and the identifier is a
+// diagnostic, which the projection drops on every arm
+ZIO.fail(Failure.NotFound(Core(
+  TrustZone.Client,
+  NonEmptyChunk(ErrorLocation.requestField(FieldName.Scenario) -> NotFoundKind.Unknown()),
+  List(Diagnostic.WorkspaceRef(wsId))
+)))
 ```
 
 ### ❌ A Secret in a Log Line
@@ -269,10 +269,10 @@ logSecurity("workspace.created", "workspace_id" -> id.value)("Workspace created"
 
 ```scala
 // BAD: 403 versus 404 tells the caller the resource exists
-Failure.AccessDenied(Core(TrustZone.Client, NonEmptyList(requestField(FieldName.Id) -> DenialKind.PermissionNotHeld), diagnostics))
+Failure.AccessDenied(Core(TrustZone.Client, NonEmptyChunk(requestField(FieldName.Id) -> DenialKind.PermissionNotHeld), diagnostics))
 
 // GOOD: one opaque status for both, so neither answer distinguishes them
-Failure.NotFound(Core(TrustZone.Client, NonEmptyList(requestField(FieldName.Id) -> NotFoundKind.Unknown()), diagnostics))
+Failure.NotFound(Core(TrustZone.Client, NonEmptyChunk(requestField(FieldName.Id) -> NotFoundKind.Unknown()), diagnostics))
 ```
 
 ### ❌ An Error Shape Outside the Declared Output
@@ -292,7 +292,6 @@ ValuedEndpointOutput(BaseEndpoint.internalFaultOut, WireError.InternalFault(trac
 | Location | Pattern |
 |----------|---------|
 | `Failure.toWire` | One-way projection, total over `(variant, zone)` |
-| `WireError.fromAppError` | One-way projection, exhaustive over the remaining `AppError` leaves |
 | `BaseEndpoint` `oneOf` | One declared variant per wire case, each at its own status |
 | `WireEither.wireEither` | The single projection point, and the only reader of the trace for a controller failure |
 | `WireDecodeFailureHandler` | A rejected input answers `RequestRejected` with the status the input decides |

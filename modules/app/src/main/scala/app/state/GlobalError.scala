@@ -14,9 +14,6 @@ import com.risquanter.register.http.errors.WireError
   * say different things: that this action failed, and that the next one will
   * fail too (ADR-019 decision 7).
   *
-  * Named `GlobalError` rather than `AppError` so it does not collide with the
-  * shared `com.risquanter.register.domain.errors.AppError`.
-  *
   * Every case is a pure value and none carries an action. What a case offers the
   * user — a dismiss, the information styling — is decided where it is rendered
   * (ADR-010).

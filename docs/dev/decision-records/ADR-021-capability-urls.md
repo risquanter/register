@@ -33,14 +33,14 @@ A `WorkspaceStore` maps `WorkspaceKeySecret → Workspace` (containing tree list
 // Protected methods additionally require `using Checked[Authority]` (ADR-030);
 // `resolve` is the Layer 0 capability gate and is the one call that precedes it.
 trait WorkspaceStore:
-  def create(seedEntityId: Option[SeedEntityId]): IO[AppError, WorkspaceKeySecret]
-  def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit]
-  def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord]
-  def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean]
-  def listTrees(key: WorkspaceKeySecret): IO[AppError, List[TreeId]]
-  def checkTreeCapacity(key: WorkspaceKeySecret): IO[AppError, Unit]
-  def delete(key: WorkspaceKeySecret): IO[AppError, Unit]
-  def rotate(key: WorkspaceKeySecret): IO[AppError, WorkspaceKeySecret]
+  def create(seedEntityId: Option[SeedEntityId]): IO[Failure, WorkspaceKeySecret]
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[Failure, Unit]
+  def resolve(key: WorkspaceKeySecret): IO[Failure, WorkspaceRecord]
+  def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[Failure, Boolean]
+  def listTrees(key: WorkspaceKeySecret): IO[Failure, List[TreeId]]
+  def checkTreeCapacity(key: WorkspaceKeySecret): IO[Failure, Unit]
+  def delete(key: WorkspaceKeySecret): IO[Failure, Unit]
+  def rotate(key: WorkspaceKeySecret): IO[Failure, WorkspaceKeySecret]
   def evictExpired: UIO[List[WorkspaceRecord]]
 ```
 

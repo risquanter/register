@@ -34,7 +34,7 @@ storage paths and authorization, never a credential.
 
 ```scala
 // GOOD: capability in, internal id derived server-side, never on the wire
-def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]] =
+def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, List[TreeId]] =
   workspaceStore.resolve(key).flatMap(ws => repo.listTrees(ws.id))
 ```
 

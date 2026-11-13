@@ -71,7 +71,7 @@ object WireDecodeFailureHandler:
     * response is logged wherever it was produced.
     *
     * A rejected request is caller-caused by construction, which is `INFO`
-    * (ADR-002). There is no `AppError` here to read an origin from, because the
+    * (ADR-002). There is no `Failure` here to read an origin from, because the
     * request never reached a handler.
     *
     * The input is named by Tapir's own rendering of it, because the location

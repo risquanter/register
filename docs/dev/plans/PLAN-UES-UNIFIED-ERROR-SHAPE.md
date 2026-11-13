@@ -25,7 +25,7 @@ because the leaf it failed with is deleted in this step; approved 2026-11-11.
 Step 4.3 landed at 0.18.15, with the two `NotSupported` services narrowed to
 `IO[Failure, A]` and sharing one `scenariosUnavailable` value, and the in-memory
 repository's row 9 values built by `pinnedReadsUnavailable`; approved
-2026-11-11. Phase 4 closes when BATS suite C passes at 0.18.15. Phase 5 step
+2026-11-11. BATS suite C passed at 0.18.15, which closes Phase 4. Phase 5 step
 5.1 landed at 0.18.16, with the deletion of `ValidationFailed` moved to step
 5.5, because rows 56 to 58 still build it until steps 5.4 and 5.5, and with
 `WorkspaceStore.maxTreesReached` and its two capacity checks taking the
@@ -68,7 +68,16 @@ step 6.1 deletes the function. `decorate`'s overflow at `MitigatedResult` is
 caused by the caller's mitigation and answers at `Client` with row 58b. The
 engine release steps 5.6 and 5.7 wait on, vql-engine 0.18.0, was published on
 2026-11-12. Steps 5.6 and 5.7 landed together on 2026-11-12 against it, with
-the signatures and deviations stated at the end of step 5.7.
+the signatures and deviations stated at the end of step 5.7. Phase 5 closes
+when BATS suites C and A pass at 0.18.22. Phase 6 landed on 2026-11-12, approved that
+day, with these deviations from its text. `AppError.scala` keeps its name and
+holds `ValidationError` and `FailureOrigin`, the two types that stay.
+`RiskTreeServiceLive`'s two simulation error codes go with `SimulationFailure`,
+their one reader. ADR-010 §4, which still described a `Task` service layer, is
+rewritten to `IO[Failure, A]`. ADR-019, ADR-021, the ADR-028 appendix, ADR-030,
+ADR-036 and ADR-039, whose examples named `AppError`, are amended on the user's
+go, and `WireDecodeFailureHandler.scala`'s comment is updated on an inventory
+extension. The plan closes when BATS suites C, B and A pass at 0.19.0.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 

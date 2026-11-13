@@ -147,7 +147,7 @@ two say different things: that this action failed, and that the next one will
 fail too.
 
 `GlobalError` is the app module's own sealed enum of the session conditions the
-banner shows, named apart from the server's `AppError` because the two describe
+banner shows, named apart from the server's `Failure` because the two describe
 different things — what went wrong, versus what the user is told:
 
 ```scala

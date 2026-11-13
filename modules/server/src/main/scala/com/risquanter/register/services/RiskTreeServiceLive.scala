@@ -9,7 +9,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
-import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, SimulationFailure, AppError, Failure, TrustZone}
+import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, Failure, TrustZone}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -140,7 +140,7 @@ class RiskTreeServiceLive private (
     * field come from the first refusal for a `Rejected`, and are fixed per case
     * otherwise.
     */
-  private def extractErrorContext(error: AppError | Failure): ErrorContext =
+  private def extractErrorContext(error: Failure): ErrorContext =
     val errorType = error.getClass.getSimpleName
     error match {
       case Failure.Rejected(core) =>
@@ -149,13 +149,6 @@ class RiskTreeServiceLive private (
           errorType = errorType,
           errorCode = FieldProblem.code(problem).code,
           errorField = Some(ErrorLocation.describe(location))
-        )
-
-      case SimulationFailure(_, _) =>
-        ErrorContext(
-          errorType = errorType,
-          errorCode = RiskTreeServiceLive.ErrorCodes.Simulation,
-          errorField = Some(RiskTreeServiceLive.ErrorCodes.SimulationField)
         )
 
       case _ =>
@@ -178,7 +171,7 @@ class RiskTreeServiceLive private (
     * @param operation The operation — its label is the span name and the metric label
     * @param body Effect to execute within the span (may call `tracing.setAttribute`)
     */
-  private def traced[A](operation: Operation)(body: IO[AppError | Failure,A]): IO[AppError | Failure,A] =
+  private def traced[A](operation: Operation)(body: IO[Failure, A]): IO[Failure, A] =
     tracing.span(operation.label, SpanKind.INTERNAL)(body).tapBoth(
       error => recordOperation(operation, success = false, Some(extractErrorContext(error))),
       _ => recordOperation(operation, success = true, None)
@@ -462,7 +455,7 @@ class RiskTreeServiceLive private (
   // LEC Query APIs (ADR-015)
   // ========================================
 
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError | Failure,Probability] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[Failure, Probability] =
     traced(Operation.ProbOfExceedance) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -483,7 +476,7 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[AppError | Failure,Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[Failure, Map[NodeId, LECNodeCurve]] =
     traced(Operation.GetLECCurvesMulti) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -564,9 +557,7 @@ object RiskTreeServiceLive {
     * names. Contracts with the metrics dashboards.
     */
   private object ErrorCodes {
-    val Simulation: String      = "SIMULATION_ERROR"
-    val Unknown: String         = "UNKNOWN_ERROR"
-    val SimulationField: String = "simulation"
+    val Unknown: String = "UNKNOWN_ERROR"
   }
 
   /** Metric names and descriptions - centralized for consistency */

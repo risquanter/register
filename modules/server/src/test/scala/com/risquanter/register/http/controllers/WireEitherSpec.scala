@@ -22,8 +22,8 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{SafeId, TelemetryPlaceholders, TraceId, WorkspaceId}
 import com.risquanter.register.domain.errors.{
-  AppError, Core, Diagnostic, ErrorLocation, ExpiryDetail, Failure, FieldName, FieldProblem, OutageMode, PeerZone,
-  SimulationFailure, TrustZone, ValidationError
+  Core, Diagnostic, ErrorLocation, ExpiryDetail, Failure, FieldName, FieldProblem, OutageMode, PeerZone, TrustZone,
+  ValidationError
 }
 import com.risquanter.register.http.RequestSpanInterceptor
 import com.risquanter.register.http.endpoints.BaseEndpoint
@@ -58,15 +58,16 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
 
   private given SttpMonadError[Task] = new RIOMonadError[Any]
 
-  /** The projection reads nothing from the failure's content, so any `AppError`
-    * exercises it. */
-  private val failure: AppError = SimulationFailure("boundary", new RuntimeException("a failure for the boundary to project"))
+  /** The trace tests read nothing from the failure's content, so any `Failure`
+    * exercises them. */
+  private val failure: Failure = rejectedAt(TrustZone.Service, FieldName.Name)
 
-  private val failing: IO[AppError, Nothing] = ZIO.fail(failure)
+  private val failing: IO[Failure, Nothing] = ZIO.fail(failure)
 
-  /** A service-caused failure used by the level test alone. Its message is its
-    * own, so the line this test reads can only be the line this test wrote. */
-  private val serviceFailure: AppError = SimulationFailure("level", new RuntimeException("a service failure for the level test"))
+  /** A service-caused failure used by the level test alone. Its message names
+    * its own field, so the line this test reads can only be the line this test
+    * wrote. */
+  private val serviceFailure: Failure = rejectedAt(TrustZone.Service, FieldName.Id)
 
   /** An unreachable authorization service.
     *
@@ -101,14 +102,9 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
   private val clientRefusal: Failure = rejectedAt(TrustZone.Client, FieldName.Email)
   private val storeRefusal: Failure  = rejectedAt(TrustZone.Peer(PeerZone.Store), FieldName.Url)
 
-  /** The log message of either failure type. */
-  private def messageOf(error: AppError | Failure): String = error match
-    case e: AppError => e.logMessage
-    case f: Failure  => f.logMessage
-
   /** The wire failure the boundary projects `error` onto. This is also where a
     * test reads the trace the response would carry. */
-  private def wireFailure(error: AppError | Failure)(using Tracing): UIO[Option[WireError]] =
+  private def wireFailure(error: Failure)(using Tracing): UIO[Option[WireError]] =
     ZIO.fail(error).wireEither(TreeScope.NoTree).map(_.left.toOption)
 
   /** The boundary's log line for `error` under `trace`, or `None` if it wrote
@@ -119,9 +115,9 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
     * test wrote therefore cannot answer for this one, whichever way the test
     * framework scopes the logger it collects from.
     */
-  private def lineFor(error: AppError | Failure, trace: Option[TraceId]): UIO[Option[ZTestLogger.LogEntry]] =
+  private def lineFor(error: Failure, trace: Option[TraceId]): UIO[Option[ZTestLogger.LogEntry]] =
     ZTestLogger.logOutput.map(_.find { entry =>
-      entry.message() == messageOf(error) &&
+      entry.message() == error.logMessage &&
       trace.exists(t => entry.annotations.get("trace_id").contains(t.value))
     })
 
@@ -135,7 +131,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
 
   /** An endpoint whose logic always fails with `error` and ends in the
     * projection, which is how every controller method ends. */
-  private def failingEndpoint(error: AppError | Failure)(using Tracing): ServerEndpoint[Any, Task] =
+  private def failingEndpoint(error: Failure)(using Tracing): ServerEndpoint[Any, Task] =
     baseEndpoint.get
       .in(RequestPath)
       .out(stringBody)
@@ -143,7 +139,7 @@ object WireEitherSpec extends ZIOSpecDefault with BaseEndpoint:
 
   /** Serves one request to that endpoint through the span interceptor, so the
     * projection runs where it runs in production: inside the request's span. */
-  private def requestFailing(error: AppError | Failure)(using tracing: Tracing): Task[Response[Either[String, String]]] =
+  private def requestFailing(error: Failure)(using tracing: Tracing): Task[Response[Either[String, String]]] =
     val backend = TapirStubInterpreter(
       ZioHttpServerOptions
         .customiseInterceptors[Any]

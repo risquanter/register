@@ -14,7 +14,7 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, Content
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
-  AppError, Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
+  Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
   TrustZone, ValidationError, ValidationErrorCode
 }
 import com.risquanter.register.telemetry.TelemetryLive
@@ -30,15 +30,15 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   // TestChecked provides the Checked[Authority] proof required by protected service methods.
   private given Checked[Authority] = TestChecked.value
 
-  // Concise service accessor pattern. The error type is `AppError | Failure`
-  // because that is what the service declares; widening it to `Throwable` here
-  // would hide which failures a call can produce.
-  private def service[A](f: RiskTreeService => IO[AppError | Failure, A]): ZIO[RiskTreeService, AppError | Failure, A] =
+  // Concise service accessor pattern. The error type is `Failure` because that
+  // is what the service declares; widening it to `Throwable` here would hide
+  // which failures a call can produce.
+  private def service[A](f: RiskTreeService => IO[Failure, A]): ZIO[RiskTreeService, Failure, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   /** The refusals of a `Rejected` from the client, as the validation errors
     * they were built from, or `None` for any other failure. */
-  private def clientRefusals(error: AppError | Failure): Option[List[ValidationError]] =
+  private def clientRefusals(error: Failure): Option[List[ValidationError]] =
     error match
       case Failure.Rejected(Core(TrustZone.Client, errors, _)) =>
         Some(errors.toList.map((location, problem) => ValidationError(location, problem)))
@@ -183,7 +183,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   /** Attach mitigations to an already-stored tree. No request can do this — the
     * request DTOs carry no mitigation field — so writing through the repository
     * is the only way to reach the state an update has to preserve. */
-  private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): IO[AppError | Failure, RiskTree] =
+  private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): IO[Failure, RiskTree] =
     repo.update(
       stubWsId,
       tree.id,
@@ -327,7 +327,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       Nil
     )
 
-  private def failedWith(exit: Exit[AppError | Failure, Any], expected: Failure): Boolean =
+  private def failedWith(exit: Exit[Failure, Any], expected: Failure): Boolean =
     exit.causeOption.flatMap(_.failureOption).contains(expected)
 
   override def spec: Spec[TestEnvironment & Scope, Any] =

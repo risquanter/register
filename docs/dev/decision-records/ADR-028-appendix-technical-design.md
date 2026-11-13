@@ -283,7 +283,7 @@ Location: `server/.../services/QueryServiceLive.scala`
 ZIO service. Single method:
 
 ```scala
-def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): IO[AppError | Failure, QueryResponse]
+def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef)(using Checked[Authority]): IO[Failure, QueryResponse]
 ```
 
 The text arrives already parsed: `QueryRequest.resolve` parsed it at the

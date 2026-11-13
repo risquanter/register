@@ -6,7 +6,7 @@ import java.time.Instant
 import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, MergeStagingRef, PositiveInt, ScenarioName, StoreBranch, WorkspaceId}
-import com.risquanter.register.domain.errors.{AppError, Core, ErrorLocation, Failure, OutageMode, PeerZone}
+import com.risquanter.register.domain.errors.{Core, ErrorLocation, Failure, OutageMode, PeerZone}
 import com.risquanter.register.http.responses.{HistoryOperation, TreeWriteKind}
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient}
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminPath, IrminTreeEntry}
@@ -67,7 +67,7 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
     commitWith('a', CommitMessage.ScenarioMerged(ws, scenario))
   )
 
-  private def history(n: Int): IO[AppError | Failure, (List[HistoryOperation], List[Int])] =
+  private def history(n: Int): IO[Failure, (List[HistoryOperation], List[Int])] =
     for
       asked   <- Ref.make(List.empty[Int])
       entries <- TreeHistoryServiceLive(FakeHistoryIrmin(log, asked, None))

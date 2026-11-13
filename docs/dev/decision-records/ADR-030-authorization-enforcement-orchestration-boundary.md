@@ -53,7 +53,7 @@ val deleteWorkspace: ServerEndpoint[Any, Task] = deleteWorkspaceEndpoint.serverL
 
 // ❌ Service calls service — authorization boundary is invisible; check() cannot be verified
 class WorkspaceService(store: WorkspaceStore, trees: RiskTreeService):
-  def deleteWithTrees(wsId: WorkspaceId, key: WorkspaceKeySecret): IO[AppError, Unit] =
+  def deleteWithTrees(wsId: WorkspaceId, key: WorkspaceKeySecret): IO[Failure, Unit] =
     for
       ids <- store.listTrees(key)               // no check() in scope — silent bypass
       _   <- trees.cascadeDeleteTrees(wsId, ids)
@@ -121,7 +121,7 @@ object Checked:
   // Only constructible inside the auth package — authz.check() is the sole production source
 
 // Service method — base type; any prior check or lifecycle token satisfies it
-def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[AppError, List[TreeId]]
+def listTrees(key: WorkspaceKeySecret)(using Checked[Authority]): IO[Failure, List[TreeId]]
 
 // Handler — specific permission value passed to SpiceDB; binds as Checked[Permission]
 // Note: Scala 3 type inference widens to Checked[Permission] when binding given from check();
@@ -218,7 +218,7 @@ register.authz.provisioning {
 ```scala
 // BAD: orchestration inside service — authorization cannot be verified at this call site
 class WorkspaceOrchestrator(store: WorkspaceStore, trees: RiskTreeService):
-  def deleteAll(key: WorkspaceKeySecret): IO[AppError, Unit] =
+  def deleteAll(key: WorkspaceKeySecret): IO[Failure, Unit] =
     for
       ids <- store.listTrees(key)   // who checked? when? no way to know from here
       _   <- trees.cascadeDeleteTrees(wsId, ids)
@@ -257,12 +257,12 @@ yield result).either
 ```scala
 // BAD: duplicates SpiceDB policy in Scala — breaks when two permissions are valid callers
 def listTrees(key: WorkspaceKeySecret)
-    (using Checked[Permission.ViewWorkspace.type]): IO[AppError, List[TreeId]]
+    (using Checked[Permission.ViewWorkspace.type]): IO[Failure, List[TreeId]]
 // Fails to compile when called after AdminWorkspace check in deleteWorkspace
 
 // GOOD: base type — policy lives in SpiceDB schema only
 def listTrees(key: WorkspaceKeySecret)
-    (using Checked[Authority]): IO[AppError, List[TreeId]]
+    (using Checked[Authority]): IO[Failure, List[TreeId]]
 ```
 
 ### ❌ Discarding the Proof

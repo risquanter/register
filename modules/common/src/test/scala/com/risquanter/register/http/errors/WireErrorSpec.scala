@@ -15,12 +15,10 @@ import com.risquanter.register.domain.errors.*
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.errors.WireError.given
 
-/** The properties the one-way projection onto the wire depends on.
-  *
-  * Exhaustive matching already makes a missing arm in `fromAppError` a compile
-  * error. These assertions pin what the compiler cannot: which wire case each
-  * internal error reaches, which status carries it, and that nothing
-  * confidential travels with it.
+/** The properties the wire cases depend on: which status carries each case,
+  * that nothing confidential travels with one, and that each round-trips
+  * through its own codec. Which case each failure reaches is pinned by the
+  * server's `FailureSpec`, beside the projection.
   */
 object WireErrorSpec extends ZIOSpecDefault:
 
@@ -154,19 +152,6 @@ object WireErrorSpec extends ZIOSpecDefault:
             UlidShape.findFirstIn(validationRejected.toJson).contains(treeId.value.toString)
           )
         },
-      ),
-      suite("fromAppError maps every internal leaf type")(
-        test("each leaf reaches the case assigned to it") {
-          val mapping: List[(AppError, String)] = List(
-            // Faults
-            SimulationFailure("sim-1", new RuntimeException("x"))   -> "InternalFault"
-          )
-
-          val wrong = mapping.filter { (error, expected) =>
-            WireError.fromAppError(error, trace, TreeScope.NoTree).productPrefix != expected
-          }
-          assertTrue(wrong.isEmpty) && assertTrue(mapping.size == 1)
-        }
       ),
       suite("every case round-trips through its own codec")(
         test("a rejected request keeps its entries") {

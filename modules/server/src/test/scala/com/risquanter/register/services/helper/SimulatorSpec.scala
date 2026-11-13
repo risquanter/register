@@ -1,11 +1,11 @@
 package com.risquanter.register.services.helper
 
-import zio.{IO, ZIO, Task}
+import zio.{Task, UIO, ZIO}
 import zio.test.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
 import com.risquanter.register.domain.data.iron.{OpenProbability, Probability, PositiveInt, SeedEntityId, SeedVarId}
 import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, DistributionParams, DistributionShape}
-import com.risquanter.register.domain.errors.{AppError, ErrorSubject, FieldProblem}
+import com.risquanter.register.domain.errors.{ErrorSubject, FieldProblem}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr, metalogShape}
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
@@ -39,7 +39,7 @@ private object TestSimulator {
   /** Simulate every sampler, at most `maxConcurrentSimulations` at a time. */
   def simulate(
     samplers: Vector[RiskSampler]
-  )(using cfg: SimulationConfig): IO[AppError, Vector[LossDistribution]] =
+  )(using cfg: SimulationConfig): UIO[Vector[LossDistribution]] =
     ZIO.collectAllPar(
       samplers.map { sampler =>
         Simulator.performTrials(sampler, cfg.defaultNTrials, cfg.defaultTrialParallelism)

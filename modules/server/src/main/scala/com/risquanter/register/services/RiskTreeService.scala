@@ -4,7 +4,7 @@ import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, Probability, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{AppError, Failure}
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.auth.{Authority, Checked}
 
 /** Service layer for RiskTree business logic.
@@ -97,7 +97,7 @@ trait RiskTreeService {
     * @param rev Read coordinate — branch head or a pinned commit.
     * @return The share of trials whose loss was at or above `threshold`.
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[AppError | Failure, Probability]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[Failure, Probability]
 
   /** Get LEC curves for multiple nodes with shared tick domain.
     *
@@ -115,7 +115,7 @@ trait RiskTreeService {
     *                   an earlier commit).
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
-  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false)(using Checked[Authority]): IO[AppError | Failure, Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false)(using Checked[Authority]): IO[Failure, Map[NodeId, LECNodeCurve]]
 }
 
 object RiskTreeService:

@@ -6,7 +6,7 @@ import zio.test.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
-import com.risquanter.register.domain.errors.{AppError, Failure}
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.telemetry.TelemetryLive
@@ -40,7 +40,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
     */
   private val RootKey = "<root>"
 
-  private def service[A](f: RiskTreeService => IO[AppError | Failure, A]): ZIO[Env, AppError | Failure, A] =
+  private def service[A](f: RiskTreeService => IO[Failure, A]): ZIO[Env, Failure, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
   /** Resolve every leaf's and the root's outcomes, keyed by leaf name / RootKey. */

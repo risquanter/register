@@ -143,6 +143,8 @@ val appLayer = ZLayer.make[WorkspaceTreeController & Server](
 - The projection onto the wire is owned by the source type, named `toWire`, and returns a typed value; `fromWire` is its total inverse (ADR-038)
 - Error accumulation collects all validation errors in one pass
 - Field paths use ID-based format (e.g., `"riskLeaf[id=cyber].probability"`)
+- Every failure is one `Failure`: a variant naming what happened (`Rejected`, `NotFound`, `Conflict`, `AccessDenied`, `Unanswered`, `Expired`, `NotSupported`) around a `Core` holding the trust zone the failing value came from, the located errors as a `NonEmptyChunk`, and the typed diagnostics. A state no validated input reaches is a defect and dies instead (ADR-010, ADR-033)
+- `Failure.toWire` is the one projection onto the wire. It is total over `(variant, zone)`. A value from the `Client` zone answers its own `WireError` case, and so do an outage, a missing capability and a denial the mesh or the authorization service decided. Every other pair answers `InternalFault`. The zone and the diagnostics are dropped on every arm, and the log level is derived from the zone (ADR-002, ADR-035)
 
 **What the separation delivers:**
 - Typed end to end: the shared module is cross-compiled, so the browser decodes into the same refined types the server encoded from, and a range or character-set restriction JSON cannot carry is still known on both sides
