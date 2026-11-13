@@ -348,7 +348,9 @@ extension open without building it now.
   ids, never node names. The name-keyed VQL domain
   (`RiskTreeKnowledgeBase`, `Value(Asset, node.name.value)`) must be reconciled to
   id-based identity so targeting survives duplicate/renamed names and future
-  multi-instance asset elements.
+  multi-instance asset elements. The mechanism was ruled on 2026-11-13 as
+  §7.6.12 decision 16: the browser rewrites every name to an identifier, and
+  the server refuses a predicate that holds a name.
 
 **Algebra (settled framing).** Three complementary structures, none in conflict:
 
@@ -1898,6 +1900,24 @@ landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
 to gate. No M4 source edit is authorized until the approval token names this
 plan and the edited file appears in the shared `## File inventory`.
 
+**Re-elevated 2026-11-13.** Slices 1, 3, 4 and 5 were restated against the code
+as it stands after `DONE-PLAN-ERROR-WIRE-BOUNDARY.md`,
+`DONE-PLAN-TYPED-ERROR-STRUCTURE.md` and `DONE-PLAN-UES-UNIFIED-ERROR-SHAPE.md`
+landed, and against ADR-037, ADR-038 and ADR-039, all three accepted after the
+September elevation. Each restated slice opens by naming what moved. Slice 2 is
+left as recorded, because decision 11 gates it and is ruled when that slice is
+the work in hand. No ruling in §7.6.2 or §7.6.12 is changed. The re-elevation
+raised three questions, recorded at the end of §7.6.12. Existing rulings answer
+two of them. The third, decision 14, was ruled on 2026-11-13 and changes no
+slice text.
+Decisions 15 and 16 were ruled on 2026-11-13 and are recorded in the same place:
+a node is written as a function term, and a stored predicate holds identifiers
+only. Neither is elevated to signatures. Both wait on an engine release that is
+not yet planned, and no text of slices 1, 3, 4 and 5 depends on them.
+Two rulings are
+restated in a later record's terms: the curve answer keeps its enclosing object
+(§7.6.3), and the new decision record is numbered ADR-040 (Decision 2).
+
 **Signatures below use the current names of the two per-workspace registries:
 `ContentCacheRegistry` and `MitigationScopeResolverRegistry`, both handing out
 their instance via `forWorkspace(...)`.**
@@ -2035,9 +2055,11 @@ from its first ruling; the entry states both the new ruling and why it changed.
 2. **Where does the client-facing mitigation API contract live?** (F3)
    **RULED B — split by surface.** The mitigation buckets amend ADR-017, whose
    "Four Buckets" decision would otherwise describe a tree PUT that no longer
-   exists. The read side becomes a new **ADR-037**, which covers the analysis
+   exists. The read side becomes a new **ADR-040**, which covers the analysis
    read contract as a whole — pin, branch header, selection, response — not only
-   its mitigation-shaped part, and which follows the ADR-00X meta template.
+   its mitigation-shaped part, and which follows the ADR-00X meta template. The
+   ruling named it ADR-037. That number has since been taken by
+   `ADR-037-in-code-constants.md`, and ADR-040 is the next free one.
 
 3. **How does the selection cross the wire?** (F6) **RULED A — a JSON body on
    both analysis endpoints; `prob-of-exceedance` becomes a POST.** A selection
@@ -2150,6 +2172,14 @@ from its first ruling; the entry states both the new ruling and why it changed.
    runs `requireDistinctNodeNames`, so a name identifies at most one node in a
    tree and the anchor is unambiguous.
 
+   **Re-ruled (user, 2026-11-14): this ruling gives way to §7.6.12 decision
+   16.** The browser writes identifiers into a predicate and the server refuses
+   names. A leaf created in a save has no identifier until the server allocates
+   one, so no predicate can name it in that save. An override on a new leaf
+   takes two saves: the leaf first, then the override. The request's anchor is
+   the identifier of a leaf that already exists. Its exact field is written
+   with the request shape, in §7.6.12 decision 11.
+
 9. **What happens to an `overrideAnchor` whose node the same PUT deletes?**
    (F17) **RULED — accept the request; staleness is the mechanism.** No
    cross-check is added to `validateMitigations`. A mitigation whose anchor names
@@ -2174,6 +2204,33 @@ from its first ruling; the entry states both the new ruling and why it changed.
    stays reachable and is the specified behaviour, not a leftover. And a stored
    tree carrying a dangling anchor stays decodable, so `fromNodes` does not
    tighten on this point.
+
+   **Re-ruled (user, 2026-11-14): a deleted anchor makes the override a no-op,
+   and it is not reported stale.** The user's words: "same treatment as
+   everything else. so this would also make it a noop simply". This follows
+   the principle ruled with §7.6.12 decision 14: a mitigation with nothing to
+   apply to is a no-op and is not flagged. The request is still accepted, and a
+   tree carrying a dangling anchor still decodes. "Stale" now means one thing:
+   the anchor leaf exists and its content hash differs from the stamp.
+
+   M4 slice 3, which delivers `staleMitigationIds`, makes the change. In
+   `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationStaleness.scala`,
+   `isStale` keeps its signature and its last arm changes:
+
+   ```scala
+   // before
+       case _                    => true
+   // after
+       // The anchor is gone, or is no longer a leaf. The override then applies
+       // to no node, which is a no-op like any mitigation with nothing to
+       // apply to, so it is not reported.
+       case _                    => false
+   ```
+
+   The comment above that arm is replaced by the one shown. In
+   `MitigationStalenessSpec.scala` the test "anchor leaf deleted → reported
+   stale" becomes "anchor leaf deleted → not reported", and it asserts the
+   empty set.
 
 11. **Does one analysis request carry one selection or several named variants?**
    **RULED A — one selection per request.** Comparing several selections is
@@ -2240,9 +2297,10 @@ it fills `fullScope` with every mitigation the tree holds, as ruled below.
 }
 ```
 
-**Conversion at the controller.** The body decodes into the existing
-`MitigationSelection`, so the service, the resolver, the cache path and the
-query-language path keep the signatures they have.
+**No conversion.** The body's `selection` decodes into `MitigationSelection`
+itself, through `MitigationSelection.create` (§7.6.5). The controller passes the
+decoded value on, so the resolver, the cache path and the query-language path
+keep the signatures they have.
 
 | Body | `MitigationSelection` |
 |---|---|
@@ -2262,9 +2320,11 @@ and the union of those two is the resolved scope.
 **A state this shape cannot express, deliberately.** `NodesOnly(Set.empty)` —
 a mitigation switched on and applied to no node — has no spelling here, because
 a mitigation is named only by appearing in `fullScope` or by having at least one
-entry in `nodesOnly`. The current `ScopeRestriction` codec accepts an empty
-`ids` array and produces that state, which is indistinguishable in effect from
-the mitigation being off.
+entry in `nodesOnly`. The hand-written `ScopeRestriction` codec the type carries
+today accepts an empty `ids` array and produces that state, which is
+indistinguishable in effect from the mitigation being off. Slice 1 deletes that
+codec, and `MitigationSelection.create` never builds an empty `NodesOnly`
+(§7.6.5).
 
 **A named mitigation that is not in the tree — ruled 2026-09-13: reject.** A
 selection names mitigations by `MitigationId`, never by name. An identifier the
@@ -2325,6 +2385,11 @@ mitigations that shaped it. The inherent series is the entry whose mitigation
 list is empty — a case of the general structure rather than a separately named
 field, which is what retires the "mitigated twin" framing for good.
 
+The map below is the value of the one field, `curves`, of the response object
+`LECCurvesResponse`. The endpoint answers that object today, and ADR-038 §3
+rules that "a response body is never a bare primitive or a bare collection", so
+the object stays and the map is not the body itself.
+
 ```json
 {
   "01HQ8ZK3": [
@@ -2383,8 +2448,8 @@ leaf that is the order the transforms compose in. At a portfolio the list
 gathers mitigations applied at different nodes, which never compose with each
 other, so the order there is determinism only and carries no meaning.
 
-**Nothing else belongs in this response.** There is no enclosing object and no
-per-request content beside the map. A mitigation that was ticked and contributed
+**Nothing else belongs in this response.** The response object has the one field
+`curves` and no per-request content beside it. A mitigation that was ticked and contributed
 nothing is observable directly: the client knows what it sent, and an identifier
 appearing in no node's `withMitigations` contributed to no curve here. Why it
 contributed nothing — a predicate that no longer binds, or one that resolves to
@@ -2435,8 +2500,8 @@ reading plus, for every node the selection reaches, one more reading under it.
 
 **Reasoning source.** This slice reads the resolver and turns what it returns
 into curves. What the resolver returns is ruled in §8.17 and specified in §8.18:
-`Task[LossDistribution]` and `Task[Map[NodeId, LossDistribution]]`, unchanged
-from today, with `LossDistribution` now a single concrete type denoting one
+`IO[Failure, LossDistribution]` and `IO[Failure, Map[NodeId, LossDistribution]]`, as
+`CachedResultResolver` declares them today, with `LossDistribution` now a single concrete type denoting one
 node's value under one selection rather than a base class with two cases. The
 signatures written below are therefore exactly right as they stand; nothing in
 this slice waits on that sub-slice except the ability to compile against it. The
@@ -2445,19 +2510,96 @@ derivation behind the type is in
 Any ambiguity below about which valuation a value represents is resolved by
 §8.17 and that document, never by re-deriving it here.
 
-**New file — `modules/common/src/main/scala/com/risquanter/register/http/requests/AnalysisRequests.scala`.**
+**What the 2026-11-13 re-elevation changed in this slice.** The signatures below
+replace the ones this section carried from September. Four things in the code
+moved underneath them:
+
+- A refusal is `ValidationError(location: ErrorLocation, problem: FieldProblem)`.
+  It has no `field`, `code` or `message`, and `ValidationFailed` no longer exists.
+  A service fails with `Failure.rejected(TrustZone.Client, …)`.
+- Every service method fails with `IO[Failure, A]` and takes
+  `(using Checked[Authority])` (ADR-010, ADR-030).
+- A controller ends with `.wireEither(TreeScope.InTree(treeId))`, which projects
+  a `Failure` onto the wire.
+- `MitigationSelection` and `ScopeRestriction` live in the `server` module, in
+  `modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala`,
+  with public constructors and unbounded collections.
+
+**The selection is a domain value, and the request body decodes into it.** The
+September text declared a second public type, `MitigationSelectionRequest`, put
+the two bounds on it, and converted it to `MitigationSelection` afterwards. Three
+passages of the records rule that shape out:
+
+- ADR-001 §1: "A domain object is constructed only through a `create()` … JSON
+  decoders call the smart constructor, so no raw object bypasses validation."
+- ADR-001 §5: "A domain aggregate is declared `final case class X private (...)`,
+  with all construction routed through a smart constructor".
+- ADR-038 §1: "The endpoint declares the domain type. That type owns a private
+  case class whose fields are the wire fields, and decodes through its own smart
+  constructor", so that "there is no public twin class to keep in step".
+
+So this slice does four things instead. `MitigationSelection` and
+`ScopeRestriction` move to `common`, because a shared endpoint must name them.
+Their constructors become private and one `create` carries both bounds. The
+two-list wire form of §7.6.3 becomes a private `Raw` in `MitigationSelection`'s
+companion. The request bodies declare the domain type, so no request-side
+selection type and no conversion function exist.
+
+Two records accepted after September also bear on the shapes. ADR-037 §3 gives a
+constant one definition, so the bounds read `RiskTree`'s bounds instead of
+restating them. ADR-038 §3 says "a response body is never a bare primitive or a
+bare collection", so the curve answer keeps its `LECCurvesResponse` wrapper and
+the exceedance figure is a `Probability`.
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`** — the two collection
+bounds lose their `private` modifier and change in no other way. Both figures
+are chosen by this project (ADR-017 §6, the domain cardinalities):
 
 ```scala
-package com.risquanter.register.http.requests
+  /** Upper bound on a tree's node count — a resource limit against oversized
+    * trees on merges, store-loads, and programmatic construction. */
+  val MaxNodes: NonNegativeInt = 10000
 
-import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, JsonDecoder}
-import zio.prelude.Validation
+  /** Persisted-content bound on the mitigation collection. */
+  val MaxMitigations: NonNegativeInt = 1000
+```
+
+**New file — `modules/common/src/main/scala/com/risquanter/register/domain/data/MitigationSelection.scala`.**
+It holds `ScopeRestriction`, `MitigationSelection` and the one entry type of the
+wire form. The first two move here from
+`modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala`.
+Their definitions name only `NodeId`, `MitigationId` and codec types, so nothing
+server-only comes with them. Family: the domain aggregates in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/`, whose
+existing member `Mitigation` is declared `final case class Mitigation private (…)`
+with `create` as its sole gate and a private `Raw` wire shape in its companion.
+
+```scala
+package com.risquanter.register.domain.data
+
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder}
+import zio.prelude.{Equal, Validation}
 import sttp.tapir.Schema
 
-import com.risquanter.register.domain.data.{MitigationSelection, ScopeRestriction}
-import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, NonNegativeInt}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
+
+/** How far one selected mitigation reaches: its whole resolved scope, or the
+  * named nodes only. A `NodesOnly` set intersects with the mitigation's
+  * resolved scope at application time, so an id outside that scope does
+  * nothing.
+  */
+sealed trait ScopeRestriction
+
+object ScopeRestriction:
+  case object FullScope extends ScopeRestriction
+
+  /** Built only by `MitigationSelection.create`, which bounds the set and never
+    * builds an empty one. */
+  final case class NodesOnly private[data] (ids: Set[NodeId]) extends ScopeRestriction
+
+  given Equal[ScopeRestriction] = Equal.default
 
 /** One tick on a mitigation's row beneath a node: that mitigation applies at
   * that node and nowhere else.
@@ -2468,219 +2610,322 @@ object NodeMitigationEntry:
   given codec: JsonCodec[NodeMitigationEntry] = DeriveJsonCodec.gen[NodeMitigationEntry]
   given schema: Schema[NodeMitigationEntry]   = Schema.derived[NodeMitigationEntry]
 
-/** A mitigation selection in the form the interface produces it. `fullScope`
-  * holds the mitigations ticked on their own control, each applying across its
-  * whole resolved scope; `nodesOnly` holds the per-node ticks. Both lists empty
-  * is the mitigation-free reading. A mitigation named in both lists applies
-  * across its whole resolved scope, because both lists are statements that it
-  * is on and the wider one subsumes the narrower.
+/** Which mitigations a valuation applies, each across its whole resolved scope
+  * or at named nodes only. `Inherent` applies none. `Residual` applies every
+  * mitigation the tree holds. `Selected` applies the ones it names.
   */
-final case class MitigationSelectionRequest private (
-  fullScope: List[MitigationId],
-  nodesOnly: List[NodeMitigationEntry]
-):
+sealed trait MitigationSelection
 
-  /** The domain selection this body denotes. */
-  def toSelection: MitigationSelection = (fullScope, nodesOnly) match
-    case (Nil, Nil) => MitigationSelection.Inherent
-    case _ =>
-      val full = fullScope.toSet
-      val restricted: Map[MitigationId, ScopeRestriction] =
-        nodesOnly
-          .filterNot(e => full.contains(e.mitigation))
-          .groupMap(_.mitigation)(_.node)
-          .view.mapValues(ns => ScopeRestriction.NodesOnly(ns.toSet): ScopeRestriction)
-          .toMap
-      MitigationSelection.Selected(
-        restricted ++ full.map(_ -> ScopeRestriction.FullScope).toMap
-      )
+object MitigationSelection:
 
-  /** Every mitigation this body names, in either list. */
-  def namedMitigations: Set[MitigationId] =
-    fullScope.toSet ++ nodesOnly.map(_.mitigation).toSet
+  /** A selection stated by naming its mitigations, which is what a request body
+    * can state. `Residual` is not one: it means every mitigation of a tree, so
+    * it has no statement without that tree, and only the query language's
+    * `residual` constant produces it. */
+  sealed trait Enumerated extends MitigationSelection
 
-object MitigationSelectionRequest:
+  /** The mitigation-free valuation: no mitigation applied. */
+  case object Inherent extends Enumerated
 
-  /** The empty selection: no mitigation is on. */
-  val inherent: MitigationSelectionRequest = new MitigationSelectionRequest(Nil, Nil)
+  /** Every mitigation the tree holds, each across its whole resolved scope. */
+  case object Residual extends MitigationSelection
 
-  /** How many distinct mitigations one selection may name. Mirrors the bound on
-    * `RiskTree.mitigations`: a selection cannot usefully name more mitigations
-    * than a tree can hold. */
-  private val MaxSelectedMitigations = 1000
+  /** The named mitigations. Never empty, and within both bounds: `create` and
+    * `single` are the only ways to build one. */
+  final case class Selected private (entries: Map[MitigationId, ScopeRestriction]) extends Enumerated
 
-  /** How many nodes one mitigation may be ticked at. Mirrors the tree's node
-    * bound: a mitigation cannot be ticked at more nodes than a tree can hold. */
-  private val MaxNodesPerMitigation = 10000
+  given Equal[MitigationSelection] = Equal.default
 
-  /** Both bounds are checked together so an oversized request reports every
-    * problem at once. Whether the named mitigations exist is deliberately not
-    * checked here: that is a lookup against a loaded tree, and no tree is in
-    * hand at decode time. */
+  /** One mitigation across its whole resolved scope. Total, because one entry
+    * breaks no bound. */
+  def single(id: MitigationId): Enumerated =
+    new Selected(Map(id -> ScopeRestriction.FullScope))
+
+  /** The selection two lists state. `fullScope` holds the mitigations that are
+    * on across their whole resolved scope, and `nodesOnly` the per-node ticks.
+    * Both lists empty is `Inherent`. A mitigation named in both lists applies
+    * across its whole resolved scope, because both lists say it is on and the
+    * wider statement subsumes the narrower.
+    *
+    * A selection names at most as many mitigations as a tree can hold, and
+    * ticks one mitigation at no more nodes than a tree can hold. Both bounds
+    * are `RiskTree`'s own, and every breach is reported together. Whether the
+    * named mitigations exist is not checked here: that is a lookup against a
+    * loaded tree.
+    *
+    * {{{
+    * create(Nil, Nil)                                        // Inherent
+    * create(List(m1), List((n1, m2), (n2, m2), (n1, m1)))
+    * // Selected(Map(m1 -> FullScope, m2 -> NodesOnly(Set(n1, n2))))
+    * create(1001 distinct ids, Nil)
+    * // fails: [request.Mitigations] too many mitigations: 1001 exceeds the limit of 1000
+    * }}}
+    */
   def create(
     fullScope: List[MitigationId],
     nodesOnly: List[NodeMitigationEntry]
-  ): Validation[ValidationError, MitigationSelectionRequest] =
-    val named = fullScope.toSet ++ nodesOnly.map(_.mitigation).toSet
-    val oversizedTick = nodesOnly.groupBy(_.mitigation).collectFirst {
-      case (id, ticks) if ticks.sizeIs > MaxNodesPerMitigation => (id, ticks.size)
-    }
+  ): Validation[ValidationError, Enumerated] =
+    val full  = fullScope.toSet
+    val named = full ++ nodesOnly.map(_.mitigation)
 
     val countV: Validation[ValidationError, Unit] =
-      if named.sizeIs <= MaxSelectedMitigations then Validation.succeed(())
+      if named.sizeIs <= RiskTree.MaxMitigations then Validation.succeed(())
       else Validation.fail(ValidationError(
-        location = ErrorLocation.requestField(FieldName.Selection),
-        code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message  = s"selection names too many mitigations: ${named.size} exceeds the limit of $MaxSelectedMitigations"
+        ErrorLocation.requestField(FieldName.Mitigations),
+        FieldProblem.TooManyMitigations(NonNegativeInt.count(named.size), RiskTree.MaxMitigations)
       ))
 
-    val perMitigationV: Validation[ValidationError, Unit] = oversizedTick match
-      case None => Validation.succeed(())
-      case Some((id, count)) => Validation.fail(ValidationError(
-        location = ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.NodesOnly),
-        code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message  = s"ticked at too many nodes: $count exceeds the limit of $MaxNodesPerMitigation"
-      ))
+    val perMitigationV: Validation[ValidationError, Unit] =
+      Validation.validateAll(
+        nodesOnly.groupBy(_.mitigation).toList.sortBy(_._1.value).collect {
+          case (id, ticks) if ticks.sizeIs > RiskTree.MaxNodes =>
+            Validation.fail(ValidationError(
+              ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Nodes),
+              FieldProblem.TooManyNodes(NonNegativeInt.count(ticks.size), RiskTree.MaxNodes)
+            ))
+        }
+      ).as(())
 
-    Validation.validateWith(countV, perMitigationV)((_, _) =>
-      new MitigationSelectionRequest(fullScope, nodesOnly))
+    Validation.validateWith(countV, perMitigationV) { (_, _) =>
+      val restricted: Map[MitigationId, ScopeRestriction] =
+        nodesOnly
+          .filterNot(entry => full.contains(entry.mitigation))
+          .groupMap(_.mitigation)(_.node)
+          .view.mapValues(nodes => ScopeRestriction.NodesOnly(nodes.toSet))
+          .toMap
+      val entries = restricted ++ full.map(_ -> ScopeRestriction.FullScope)
+      if entries.isEmpty then Inherent else new Selected(entries)
+    }
 
+  /** The wire fields. Either list may be omitted and means the empty list. */
   private case class Raw(
     fullScope: Option[List[MitigationId]],
     nodesOnly: Option[List[NodeMitigationEntry]]
   )
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
 
-  /** Decode runs `create`, so no value of this type exists that breaks a bound.
-    * Either list may be omitted and means the empty list. */
-  given codec: JsonCodec[MitigationSelectionRequest] = JsonCodec(
+  private def fromRaw(raw: Raw): Validation[ValidationError, Enumerated] =
+    create(raw.fullScope.getOrElse(Nil), raw.nodesOnly.getOrElse(Nil))
+
+  /** The two lists a selection is stated by, each in identifier order. */
+  private def toRaw(selection: Enumerated): Raw = selection match
+    case Inherent => Raw(Some(Nil), Some(Nil))
+    case Selected(entries) =>
+      val ordered = entries.toList.sortBy(_._1.value)
+      Raw(
+        Some(ordered.collect { case (id, ScopeRestriction.FullScope) => id }),
+        Some(ordered.flatMap {
+          case (id, ScopeRestriction.NodesOnly(ids)) => ids.toList.sortBy(_.value).map(NodeMitigationEntry(_, id))
+          case (_, ScopeRestriction.FullScope)       => Nil
+        })
+      )
+
+  /** Decode runs `create`, so a decoded selection is as trustworthy as a
+    * constructed one, on the server and in the browser. Declared for
+    * `Enumerated`, so a body cannot state `Residual` and the encoder is total. */
+  given codec: JsonCodec[Enumerated] = JsonCodec(
     JsonEncoder[Raw].contramap(toRaw),
     JsonDecoder[Raw].mapOrFail(raw =>
-      create(raw.fullScope.getOrElse(Nil), raw.nodesOnly.getOrElse(Nil))
-        .toEither.left.map(_.toChunk
-          .map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")))
+      fromRaw(raw).toEither.left.map(_.toChunk.map(ValidationError.describe).mkString("; ")))
   )
 
-  private def toRaw(s: MitigationSelectionRequest): Raw =
-    Raw(Some(s.fullScope), Some(s.nodesOnly))
+  /** Derived from `Raw`, the shape the codec reads and writes, and mapped
+    * through the constructor the decoder uses (ADR-038 §1). */
+  given schema: Schema[Enumerated] =
+    Schema.derived[Raw].map(raw => fromRaw(raw).toEither.toOption)(toRaw)
+```
 
-  /** The published description is derived from `Raw`, the shape the codec reads
-    * and writes, and mapped onto the refined type through the same smart
-    * constructor the decoder uses (ADR-038 §1). Deriving from the type itself
-    * cannot work: its constructor is private, and the optionality the codec
-    * gives both lists is a property of `Raw` rather than of the type. */
-  given schema: Schema[MitigationSelectionRequest] =
-    Schema.derived[Raw].map(raw =>
-      create(raw.fullScope.getOrElse(Nil), raw.nodesOnly.getOrElse(Nil)).toEither.toOption
-    )(toRaw)
+Five points about that file.
+
+**Why the codec is declared for `Enumerated` and not for `MitigationSelection`.**
+A codec has two directions. The decoder turns a body into a value, and the
+encoder turns a value into a body. The browser uses the encoder to send a
+request, so the encoder must have an answer for every value of the type it is
+declared for. `MitigationSelection` has three cases. §7.6.3 rules that the body
+has no spelling for the third one, `Residual`, because the two lists can only
+name mitigations and `Residual` means "every mitigation of a tree". So a codec
+declared for `MitigationSelection` would have nothing to write for `Residual`.
+`Enumerated` is the name for the two cases the body can state, `Inherent` and
+`Selected`. It is a subtype of `MitigationSelection`, so the service takes the
+decoded value as it is, with no conversion. The name is §7.6.3's own word: the
+"All mitigations" control "enumerates".
+
+**`create` and the wire form are a build-and-parse pair, and a law test pins
+them.** For every selection `s` that `create` can build, decoding what the
+encoder writes for `s` gives `s` back. `create` never builds a `Selected` with
+no entries and never builds a `NodesOnly` with no nodes, so each selection has
+exactly one representation and the law is an equality.
+
+**The two codecs the types carry today are deleted.** `ScopeRestriction` and
+`MitigationSelection` each have a hand-written codec tagged with a string kind:
+`"full"`, `"nodes"`, `"inherent"`, `"residual"`, `"selected"`. No production code
+reads either. One assertion in `MitigationApplicationSpec` round-trips them, and
+the law test above replaces it. `ScopeRestriction` then has no codec at all,
+because it never crosses on its own.
+
+**Two server sites build a `Selected` directly today, and both go through
+`single`.** They are `MitigationSelectionScan.referenced` in `QueryServiceLive.scala`
+and `selectionOf` in `RiskTreeKnowledgeBase.scala`. Each builds
+`MitigationSelection.Selected(Map(id -> ScopeRestriction.FullScope))`, and each
+now reads `MitigationSelection.single(id)`.
+
+**No refusal carries a sentence.** Each is a location and a `FieldProblem` case,
+and `ValidationMessages.render` writes the sentence where it is shown (ADR-035).
+The refusals reuse existing cases, found by the family search in
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`:
+`FieldProblem.TooManyMitigations(count, limit)` and
+`FieldProblem.TooManyNodes(count, limit)` already state a count against a limit,
+and `RiskTree` raises both for the same two bounds. The locations reuse existing
+`FieldName` cases as well. `FieldName.Mitigations` names the mitigation
+collection, and `FieldName.Nodes` is where the empty-node-list refusal below is
+already located. The per-mitigation refusal puts the mitigation in the
+location's subject, `ErrorSubject.Mitigation(id)`. So this slice adds no
+`FieldName` case, where the September text added three. The per-mitigation bound
+reports every mitigation that breaks it, in identifier order. The September body
+reported the first one only, which contradicted its own docstring.
+
+**`modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala`** — the
+definitions of `ScopeRestriction` and `MitigationSelection` leave this file, with
+their codecs. `MitigationApplication` itself is unchanged, and imports the two
+types from `com.risquanter.register.domain.data`. The same import change reaches
+every other server file that names them: `CachedResultResolver.scala`,
+`CachedResultResolverLive.scala`, `QueryServiceLive.scala` and
+`RiskTreeKnowledgeBase.scala`.
+
+**New file — `modules/common/src/main/scala/com/risquanter/register/http/requests/AnalysisRequests.scala`.**
+The two request bodies. Neither restates a domain type: a body is the requested
+nodes beside the selection, and no domain value holds that pair.
+
+```scala
+package com.risquanter.register.http.requests
+
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder}
+import zio.prelude.Validation
+import sttp.tapir.Schema
+
+import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
+import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Body of the multi-node curve read: the nodes to draw, and the one selection
   * the answer is computed under.
   */
 final case class LECCurvesMultiRequest private (
   nodeIds: List[NodeId],
-  selection: MitigationSelectionRequest
+  selection: MitigationSelection.Enumerated
 )
 
 object LECCurvesMultiRequest:
 
-  /** How many nodes one request may ask for. Mirrors the tree's node bound: a
-    * request cannot ask for more nodes than a tree can hold. */
-  private val MaxRequestedNodes = 10000
-
+  /** A request asks for at most as many nodes as a tree can hold. */
   def create(
     nodeIds: List[NodeId],
-    selection: MitigationSelectionRequest
+    selection: MitigationSelection.Enumerated
   ): Validation[ValidationError, LECCurvesMultiRequest] =
-    if nodeIds.sizeIs <= MaxRequestedNodes then
+    if nodeIds.sizeIs <= RiskTree.MaxNodes then
       Validation.succeed(new LECCurvesMultiRequest(nodeIds, selection))
     else
       Validation.fail(ValidationError(
-        location = ErrorLocation.requestField(FieldName.NodeIds),
-        code     = ValidationErrorCode.CONSTRAINT_VIOLATION,
-        message  = s"too many nodes requested: ${nodeIds.size} exceeds the limit of $MaxRequestedNodes"
+        ErrorLocation.requestField(FieldName.Nodes),
+        FieldProblem.TooManyNodes(NonNegativeInt.count(nodeIds.size), RiskTree.MaxNodes)
       ))
 
-  private case class Raw(nodeIds: List[NodeId], selection: Option[MitigationSelectionRequest])
+  private case class Raw(nodeIds: List[NodeId], selection: Option[MitigationSelection.Enumerated])
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+  private def fromRaw(raw: Raw): Validation[ValidationError, LECCurvesMultiRequest] =
+    create(raw.nodeIds, raw.selection.getOrElse(MitigationSelection.Inherent))
 
   private def toRaw(r: LECCurvesMultiRequest): Raw = Raw(r.nodeIds, Some(r.selection))
 
+  /** Decode runs `create`, so no value of this type exists that breaks the
+    * bound. An absent `selection` means the inherent reading. */
   given codec: JsonCodec[LECCurvesMultiRequest] = JsonCodec(
     JsonEncoder[Raw].contramap(toRaw),
     JsonDecoder[Raw].mapOrFail(raw =>
-      create(raw.nodeIds, raw.selection.getOrElse(MitigationSelectionRequest.inherent))
-        .toEither.left.map(_.toChunk
-          .map(e => s"[${ErrorLocation.describe(e.location)}] ${e.message}").mkString("; ")))
+      fromRaw(raw).toEither.left.map(_.toChunk.map(ValidationError.describe).mkString("; ")))
   )
 
-  /** Derived from `Raw` for the reason given on `MitigationSelectionRequest`:
-    * the constructor is private, and an absent `selection` means the inherent
-    * reading, neither of which a derivation from the type itself would show. */
+  /** Derived from `Raw`, the shape the codec reads and writes (ADR-038 §1): the
+    * constructor is private, and the optionality of `selection` is a property
+    * of `Raw`. */
   given schema: Schema[LECCurvesMultiRequest] =
-    Schema.derived[Raw].map(raw =>
-      create(raw.nodeIds, raw.selection.getOrElse(MitigationSelectionRequest.inherent)).toEither.toOption
-    )(toRaw)
+    Schema.derived[Raw].map(raw => fromRaw(raw).toEither.toOption)(toRaw)
 
 /** Body of the exceedance-probability read. The node and the threshold stay
   * where they are — in the path and the query string — so the body carries the
   * selection alone.
   */
-final case class ProbOfExceedanceRequest(selection: MitigationSelectionRequest)
+final case class ProbOfExceedanceRequest(selection: MitigationSelection.Enumerated)
 
 object ProbOfExceedanceRequest:
-  private case class Raw(selection: Option[MitigationSelectionRequest])
+  private case class Raw(selection: Option[MitigationSelection.Enumerated])
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+  private def fromRaw(raw: Raw): ProbOfExceedanceRequest =
+    ProbOfExceedanceRequest(raw.selection.getOrElse(MitigationSelection.Inherent))
 
   private def toRaw(r: ProbOfExceedanceRequest): Raw = Raw(Some(r.selection))
 
   given codec: JsonCodec[ProbOfExceedanceRequest] = JsonCodec(
     JsonEncoder[Raw].contramap(toRaw),
-    JsonDecoder[Raw].map(raw =>
-      ProbOfExceedanceRequest(raw.selection.getOrElse(MitigationSelectionRequest.inherent)))
+    JsonDecoder[Raw].map(fromRaw)
   )
 
   /** Derived from `Raw` so the published description shows `selection` as
     * optional, which is what the codec reads. The decode is total, so the
     * mapping never fails. */
   given schema: Schema[ProbOfExceedanceRequest] =
-    Schema.derived[Raw].map(raw =>
-      Some(ProbOfExceedanceRequest(raw.selection.getOrElse(MitigationSelectionRequest.inherent)))
-    )(toRaw)
+    Schema.derived[Raw].map(raw => Some(fromRaw(raw)))(toRaw)
 ```
 
-Four points about that file. The node-count bound on `nodeIds` is new: F5 bounded the
-selection payload and said nothing about the requested node list, and an
-unbounded list on an endpoint that now also carries a selection is the same
-defect in a second place. The empty-`nodeIds` case is deliberately **not**
-moved into the decoder: `RiskTreeServiceLive` already fails it with
-`EMPTY_COLLECTION` and a test asserts that, and moving the check would change
-the error a caller sees for no gain.
+Four points about that file.
 
-Each refusal names a typed location rather than a field-path string.
-`ValidationError` carries `location: ErrorLocation`, so there is no `field`
-slot to build a path in and no `fieldPrefix` parameter to pass one down. The
-per-mitigation refusal puts the mitigation in the location's subject —
-`ErrorSubject.Mitigation(id)` — instead of interpolating its identifier into
-the sentence, so the identifier reaches a caller as a value of a declared case
-rather than as free text. Three `FieldName` cases do not exist yet, and this
-slice adds them to
-`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`
-beside the mitigation group already there:
+`ProbOfExceedanceRequest` has a public constructor because it holds no rule of
+its own. Its one field is a selection that `create` already built, and any
+selection is a valid body.
+
+The node-count bound on `nodeIds` is the bound `docs/dev/TODO.md` item 40 asks
+for. **Item 40 is marked closed when this slice lands.** F5 bounded the selection
+payload and said nothing about the requested node list, and an unbounded list on
+an endpoint that also carries a selection is the same defect in a second place.
+
+The empty-`nodeIds` case is deliberately **not** moved into the decoder.
+`RiskTreeServiceLive` already refuses it with `FieldProblem.NodeIdsEmpty` at
+`ErrorLocation.requestField(FieldName.Nodes)`, a test asserts that, and moving
+the check would change the refusal a caller sees for no gain.
+
+Each schema in this file and in `MitigationSelection.scala` is derived from that
+type's own `Raw` and mapped onto the type, which is the convention ADR-038 §1
+states and `RiskTree` follows. `Schema.any` is not used: it publishes an
+unconstrained value, so the two endpoints that carry the bounds would state
+neither the shape nor the bound.
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`** — one new
+`FieldProblem` case, for a selection naming a mitigation the tree does not hold.
+Family: the `FieldProblem` enum, in the group headed "Workspace limits and
+lookups the services report in a Rejected", whose existing member is
+`case NodeNotFound`. No existing case denotes this: `NodeNotFound`,
+`ScenarioNotFound` and `CommitNotFound` each name a different subject. The
+pattern is a subject-named `…NotFound` case carrying nothing the location
+already carries, so the mitigation's identifier rides in the location.
 
 ```scala
-  // The analysis request bodies
-  case Selection, NodesOnly, NodeIds
+  case NodeNotFound
+  case MitigationNotFound
 ```
 
-Each of the three schemas is derived from that type's own `Raw` and mapped onto
-the refined type, which is the convention ADR-038 §1 states and `RiskTree`
-follows. `Schema.any` is not used: it publishes an unconstrained value, so the
-two endpoints that carry the selection bounds would state neither the shape nor
-the bound, and §7.6.6 rules that out for the mitigation request types in the
-same words. Deriving from each type itself is not the alternative — two of the
-three have a private constructor, and all three give a field an optionality the
-codec supplies and the type does not show.
+```scala
+    case MitigationNotFound                         => ValidationErrorCode.NOT_FOUND
+```
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`** gains the
+matching arm in `render`, beside `NodeNotFound`'s:
+
+```scala
+    case FieldProblem.MitigationNotFound           => "Mitigation not found in tree"
+```
 
 **New file — `modules/common/src/main/scala/com/risquanter/register/http/responses/AnalysisResponses.scala`.**
 
@@ -2691,7 +2936,8 @@ import zio.json.{DeriveJsonCodec, JsonCodec}
 import sttp.tapir.Schema
 
 import com.risquanter.register.domain.data.LECNodeCurve
-import com.risquanter.register.domain.data.iron.MitigationId
+import com.risquanter.register.domain.data.iron.{MitigationId, Probability}
+import com.risquanter.register.domain.data.iron.given
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** One drawn curve together with the mitigations that shaped it.
@@ -2718,20 +2964,28 @@ object LECNodeSeries:
   * happens to match it — a cap set above the queried threshold leaves the
   * probability unchanged while still being named here.
   */
-final case class ExceedanceSeries(probability: Double, withMitigations: List[MitigationId])
+final case class ExceedanceSeries(probability: Probability, withMitigations: List[MitigationId])
 
 object ExceedanceSeries:
   given codec: JsonCodec[ExceedanceSeries] = DeriveJsonCodec.gen[ExceedanceSeries]
   given schema: Schema[ExceedanceSeries]   = Schema.derived[ExceedanceSeries]
 ```
 
-**`modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`** gains the
-Tapir schema `MitigationId` needs to appear inside a JSON body, mirroring the
-one `NodeId` already has:
+`probability` is a `Probability` and not a `Double`: the endpoint answers
+`jsonBody[Probability]` today, and ADR-038 §3 rules out a raw primitive where a
+refined type exists. `IronTapirCodecs` already declares `Schema[MitigationId]`
+and `Schema[Probability]`, so that file is not edited.
+
+**`modules/common/src/main/scala/com/risquanter/register/http/responses/LECCurvesResponse.scala`** — the
+existing wrapper stays and its map's value type becomes the list of readings:
 
 ```scala
-  /** Schema for MitigationId for JSON body parameters (ADR-001 §2). */
-  given Schema[MitigationId] = Schema.string
+/** The curves lec-multi answers, per requested node present in the tree at the
+  * revision read: the mitigation-free reading first, and a second reading when
+  * the selection reaches the node. Every curve is sampled at the same loss
+  * ticks, so the set draws on one axis.
+  */
+final case class LECCurvesResponse(curves: Map[NodeId, List[LECNodeSeries]])
 ```
 
 **`modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala`** — both endpoints:
@@ -2742,7 +2996,7 @@ one `NodeId` already has:
       .tag("workspaces")
       .name("getWorkspaceProbOfExceedance")
       .description("Get probability of exceeding a loss threshold (workspace-scoped) under one mitigation selection; optional `at` commit pin")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "nodes" / path[NodeId]("nodeId") / "prob-of-exceedance")
+      .in(nodesRoute / path[NodeId]("nodeId") / "prob-of-exceedance")
       .post
       .in(query[Long]("threshold"))
       .in(query[Boolean]("includeProvenance").default(false))
@@ -2756,7 +3010,7 @@ one `NodeId` already has:
       .tag("workspaces")
       .name("getWorkspaceLECCurvesMulti")
       .description("Get LEC curves for multiple nodes (workspace-scoped) under one mitigation selection; optional `at` commit pin")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "nodes" / "lec-multi")
+      .in(nodesRoute / "lec-multi")
       .post
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[LECCurvesMultiRequest].description("Requested node IDs and the mitigation selection"))
@@ -2764,7 +3018,7 @@ one `NodeId` already has:
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
       .in(query[Boolean]("omitAbsent").default(false)
         .description("When true, requested node IDs absent from the tree at this revision are omitted from the result instead of failing the request (point-in-time reads)."))
-      .out(jsonBody[Map[NodeId, List[LECNodeSeries]]])
+      .out(jsonBody[LECCurvesResponse])
 ```
 
 The exceedance endpoint becomes a POST. That is Decision 3 and it is not
@@ -2801,7 +3055,7 @@ analysis methods:
     branch: BranchRef,
     at: Option[CommitHash],
     selection: MitigationSelection = MitigationSelection.Inherent
-  ): Task[ExceedanceSeries]
+  )(using Checked[Authority]): IO[Failure, ExceedanceSeries]
 
   /** LEC curves for several nodes on one shared tick domain, under one
     * mitigation selection.
@@ -2821,21 +3075,30 @@ analysis methods:
     at: Option[CommitHash],
     omitAbsent: Boolean = false,
     selection: MitigationSelection = MitigationSelection.Inherent
-  ): Task[Map[NodeId, List[LECNodeSeries]]]
+  )(using Checked[Authority]): IO[Failure, Map[NodeId, List[LECNodeSeries]]]
 ```
 
+`threshold: Long` stays as the method has it today. It is not changed by this
+slice.
+
 **`modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`** — the class gains
-one dependency and five private members.
+one dependency, named as `QueryServiceLive` names its own, and six private
+members.
 
 ```scala
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   resolver: CachedResultResolver,
-  scopeResolver: MitigationScopeResolverRegistry,
+  scopeResolvers: MitigationScopeResolverRegistry,
   invalidationHandler: InvalidationHandler,
+  simulationConfig: SimulationConfig,
   tracing: Tracing,
   operationsCounter: Counter[Long]
 ) extends RiskTreeService {
+```
+
+```scala
+  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & MitigationScopeResolverRegistry & InvalidationHandler & SimulationConfig & Tracing & Meter, Throwable, RiskTreeService]
 ```
 
 ```scala
@@ -2843,22 +3106,25 @@ class RiskTreeServiceLive private (
   private def revisionOf(branch: BranchRef, at: Option[CommitHash]): Revision =
     at.fold[Revision](Revision.Head(branch))(Revision.At(_))
 
-  /** Fail when the selection names a mitigation this tree version does not
-    * hold. Naming a mitigation that applies to nothing is a valid request whose
-    * answer is "no effect"; naming one that does not exist is a broken request.
-    * The check cannot live in the JSON decoder, which has no tree to look an id
-    * up in. */
-  private def requireKnownMitigations(tree: RiskTree, selection: MitigationSelection): Task[Unit] =
+  /** The refusal of a mitigation the tree does not hold. */
+  private def mitigationAbsent(id: MitigationId): ValidationError =
+    ValidationError(
+      ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Id),
+      FieldProblem.MitigationNotFound
+    )
+
+  /** Refuse a selection naming a mitigation this tree version does not hold,
+    * accumulating every such mitigation in identifier order. Naming a
+    * mitigation that applies to nothing is a valid request whose answer is "no
+    * effect"; naming one that does not exist is a broken request. The check
+    * cannot live in the JSON decoder, which has no tree to look an id up in. */
+  private def requireKnownMitigations(tree: RiskTree, selection: MitigationSelection): IO[Failure, Unit] =
     selection match
       case MitigationSelection.Selected(entries) =>
-        val absent = entries.keySet -- tree.mitigations.map(_.id).toSet
-        if absent.isEmpty then ZIO.unit
-        else ZIO.fail(ValidationFailed(absent.toList.sortBy(_.value).map(id => ValidationError(
-          field   = "selection",
-          code    = ValidationErrorCode.NOT_FOUND,
-          message = s"Mitigation ${id.value} not found in tree ${tree.id}"
-        ))))
-      case _ => ZIO.unit
+        refuseAll(
+          (entries.keySet -- tree.mitigations.map(_.id)).toList.sortBy(_.value).map(mitigationAbsent)
+        )
+      case MitigationSelection.Inherent | MitigationSelection.Residual => ZIO.unit
 
   /** Per-mitigation resolved scopes for this tree version. A mitigation-free
     * reading applies nothing, so nothing needs resolving and the resolver is
@@ -2870,11 +3136,11 @@ class RiskTreeServiceLive private (
     commit: CommitHash,
     tree: RiskTree,
     selection: MitigationSelection
-  ): Task[ResolvedScopes] = selection match
+  ): UIO[ResolvedScopes] = selection match
     case MitigationSelection.Inherent => ZIO.succeed(ResolvedScopes(Map.empty))
-    case _ =>
+    case MitigationSelection.Residual | MitigationSelection.Selected(_) =>
       for
-        mitResolver <- scopeResolver.forWorkspace(wsId)
+        mitResolver <- scopeResolvers.forWorkspace(wsId)
         scopes      <- mitResolver.resolve(ScopeResolutionContext(treeId, branch, commit), tree)
         _           <- ResolvedScopes.logFailures(scopes)
       yield scopes
@@ -2918,64 +3184,68 @@ class RiskTreeServiceLive private (
     * `LECGenerator.generateCurvePointsMulti` call. */
   private case class SeriesKey(nodeId: NodeId, mitigated: Boolean)
 
-  /** Assemble one node's curve from its evaluated points and its own result. */
+  /** One node's curve from its evaluated points and its own result. */
   private def curveOf(
-    nodeId: NodeId,
-    name: String,
-    points: Vector[(Long, Double)],
-    result: Option[LossDistribution]
+    node: RiskNode,
+    points: Vector[(Long, Probability)],
+    result: LossDistribution
   ): LECNodeCurve =
     LECNodeCurve(
-      nodeId,
-      name,
+      node.id,
+      node.name,
       points.map { case (loss, prob) => LECPoint(loss, prob) },
-      result.map(LECGenerator.calculateQuantiles).getOrElse(Map.empty),
-      result.map(LECGenerator.averageAnnualLoss).getOrElse(0.0),
-      result.map(LECGenerator.probabilityOfNoLoss).getOrElse(1.0)
+      LECGenerator.calculateQuantiles(result),
+      LECGenerator.averageAnnualLoss(result),
+      LECGenerator.probabilityOfNoLoss(result)
     )
 ```
 
+`curveOf` takes a result that is present, where the September text took an
+`Option` and substituted figures for an absent one. The current method builds a
+curve only for a node that has both a result and a node record, and this keeps
+that.
+
 `getLECCurvesMulti`'s body, replacing the current one from the tree lookup
-onward. Everything before the lookup — the empty-`nodeIds` failure, the tracing
-attributes, the `omitAbsent` log line — stays as it is:
+onward. Everything before the lookup — the tracing attributes and the
+empty-`nodeIds` refusal — stays as it is, and so does the `omitAbsent` log line:
 
 ```scala
-      (tree, commit, nodesMap) = treeWithNodes
-      _        <- requireKnownMitigations(tree, selection)
-      presentIds = nodesMap.keySet
-      scopes   <- resolvedScopesFor(wsId, treeId, branch, commit, tree, selection)
-      applied   = scopes.appliedScopes
-      scoped    = MitigationApplication.scoped(tree, selection, applied)
+        (tree, commit, nodesMap) <- lookupNodesInTree(wsId, treeId, nodeIds, revisionOf(branch, at), omitAbsent)
+        presentIds = nodesMap.keySet
+        _         <- requireKnownMitigations(tree, selection)
+        scopes    <- resolvedScopesFor(wsId, treeId, branch, commit, tree, selection)
+        applied    = scopes.appliedScopes
+        scoped     = MitigationApplication.scoped(tree, selection, applied)
 
-      inherent  <- resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance)
-      mitigated <- selection match
-                     case MitigationSelection.Inherent =>
-                       ZIO.succeed(Map.empty[NodeId, LossDistribution])
-                     case _ =>
-                       resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance, selection, applied)
+        inherent  <- resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance)
+        mitigated <- selection match
+                       case MitigationSelection.Inherent =>
+                         ZIO.succeed(Map.empty[NodeId, LossDistribution])
+                       case MitigationSelection.Residual | MitigationSelection.Selected(_) =>
+                         resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance, selection, applied)
 
-      // One tick domain for every curve in the answer, both valuations included.
-      curves = LECGenerator.generateCurvePointsMulti(
-                 inherent.map((id, r) => SeriesKey(id, false) -> r) ++
-                 mitigated.map((id, r) => SeriesKey(id, true) -> r)
-               )
-
-      result = presentIds.iterator.map { id =>
-                 val name    = nodesMap.get(id).map(_.name.value.toString).getOrElse(id.value)
-                 val applied = withMitigationsFor(tree, scoped, id)
-                 val base    = LECNodeSeries(
-                   curveOf(id, name, curves.getOrElse(SeriesKey(id, false), Vector.empty), inherent.get(id)),
-                   Nil
+        // One tick domain for every curve in the answer, both valuations included.
+        points = LECGenerator.generateCurvePointsMulti(
+                   inherent.map((id, result) => SeriesKey(id, mitigated = false) -> result) ++
+                   mitigated.map((id, result) => SeriesKey(id, mitigated = true) -> result),
+                   simulationConfig.curveTickCount,
+                   simulationConfig.curveTailCutoff
                  )
-                 val extra   = Option.when(applied.nonEmpty)(
-                   LECNodeSeries(
-                     curveOf(id, name, curves.getOrElse(SeriesKey(id, true), Vector.empty), mitigated.get(id)),
-                     applied
-                   )
-                 )
-                 id -> (base :: extra.toList)
-               }.toMap
-    } yield result
+
+        series = nodesMap.map { (id, node) =>
+                   val reached = withMitigationsFor(tree, scoped, id)
+                   val base = for
+                     result <- inherent.get(id)
+                     curve  <- points.get(SeriesKey(id, mitigated = false))
+                   yield LECNodeSeries(curveOf(node, curve, result), Nil)
+                   val extra = for
+                     result <- mitigated.get(id) if reached.nonEmpty
+                     curve  <- points.get(SeriesKey(id, mitigated = true))
+                   yield LECNodeSeries(curveOf(node, curve, result), reached)
+                   id -> (base.toList ++ extra.toList)
+                 }
+        _ <- tracing.setAttribute("curves_generated", series.size.toLong)
+      } yield series
 ```
 
 `probOfExceedance` shares the lookup, the known-mitigation check and the scope
@@ -2989,23 +3259,23 @@ alone.
         scopes   <- resolvedScopesFor(wsId, treeId, branch, commit, tree, selection)
         applied   = scopes.appliedScopes
         scoped    = MitigationApplication.scoped(tree, selection, applied)
-        withMits  = withMitigationsFor(tree, scoped, nodeId)
+        reached   = withMitigationsFor(tree, scoped, nodeId)
 
-        result   <- if withMits.isEmpty
+        result   <- if reached.isEmpty
                     then resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
                     else resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance, selection, applied)
-      } yield ExceedanceSeries(result.probOfExceedance(threshold), withMits)
+      } yield ExceedanceSeries(result.probOfExceedance(threshold), reached)
 ```
 
-The empty-`withMits` branch drops the selection rather than passing one that
+The empty-`reached` branch drops the selection rather than passing one that
 reaches nothing. Both branches return the same figure in that case — a selection
 scoping no node in this subtree leaves the effective subtree and its content
 hash unchanged — so the branch is there to keep the mitigation-free read on the
 path it already has, not to correct a result.
 
 **`modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`** gains one
-shared logging helper, moved out of `QueryServiceLive` so both readers of a
-resolution report drift the same way:
+shared logging helper, moved out of `QueryServiceLive` with its body unchanged,
+so both readers of a resolution report drift the same way:
 
 ```scala
 object ResolvedScopes:
@@ -3017,17 +3287,17 @@ object ResolvedScopes:
       ZIO.logWarning(
         s"MitigationScopeResolver: ${resolved.failures.size} mitigation(s) did not " +
         s"resolve against this tree version: " +
-        resolved.failures.map((id, errs) => s"${id.value} -> ${errs.mkString("[", ", ", "]")}").mkString("; ")
+        resolved.failures.map((id, errs) => s"${id.value} -> ${errs.map(BindProblem.describe).mkString("[", "; ", "]")}").mkString("; ")
       )
     ).unit
 ```
 
-`QueryServiceLive.logResolutionFailures` is deleted and its one call site now
-reads `ResolvedScopes.logFailures(resolved)`.
+`QueryServiceLive.logResolutionFailures` is deleted and its one call site reads
+`ResolvedScopes.logFailures(resolved)`.
 
 **`modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala`** — both
-handlers take the new tuple and forward the branch and the pin instead of
-composing a `Revision`:
+handlers take the new tuple, forward the branch and the pin instead of composing
+a `Revision`, and keep `wireEither`:
 
 ```scala
   val probOfExceedance: ServerEndpoint[Any, Task] = getWorkspaceProbOfExceedanceEndpoint.serverLogic {
@@ -3039,8 +3309,8 @@ composing a `Revision`:
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.probOfExceedance(
                     ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance,
-                    branch, at, body.selection.toSelection)
-      yield result).either
+                    branch, at, body.selection)
+      yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   val getLECCurvesMulti: ServerEndpoint[Any, Task] = getWorkspaceLECCurvesMultiEndpoint.serverLogic {
@@ -3050,16 +3320,18 @@ composing a `Revision`:
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.getLECCurvesMulti(
+        curves <- riskTreeService.getLECCurvesMulti(
                     ws.id, treeId, body.nodeIds.toSet, ws.seedEntityId, includeProvenance,
-                    branch, at, omitAbsent, body.selection.toSelection)
-      yield result).either
+                    branch, at, omitAbsent, body.selection)
+      yield LECCurvesResponse(curves)).wireEither(TreeScope.InTree(treeId))
   }
 ```
 
 **`modules/server/src/main/scala/com/risquanter/register/Application.scala`** — `RiskTreeServiceLive.layer` now also
-requires `MitigationScopeResolverRegistry`, which the application already provides at line
-290; the layer's type widens and no wiring line moves.
+requires `MitigationScopeResolverRegistry`, which the application already
+provides to `QueryServiceLive`; the layer's type widens and no wiring line moves.
+Every test that builds the layer provides the registry as well. §7.6.13 names
+those files.
 
 **The browser, minimally.** Changing a shared endpoint definition breaks the
 Scala.js module, so this slice carries the smallest change that keeps it
@@ -3073,13 +3345,16 @@ of the answer. The variant-aware cache belongs to slice 6.
       case (Some(key), Some(treeId)) =>
         curvesTrigger.emit(Some(() =>
           getWorkspaceLECCurvesMultiEndpoint(
+            // omitAbsent = true: a rewound read must drop nodes that don't exist
+            // at the pinned commit (surfaced via droppedSelections) rather
+            // than fail the whole chart.
             (userIdAccessor(), key, treeId, false,
-             LECCurvesMultiRequest.create(nodeIds, MitigationSelectionRequest.inherent)
+             LECCurvesMultiRequest.create(nodeIds, MitigationSelection.Inherent)
                .getOrElse(throw new IllegalStateException("selection request rejected its own empty value")),
              branchAccessor(), atAccessor(), true)
-          ).toOutcomeEventStream.map(_.map(LECChartState.inherentCurves))
+          ).map(response => LECChartState.inherentCurves(response.curves)).toOutcomeEventStream
         ))
-      case _ => ()
+      case _ => () // No workspace or tree selected — nothing to do
 ```
 
 ```scala
@@ -3087,18 +3362,19 @@ object LECChartState:
   /** Each node's mitigation-free curve — the series whose mitigation list is
     * empty. Every node always has one, so a node missing from the result is a
     * node absent at this revision, which is what `deriveDropped` reports. */
-  def inherentCurves(response: Map[NodeId, List[LECNodeSeries]]): Map[NodeId, LECNodeCurve] =
-    response.flatMap { case (id, series) =>
+  def inherentCurves(curves: Map[NodeId, List[LECNodeSeries]]): Map[NodeId, LECNodeCurve] =
+    curves.flatMap { case (id, series) =>
       series.find(_.withMitigations.isEmpty).map(id -> _.curve)
     }
 ```
 
-The `getOrElse` above throws on a value that cannot fail — the empty selection
-breaks no bound — and that is the wrong shape for the finished code. Slice 6
-replaces the whole call with one that carries a real selection and handles a
-rejected one; until then the throw is unreachable and states the invariant.
-`LECCurvesMultiRequest` exposes no total constructor deliberately, so this is
-the one place the tension shows.
+The `getOrElse` above throws on a value that cannot fail for the selection — the
+empty selection breaks no bound. It can fail for the node list: the chart caps
+user-selected nodes at 13 (F11), which is below `RiskTree.MaxNodes`, so the
+throw is unreachable while that cap stands. It is the wrong shape for the
+finished code. Slice 6 replaces the whole call with one that carries a real
+selection and handles a rejected one. `LECCurvesMultiRequest` exposes no total
+constructor deliberately, so this is the one place the tension shows.
 
 #### 7.6.6 M4 slice 2 — the tree write path carries mitigations
 
@@ -3122,6 +3398,32 @@ request could carry — `PLAN-LOSS-SHAPE-ALGEBRA.md` replaced it with the
 and `AbsoluteReplacement` (see the supersession note at §7.1.3). The stored side
 of that shape has landed; the wire side has not, so what a request carries for a
 leaf-stage mitigation is an open wire-shape question rather than a rename.
+
+**The request types below also carry the defect slice 1 removed.** This is
+recorded on 2026-11-13 as input to decision 11 and is not ruled here. ADR-001 §1
+has JSON decoders call the domain type's smart constructor, and ADR-038 §1 has
+the endpoint declare the domain type so that "there is no public twin class to
+keep in step". Against those two passages:
+
+- `MitigationSpecRequest.ResultStage(pipeline: TransformPipeline)` restates
+  `MitigationSpec.ResultStage` case for case.
+- `MitigationDefinitionRequest` and `MitigationUpdateRequest` declare
+  `name: String`, `target: String` and `id: String`, where `SafeName`,
+  `TargetingPredicate` and `MitigationId` exist with codecs. They declare
+  `precedence: Int = 0`, where `MitigationPrecedence` and
+  `MitigationPrecedence.default` exist.
+- `overrideAnchorName: Option[String]` is a node name with no `SafeName`.
+- `ResolvedMitigation` and `ResolvedMitigationStage` are a second intermediate
+  between the request and `Mitigation`.
+- `buildMitigations` returns `Task[Seq[Mitigation]]`, where every service
+  operation now fails with `Failure`.
+
+One fact bears on how decision 11 settles this. The node buckets of the same
+request already use raw-primitive request types, such as
+`RiskLeafUpdateRequest(id: String, name: String, …)`, refined by
+`RiskTreeRequests.resolveUpdate`. So the mitigation buckets either follow the
+node buckets or follow the two passages above, and that choice belongs to
+decision 11.
 
 **That question is deliberately left unruled.** It is §7.6.12 decision 11, and it
 is the one open decision in §7.6 — nothing below it in this section answers it,
@@ -3358,10 +3660,14 @@ so `validateMitigations` keeps the invariants it already enforces — unique
 mitigation ids, unique mitigation names and the collection bound — and gains no
 anchor cross-check. Its signature and its docstring stay as they are.
 
-An override whose anchor names a deleted node is therefore a legal tree.
-`MitigationStaleness.isStale` reports it stale, slice 3 carries the result to the
-client in `staleMitigationIds`, and the user retargets or removes the mitigation
-when they choose. Placing the check in `validateMitigations` would have put it in
+> **Amended by §7.6.2 decisions 8 and 9 (re-ruled 2026-11-14):** an override's
+> anchor is the identifier of a leaf that already exists, so the name-based
+> anchor resolution above is not built. A deleted anchor makes the override a
+> no-op and is not reported stale. The request shapes in this slice are
+> rewritten when decision 11 is ruled.
+
+An override whose anchor names a deleted node is therefore a legal tree. It
+applies to no node and is not reported. Placing the check in `validateMitigations` would have put it in
 the decode path as well, since `RiskTree`'s decoder routes through `fromNodes`;
 not adding it keeps every stored tree readable.
 
@@ -3375,6 +3681,118 @@ is the resolution of each predicate against this tree version, and the ids of
 overrides whose stored stamp no longer matches the leaf they were authored
 against.
 
+**What the 2026-11-13 re-elevation changed in this slice.** The September text
+mapped a server enum `ScopeResolutionFailure` onto a wire type
+`ScopeFailureView(code: String, detail: String)`. That enum no longer exists. A
+predicate that does not bind is now reported as `BindProblem` values:
+`ScopeOutcome.Failed(errors: NonEmptyChunk[BindProblem])`. `BindProblem` is
+already a wire type in `common`, with a derived codec and schema, and it already
+crosses to the client inside a refused query. So `ScopeFailureView` is not
+written. A string code for a closed set is also the shape ADR-038 names "String
+Standing In for a Closed Set". The "internal-error" code has no successor: a
+stored predicate that fails to re-parse or to evaluate is a defect and throws,
+so it never reaches an outcome.
+
+**One mitigation's resolution crosses as `ScopeOutcome` itself.** A predicate's
+resolution has two alternatives: it bound and gives a node set, or it did not
+bind and gives the problems. §8.13 ruled `ScopeOutcome` "a coproduct" of exactly
+those two cases, and §7.6.2 Decision 12 names "each mitigation's `ScopeOutcome`"
+as what the tree read carries. ADR-038 §2 states the same shape for any outcome
+with alternatives: "Each case carries its own payload, so a match is
+exhaustive". The September text instead declared three fields side by side, a
+scope and a failure list on every mitigation. That form can hold a non-empty
+scope beside failures, a state the server never produces, and it tells a bound
+predicate matching nothing from a failed one only by whether a list is empty.
+The enum exists today in
+`modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
+with no codec, so it does not cross the wire yet. A second enum with the same
+two cases would be the same set under another name, so `ScopeOutcome` moves to
+`common` and gains a derived codec, and no view enum is written. On the wire one
+entry reads, with the `BindProblem` fields abbreviated:
+
+```json
+{ "mitigationId": "m1", "outcome": { "kind": "Resolved", "scope": ["01HQ8ZK3", "01HQ8ZK7"] } }
+{ "mitigationId": "m1", "outcome": { "kind": "Resolved", "scope": [] } }
+{ "mitigationId": "m1", "outcome": { "kind": "Failed",   "errors": [ { "kind": "UnreadableLiteral", "text": "Servers", "sort": … } ] } }
+```
+
+**New file — `modules/common/src/main/scala/com/risquanter/register/domain/data/ScopeOutcome.scala`.**
+The enum moves here from
+`modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
+with its three members unchanged. What is added is the tag key, the codec and
+the schema.
+
+```scala
+package com.risquanter.register.domain.data
+
+import zio.NonEmptyChunk
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder, jsonDiscriminator}
+import sttp.tapir.{Schema, Validator}
+import sttp.tapir.generic.Configuration
+
+import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
+import com.risquanter.register.http.errors.BindProblem
+
+/** One mitigation's resolution against one tree version. `Failed` carries why
+  * the predicate does not bind against that version, such as a quoted node
+  * that was renamed or deleted. It still contributes an empty applied scope: a
+  * predicate that does not bind makes that one mitigation a no-op and never
+  * fails a request.
+  */
+@jsonDiscriminator(ScopeOutcome.TagField)
+enum ScopeOutcome:
+  case Resolved(scope: Set[NodeId])
+  case Failed(errors: NonEmptyChunk[BindProblem])
+
+  def toEither: Either[NonEmptyChunk[BindProblem], Set[NodeId]] = this match
+    case Resolved(scope) => Right(scope)
+    case Failed(errs)    => Left(errs)
+
+  def scopeOrEmpty: Set[NodeId] = this match
+    case Resolved(scope) => scope
+    case Failed(_)       => Set.empty
+
+  def failures: Option[NonEmptyChunk[BindProblem]] = this match
+    case Resolved(_)  => None
+    case Failed(errs) => Some(errs)
+
+object ScopeOutcome:
+  /** The key naming which case a payload states, read by the decoder and
+    * published in the schema. */
+  final val TagField = "kind"
+
+  /** A non-empty chunk crosses as a JSON array, and the decoder refuses an
+    * empty one, so a failure that names no problem cannot be decoded. */
+  private given nonEmptyChunkEncoder[A: JsonEncoder]: JsonEncoder[NonEmptyChunk[A]] =
+    JsonEncoder[List[A]].contramap(_.toList)
+  private given nonEmptyChunkDecoder[A: JsonDecoder]: JsonDecoder[NonEmptyChunk[A]] =
+    JsonDecoder[List[A]].mapOrFail(list => NonEmptyChunk.fromIterableOption(list).toRight("expected at least one element"))
+
+  /** Published as an array of at least one item. */
+  private given nonEmptyChunkSchema[A: Schema]: Schema[NonEmptyChunk[A]] =
+    Schema.schemaForIterable[A, List]
+      .validate(Validator.minSize[A, List](1))
+      .map(list => NonEmptyChunk.fromIterableOption(list))(_.toList)
+
+  given codec: JsonCodec[ScopeOutcome] = DeriveJsonCodec.gen[ScopeOutcome]
+
+  given schema: Schema[ScopeOutcome] =
+    given Configuration = Configuration.default.withDiscriminator(TagField)
+    Schema.derived[ScopeOutcome]
+```
+
+The three private givens mirror the ones `QueryProblem` declares for
+`NonEmptyList` in
+`modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala`.
+That they derive for `NonEmptyChunk` on both platforms is unverified here. The
+check that settles it is `sbt commonJVM/compile` and `sbt commonJS/compile` with
+this file in place.
+
+`MitigationScopeResolver.scala`, `MitigationScopeResolverLive.scala` and
+`MitigationScopeResolverSpec.scala` import the enum from
+`com.risquanter.register.domain.data`.
+
 **New file — `modules/common/src/main/scala/com/risquanter/register/http/responses/TreeStructureResponse.scala`.**
 
 ```scala
@@ -3383,34 +3801,16 @@ package com.risquanter.register.http.responses
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import sttp.tapir.Schema
 
-import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
+import com.risquanter.register.domain.data.{RiskTree, ScopeOutcome}
+import com.risquanter.register.domain.data.iron.MitigationId
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
-/** Why one mitigation's targeting predicate did not resolve, in wire form.
-  * `code` is one of "unknown-node", "malformed-node-id", "type-error",
-  * "malformed-predicate", "internal-error". `detail` names the reference or
-  * symbol at fault for the four a user can act on; for "internal-error" it is a
-  * fixed message, because that case carries server internals a client must not
-  * receive (ADR-035).
+/** One mitigation beside its resolution against the tree version this read
+  * returned. `Resolved` with an empty scope is a predicate that bound correctly
+  * and matched nothing — a different situation from `Failed`, and the interface
+  * says so differently.
   */
-final case class ScopeFailureView(code: String, detail: String)
-
-object ScopeFailureView:
-  given codec: JsonCodec[ScopeFailureView] = DeriveJsonCodec.gen[ScopeFailureView]
-  given schema: Schema[ScopeFailureView]   = Schema.derived[ScopeFailureView]
-
-/** One mitigation's resolution against the tree version this read returned: the
-  * nodes it applies to, and why it resolved to none when its predicate did not
-  * bind. An empty `failures` with an empty `resolvedScope` is a predicate that
-  * bound correctly and matched nothing — a different situation from a predicate
-  * that failed, and the interface says so differently.
-  */
-final case class MitigationScopeView(
-  mitigationId: MitigationId,
-  resolvedScope: Set[NodeId],
-  failures: List[ScopeFailureView]
-)
+final case class MitigationScopeView(mitigationId: MitigationId, outcome: ScopeOutcome)
 
 object MitigationScopeView:
   given codec: JsonCodec[MitigationScopeView] = DeriveJsonCodec.gen[MitigationScopeView]
@@ -3437,19 +3837,33 @@ object TreeStructureResponse:
   given schema: Schema[TreeStructureResponse]   = Schema.derived[TreeStructureResponse]
 ```
 
-**`MitigationScopeResolver.scala`** gains the wire mapping on the failure enum,
-following the `NodeChangeStatus.toWire` precedent — the enum is server-side, the
-view type is shared, and the server module already depends on the shared one:
+Family search for the two new types. The family is the response wire types, in
+`modules/common/src/main/scala/com/risquanter/register/http/responses/`, whose
+existing member `LECCurvesResponse` is a `final case class` with a derived codec
+and a derived schema in its companion. No existing type holds a tree beside its
+resolved scopes, and none holds one mitigation's resolved scope.
+
+**What a `BindProblem` in this answer discloses.** ADR-035 §5 permits a refusal
+to carry words and literals of query-language text in typed fields, and gives as
+one ground that "the answer returns only to the caller who sent the text". Here
+the text is a stored predicate, and the reader may be a different holder of the
+workspace key than its author. The inference that this is still sound is this
+plan's and not the record's: the same answer already carries every mitigation's
+predicate source in full, inside `tree.mitigations`, so a `BindProblem` names
+nothing the answer does not already contain. Slice 5 writes that sentence into
+ADR-035 §5.
+
+**`modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`** gains the
+wire projection on `ResolvedScopes`. The source owns it and it returns a typed
+value (ADR-038 §5); the server module already depends on the shared one:
 
 ```scala
-enum ScopeResolutionFailure:
+final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
   ...
-  def toWire: ScopeFailureView = this match
-    case UnknownNode(reference)      => ScopeFailureView("unknown-node", reference)
-    case MalformedNodeId(reference)  => ScopeFailureView("malformed-node-id", reference)
-    case TypeError(detail)           => ScopeFailureView("type-error", detail)
-    case MalformedPredicate(detail)  => ScopeFailureView("malformed-predicate", detail)
-    case InternalError(_)            => ScopeFailureView("internal-error", "resolution failed")
+  /** Wire form: one view per mitigation, in identifier order. Use only at the
+    * wire boundary. */
+  def toWire: List[MitigationScopeView] =
+    outcomes.toList.sortBy((id, _) => id.value).map(MitigationScopeView(_, _))
 ```
 
 **`RiskTreeService`** gains one method rather than widening `getById`:
@@ -3457,22 +3871,56 @@ enum ScopeResolutionFailure:
 ```scala
   /** The tree at this read coordinate, together with each mitigation's resolved
     * scope for that version and the ids of overrides whose base stamp is stale.
+    * Fails with `RiskTreeRepository.treeAbsent` when the revision lacks the
+    * tree.
     *
     * Separate from `getById` because resolving scopes builds a knowledge base
     * and evaluates every predicate. `getById` is on the update path's pre-read
     * and on the cascade paths, none of which consume a resolution, and none of
-    * which should pay for one. The commit hash `getById` returns is not
-    * analogous: it is already in hand from the same read and costs nothing.
+    * which should pay for one.
     */
   def getStructure(wsId: WorkspaceId, id: TreeId, branch: BranchRef, at: Option[CommitHash])(
-    using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]
-  ): Task[Option[(RiskTree, ResolvedScopes, Set[MitigationId])]]
+    using Checked[Authority]
+  ): IO[Failure, (RiskTree, ResolvedScopes, Set[MitigationId])]
 ```
 
-The implementation reads through `repo.getById`, calls the workspace's scope
-resolver with `ScopeResolutionContext(id, branch, commit)`, and computes
-`MitigationStaleness.staleOverrides(tree)`. It returns domain values; the
-controller builds the wire type, exactly as the changed-nodes endpoint does:
+The September signature returned an `Option` of the triple and left the
+controller to turn `None` into a failure. The structure handler already fails an
+absent tree with `RiskTreeRepository.treeAbsent`, and `RiskTreeServiceLive` has
+`getTreeOrFail` for exactly that, so the method fails instead of answering
+`None`.
+
+**`RiskTreeServiceLive`** — the implementation, and one new case of the private
+`Operation` enum the metrics counter labels. Family: `Operation`, in
+`RiskTreeServiceLive`'s companion, whose existing member is
+`case GetById extends Operation("getById")`. The label is a contract with the
+metrics dashboards, declared and not derived (ADR-037 §2), and is chosen here.
+
+```scala
+    case GetStructure      extends Operation("getStructure")
+```
+
+```scala
+  override def getStructure(wsId: WorkspaceId, id: TreeId, branch: BranchRef, at: Option[CommitHash])(
+    using Checked[Authority]
+  ): IO[Failure, (RiskTree, ResolvedScopes, Set[MitigationId])] =
+    (for
+      (tree, commit) <- getTreeOrFail(wsId, id, revisionOf(branch, at))
+      mitResolver    <- scopeResolvers.forWorkspace(wsId)
+      scopes         <- mitResolver.resolve(ScopeResolutionContext(id, branch, commit), tree)
+      _              <- ResolvedScopes.logFailures(scopes)
+    yield (tree, scopes, MitigationStaleness.staleOverrides(tree))).tapBoth(
+      error => recordOperation(Operation.GetStructure, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(Operation.GetStructure, success = true, None)
+    )
+```
+
+**`modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceTreeEndpoints.scala`** — the
+structure endpoint's output becomes `.out(jsonBody[TreeStructureResponse])`. No
+input changes.
+
+**`modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala`** — the
+handler builds the wire type from the domain values:
 
 ```scala
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
@@ -3483,24 +3931,22 @@ controller builds the wire type, exactly as the changed-nodes endpoint does:
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         loaded <- riskTreeService.getStructure(ws.id, treeId, branch, at)
-      yield loaded.map { case (tree, scopes, stale) =>
-        TreeStructureResponse(
-          tree = tree,
-          mitigationScopes = scopes.outcomes.toList.sortBy(_._1.value).map { (id, outcome) =>
-            MitigationScopeView(id, outcome.scopeOrEmpty, outcome.failures.toList.flatMap(_.toList).map(_.toWire))
-          },
-          staleMitigationIds = stale
-        )
-      }).either
+        (tree, scopes, stale) = loaded
+      yield TreeStructureResponse(tree, scopes.toWire, stale)).wireEither(TreeScope.InTree(treeId))
   }
 ```
 
-and the endpoint's output type becomes `jsonBody[Option[TreeStructureResponse]]`.
-
 **The browser, minimally.** `TreeViewState.emitStructureFetch` now receives the
-response object; the minimal adaptation maps it to `_.tree` so every existing
-consumer of `selectedTree` is untouched. The scopes and the stale ids are
-carried and unused until slice 6, which is where a consumer for them exists.
+response object. The minimal adaptation takes the tree out of it before the
+stream is built, so every existing consumer of `selectedTree` is untouched:
+
+```scala
+          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), atAccessor()))
+            .map(_.tree).toOutcomeEventStream
+```
+
+The scopes and the stale ids are carried and unused until slice 6, which is where
+a consumer for them exists.
 
 #### 7.6.8 M4 slice 4 — change notification sees mitigation edits
 
@@ -3523,9 +3969,9 @@ object MitigationScopeResolver:
   def resolveUncached(tree: RiskTree): ResolvedScopes
 ```
 
-`computeAll`, `resolveOne`, `satisfyingIds`, `fromTypeCheckError` and
-`fromQueryError` move from `MitigationScopeResolverLive` into this object
-unchanged — none of them reads instance state — and the live resolver's miss
+`computeAll`, `resolveOne`, `satisfyingIds`, `bindProblem` and `defect` move
+from `MitigationScopeResolverLive` into this object unchanged — none of them
+reads instance state — and the live resolver's miss
 branch calls `MitigationScopeResolver.resolveUncached(tree)`. This is how
 Decision 1's "scope-resolver dependency on the write path" is discharged:
 `InvalidationHandler` gains no constructor parameter and no layer requirement,
@@ -3564,14 +4010,19 @@ workspace nor a commit to key a memo with.
     }.filter(newTree.index.nodes.contains)
   }
 
-  /** What a mitigation does, as a comparison key. Encoded rather than compared
-    * by value for the same reason `nodeContent` is: a transform can carry
-    * arrays, which compare by reference, and every mutation rebuilds the tree,
-    * so value comparison would report every mitigation as changed on every
-    * save. The name is deliberately not part of the key. */
-  private def mitigationEffect(m: Mitigation): String =
-    s"${m.target.toJson}|${m.spec.toJson}|${m.precedence.key}"
+  /** What a mitigation does, as a comparison key: its target, its spec and
+    * its precedence. Every field these hold is a value or an immutable
+    * sequence, so the derived `==` is content equality, as it is for a node.
+    * The name is deliberately not part of the key. */
+  private def mitigationEffect(m: Mitigation): (MitigationTarget, MitigationSpec, MitigationPrecedence) =
+    (m.target, m.spec, m.precedence)
 ```
+
+The September text encoded the key as a JSON string, on the ground that a
+transform can carry arrays, which compare by reference. No mitigation type holds
+an array now: `Mitigation.scala` and `RiskLeafTransform.scala` contain no
+`Array[`. `computeAffectedNodes` compares nodes by `==` for the same reason, so
+the mitigation key does too.
 
 `computeAffectedNodes` returns `(affectedFromAdded ++ affectedFromRemoved ++ affectedFromChanged ++ mitigationAffectedNodes(oldTree, newTree), removed)`,
 and every affected node still expands to its ancestor path in the existing
@@ -3615,7 +4066,7 @@ final case class MitigationScopeResolverLive(
 object MitigationScopeResolverLive:
   /** Revisions one (tree, branch) slot holds: the branch head and one pinned
     * revision. */
-  val SlotCapacity: Int = 2
+  val SlotCapacity: PositiveInt = IronConstants.Two
 ```
 
 `MitigationScopeResolverRegistry.forWorkspace` constructs the widened `Ref` type:
@@ -3636,21 +4087,42 @@ request carries two further buckets, `mitigations` and `newMitigations`; that
 the create request carries `newMitigations` only, because Decision 1 of that
 same ADR keeps id-bearing buckets out of create requests; that omission of the
 mitigation collection deletes it, exactly as for nodes; and that an override
-anchor is stated as a node name and resolved server-side against the same
-name-keyed map parent names resolve against. The amendment also records that a
-tree PUT whose mitigation carries an override anchor naming an absent node is
-accepted, and that the resulting mitigation reports itself stale (Decision 9).
+anchor is the identifier of a leaf that already exists (Decision 8). The
+amendment also records that a tree PUT whose mitigation carries an override
+anchor naming an absent node is accepted, and that the resulting mitigation
+applies to no node and is not reported (Decision 9).
 
-**The same amendment corrects that ADR's HTTP surface table, which is wrong in
-both directions.** It lists `POST /w/{key}/risk-trees/{treeId}/invalidate/{nodeId}`,
-an endpoint that exists nowhere in `modules/`; and it omits every workspace-scoped
-endpoint that is not tree CRUD — `changed-nodes`, `history`, `revert`,
+**The same amendment completes that ADR's HTTP surface table.** The table no
+longer lists a cache-invalidation route: it now states that no such endpoint
+exists. It still lists the six tree CRUD routes only, and omits every other
+workspace-scoped endpoint — `changed-nodes`, `history`, `revert`,
 `nodes/{nodeId}/prob-of-exceedance`, `nodes/lec-multi`, `query`, the five
-`scenarios` routes, `rotate`, and workspace delete. Fixing the table as a whole is
-part of this amendment, not a separate change: the mitigation buckets are being
-added to a table that does not currently describe the surface it claims to.
+`scenarios` routes, `rotate`, and workspace delete. Completing the table is part
+of this amendment, not a separate change: the mitigation buckets are being added
+to a table that does not currently describe the surface it claims to.
 
-**`docs/dev/decision-records/ADR-037-analysis-read-contract.md` — new, following the
+**`docs/dev/decision-records/ADR-035-error-leakage-prevention.md` — one sentence
+added to §5.** §5 governs what of the caller's query text a refusal may carry,
+and names two carriers, `QueryProblem` and
+`FieldProblem.TargetingPredicateUnparseable`. The structure read is not a
+refusal: it succeeds and reports on stored predicates, so §5 does not govern it
+and nothing in §5 forbids it. The sentence states the scope: the structure
+read's `ScopeOutcome.Failed` carries `BindProblem` values with the same typed
+fields, the answer carrying them already holds each predicate's source in
+`tree.mitigations`, and the panel writes them through Laminar's typed DOM calls.
+Of §5's three grounds, "The answer returns only to the caller who sent the text"
+does not hold as worded, because the reader may not be the author, and the
+source already crossing in the same answer is what replaces it.
+
+**What the new record owes the routing document.** The `adr-constraints` skill
+requires a new record to be placed in all three of its layers in the same plan.
+ADR-040 gets a Layer 2 row; an entry under the Layer 1 activity "Adding or
+changing an endpoint, a DTO, or anything else on the wire"; and a Layer 3 row for
+ADR-040 × ADR-038, because the curve answer's enclosing object is ruled by
+ADR-038 §3 and described by ADR-040. The skill's Layer 2 check is then run and
+prints nothing.
+
+**`docs/dev/decision-records/ADR-040-analysis-read-contract.md` — new, following the
 ADR-00X template.** It covers the analysis read contract as a whole rather than
 its mitigation-shaped part: the required branch header, the optional `at` pin
 and what it means, why both analysis endpoints take a JSON body, the selection's
@@ -3665,7 +4137,8 @@ immutable, so a request is answered at the version it names and there is nothing
 for a client's view to diverge from.
 
 **Scope of the ADR amendments — RULED 2026-09-15 (user).** Slice 5 amends the
-records marked "Amended, slice 5" in §7.6.10, which are now ADR-015 and ADR-017.
+records marked "Amended, slice 5" in §7.6.10, which are now ADR-015, ADR-017 and
+ADR-035, and it creates ADR-040.
 ADR-003, ADR-009 and ADR-034 were amended ahead of this slice by
 `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`, because the type change made parts of them
 uncompilable and the sweep landed with it. ADR-033 was renamed to the new
@@ -3700,14 +4173,14 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 
 | ADR | Bearing | Status |
 |---|---|---|
-| ADR-001 (validate once, at the boundary) | The request types carry smart constructors and their decoders run them, so a handler receives a selection that already satisfies both bounds. The one check deliberately outside the decoder — whether a named mitigation exists — is a lookup against a loaded tree, not a field format rule, and the plan says so where it is placed | Compliant |
-| ADR-001 §2 (Iron types in JSON bodies need an explicit Tapir schema) | `Schema[MitigationId]` is added beside the existing `Schema[NodeId]` | Compliant |
+| ADR-001 (validate once, at the boundary) | The request body's selection decodes into the domain type `MitigationSelection` through its smart constructor `create`, which carries both bounds (§1). `Selected` and `NodesOnly` have private constructors, so no selection exists that breaks a bound (§5). The controllers pass the decoded value on and convert nothing (§2). The one check deliberately outside the decoder — whether a named mitigation exists — is a lookup against a loaded tree, not a field format rule, and the plan says so where it is placed | Compliant |
+| ADR-001 §2 (Iron types in JSON bodies need an explicit Tapir schema) | `IronTapirCodecs` already declares `Schema[MitigationId]` and `Schema[Probability]`, and the new wire types use them | Compliant |
 | ADR-002 (drift signals, not failures) | A predicate that no longer binds makes one mitigation a no-op and is logged; it never fails a read | Compliant |
 | ADR-003 (provenance and reproducibility) | A leaf's record sits on its own `LossDistribution` in `provenance`, and a subtree's records are read by resolving each leaf under its own identifier — no walk descends through a returned value. ADR-003's Implementation table claimed optional provenance capture was implemented via `includeProvenance`, which sets a tracing attribute only | Amended by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` |
 | ADR-004a (storage mapping) | Unchanged: mitigations are already stored as `mitigations/{id}` blobs and this plan adds no storage shape | Compliant |
 | ADR-009 (associativity of the aggregate) | Result-stage transforms still apply to a finished node value, never inside the summation — compliant and unchanged. §2 enumerated two subtypes of a sealed hierarchy that no longer exists, and §5 published a `children.collect { case r: RiskResult => … }` pattern that no longer compiles; both now describe the one concrete value and the `private[cache]` family beneath it | Amended by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` |
 
-| ADR-010 (typed errors, accumulated) | Every new validation returns `ValidationError` with a code, and independent checks accumulate through `Validation.validateWith` | Compliant |
+| ADR-010 (typed errors, accumulated) | Every new and changed service method fails with `IO[Failure, A]`. Every refusal is a `ValidationError` of a location and a `FieldProblem` case, raised as `Failure.rejected(TrustZone.Client, …)`, and independent checks accumulate through `Validation.validateWith` | Compliant |
 | ADR-014 (render-time curve computation) | Both valuations of every requested node go through one `generateCurvePointsMulti` call, so the shared tick domain covers them together | Compliant |
 | ADR-015 (query APIs compose on `ensureCached`) | The mitigated reading is a second `ensureCached`/`ensureCachedAll` call with a selection, not a new resolution path — compliant. The ADR still writes the resolver trait out verbatim in a form two generations old; the return type is already as narrow as decision 2 asked, because `LossDistribution` ceased to be a base class | Amended, slice 5 |
 
@@ -3715,21 +4188,37 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-018 (nominal id wrappers) | `MitigationId` stays distinct from `NodeId` and `TreeId` throughout the new types | Compliant |
 | ADR-019 (frontend ownership rules) | Slice 1's browser change touches one state class and adds one pure function beside it; no component gains state | Compliant |
 | ADR-024 (application as a pure enforcement point) | Both analysis handlers keep their `AnalyzeRun` check and the structure handler keeps `ViewTree`; the method change on one endpoint moves no check | Compliant |
+| ADR-030 (authorization proof in the signature) | `probOfExceedance`, `getLECCurvesMulti` and the new `getStructure` each declare `(using Checked[Authority])`, and each controller binds `given Checked[Permission]` from `authzService.check` before the call | Compliant |
 | ADR-032 (two equality relations) | The mitigation diff compares encoded content, not values, for the same array-equality reason the node diff already does | Compliant |
 | ADR-033 (narrowest sound catch) | `LossDistribution.decorate` catches `ArithmeticException` from the layer's own arithmetic and converts it to a `ValidationError`; `PortfolioLosses.create` does the same for the combine. Both catches name the exception the code they wrap is documented to raise, and ADR-033's Implementation table lists both sites | Amended |
 | ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. Its Decision 4 now writes out the shipped five-field `LossDistribution`, and its §6 carries the rule that no mitigation may eliminate a risk | Amended by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` and `DONE-PLAN-LOGNORMAL-BOUND-POSITIVITY.md` |
-| ADR-035 (error leakage prevention) | The internal-error resolution failure reaches the wire as a fixed message with no detail | Compliant |
+| ADR-035 (error leakage prevention) | No refusal carries a sentence: each is a location and a `FieldProblem` case, rendered where it is shown. The structure read carries a non-binding predicate's `BindProblem` values, whose typed fields are the ones §5 permits. §5 governs refusals and the structure read is not one, so §5 gains a sentence stating that scope | Amended, slice 5 |
 | ADR-036 (confidential internal identifiers) | `WorkspaceId` and `BranchRef` stay on internal service signatures and never cross the client boundary. `TreeId`, `NodeId` and `MitigationId` are not confined by this record: it names `WorkspaceId` as its subject and shows `nodeId` as a client-safe reporting field, and every lookup taking a client-supplied node id resolves it inside a tree the caller is already authorized for | Compliant |
+| ADR-037 (constants and closed sets) | The request bounds read `RiskTree.MaxNodes` and `RiskTree.MaxMitigations` instead of restating them (§3). `MitigationScopeResolverLive.SlotCapacity` is a named constant stating what it holds. The `Operation.GetStructure` label is declared (§2). No new parameter is a defaulted `Option` (§4) | Compliant |
+| ADR-038 (response wire shapes) | The curve answer keeps its `LECCurvesResponse` object and the exceedance figure is a `Probability` (§3). The endpoint declares the domain type `MitigationSelection`, which owns its two-list wire shape as a private `Raw` and decodes through `create`, so no public twin of it exists (§1). One mitigation's resolution is the two-case enum `ScopeOutcome` with a derived discriminated codec, not a product that can hold a scope beside failures (§2). `ResolvedScopes.toWire` is owned by the source and returns a typed value (§5). A non-binding predicate is reported as `BindProblem` values, not as a string code | Compliant |
+| ADR-039 (trust-boundary ingress) | Each request decoder routes through its smart constructor, so a decoded body satisfies both bounds on the server and in the browser. The browser decodes `LECCurvesResponse` and `TreeStructureResponse` through the same shared types, and `tree` inside the structure answer decodes through `RiskTree.fromNodes` | Compliant |
 
 #### 7.6.11 Verification plan
 
 New tests, by the behaviour each one pins:
 
-- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationSelectionRequestSpec.scala` —
-  both lists empty converts to the mitigation-free reading; the two-list form
-  converts to the entry map; a mitigation in both lists converts to full scope;
-  an omitted list decodes as empty; each bound rejects with its own field path
-  and both bounds accumulate.
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationSelectionSpec.scala`
+  (new) — `create` answers `Inherent` for two empty lists, the entry map for the
+  two-list form, `FullScope` for a mitigation named in both lists, and
+  `NodesOnly` holding every node a mitigation is ticked at; each bound is refused
+  at its own location with `TooManyMitigations` or `TooManyNodes`, both bounds
+  accumulate, and two mitigations each ticked at too many nodes are both
+  reported; an omitted list decodes as empty; and the law: for every selection
+  `create` builds, decoding what the encoder writes gives the same selection.
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/AnalysisRequestsSpec.scala`
+  (new) — a node list above the bound is refused with `TooManyNodes` at
+  `FieldName.Nodes`; an absent `selection` decodes as `Inherent` in both bodies.
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/ScopeOutcomeSpec.scala`
+  (new) — both cases round-trip through the codec, and a `Failed` with an empty
+  problem array is refused by the decoder.
+- `modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala`
+  (existing) — the assertion that round-trips the two deleted codecs is removed,
+  and every selection the spec builds goes through `create` or `single`.
 - `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationRequestsSpec.scala` —
   a malformed predicate is rejected at the DTO boundary; a request-side
   duplicate mitigation id and a duplicate name are each rejected; the request
@@ -3737,12 +4226,13 @@ New tests, by the behaviour each one pins:
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeSpec.scala` (or the
   existing mitigation entity spec) — a tree whose override anchor names a node
   that is not in the tree still builds and still decodes, because Decision 9
-  makes that a staleness signal rather than a validation failure; duplicate
+  makes that a no-op rather than a validation failure; duplicate
   mitigation ids, duplicate mitigation names and an over-large collection each
   still fail.
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala` —
-  a mitigation whose override anchor names a deleted node reports stale, and a
-  mitigation whose anchor names a node that is no longer a leaf reports stale.
+  a mitigation whose override anchor names a deleted node is not reported, and
+  a mitigation whose anchor names a node that is no longer a leaf is not
+  reported.
 - `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala` — the
   mitigation-free reading is always present and first; a node inside an applied
   scope carries exactly one further reading; a node outside every applied scope
@@ -3754,8 +4244,13 @@ New tests, by the behaviour each one pins:
   queried threshold leaves that endpoint's probability equal to the
   mitigation-free figure while `withMitigations` still names the mitigation,
   which is what makes the field load-bearing rather than decorative; a
-  selection naming an absent mitigation fails with `NOT_FOUND`; a
+  selection naming two absent mitigations is refused with
+  `FieldProblem.MitigationNotFound` once per mitigation, each located at its own
+  `ErrorSubject.Mitigation`; a
   mitigation-free request performs one resolution pass and no scope resolution;
+  the structure read answers each mitigation's resolved scope, answers the
+  `BindProblem` values of a mitigation whose predicate names a renamed node, and
+  fails with the tree-absent failure at a revision that lacks the tree;
   a tree PUT carrying mitigation buckets stores them, and a PUT omitting the
   buckets clears them.
 - `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
@@ -3796,14 +4291,25 @@ is all four:
 ```
 sbt 'commonJVM/test; server/test'
 sbt app/test
-docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm -f; docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm
+docker ps -a --filter name=register_it_ -q | xargs -r docker rm -f; docker network ls --filter name=register_it_ -q | xargs -r docker network rm; docker volume ls --filter name=register_it_ -q | xargs -r docker volume rm; echo "--- remaining register_it_ containers/networks/volumes ---"; for k in "ps -a" "network ls" "volume ls"; do docker $k --filter name=register_it_ -q | wc -l; done
 sbt 'serverIt/test'
 ```
 
-The leaked-network cleanup is a mandatory pre-step for the integration tier, not
-crash recovery. A BATS fast gate (`run_bats tests/bats/suite-c-in-memory.bats`,
-invoked as the register-dev skill defines it) runs after the slices that change
-the server image's behaviour, which is all of slices 1 to 4.
+The cleanup clears leaked containers, networks and volumes, and its last three
+lines each print `0`. It is a mandatory pre-step for the integration tier, not
+crash recovery. These four run after each slice.
+
+The BATS suites need the server and frontend images at the current
+`APP_VERSION`, so they run once, when slices 1 to 5 have landed and the four
+commands above are green. The user runs them:
+
+```
+tests/bats/run-suites.sh C A
+```
+
+Suite C is the in-memory gate. Suite A is the end-to-end run with Irmin
+persistence, and it is due because slices 1 to 4 change what the server image
+answers.
 
 Each slice lands with a PATCH version bump in `build.sbt`, mirrored into `.env`
 and `.env.irmin`; closing M4 is the MINOR bump.
@@ -3811,7 +4317,10 @@ and `.env.irmin`; closing M4 is the MINOR bump.
 #### 7.6.12 The slice decisions
 
 Decisions 1 to 10 are all closed — each is ruled or void, and each records its own
-resolution in place. One decision is open, and it was opened after the other ten
+resolution in place. Three questions the 2026-11-13 re-elevation raised are
+recorded at the end of this section: two with the rulings that answer them, and
+decision 14. Decisions 15 and 16, ruled on 2026-11-13, come before decision 14,
+which was ruled after them on the same day. Decision 11 is open too, and it was opened after the other ten
 by work outside this plan: decision 11, the leaf-stage mitigation's request shape,
 which gates slice 2. All of them are listed here so the elevation states them
 rather than implying them.
@@ -4150,6 +4659,231 @@ the rest of M4, item 40 is marked closed then rather than at the end.
     visualisation rather than mitigation authoring. It is ruled when M4 slice 2 is
     the work in hand, and it gates that slice alone.
 
+**Raised by the 2026-11-13 re-elevation and answered by existing rulings.**
+Each question was first presented as open and was then found settled. Slices 1
+and 3 are written under these answers.
+
+- **What the structure read tells the client about a mitigation whose predicate
+  does not bind: the typed reasons.** §8.13 (ruled 2026-08-28) keeps "the
+  user-actionable distinctions — a renamed/deleted node, a malformed id, a type
+  error" separate. Decision 12 (§7.6.2) sends "each mitigation's `ScopeOutcome`"
+  to the editing screen, "where a user can act on them". A reason kept in the
+  server log reaches no user, so `ScopeOutcome.Failed(errors)` crosses as
+  §7.6.7 writes it. ADR-035 §5 governs refusals, and slice 5 adds the sentence
+  stating that scope (§7.6.9).
+- **How `MitigationSelection` represents the inherent and the residual
+  valuation: three cases, and the request body declares `Enumerated`.** §7.6.3
+  (ruled 2026-09-13): "`Residual` stays a `MitigationSelection` case, because
+  the query language's `residual` literal produces it […]; the analysis
+  endpoint's body simply never constructs it." The body decodes into the
+  selection itself, so its type is narrowed to the cases it can state, as
+  §7.6.5 writes it.
+
+**Ruled on 2026-11-13.** Neither decision is elevated to signatures. Both wait
+on an engine release, and the plan for that release is drafted on the user's go
+and not before.
+
+15. **How a predicate names a node in a position that today reads a name only.**
+    **RULED (user, 2026-11-13): node-returning functions, delivered by an engine
+    release.** A node is written as a function term in any node position:
+    `descendant_of(x, node_id("01HQ8ZK3…"))`,
+    `eq(x, node_named("Ransomware Attack"))`. `node_named` and `node_id` are
+    working names. Both are register's functions, defined in
+    `RiskTreeKnowledgeBase`, so register's catalog fixes the names. The alternative considered
+    was a pair of suffixed predicates, `_named` and `_id`, for each of
+    `child_of`, `descendant_of` and `leaf_descendant_of`. It is not built.
+
+    What follows from the ruling:
+
+    - **`named_risk` and `risk_id` are removed when the function form lands.**
+      `eq(x, node_named(…))` and `eq(x, node_id(…))` say the same thing. The
+      user's words: "we ditch it once they land (or the node function)". The
+      bare quoted name in `eq(x, "name")` goes with them: "we will remove it for
+      consistency. deliberately". This supersedes §8.12's "Both are kept
+      deliberately".
+    - **The targeting fragment has to admit node-returning functions.** §8.4-3
+      records the user direction of 2026-08-10: the "term rule admits no
+      function application, which excludes the simulation functions
+      grammatically rather than by symbol whitelist". `p95`, `p99` and `lec`
+      stay excluded. How the engine tells a node-returning function from a
+      simulation function is the engine plan's to decide.
+    - **The engine refuses such a function today.** A function whose return
+      sort is a domain type is refused as
+      `TypeCatalogError.FunctionReturnIsDomainType`, in
+      `vql/typed/TypeCatalog.scala` of the `vague-quantifier-logic` repository.
+      That repository's `docs/TODOS.md` holds the lift as T-004, "DEFERRED
+      pending use case". The same file records a second route as T-012, tagged
+      literals such as `id"01BX…"`, which was not the route ruled here.
+    - **ADR-029 §3 states the rule this supersedes.** Its
+      `TargetingPredicate.create` row reads "restricted to the targeting
+      fragment (no quantifiers, no function terms)". The user ruled on
+      2026-11-13 that the record gives way: "I want the node returnign
+      function". The tagged-literal route of T-012 is not taken. The amendment
+      is owed by the slice that adopts the engine release.
+    - **One premise is not verified, and it belongs to the engine plan.** That
+      the binder accepts a function term in a node position. What a node
+      function does when its argument names no node is ruled by decision 14.
+    - **The published examples use the predicates this removes.** Q-E to Q-H in
+      `examples/demo-enterprise-curl.sh` and
+      `examples/demo-enterprise-httpie.sh`, the section "Selecting one risk, or
+      a set picked by hand" in `docs/user/VQL-QUERY-EXAMPLES.md`, and two rows
+      of the reference table in `docs/user/API-TUTORIAL.md` are rewritten when
+      the function form lands.
+
+16. **Whether a stored targeting predicate may hold a node name.** **RULED
+    (user, 2026-11-13): no.** The user's words: "the client should offer a
+    rewrite preview option and the server rewrites everything mandatory". When a
+    predicate is saved, the server replaces every name reference with the
+    identifier the name resolves to in the tree being saved. The stored source
+    is the rewritten one.
+
+    **Re-ruled (user, later on 2026-11-13): the browser rewrites, and the server
+    refuses a name.** The browser replaces every name with its identifier and
+    shows the result. It sends only the identifier form. The server refuses a
+    targeting predicate that holds a name, and it stores the text it receives
+    once that text passes its checks. The user accepted the condition stated
+    with the recommendation: "It holds if authors seldom target a node in the
+    same save that creates it." No helper endpoint is built, because the query
+    engine and `TargetingPredicate` are in `common`, which compiles for the
+    browser.
+
+    This is the mechanism for §6's requirement that "Mitigation targeting
+    resolves to and stores stable node ids, never node names". §8.12 had made
+    that requirement unreachable for a structural predicate, because it narrowed
+    "the `Node`-sort literal validator to **name-only**". Decision 15 gives a
+    structural position an identifier form, and this decision uses it.
+
+    What follows from the ruling:
+
+    - **It waits on decision 15's engine release.** Until a structural position
+      can hold an identifier, "every leaf under `Servers`" has no identifier
+      form. So the tree write path of slice 2 stores no predicate before that
+      release is adopted. Nothing has to be migrated: no request type carries
+      mitigations today (decision 11).
+    - **A stored predicate no longer follows a name onto a different node.**
+      This supersedes the guidance in "Task — user-documentation stub: targeting
+      semantics under node renames" to "Use `named_risk(…)` when the scope
+      should track a *name*". A new leaf under `Servers` is still included,
+      because that comes from the tree structure and not from a name.
+    - **A rename changes no stored predicate's scope.** §8.4-1 allows "a
+      hand-written name-based predicate" and flags its drift. The author may
+      still type one in the browser, which rewrites it before sending, so drift
+      by rename cannot occur.
+    - **The browser's rewrite works on the parsed formula and prints it back
+      to text.** It resolves each name against the tree the browser holds. The
+      values written into the text are `NodeId`s, whose refinement admits no
+      character that carries meaning to the parser. The server stores the text
+      it was sent, so ADR-029 §3's "never re-serialised or interpolated" stays
+      true, and only "no function terms" gives way, for decision 15. One
+      premise is not verified: that `FOLPrinter.print` followed by a parse
+      returns the same formula. A law test on the pair settles it.
+    - **The server refuses a name in a stored predicate.** That covers
+      `node_named(…)` and a quoted name in a node position. The refusal's wire
+      shape is written when this decision is elevated. A screening query still
+      accepts names.
+    - **A predicate cannot refer to a node created in the same save.** That
+      node has no identifier until the server allocates one. The author saves
+      the tree first, then writes the predicate and saves again. This
+      conflicts with decision 8, whose name-based anchor exists so that an
+      override can be attached to a node created in the same request. The user
+      ruled on 2026-11-14 that decision 8 gives way (§7.6.2).
+    - **The length bound has to be restated.** `TargetingPredicate.create`
+      bounds the source at 256 characters, a figure chosen by this project. It
+      applies to the identifier form, the one text the author sees and the
+      server receives. A hand-picked list of ten nodes is over 400 characters
+      in that form. Whether the bound is raised is ruled when this decision is
+      elevated.
+    - **The structure read returns identifiers.** Slice 3 returns each
+      mitigation's stored source. The interface shows a name for each identifier
+      by looking it up in the tree it already holds. That belongs to slice 6.
+    - **The browser's rewrite belongs to the predicate editor**, which
+      decision 7 puts outside M4 and which has its own plan document, not yet
+      written.
+    - **A screening query is not stored and is not rewritten.** A name it quotes
+      that no node has is refused, as today.
+
+**Ruled on 2026-11-13, after decisions 15 and 16.**
+
+14. **What a mitigation does when its stored predicate refers to a node that no
+    longer exists.** The question was first asked about names: whether
+    `named_risk(x, "Web") \/ named_risk(x, "DB")` still applies to `Web` after
+    `DB` is renamed. The code says no. The engine's binder refuses the whole
+    formula when any one literal is unreadable, so the mitigation applies to
+    nothing. §8.1's ruling of 2026-08-10 isolates a failure per mitigation
+    rather than per request, and its recorded motivation is that "the request as
+    a whole never fails because one stored predicate went stale". It does not
+    consider a predicate with one stale reference among several, and neither
+    does anchor A8. The user-facing note on renaming points the other way: "a
+    node whose name no longer matches — because it was renamed or deleted —
+    silently drops out of scope". The behaviour comes from the engine and was
+    never ruled.
+
+    Decision 16 changes what can occur. A stored predicate holds identifiers
+    only, so a rename changes nothing and the case above cannot arise. What
+    remains is a reference to a node that no longer exists. It arises in two
+    ways: a save deletes a node that a predicate refers to, or a merge brings
+    together a reference made on one branch and a deletion made on the other.
+    §8.4-4 records that a merge passes no write check.
+
+    For an identifier the code behaves differently from the name case. The
+    literal validator of `risk_id` is `NodeId.fromString`, which checks the
+    format only. An identifier that names no node therefore binds, the atom is
+    false for every node, and the rest of the predicate applies. Nothing is
+    reported. That behaviour was not ruled either.
+
+    Decision 15 makes this a design input. The behaviour is no longer inherited
+    from the binder's literal lookup: what a node function does when its
+    argument names no node has to be specified in the engine plan. Three options
+    were put to the user on 2026-11-13: the whole mitigation stops applying and
+    is flagged; the reference matches nothing, the rest applies, and the outcome
+    lists the missing references; or the second where the reference sits in a
+    positive position and the first where it sits under a negation.
+
+    **RULED (user, 2026-11-13): a reference to a node that does not exist
+    matches no node, the rest of the predicate applies, and nothing is
+    reported.** The user's words: "SQL also doesnt warn is a joins output is
+    changes because one jointable changes", and "the mitigation has nothing it
+    applies to: simply a no-op". Every tree version is stored, so an earlier
+    state stays recoverable. A function comparing two tree states is to be
+    built if it is needed, and no item of this plan builds it.
+
+    The ruling states two principles and names none of the three options.
+    Reading it as the second option without its list is mine, and it is
+    reversible: a join does not drop every row because one joined row is gone.
+
+    What follows:
+
+    - **`node_id` returns the identifier it is given, whether or not a node
+      has it.** Every node predicate in `RiskTreeKnowledgeBase` compares
+      identifiers. An identifier no node has equals no node and is no node's
+      parent or ancestor, so every atom taking it is false, and no value for a
+      missing node is needed. `node_id` is register's function, and the engine
+      release only has to let a function return a node.
+    - **Under a negation the target set grows.** `leaf(x) /\
+      ~descendant_of(x, node_id(…))` covers every leaf once that portfolio is
+      deleted. Moving the portfolio's leaves elsewhere has the same effect, and
+      the same principle accepts both.
+    - **A mitigation whose target set is empty is a no-op, and it is not
+      flagged.**
+    - **No save warns that it changes a mitigation's target set.** The save
+      confirmation, the report of target-set changes, the preview route and the
+      save response with a confirmation-required case were designed in
+      conversation on 2026-11-13 and are withdrawn. None was written into this
+      plan. A tree save stays one request with its current response.
+    - **The structure read gains no list of missing references.** Slice 3's
+      wire shape is unchanged by this decision.
+    - **A name that resolves to no node cannot be rewritten.** The browser has
+      no identifier to write for it, and the server refuses every name in a
+      stored predicate (decision 16). A screening query refuses it as it does
+      today.
+    - **A deleted node no longer makes a stored predicate fail to bind.**
+      `ScopeOutcome.Failed` remains for a stored predicate the current catalog
+      cannot read. Of §8.13's distinctions, "a renamed/deleted node" no longer
+      arises.
+    - **The same principle re-rules Decision 9.** An override whose anchor
+      leaf is deleted is a no-op and is not reported stale (§7.6.2, re-ruled
+      2026-11-14).
+
 #### 7.6.13 File inventory — M4 slices 1 to 5
 
 These lines append to the shared `## File inventory` section on approval. Files
@@ -4167,14 +4901,33 @@ omission is a denial.
 - `modules/common/src/main/scala/com/risquanter/register/http/responses/TreeStructureResponse.scala`
 - `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala`
 - `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceTreeEndpoints.scala`
-- `modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`
-- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationSelectionRequestSpec.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/LECCurvesResponse.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/MitigationSelection.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/ScopeOutcome.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationSelectionSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/ScopeOutcomeSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/AnalysisRequestsSpec.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/QueryServiceLiveSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
 - `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationRequestsSpec.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeBoundsSpec.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationEntitySpec.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala`
+- `modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/DecodeFailureStatusSurfaceSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverRegistry.scala`
@@ -4202,9 +4955,26 @@ omission is a denial.
 - `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala`
 ```
 
-Two documents change outside the gated tree and are listed for scope, not for
-the hook: `docs/dev/decision-records/ADR-017-tree-api-design.md` (amended) and
-`docs/dev/decision-records/ADR-037-analysis-read-contract.md` (new).
+Five documents change outside the gated tree and are listed for scope, not for
+the hook: `docs/dev/decision-records/ADR-017-tree-api-design.md`,
+`docs/dev/decision-records/ADR-015.md` and
+`docs/dev/decision-records/ADR-035-error-leakage-prevention.md` (amended),
+`docs/dev/decision-records/ADR-040-analysis-read-contract.md` (new, and it does
+not exist yet; slice 5 creates it), and
+`.claude/skills/adr-constraints/SKILL.md` (ADR-040 placed in its three layers).
+
+The 2026-11-13 re-elevation changed this list. `IronTapirCodecs.scala` is no
+longer edited, because the schema it was to gain already exists.
+`LECCurvesResponse.scala`, `ErrorLocation.scala`, `ValidationMessages.scala`,
+`RiskTree.scala` and `MitigationApplication.scala` are edited by slice 1 as
+§7.6.5 states. `DecodeFailureStatusSurfaceSpec.scala` and `TreeRevertItSpec.scala`
+each build `RiskTreeServiceLive.layer`, and the September list did not name them.
+`MitigationSelection.scala` and `ScopeOutcome.scala` are new files in `common`
+that receive the types moved out of `server`. `CachedResultResolver.scala`,
+`CachedResultResolverLive.scala` and `RiskTreeKnowledgeBase.scala`, and the five
+server specs listed after them, name `MitigationSelection` and change their
+import and their construction of a selection. `MitigationSelectionRequestSpec.scala`
+is no longer written, because the type it named does not exist.
 
 Why each non-obvious entry is here. `QueryServiceLive.scala` loses its private
 resolution-failure logger to the shared one. `CascadeTestStubs.scala` is the
@@ -4237,6 +5007,13 @@ its identifier tiebreak; the five result-stage operations; scope-disjoint
 mitigations commuting; the parameter-stage arrow over a leaf's two parts; one
 control that is relative in one part and absolute in the other being two
 mitigations; layer; the raw valuation; the trial default; the mitigation ceiling.
+
+**Decisions 15 and 16 affect no term.** The glossary says a mitigation targets
+"a condition that resolves to a set of nodes", and gives "Every leaf under the
+Technology portfolio" as the example. Neither sentence says how the condition
+names a node, and its screening-query examples name no node. **Nor does
+decision 14.** The glossary does not say what a condition does when it refers
+to a node that no longer exists.
 
 **M5 cannot be assessed.** §7.7 records a problem space with no design, so it has
 no decisions to pair a term against. The assessment is owed when M5 is designed.
@@ -4309,9 +5086,9 @@ adr-constraints skill). Per-ADR outcome for this plan:
 | 014 (+appendices) (caching) | Cache keys | Compliant: outcomes cached, not curves; no transform params in keys (D3); effective-content keying reuses DD-16 unchanged |
 | 015 (resolver) | Resolver edge | Compliant: `ensureCached` stays the single simulation entry point; mitigation is edge logic around it |
 | 016 (config) | — | No new config in M1/M2 |
-| 017 (+NOTES) (tree API) | M4 DTO buckets | Deferred to §7.6: whole-tree PUT + identity-preserving buckets pattern will be followed; flagged now |
+| 017 (+NOTES) (tree API) | M4 DTO buckets | Reviewed at §7.6.10: the tree PUT gains two mitigation buckets and the record is amended in M4 slice 5 (§7.6.9) |
 | 018 (nominal wrappers) | `MitigationId` | Compliant: case-class wrapper over `SafeId`, `NodeId` pattern |
-| 019 (frontend) | M4 | Deferred to §7.6: parent-owned state, Pattern 6 for the popup flow |
+| 019 (frontend) | M4 | Reviewed at §7.6.10 for slices 1 to 5: compliant, each browser change touches one state class and no component gains state. The interface itself is M4 slice 6, which is not elevated yet and owes its own review of this record: parent-owned state, Pattern 6 for the popup flow |
 | 020 (supply chain) + skill | M3 engine bump | Compliant: exact pin; first-party sibling → cooldown n/a (documented at pin site) |
 | 021 (capability URLs) | — | Endpoints stay under `/w/{key}`; no new auth surface |
 | 022 (secrets) | — | No credentials involved; mitigation data is ordinary domain content |
@@ -4321,13 +5098,13 @@ adr-constraints skill). Per-ADR outcome for this plan:
 | 026 (images) | — | Engine bump triggers the documented graalvm-builder rebuild (register-dev skill); no Dockerfile changes |
 | 028 (+appendix) (query pane) | M3 KB | **Amendment required in M3**: Decision 5 "model built per-query" superseded by tree-version memoization; KB schema additions follow the existing catalog/dispatcher patterns |
 | 029 (injection) | M3 predicate | **Table row required in M3**: targeting predicate is a new parser boundary (parsed once at the boundary by the formula parser; never interpolated) |
-| 030 (authz orchestration) | M4 endpoints | Deferred to §7.6: `Checked[Permission]` propagation on extended endpoints |
+| 030 (authz orchestration) | M4 endpoints | Reviewed at §7.6.10: compliant. Each changed or new service method declares `(using Checked[Authority])`, and each controller binds `given Checked[Permission]` before the call |
 | 031 (startup readiness) | — | No bearing |
 | 032 (equality relations) | Diff/merge | Compliant: mitigation blobs join the storage relation automatically; domain relation deliberately blind to mitigations (OD-4 covers the compare-view consequence) |
 | 033 (exception boundaries) | New code | Compliant: throw-free; no new catches |
 | 034 (mitigation valuation model) | The whole plan | Compliant: `raw` is the cached mitigation-free fold, `mitigated` is derived at the read edge and never stored; the Option F portfolio arm is implemented in `CachedResultResolverLive` |
-| 035 (error leakage prevention) | M4 endpoints | Deferred to §7.6: mitigation scope-resolution failures are server-side drift signals (logged, per-mitigation no-op) and must not be echoed to the client; any new error variant needs its sanitisation clause on the sealed hierarchy |
-| 036 (confidential internal identifiers) | M4 request/response shapes | Deferred to §7.6: `WorkspaceId` and `BranchRef` must not cross the client boundary in either direction. `CommitHash` is **not** in this category — it is already client input (`?at=`, `revertTree`) and already returned in `TreeHistoryEntry`, so returning it from a service read introduces no new exposure |
+| 035 (error leakage prevention) | M4 endpoints | Reviewed at §7.6.10, where §5 gains one sentence in M4 slice 5. A predicate that does not bind is a drift signal: it is logged, it makes that one mitigation a no-op, and the structure read reports it as typed `BindProblem` values (§7.6.2 Decision 12). No refusal carries a sentence |
+| 036 (confidential internal identifiers) | M4 request/response shapes | Reviewed at §7.6.10: compliant. `WorkspaceId` and `BranchRef` must not cross the client boundary in either direction. `CommitHash` is **not** in this category — it is already client input (`?at=`, `revertTree`) and already returned in `TreeHistoryEntry`, so returning it from a service read introduces no new exposure |
 | INFRA-006 | — | No bearing (DB credentials) |
 
 ## File inventory
@@ -4688,6 +5465,11 @@ M4 elevation respectively).
    quantifiers; term rule admits no function application, which excludes
    the simulation functions grammatically rather than by symbol
    whitelist), delegating as much as possible to the parser.
+
+   > **Amended by §7.6.12 decision 15 (2026-11-13):** node-returning functions
+   > are to be admitted to the targeting fragment, by an engine release that is
+   > not yet planned. The simulation functions stay excluded. Until that release
+   > is adopted, this paragraph describes the code.
 
    **Enforcement locus RULED (user, 2026-08-10): engine-side
    fragment-membership API.** The engine gains a function (beside the
@@ -5805,6 +6587,12 @@ are equivalent in the screening language. Both are kept deliberately: `named` /
 sublanguage and the UI node-picker emit; `eq` is node-to-node identity between
 two variables (its sole non-redundant use — e.g. "two distinct leaves under a
 portfolio": `leaf_descendant_of(a,p) /\ leaf_descendant_of(b,p) /\ not eq(a,b)`).
+
+> **Amended by §7.6.12 decision 15 (2026-11-13):** once a node can be written as
+> a function term, the node-pinning predicates and the bare quoted name in `eq`
+> are removed, and `eq` over a variable and a function term replaces them. Until
+> the engine release that brings the function form is adopted, this section
+> describes the code.
 
 #### Exact signatures
 
@@ -7033,6 +7821,12 @@ mitigation conflict is *structured for the UI* is OD-9 below.
 #### Open decisions
 
 **OD-8 — anchor no longer resolves to a leaf. ✅ RULED (2026-08-29, Option A).**
+
+> **Amended by §7.6.2 decision 9 (re-ruled 2026-11-14):** Option B's behaviour
+> now holds. A missing or no-longer-leaf anchor is not reported, and no separate
+> "orphaned" diagnostic is added, because such an override is a no-op like any
+> mitigation with nothing to apply to.
+
 The anchor `NodeId` is stable
 across rename and reparent (a node's id does not change), so in normal editing it
 still names its original leaf. It stops resolving to a `RiskLeaf` only if that
@@ -10298,6 +11092,16 @@ in it a **required, explicit note on how a mitigation's targeting behaves when a
 node is renamed or deleted.** This is a mandatory user-facing note, not optional
 background: targeting behaviour under renaming is non-obvious and differs by which
 predicate the author used.
+
+> **Amended by §7.6.12 decision 16 (2026-11-13):** a stored predicate holds
+> identifiers only, because the browser rewrites every name and the server
+> refuses a name. The note
+> below describes predicates stored with names, which is what the code does
+> until that rewrite is built. When it is built, the note states instead that a
+> rename changes no mitigation's scope, and that a predicate cannot follow a
+> name onto a different node. For a deleted node it states that the node leaves
+> the target set, the rest of the predicate still applies, and nothing is
+> reported (§7.6.12 decision 14).
 
 The note must state, in user terms:
 
