@@ -3,8 +3,9 @@
 This is a teaching write-up. It builds the vocabulary first, then the valuation
 every figure comes from, then mitigation, then the obstruction mitigation runs
 into and how the design resolves it, then the two kinds of sensitive value the
-system handles. It assumes no prior knowledge and defines every term at the
-point it is first needed.
+system handles, then the jobs done on every request for a workspace's data. It
+assumes no prior knowledge and defines every term at the point it is first
+needed.
 
 Throughout, a node's value is shown as a single number, meaning the loss in one
 run of the simulation — 1.5 names that run a trial. That is a slice through the
@@ -1032,3 +1033,82 @@ message. A request that names a tree in its path and carries a query the server
 refuses is answered with a message naming that tree. The caller supplied that
 value in the request being answered, so the answer adds nothing to what the
 caller already held.
+
+---
+
+## Part 9 — Serving a request for a workspace
+
+A request for a workspace's data needs three jobs done, in a fixed order. They
+are named apart here because each needs different things, and so each can be
+given to a different component. Which component does which job is a property of
+how the system is deployed. What each job is does not change.
+
+### 9.1 Key resolution
+
+**Key resolution** is finding the workspace a workspace key belongs to. The key
+arrives in the request's path. It is hashed, and the hash is looked up among the
+workspace records. The answer is one workspace, or nothing.
+
+This is the selecting and the proving of 8.5 done in one step. Finding a record
+selects the workspace, and the caller having held a key that matches is the
+entitlement.
+
+Key resolution needs the workspace records and nothing else. It reads no tree
+and runs no simulation.
+
+### 9.2 Routing
+
+**Routing** is delivering the request to the process that serves the workspace
+key resolution found.
+
+Routing needs the answer of key resolution and nothing else. It reads no
+workspace record itself and no tree. It decides nothing about entitlement,
+because that was settled one step earlier.
+
+### 9.3 Request handling
+
+**Request handling** is doing what the request asks: reading or changing the
+workspace's trees in the store, running the simulation, and answering.
+
+Request handling needs the store, and it needs to know which workspace the
+request is for. It is the only one of the three jobs that touches a tree.
+
+### 9.4 Resolver and router
+
+A **resolver** is a component whose only job is key resolution. It is asked
+which workspace a key belongs to and it answers. It forwards no request.
+
+A **router** is a component whose job is routing. It receives the request and
+passes it on.
+
+The two are different components wherever they exist separately, and the
+difference matters: every request passes through a router, while a resolver is
+only asked a question about it.
+
+### 9.5 Where the three jobs are done
+
+One server process does all three, and it does not separate them. There is no
+resolver and no router as a component of their own.
+
+Take a request to read one tree. It arrives at the server carrying a key and a
+tree identifier. The server resolves the key to a workspace. Routing has nothing
+to decide, because that same process serves every workspace, so the request is
+already where it will be handled. The server then reads the tree from the store
+and answers.
+
+So key resolution is a step inside the server, routing is the trivial case of
+one destination, and request handling is the rest of the server.
+
+### 9.6 Creating a workspace
+
+**Creating a workspace** is the one request that carries no key, because the
+workspace it concerns does not exist yet. Key resolution therefore has nothing
+to resolve.
+
+The server that receives the request does the whole job. It writes the workspace
+record, mints the key, writes the first tree to the store, and answers with the
+key and the tree. This is one of the two answers that carry the key (8.2).
+
+Creation is where routing first has something to settle: the first tree must be
+written to the store that will hold this workspace's trees. With one server and
+one store there is only one place it can go.
