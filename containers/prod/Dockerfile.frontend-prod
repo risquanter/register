@@ -66,25 +66,35 @@ WORKDIR /app
 # libraries (metalog-distribution, vql-engine, hdr-rng) come from Maven Central.
 # .sbtopts caps sbt's heap as on the host, including the sbt that vite starts
 # for the Scala.js link; nothing caps a build container on this daemon.
+# The coursier cache is a BuildKit cache mount, shared by id with the server
+# image: the build host keeps it between builds and no layer contains it.
+# build.sbt holds the project version, so a version bump re-runs this step and
+# every step below it, and the mount lets sbt resolve against artefacts already
+# downloaded. Every step that runs sbt mounts it.
 # --------------------------------------------------------------------------
 COPY .sbtopts .sbtopts
 COPY build.sbt build.sbt
 COPY project/ project/
-RUN sbt "app/update; commonJS/update"
+RUN --mount=type=cache,id=register-coursier,target=/root/.cache/coursier \
+    sbt "app/update; commonJS/update"
 
 # --------------------------------------------------------------------------
 # npm dependency layer (cached unless package.json/package-lock.json changes)
 # .npmrc enforces ignore-scripts=true, save-exact=true, legacy-peer-deps=true
 # (ADR-020). `npm ci` — not `npm install` — installs exactly what's in
 # package-lock.json and fails if it and package.json disagree; `npm install`
-# re-resolves from the registry on every build and had silently drifted from
-# the committed lockfile (2026-07-21 incident, ADR-020 §7). --ignore-scripts
-# is belt-and-suspenders in addition to the .npmrc setting.
+# re-resolves from the registry on every build and can drift from the
+# committed lockfile (ADR-020 §7). --ignore-scripts is belt-and-suspenders in
+# addition to the .npmrc setting.
+# npm's download cache is a BuildKit cache mount, for the reason the coursier
+# cache is one. `npm ci` checks each cached tarball against the lockfile's
+# integrity hash, so a cached package is held to the same check as a fetched one.
 # --------------------------------------------------------------------------
 COPY modules/app/package.json      modules/app/package.json
 COPY modules/app/package-lock.json modules/app/package-lock.json
 COPY modules/app/.npmrc            modules/app/.npmrc
-RUN cd modules/app && npm ci --ignore-scripts
+RUN --mount=type=cache,id=register-npm,target=/root/.npm \
+    cd modules/app && npm ci --ignore-scripts
 
 # --------------------------------------------------------------------------
 # Source layer — compile and bundle
@@ -99,7 +109,8 @@ COPY modules/app/index.html   modules/app/index.html
 COPY modules/app/main.js      modules/app/main.js
 COPY modules/app/vite.config.js modules/app/vite.config.js
 
-RUN cd modules/app && npm run build
+RUN --mount=type=cache,id=register-coursier,target=/root/.cache/coursier \
+    cd modules/app && npm run build
 
 # ============================================================================
 # Stage 2: Runtime — nginx serving static assets
@@ -136,7 +147,7 @@ COPY --from=builder /app/modules/app/dist/ /srv/app/
 #                                       generated at container startup from
 #                                       REGISTER_REPOSITORY_TYPE, tells the SPA
 #                                       whether to show scenario UI without an
-#                                       API round trip (milestone-2b item 6)
+#                                       API round trip
 #   / and everything else            → try_files → index.html (SPA fallback)
 #
 # The /w/ routing uses an inverted Accept check: proxy by default, serve

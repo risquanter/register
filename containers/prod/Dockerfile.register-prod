@@ -11,18 +11,25 @@ WORKDIR /app
 
 # Dependency layer: cached unless build definition changes.
 # Source-only edits skip this entirely (~60-90s saved).
+# The coursier cache is a BuildKit cache mount: the build host keeps it between
+# builds and no layer contains it. build.sbt holds the project version, so a
+# version bump re-runs this step, and the mount lets it resolve against
+# artefacts already downloaded. Every step that runs sbt mounts it, because the
+# artefacts exist nowhere else in the build. The frontend image shares it by id.
 # .sbtopts caps sbt's heap as on the host; without it sbt takes a quarter of
 # the host's memory, since nothing caps a build container on this daemon.
 COPY .sbtopts .sbtopts
 COPY build.sbt build.sbt
 COPY project/ project/
-RUN sbt "server/update; commonJVM/update"
+RUN --mount=type=cache,id=register-coursier,target=/root/.cache/coursier \
+    sbt "server/update; commonJVM/update"
 
 # Source layer: only this rebuilds on code changes.
 # Only common (shared domain) and server main sources — no app, no tests, no IT.
 COPY modules/common/src/main/ modules/common/src/main/
 COPY modules/server/src/main/ modules/server/src/main/
-RUN sbt server/compile && sbt server/nativeImage
+RUN --mount=type=cache,id=register-coursier,target=/root/.cache/coursier \
+    sbt server/compile && sbt server/nativeImage
 
 # Stage 2: Create minimal runtime image with distroless
 # nonroot is a moving tag, so the digest is what fixes the image (ADR-020 §1).
