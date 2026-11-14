@@ -271,7 +271,7 @@ run_example_script() {
 }
 
 @test "C18: examples/demo-enterprise-curl.sh runs and every query is evaluated" {
-    run_example_script demo-enterprise-curl.sh 20
+    run_example_script demo-enterprise-curl.sh 24
 }
 
 @test "C19: examples/demo-simple-httpie.sh runs and every query is evaluated" {
@@ -281,5 +281,13 @@ run_example_script() {
 
 @test "C20: examples/demo-enterprise-httpie.sh runs and every query is evaluated" {
     require_httpie
-    run_example_script demo-enterprise-httpie.sh 20
+    run_example_script demo-enterprise-httpie.sh 24
+}
+
+# Each demo exists once per HTTP client, and only the transport may differ
+# between the two. The check compares the tree each variant sends and every
+# query it issues, and prints the difference when a pair has drifted.
+@test "C21: the curl and httpie variants of each demo send the same tree and issue the same queries" {
+    run "${BATS_TEST_DIRNAME}/check-example-variants.sh"
+    [[ "$status" -eq 0 ]] || { echo "$output" >&2; return 1; }
 }

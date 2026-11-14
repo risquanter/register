@@ -224,6 +224,8 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
 | `child_of(x, "Parent Name")` | x is a direct child of the named node |
 | `descendant_of(x, "Name")` | x is any descendant of the named node |
 | `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node |
+| `named_risk(x, "Name")` | x is the one node that has this name |
+| `risk_id(x, "<node id>")` | x is the one node that has this identifier |
 | `p95(x, "inherent")`, `p99(x, "inherent")` | P95 / P99 loss value for node x (returns Loss) |
 | `lec(x, 1000000, "inherent")` | Exceedance probability at \$1 M for node x (returns Probability) |
 | `gt_loss(p95(x, "inherent"), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |

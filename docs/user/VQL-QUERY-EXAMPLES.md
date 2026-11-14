@@ -192,8 +192,53 @@ The predicate can include a negation (`~`) to exclude nodes matching a named bra
 *"Do about half of the non-Cyber leaves carry a loss above $1M in 1-in-20 occurrences?"*:
 
 ```
-Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))
+Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))
 ```
+
+---
+
+## Selecting one risk, or a set picked by hand
+
+The scoping predicates above each select a group: the children of a node, or everything under it. Two predicates select one node instead:
+
+- `named_risk(x, "Name")` holds for the one node that has that name. Node names are unique within a tree.
+- `risk_id(x, "<node id>")` holds for the one node that has that identifier.
+
+Used as the range, either one leaves a single node in it. The proportion is then 0 or 1, so the query is a yes/no question about that risk. The examples below use the enterprise tree, and the enterprise scripts run them as Q-E to Q-H.
+
+*"Does Ransomware Attack carry a loss above $10M in 1-in-100 occurrences?"*:
+
+```
+Q[>=]^{1/1} x (named_risk(x, "Ransomware Attack"), gt_loss(p99(x, "inherent"), 10000000))
+```
+
+Joining two of them with `\/` ("or") picks a set by hand. Ransomware Attack and Data Breach - PII share a parent with two other leaves, so no scoping predicate selects exactly this pair. With two nodes in the range, "at least half" means "at least one of them".
+
+*"Does at least one of Ransomware Attack and Data Breach - PII carry a loss above $5M in 1-in-100 occurrences?"*:
+
+```
+Q[>=]^{1/2} x (named_risk(x, "Ransomware Attack") \/ named_risk(x, "Data Breach - PII"), gt_loss(p99(x, "inherent"), 5000000))
+```
+
+Negating one takes a single node out of a larger range. Here the range is 20 of the 21 leaves.
+
+*"Do at least half of all leaves other than Internal Fraud carry a loss above $1M in 1-in-100 occurrences?"*:
+
+```
+Q[>=]^{1/2} x (leaf(x) /\ ~named_risk(x, "Internal Fraud"), gt_loss(p99(x, "inherent"), 1000000))
+```
+
+`risk_id` selects by identifier. A name can be edited and an identifier cannot, so a query written with `risk_id` keeps selecting the same risk after the risk is renamed.
+
+*"Does this one risk have a greater-than-1% annual probability of generating a loss above $10M?"*:
+
+```
+Q[>=]^{1/1} x (risk_id(x, "<node id>"), gt_prob(lec(x, 10000000, "inherent"), 0.01))
+```
+
+A node's identifier is read from the tree structure, `GET /w/<workspaceKey>/risk-trees/<treeId>/structure`, where each node carries its `id` beside its `name`. The `node_id` function in the enterprise scripts does this lookup. The `satisfyingNodeIds` field of any query response holds identifiers too.
+
+An identifier is accepted by `risk_id` only. A scoping predicate reads its quoted argument as a name, so `child_of(x, "<node id>")` is rejected.
 
 ---
 

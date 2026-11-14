@@ -3,10 +3,11 @@
 # demo-enterprise-httpie.sh — Financial Services Enterprise Risk demo (httpie)
 #
 # Bootstraps a realistic 4-domain enterprise risk tree (21 leaves across
-# 11 portfolios) and runs 20 vague-quantifier queries against it.
+# 11 portfolios) and runs 24 vague-quantifier queries against it.
 # Queries Q1–Q8 cover the full surface; Q-A–Q-D demonstrate sub-portfolio
 # scoping; Q-Ab/Q-Bb/Q-C1b/Q-C2b/Q-Db are satisfied contrasts that show
 # how adjusting a threshold, scope, or quantifier direction flips the result.
+# Q-E–Q-H ask about one risk, or about a set of risks picked by hand.
 #
 # Requires: httpie (https://httpie.io/), jq
 #
@@ -387,8 +388,15 @@ http --ignore-stdin GET "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" "X-Branch: main"
 # gt_prob, p95, p99, lec, leaf, portfolio, all four quantifier shapes).
 # Q-A–Q-D below demonstrate sub-portfolio scoping with quoted node-name
 # literals (leaf_descendant_of, child_of, descendant_of, with negation).
-# Quoted node-name literal support: PLAN-QUERY-NODE-NAME-LITERALS.md §F1–F3.
+# Q-E–Q-H name one risk, by its name (named_risk) or its identifier (risk_id).
 header "Step 3 — Vague quantifier queries"
+
+# Read a node's identifier by its name from the tree structure.
+# $1 node name
+node_id() {
+  http --ignore-stdin GET "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/structure" "X-Branch: main" \
+    | jq -r --arg n "$1" '.nodes[] | (.RiskLeaf // .RiskPortfolio // .) | select(.name==$n) | .id' | head -1
+}
 
 run_query() {
   local label="$1"
@@ -427,7 +435,7 @@ run_query \
   "Q2: Do fewer than half of all leaves have a >10% chance of exceeding \$1M?" \
   'Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000, "inherent"), 0.10))'
 
-# Q3 — Tail breadth at the P95 level (was Q7, scoped to Operational Risk)
+# Q3 — Tail breadth at the P95 level
 run_query \
   "Q3: Do at least 3/4 of all leaves have P95 above \$1M?" \
   'Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x, "inherent"), 1000000))'
@@ -478,10 +486,9 @@ run_query \
   "Q8 (forall): Do at least half of portfolio nodes have ALL their direct children with P99 above \$1M?" \
   'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y, "inherent"), 1000000)))'
 
-# ── Sub-portfolio scoped queries (Q-A – Q-D, Phase 6) ────────────────────────
+# ── Sub-portfolio scoped queries (Q-A – Q-D) ─────────────────────────────────
 # Scope the quantifier range to a named sub-portfolio via quoted node-name
-# literals. Requires PLAN-QUERY-NODE-NAME-LITERALS.md §F1–F3 (live since
-# vql-engine 0.10.2 + Phase 4 catalog.constants population).
+# literals.
 
 # Q-A — descendant scoping + P95: tail severity within the Cyber sub-portfolio
 # NOT SATISFIED: no Cyber leaf has unconditional P95 > $5M (prob ≤ 30% means most are zero at P95)
@@ -536,6 +543,41 @@ run_query \
 run_query \
   "Q-Db: Do about half of non-Cyber leaves have P95 above \$1M? (around-quantifier contrast)" \
   'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))'
+
+# ── One risk, or a set picked by hand (Q-E – Q-H) ────────────────────────────
+# The scoping predicates above each select a group: the children of a node, or
+# everything under it. named_risk(x, "Name") holds for the one node that has
+# that name, and risk_id(x, "<id>") for the one node that has that identifier.
+# Used as the range, either one leaves a single node in it, so the proportion
+# is 0 or 1 and the query is a yes/no question about that risk.
+
+# Q-E — one risk by name
+run_query \
+  "Q-E: Does Ransomware Attack have P99 above \$10M?" \
+  'Q[>=]^{1/1} x (named_risk(x, "Ransomware Attack"), gt_loss(p99(x, "inherent"), 10000000))'
+
+# Q-F — two risks picked by hand, joined with "or" (\/). They are siblings of
+# two other leaves, so no structural predicate selects exactly this pair. With
+# two nodes in the range, "at least half" means "at least one of them".
+run_query \
+  "Q-F: Does at least one of Ransomware Attack and Data Breach - PII have P99 above \$5M?" \
+  'Q[>=]^{1/2} x (named_risk(x, "Ransomware Attack") \/ named_risk(x, "Data Breach - PII"), gt_loss(p99(x, "inherent"), 5000000))'
+
+# Q-G — every leaf except one: the negation takes Internal Fraud out of the
+# range, which leaves 20 of the 21 leaves.
+run_query \
+  "Q-G: Do at least half of all leaves other than Internal Fraud have P99 above \$1M?" \
+  'Q[>=]^{1/2} x (leaf(x) /\ ~named_risk(x, "Internal Fraud"), gt_loss(p99(x, "inherent"), 1000000))'
+
+# Q-H — one risk by identifier. A name can be edited and an identifier cannot,
+# so this query keeps selecting the same risk after the risk is renamed.
+COUNTERPARTY_ID=$(node_id "Counterparty Default")
+if [[ -z "$COUNTERPARTY_ID" ]]; then
+  fail "Could not read the identifier of Counterparty Default from the tree structure."; exit 1
+fi
+run_query \
+  "Q-H: Does Counterparty Default, selected by its identifier, have a >1% chance of exceeding \$10M?" \
+  "Q[>=]^{1/1} x (risk_id(x, \"$COUNTERPARTY_ID\"), gt_prob(lec(x, 10000000, \"inherent\"), 0.01))"
 
 header "Done — workspace info"
 ok "Workspace key : $WS_KEY"
