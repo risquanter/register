@@ -1,0 +1,18 @@
+# Compose override for tests/perf/measure-simulation.sh. It is layered over
+# docker-compose.yml and changes only what a timing run has to control.
+#
+# docker-compose.yml fixes the trial count and the trial parallelism as
+# literals, so they are reopened here as variables the script sets per
+# configuration. It also caps the server at 2 processors and 256M, which is
+# below the default trial parallelism of 8, so both caps are lifted to values
+# the script passes in.
+services:
+  register-server:
+    environment:
+      REGISTER_DEFAULT_NTRIALS: "${PERF_NTRIALS:?set by measure-simulation.sh}"
+      REGISTER_TRIAL_PARALLELISM: "${PERF_PARALLELISM:?set by measure-simulation.sh}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${PERF_CPUS:?set by measure-simulation.sh}"
+          memory: "${PERF_MEMORY:?set by measure-simulation.sh}"
