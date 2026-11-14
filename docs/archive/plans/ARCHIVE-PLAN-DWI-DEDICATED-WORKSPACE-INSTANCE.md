@@ -25,7 +25,7 @@ The security purpose is tenant separation. A request that reaches the wrong inst
 - **Pool.** The set of pairs that exist and have no workspace yet. PLAN-WSS keeps the pool at a target size, so that creating a workspace does not wait for a pod and a volume.
 - **Claim.** The one-time step that binds a slot to a workspace.
 - **Tenancy.** Which of the two ways an instance runs. *Shared* is today's behaviour: the instance serves every workspace in its store. *Dedicated* is the new one: the instance serves the workspace its slot is claimed for, and no other.
-- **Resolver.** The component in `register-infra` that maps a workspace key to a slot for the gateway. It is specified in PLAN-WSS §3.3.
+- **Resolver.** The component in `register-infra` that maps a workspace key to a slot for the gateway. It is specified in PLAN-WSS §3.3. It answers with the slot under WSS-D-12 option B, and with the workspace identifier under option A.
 - **Controller.** The component in `register-infra` that creates and deletes pairs. It is specified in PLAN-WSS §3.4.
 
 ## 3. What the code does today
@@ -203,9 +203,9 @@ Amendments this plan owes, in its own scope: the new section in ADR-021, and the
 
 | # | Point | What this plan fixes | What PLAN-WSS must match |
 |---|---|---|---|
-| I-1 | Slot format | A 26-character ULID in upper case, stored in `pool.slot` | Kubernetes object names must be lower case. Object names and labels use the lower-case form of the slot. |
+| I-1 | Slot format | A 26-character ULID in upper case, stored in `pool.slot` | Kubernetes object names must be lower case. Object names and labels use the lower-case form of the slot under WSS-D-12 option B. |
 | I-2 | Who writes `pool` | Register's migration creates the table. The instance claims and releases. | The controller inserts a row per pair and deletes it with the pair. |
-| I-3 | Resolver lookup | The key hash is SHA-256 over the UTF-8 key, in lower-case hex (`WorkspaceKeyCrypto.hash`) | The resolver returns the slot of the claimed, unreleased row whose `key_hash` matches. |
+| I-3 | Resolver lookup | The key hash is SHA-256 over the UTF-8 key, in lower-case hex (`WorkspaceKeyCrypto.hash`) | The resolver returns the slot of the claimed, unreleased row whose `key_hash` matches, under WSS-D-12 option B. An unknown key must get the same `404` the server gives (PLAN-WSS §3.3 currently says `403`). |
 | I-4 | Bootstrap routing | An unclaimed instance accepts `POST /workspaces`. A claimed one refuses it. | `/workspaces` is routed to unclaimed instances, and a refusal is retried on another instance. |
 | I-5 | Removal | `released_at` is set when the workspace is evicted or deleted. | The controller removes pairs whose slot is released, and applies volume retention. |
 | I-6 | Environment | `REGISTER_WORKSPACE_TENANCY`, `REGISTER_WORKSPACE_SLOT`, `REGISTER_WORKSPACE_STORE_BACKEND=postgres`, `IRMIN_URL` | The pod template sets all four. The slot value is fixed for the life of the pair. |
@@ -312,5 +312,7 @@ This section records what the user stated and the direction the discussion reach
 On compose the in-process routing is a ZIO service wired by a layer at startup. On Kubernetes that service does not start, because Envoy Gateway and the resolver do its job. WSS-D-1 and WSS-D-2 are untouched by this.
 
 **What the direction changes in this draft.** §4.1 places the difference between the two ways of running inside `WorkspaceStorePostgres`, as shared and dedicated tenancy. The direction places it in front of the request handlers, as a routing service that is present or absent. Two differences remain in the server under either placement. On compose it accepts every workspace's key, and on Kubernetes only its own. On compose it creates a workspace by itself, and on Kubernetes creation involves a pair. The re-check of the key by each workspace's server is the assistant's drafting in PLAN-WSS §2 and was not ruled.
+
+**What follows separation.** The user ruled on 2026-11-13 that the next stage in `register-infra` runs the separated Scala containers under Kata Containers (PLAN-WSS §5.0). The server image does not change for it, so this plan owes it nothing.
 
 **What only Kubernetes can run.** The forwarding path, the per-workspace objects and a server limited to one workspace are run by no test under compose. A Kubernetes development environment is a prerequisite for verifying them. The user stated that the current k3d cluster is under development and that the infra plan's first step tears it down.

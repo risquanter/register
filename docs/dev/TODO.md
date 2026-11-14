@@ -2788,3 +2788,38 @@ too.
 
 **Status.** Open. Left out of `PLAN-UES-UNIFIED-ERROR-SHAPE.md` by the user's
 ruling of 2026-11-11.
+
+## 66. The server does not exit on the stop signal, so every `docker compose down` waits ten seconds and then kills it — investigate
+
+**What was observed.** During the timing runs of 2026-11-13 and 2026-11-14
+(`tests/perf/measure-simulation.sh`), Docker's recorded events for the
+`register-server` container showed the same sequence at every
+`docker compose down`: a `kill` event, a second `kill` event ten seconds later,
+and a `die` event with exit code 137. Ten seconds is Docker's default grace
+period between the stop signal, SIGTERM, and the forced kill, SIGKILL. Exit
+code 137 is 128 plus 9, the number of SIGKILL. So the server process was still
+running when the grace period ended.
+
+**What is not known.** Whether the process never receives SIGTERM, receives it
+and ignores it, or starts shutting down and does not finish within ten seconds.
+The server runs as a GraalVM native image as the container's first process, on
+a distroless image with no init process in front of it. Nothing in this entry
+has been checked against `Application.scala` or
+`containers/prod/Dockerfile.register-prod`.
+
+**Practical effect today.** None observed beyond the ten seconds each `down`
+takes. With the in-memory repository there is nothing to flush. Whether a write
+to Irmin or to the workspace records can be cut off mid-request has not been
+looked at.
+
+**What to check.**
+
+- Whether the image's entrypoint runs the binary directly, so that it is
+  process 1 and receives the signal.
+- Whether the native image installs a SIGTERM handler, and whether ZIO's
+  shutdown hooks run under it.
+- Whether a shutdown that does start is waiting on something: open server-sent
+  event streams, the telemetry exporter's final flush, or the HTTP server's own
+  drain period.
+
+**Status.** Open. Recorded for investigation; no practical implication known.
