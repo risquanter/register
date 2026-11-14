@@ -99,8 +99,9 @@ object RiskTree {
   }
 
   /** Upper bound on a tree's node count — a resource limit against oversized
-    * trees on merges, store-loads, and programmatic construction. */
-  private val MaxNodes: NonNegativeInt = 10000
+    * trees on merges, store-loads, and programmatic construction. Chosen by
+    * this project (ADR-017 §6). */
+  val MaxNodes: NonNegativeInt = 10000
 
   private def validateNodeCount(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
     if (nodes.sizeIs <= MaxNodes) Validation.succeed(())
@@ -160,8 +161,9 @@ object RiskTree {
       }
   }
 
-  /** Persisted-content bound on the mitigation collection. */
-  private val MaxMitigations: NonNegativeInt = 1000
+  /** Persisted-content bound on the mitigation collection. Chosen by this
+    * project (ADR-017 §6). */
+  val MaxMitigations: NonNegativeInt = 1000
 
   /** Tree-level mitigation invariants: unique ids and names, and a bound on the
     * collection size. Predicate validity is enforced when each

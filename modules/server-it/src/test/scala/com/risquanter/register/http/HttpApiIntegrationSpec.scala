@@ -6,10 +6,10 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
-import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest}
+import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest, LECCurvesMultiRequest, ProbOfExceedanceRequest}
 import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
-import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
+import com.risquanter.register.domain.data.{MitigationSelection, RiskLeaf, RiskTree}
 import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice, CommitHash}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
@@ -300,8 +300,10 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           onScenario = basicRequest.header("X-Branch", scenarioName).response(asStringAlways)
           answers <- ZIO.foreach(List(
             onScenario.get(treeUri),
-            onScenario.post(uri"$treeUri/nodes/lec-multi").body(List(rootId).toJson),
-            onScenario.get(uri"$treeUri/nodes/${rootId.value}/prob-of-exceedance?threshold=1000"),
+            onScenario.post(uri"$treeUri/nodes/lec-multi")
+              .body(LECCurvesMultiRequest.create(List(rootId), MitigationSelection.Inherent).toEither.toOption.get),
+            onScenario.post(uri"$treeUri/nodes/${rootId.value}/prob-of-exceedance?threshold=1000")
+              .body(ProbOfExceedanceRequest(MitigationSelection.Inherent)),
             onScenario.put(treeUri).body(update),
             onScenario.post(uri"$treeUri/query").body(QueryRequest("Q[>=]^{1/2} x (leaf(x), true)"))
           ))(_.send(client.backend))

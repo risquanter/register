@@ -3,6 +3,7 @@ package com.risquanter.register.http.controllers
 import zio.*
 import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
+import com.risquanter.register.services.cache.MitigationScopeResolverRegistry
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
@@ -74,6 +75,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       ZLayer.succeed(makeStubRepo()),
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.cache.ContentCacheRegistry.layer,
+      MitigationScopeResolverRegistry.layer,
       com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,

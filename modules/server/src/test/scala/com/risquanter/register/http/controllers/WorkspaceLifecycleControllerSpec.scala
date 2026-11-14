@@ -21,7 +21,7 @@ import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeaf
 import com.risquanter.register.http.responses.{TreeListResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, RiskTreeServiceLive, ScenarioService, ScenarioServiceNotSupported, ScenarioSummary}
-import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry}
+import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
@@ -93,6 +93,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         TestConfigs.telemetryLayer >>> TelemetryLive.configured,
         RiskTreeServiceLive.layer,
         ContentCacheRegistry.layer,
+        MitigationScopeResolverRegistry.layer,
         CachedResultResolverLive.layer,
         SSEHub.live,
         InvalidationHandler.live,

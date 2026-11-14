@@ -6,11 +6,12 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, RelativeLikelihood, RelativeSeverity}
+import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, TargetingPredicate, RelativeLikelihood, RelativeSeverity, ResultTransformSpec}
+import com.risquanter.register.domain.data.iron.ValidationUtil
 import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry}
+import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
@@ -20,7 +21,7 @@ import com.risquanter.register.domain.errors.{
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.{
-  safeId, nodeId, treeId, mitigationId, unsafeGet, lognormalShape, retentionFactor
+  safeId, nodeId, treeId, mitigationId, unsafeGet, lognormalShape, retentionFactor, resultStage
 }
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
@@ -127,7 +128,10 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     tree.nodes.collect { case l: RiskLeaf => l.name.value -> l.seedVarId.value }.toMap
 
   private def leafIdByName(tree: RiskTree, name: String): String =
-    tree.nodes.collectFirst { case l: RiskLeaf if l.name.value == name => l.id.value }.get
+    leafNodeId(tree, name).value
+
+  private def leafNodeId(tree: RiskTree, name: String): NodeId =
+    tree.nodes.collectFirst { case l: RiskLeaf if l.name.value == name => l.id }.get
 
   private def portfolioUpd(tree: RiskTree, name: String): RiskPortfolioUpdateRequest =
     val id = tree.nodes.collectFirst { case p: RiskPortfolio if p.name.value == name => p.id.value }.get
@@ -179,6 +183,30 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       ),
       "mitigation"
     )
+
+  /** A mitigation targeting the nodes `predicate` selects. */
+  private def targeted(label: String, predicate: String, spec: MitigationSpec): Mitigation =
+    unsafeGet(
+      Mitigation.create(
+        id = mitigationId(label),
+        name = SafeName.fromString(label).toOption.get,
+        target = MitigationTarget.Predicate(TargetingPredicate.create(predicate).toEither.toOption.get),
+        spec = spec,
+        precedence = MitigationPrecedence.default
+      ),
+      "mitigation"
+    )
+
+  /** Halves the likelihood of the one leaf named "Cyber Attack". */
+  private val cyberControl: Mitigation =
+    targeted("cyber-control", """named_risk(x, "Cyber Attack")""",
+      MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep))
+
+  /** Caps every leaf's loss at `cap`. */
+  private def leafCap(cap: Long): Mitigation =
+    targeted("leaf-cap", "leaf(x)",
+      resultStage(ResultTransformSpec.CapLosses(
+        ValidationUtil.refineLossCap(cap, ErrorLocation.requestField(FieldName.Cap)).toOption.get)))
 
   /** Attach mitigations to an already-stored tree. No request can do this — the
     * request DTOs carry no mitigation field — so writing through the repository
@@ -276,6 +304,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
                      TestConfigs.simulationLayer,
                      CachedResultResolverLive.layer,
                      ContentCacheRegistry.layer,
+                     MitigationScopeResolverRegistry.layer,
                      TestConfigs.telemetryLayer >>> TelemetryLive.configured
                    )
         result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
@@ -295,6 +324,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
                      TestConfigs.simulationLayer,
                      CachedResultResolverLive.layer,
                      ContentCacheRegistry.layer,
+                     MitigationScopeResolverRegistry.layer,
                      TestConfigs.telemetryLayer >>> TelemetryLive.configured
                    )
         result  <- svc.revertTree(stubWsId, revertedTree.id, CascadeTestStubs.stubCommit, BranchRef.Main)
@@ -438,10 +468,10 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           rootId = tree.rootId
           
           // Test at multiple thresholds
-          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 1000L, testEntity, false, Revision.Head(BranchRef.Main)))   // Low threshold
-          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 25000L, testEntity, false, Revision.Head(BranchRef.Main)))  // Mid threshold
-          prob3 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 50000L, testEntity, false, Revision.Head(BranchRef.Main)))  // High threshold
-        } yield (prob1, prob2, prob3)
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 1000L, testEntity, false, BranchRef.Main, None))   // Low threshold
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 25000L, testEntity, false, BranchRef.Main, None))  // Mid threshold
+          prob3 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 50000L, testEntity, false, BranchRef.Main, None))  // High threshold
+        } yield (prob1.probability, prob2.probability, prob3.probability)
 
         program.assert { case (prob1, prob2, prob3) =>
           // Probabilities should be in range [0, 1]
@@ -459,8 +489,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           rootId = tree.rootId
           
           // Call twice with same threshold
-          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity, false, Revision.Head(BranchRef.Main)))
-          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity, false, Revision.Head(BranchRef.Main)))
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity, false, BranchRef.Main, None))
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity, false, BranchRef.Main, None))
         } yield (prob1, prob2)
 
         program.assert { case (prob1, prob2) =>
@@ -497,12 +527,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           idsByName = tree.index.nodes.map((nid, n) => n.name.value.toString -> nid).toMap
           leaf1Id = idsByName("Leaf 1")
           leaf2Id = idsByName("Leaf 2")
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id), testEntity, false, Revision.Head(BranchRef.Main)))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id), testEntity, false, BranchRef.Main, None))
         } yield curves
 
         program.assert { curves =>
           curves.size == 2 &&
-            curves.values.forall(_.curve.nonEmpty)
+            curves.values.forall(_.head.curve.curve.nonEmpty)
         }
       },
 
@@ -532,12 +562,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           nodeAId = idsByName("Node A")
           nodeBId = idsByName("Node B")
           
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(nodeAId, nodeBId), testEntity, false, Revision.Head(BranchRef.Main)))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(nodeAId, nodeBId), testEntity, false, BranchRef.Main, None))
         } yield (curves, nodeAId, nodeBId)
 
         program.assert { case (curves, nodeAId, nodeBId) =>
-          val curveA = curves(nodeAId).curve
-          val curveB = curves(nodeBId).curve
+          val curveA = curves(nodeAId).head.curve.curve
+          val curveB = curves(nodeBId).head.curve.curve
           
           // Both curves should have same number of points (shared tick domain)
           curveA.size == curveB.size &&
@@ -549,7 +579,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurvesMulti rejects empty set") {
         for {
           tree <- service(_.create(stubWsId, validRequest, BranchRef.Main))
-          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set.empty, testEntity, false, Revision.Head(BranchRef.Main))).exit
+          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set.empty, testEntity, false, BranchRef.Main, None)).exit
         } yield assertTrue(
           exit.isFailure
         )
@@ -559,7 +589,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val missing = NodeId.fromString("01HX9ABCDE0000000000000099").toOption.get
         for {
           tree <- service(_.create(stubWsId, validRequest, BranchRef.Main))
-          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(tree.rootId, missing), testEntity, false, Revision.Head(BranchRef.Main))).exit
+          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(tree.rootId, missing), testEntity, false, BranchRef.Main, None)).exit
         } yield assertTrue(exit.isFailure)
       },
 
@@ -567,7 +597,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val missing = NodeId.fromString("01HX9ABCDE0000000000000099").toOption.get
         for {
           tree   <- service(_.create(stubWsId, validRequest, BranchRef.Main))
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(tree.rootId, missing), testEntity, false, Revision.Head(BranchRef.Main), true))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(tree.rootId, missing), testEntity, false, BranchRef.Main, None, true))
         } yield assertTrue(
           curves.contains(tree.rootId),
           !curves.contains(missing)
@@ -579,7 +609,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val missing2 = NodeId.fromString("01HX9ABCDE0000000000000098").toOption.get
         for {
           tree   <- service(_.create(stubWsId, validRequest, BranchRef.Main))
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(missing1, missing2), testEntity, false, Revision.Head(BranchRef.Main), true))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(missing1, missing2), testEntity, false, BranchRef.Main, None, true))
         } yield assertTrue(curves.isEmpty)
       },
 
@@ -788,6 +818,99 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       ),
 
       // ========================================
+      // Analysis under a mitigation selection
+      // ========================================
+      // "Seed Root" holds "Cyber Attack" and "Fraud". `cyberControl` reaches the
+      // first leaf only, so the root is reached through a descendant and "Fraud"
+      // is not reached at all.
+      suite("Analysis under a mitigation selection")(
+        test("the mitigation-free selection answers one reading per node, naming no mitigation") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Inherent Read"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, cyberControl)
+            curves  <- service(_.getLECCurvesMulti(stubWsId, seeded.id, seeded.index.nodes.keySet, testEntity,
+                         false, BranchRef.Main, None, false, MitigationSelection.Inherent))
+          } yield curves
+
+          program.assert(curves => curves.values.forall(series => series.map(_.withMitigations) == List(Nil)))
+        },
+
+        test("a reached node carries a second reading naming its mitigations; an unreached one carries one") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Residual Read"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, cyberControl)
+            curves  <- service(_.getLECCurvesMulti(stubWsId, seeded.id, seeded.index.nodes.keySet, testEntity,
+                         false, BranchRef.Main, None, false, MitigationSelection.Residual))
+          } yield (seeded, curves)
+
+          program.assert { case (seeded, curves) =>
+            val readings = (name: String) => curves(leafNodeId(seeded, name)).map(_.withMitigations)
+            readings("Cyber Attack") == List(Nil, List(cyberControl.id)) &&
+              readings("Fraud") == List(Nil) &&
+              curves(seeded.rootId).map(_.withMitigations) == List(Nil, List(cyberControl.id))
+          }
+        },
+
+        test("the exceedance read answers one reading, naming the mitigations that reach the node") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Exceedance Read"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, cyberControl)
+            atFraud <- service(_.probOfExceedance(stubWsId, seeded.id, leafNodeId(seeded, "Fraud"), 1000L,
+                         testEntity, false, BranchRef.Main, None, MitigationSelection.Residual))
+            atRoot  <- service(_.probOfExceedance(stubWsId, seeded.id, seeded.rootId, 1000L,
+                         testEntity, false, BranchRef.Main, None, MitigationSelection.Residual))
+          } yield (atFraud, atRoot)
+
+          program.assert { case (atFraud, atRoot) =>
+            atFraud.withMitigations.isEmpty && atRoot.withMitigations == List(cyberControl.id)
+          }
+        },
+
+        test("a cap above the threshold leaves the probability unchanged and is still named") {
+          // A cap moves a loss down to the cap, so a loss at or above a lower
+          // threshold stays at or above it.
+          val cap = leafCap(40000L)
+          val program = for {
+            repo     <- ZIO.service[RiskTreeRepository]
+            created  <- service(_.create(stubWsId, seedTreeRequest("Cap Read"), BranchRef.Main))
+            seeded   <- seedMitigations(repo, created, cap)
+            leaf      = leafNodeId(seeded, "Cyber Attack")
+            inherent <- service(_.probOfExceedance(stubWsId, seeded.id, leaf, 10000L,
+                          testEntity, false, BranchRef.Main, None, MitigationSelection.Inherent))
+            residual <- service(_.probOfExceedance(stubWsId, seeded.id, leaf, 10000L,
+                          testEntity, false, BranchRef.Main, None, MitigationSelection.Residual))
+          } yield (inherent, residual)
+
+          program.assert { case (inherent, residual) =>
+            residual.probability == inherent.probability &&
+              inherent.withMitigations.isEmpty &&
+              residual.withMitigations == List(cap.id)
+          }
+        },
+
+        test("a selection naming mitigations the tree lacks is refused once per mitigation, in id order") {
+          val absentB = mitigationId("absent-b")
+          val absentA = mitigationId("absent-a")
+          val program = for {
+            created <- service(_.create(stubWsId, seedTreeRequest("Absent Read"), BranchRef.Main))
+            selection = unsafeGet(MitigationSelection.create(List(absentB, absentA), Nil), "selection")
+            exit    <- service(_.probOfExceedance(stubWsId, created.id, created.rootId, 1000L,
+                         testEntity, false, BranchRef.Main, None, selection)).exit
+          } yield exit
+
+          program.map { exit =>
+            val refusals = exit.causeOption.flatMap(_.failureOption).flatMap(clientRefusals)
+            val expected = List(absentA, absentB).sortBy(_.value).map(id =>
+              ValidationError(ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Id), FieldProblem.MitigationNotFound))
+            assertTrue(refusals.contains(expected))
+          }
+        }
+      ),
+
+      // ========================================
       // Mitigation carry-over across an update
       // ========================================
       // ADR-017's omission-means-delete governs the node collection, which the
@@ -850,6 +973,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       TestConfigs.simulationLayer,
       CachedResultResolverLive.layer,
       ContentCacheRegistry.layer,
+      MitigationScopeResolverRegistry.layer,
       InvalidationHandler.live,
       SSEHub.live,
       // Telemetry layers require TelemetryConfig

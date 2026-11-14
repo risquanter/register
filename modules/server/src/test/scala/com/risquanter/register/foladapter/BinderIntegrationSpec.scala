@@ -2,8 +2,7 @@ package com.risquanter.register.foladapter
 
 import zio.test.*
 
-import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskNode}
-import com.risquanter.register.mitigation.MitigationSelection
+import com.risquanter.register.domain.data.{MitigationSelection, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.RiskTree

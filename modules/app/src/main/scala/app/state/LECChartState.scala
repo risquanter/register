@@ -1,16 +1,18 @@
 package app.state
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import scala.scalajs.js
 
 import app.chart.{ColorAssigner, LECSpecBuilder, PaletteData}
 import app.core.ZJS.*
 import app.core.RequestFailure
-import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve, MitigationSelection}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
+import com.risquanter.register.http.requests.LECCurvesMultiRequest
+import com.risquanter.register.http.responses.LECNodeSeries
 
 /** Chart selection and LEC curve data state, separated from tree navigation.
   *
@@ -278,14 +280,25 @@ final class LECChartState(
             // omitAbsent = true: a rewound read must drop nodes that don't exist
             // at the pinned commit (surfaced via droppedSelections) rather
             // than fail the whole chart.
-            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor(), true)
-          ).map(_.curves).toOutcomeEventStream
+            (userIdAccessor(), key, treeId, false,
+             LECCurvesMultiRequest.create(nodeIds, MitigationSelection.Inherent)
+               .getOrElse(throw new IllegalStateException("selection request rejected its own empty value")),
+             branchAccessor(), atAccessor(), true)
+          ).map(response => LECChartState.inherentCurves(response.curves)).toOutcomeEventStream
         ))
       case _ => () // No workspace or tree selected — nothing to do
 
 object LECChartState:
   /** The most curves a user may select by Ctrl+click, chosen by this project. */
   val MaxUserSelections: Int = 13
+
+  /** Each node's mitigation-free curve — the series whose mitigation list is
+    * empty. Every node always has one, so a node missing from the result is a
+    * node absent at this revision, which is what `deriveDropped` reports. */
+  def inherentCurves(curves: Map[NodeId, List[LECNodeSeries]]): Map[NodeId, LECNodeCurve] =
+    curves.flatMap { case (id, series) =>
+      series.find(_.withMitigations.isEmpty).map(id -> _.curve)
+    }
 
   /** Pure derivation extracted from `droppedSelections` so it's testable
     * without a Laminar harness: selected nodes not present in the loaded curve

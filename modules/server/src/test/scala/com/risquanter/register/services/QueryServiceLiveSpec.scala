@@ -11,9 +11,8 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{
   RiskLeaf, RiskPortfolio, RiskNode, RiskTree,
   Mitigation, MitigationTarget, MitigationPrecedence, TargetingPredicate,
-  ResultTransformSpec
+  ResultTransformSpec, MitigationSelection
 }
-import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{
@@ -129,7 +128,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   )
 
   private val everyMitigation: Set[MitigationSelection] =
-    Set(MitigationSelection.Selected(Map(mAlphaId -> ScopeRestriction.FullScope)))
+    Set(MitigationSelection.single(mAlphaId))
 
   private val scanSuite = suite("MitigationSelectionScan.referenced")(
     test("the inherent constant references the Inherent valuation") {

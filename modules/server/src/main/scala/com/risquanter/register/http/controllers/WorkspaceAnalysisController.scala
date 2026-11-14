@@ -6,7 +6,6 @@ import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
-import com.risquanter.register.domain.data.iron.Revision
 import com.risquanter.register.http.responses.LECCurvesResponse
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -42,26 +41,28 @@ class WorkspaceAnalysisController private (
   private given Tracing = tracing
 
   val probOfExceedance: ServerEndpoint[Any, Task] = getWorkspaceProbOfExceedanceEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance, activeBranch, at) =>
+    case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance, body, activeBranch, at) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
-        result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance, rev)
+        result <- riskTreeService.probOfExceedance(
+                    ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance,
+                    branch, at, body.selection)
       yield result).wireEither(TreeScope.InTree(treeId))
   }
 
   val getLECCurvesMulti: ServerEndpoint[Any, Task] = getWorkspaceLECCurvesMultiEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, includeProvenance, nodeIds, activeBranch, at, omitAbsent) =>
+    case (maybeUserId, key, treeId, includeProvenance, body, activeBranch, at, omitAbsent) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
-        curves <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, rev, omitAbsent)
+        curves <- riskTreeService.getLECCurvesMulti(
+                    ws.id, treeId, body.nodeIds.toSet, ws.seedEntityId, includeProvenance,
+                    branch, at, omitAbsent, body.selection)
       yield LECCurvesResponse(curves)).wireEither(TreeScope.InTree(treeId))
   }
 

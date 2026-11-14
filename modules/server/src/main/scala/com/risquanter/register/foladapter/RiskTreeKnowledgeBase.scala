@@ -1,8 +1,7 @@
 package com.risquanter.register.foladapter
 
-import com.risquanter.register.domain.data.{Loss, RiskTree, RiskPortfolio}
+import com.risquanter.register.domain.data.{Loss, MitigationSelection, RiskTree, RiskPortfolio}
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
-import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, Probability}
 import com.risquanter.register.domain.tree.TreeIndex
@@ -158,8 +157,7 @@ class RiskTreeKnowledgeBase(
   private def selectionOf(v: Value): Either[String, MitigationSelection] = v.raw match
     case ValuationBasis.Inherent.symbol => Right(MitigationSelection.Inherent)
     case ValuationBasis.Residual.symbol => Right(MitigationSelection.Residual)
-    case id: MitigationId               =>
-      Right(MitigationSelection.Selected(Map(id -> ScopeRestriction.FullScope)))
+    case id: MitigationId               => Right(MitigationSelection.single(id))
     case other =>
       Left(s"mitigation selection: unrecognised carrier '$other' in sort '${v.sort.value}'")
 

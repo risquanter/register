@@ -140,6 +140,7 @@ object ValidationMessages:
     case FieldProblem.MaxTreesReached(limit) =>
       s"workspace already holds the maximum of $limit risk trees — delete one before creating another"
     case FieldProblem.NodeNotFound                 => "Node not found in tree"
+    case FieldProblem.MitigationNotFound           => "Mitigation not found in tree"
     case FieldProblem.NodeIdsEmpty                 => "nodeIds set is empty"
     case FieldProblem.TreeIdAlreadyExists(treeId)  => s"Tree ID '${treeId.value}' already exists"
     case FieldProblem.TreeNameAlreadyExists(name)  => s"Tree name '${name.value}' already exists"

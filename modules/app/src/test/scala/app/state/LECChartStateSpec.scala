@@ -4,17 +4,27 @@ import zio.test.*
 import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
-import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKeySecret}
+import io.github.iltotore.iron.*
 
-/** Tests for `LECChartState`'s user selection: the wholesale-replace write used
-  * by the mirror-baseline sync, and the toggle's selection cap. */
+import com.risquanter.register.domain.data.{LECNodeCurve, RiskTree}
+import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, Probability, SafeName, TreeId, WorkspaceKeySecret}
+import com.risquanter.register.http.responses.LECNodeSeries
+
+/** Tests for `LECChartState`'s user selection — the wholesale-replace write used
+  * by the mirror-baseline sync, and the toggle's selection cap — and for picking
+  * each node's mitigation-free curve out of an analysis answer. */
 object LECChartStateSpec extends ZIOSpecDefault:
 
   private def node(i: Int): NodeId = NodeId.fromString(f"01HX9ABCDE00000000000000$i%02d").toOption.get
 
   private val n1 = node(1)
   private val n2 = node(2)
+
+  private val noLoss: Probability = 0.5
+
+  /** A curve told apart from another by its average annual loss alone. */
+  private def curve(id: NodeId, averageAnnualLoss: Double): LECNodeCurve =
+    LECNodeCurve(id, SafeName.fromString("Node").toOption.get, Vector.empty, Map.empty, averageAnnualLoss, noLoss)
 
   private def newState: LECChartState =
     new LECChartState(
@@ -67,5 +77,15 @@ object LECChartStateSpec extends ZIOSpecDefault:
         emissionsAfterNoop == emissionsAfterSet,
         afterReplace == Set(n1)
       )
+    },
+
+    test("each node's curve is the reading that names no mitigation") {
+      val mitigation = MitigationId(n2.toSafeId)
+      val inherentAtN1 = curve(n1, 100.0)
+      val answer = Map(
+        n1 -> List(LECNodeSeries(inherentAtN1, Nil), LECNodeSeries(curve(n1, 50.0), List(mitigation))),
+        n2 -> List(LECNodeSeries(curve(n2, 70.0), Nil))
+      )
+      assertTrue(LECChartState.inherentCurves(answer) == Map(n1 -> inherentAtN1, n2 -> curve(n2, 70.0)))
     }
   )

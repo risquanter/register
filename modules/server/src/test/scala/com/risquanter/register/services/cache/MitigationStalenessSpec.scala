@@ -7,9 +7,9 @@ import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, RiskNode,
   Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  AbsoluteReplacement, RelativeLikelihood, RelativeSeverity, ResultTransformSpec
+  AbsoluteReplacement, RelativeLikelihood, RelativeSeverity, ResultTransformSpec, MitigationSelection
 }
-import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
+import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.domain.data.iron.{NodeId, SafeName, SeedVarId, ContentHash}
 import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.testutil.TestHelpers

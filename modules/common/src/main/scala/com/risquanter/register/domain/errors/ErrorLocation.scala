@@ -75,6 +75,9 @@ enum ErrorSubject:
   /** A mitigation, or the leaf transform belonging to one. */
   case Mitigation(mitigationId: MitigationId)
 
+  /** A mitigation as applied to one node. */
+  case MitigationAtNode(mitigationId: MitigationId, nodeId: NodeId)
+
   /** The workspace the request is scoped to, for a limit the workspace holds
     * rather than the request. */
   case Workspace
@@ -247,6 +250,7 @@ object ErrorLocation:
     case ErrorSubject.ExistingNode(nodeId)   => s"node ${nodeId.value}"
     case ErrorSubject.Tree(treeId)           => s"tree ${treeId.value}"
     case ErrorSubject.Mitigation(id)         => s"mitigation ${id.value}"
+    case ErrorSubject.MitigationAtNode(m, n) => s"mitigation ${m.value} at node ${n.value}"
     case ErrorSubject.Workspace              => "workspace"
 
 /** The request headers this application declares.
@@ -537,6 +541,7 @@ enum FieldProblem:
   case SeedEntityIdInUse(seedEntityId: SeedEntityId.SeedEntityId)
   case MaxTreesReached(limit: NonNegativeInt)
   case NodeNotFound
+  case MitigationNotFound
   case NodeIdsEmpty
   case TreeIdAlreadyExists(treeId: TreeId)
   case TreeNameAlreadyExists(name: SafeName.SafeName)
@@ -626,6 +631,7 @@ object FieldProblem:
     case SeedEntityIdInUse(_)                       => ValidationErrorCode.DUPLICATE_VALUE
     case MaxTreesReached(_)                         => ValidationErrorCode.CONSTRAINT_VIOLATION
     case NodeNotFound                               => ValidationErrorCode.NOT_FOUND
+    case MitigationNotFound                         => ValidationErrorCode.NOT_FOUND
     case NodeIdsEmpty                               => ValidationErrorCode.EMPTY_COLLECTION
     case TreeIdAlreadyExists(_)                     => ValidationErrorCode.DUPLICATE_VALUE
     case TreeNameAlreadyExists(_)                   => ValidationErrorCode.DUPLICATE_VALUE

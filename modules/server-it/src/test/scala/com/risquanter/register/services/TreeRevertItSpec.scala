@@ -11,6 +11,7 @@ import com.risquanter.register.http.responses.TreeWriteKind
 import com.risquanter.register.infra.irmin.{CommitMessage, IrminClient, IrminClientLive, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.WorkspaceStoragePaths.TreePath
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
+import com.risquanter.register.services.cache.MitigationScopeResolverRegistry
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.TelemetryLive
@@ -77,6 +78,7 @@ object TreeRevertItSpec extends ZIOSpecDefault:
       TestConfigs.simulationLayer,
       com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.cache.ContentCacheRegistry.layer,
+      MitigationScopeResolverRegistry.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
       TestConfigs.telemetryLayer >>> TelemetryLive.configured

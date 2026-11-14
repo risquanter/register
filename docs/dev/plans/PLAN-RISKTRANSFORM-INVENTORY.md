@@ -375,3 +375,13 @@ PATCH bump; plan close = MINOR bump.
 - docs/dev/plans/PLAN-RISKTRANSFORM.md
 - modules/app/src/main/scala/app/state/GlobalError.scala
 - modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
+- modules/common/src/main/scala/com/risquanter/register/http/responses/LECCurvesResponse.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/MitigationSelection.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/ScopeOutcome.scala
+- modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationSelectionSpec.scala
+- modules/common/src/test/scala/com/risquanter/register/domain/data/ScopeOutcomeSpec.scala
+- modules/common/src/test/scala/com/risquanter/register/http/requests/AnalysisRequestsSpec.scala
+- modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala
+- modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/DecodeFailureStatusSurfaceSpec.scala

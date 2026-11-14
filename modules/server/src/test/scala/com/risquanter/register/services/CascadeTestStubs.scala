@@ -2,10 +2,11 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.auth.{Authority, Checked}
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, NodeId, Probability, ScenarioName, SeedEntityId, TreeId, WorkspaceId, Revision}
-import com.risquanter.register.domain.data.{LECNodeCurve, RiskTree}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, NodeId, ScenarioName, SeedEntityId, TreeId, WorkspaceId, Revision}
+import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
+import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
 import com.risquanter.register.repositories.RiskTreeRepository
 
 /** Minimal `RiskTreeService`/`ScenarioService` test doubles shared by every spec
@@ -33,8 +34,8 @@ object CascadeTestStubs:
     def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Authority]): IO[Failure,RiskTree] = onDelete(wsId, id)
     def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Authority]): IO[Failure,RiskTree] = ZIO.die(new UnsupportedOperationException)
     def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[Failure,Option[(RiskTree, CommitHash)]] = onGetById(wsId, id, rev).map(_.map((_, stubCommit)))
-    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[Failure,Probability] = ZIO.die(new UnsupportedOperationException)
-    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[Failure,Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
+    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], selection: MitigationSelection)(using Checked[Authority]): IO[Failure, ExceedanceSeries] = ZIO.die(new UnsupportedOperationException)
+    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], omitAbsent: Boolean, selection: MitigationSelection)(using Checked[Authority]): IO[Failure, Map[NodeId, List[LECNodeSeries]]] = ZIO.die(new UnsupportedOperationException)
 
   /** `delete` always fails — simulates a tree that was already manually deleted.
     *

@@ -7,14 +7,16 @@ import zio.telemetry.opentelemetry.metrics.{Meter, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
+import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape, Mitigation, MitigationSelection}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, MitigationId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
 import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, Failure, TrustZone}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.ValidationExtensions.*
+import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.simulation.LECGenerator
-import com.risquanter.register.services.cache.CachedResultResolver
+import com.risquanter.register.simulation.{LECGenerator, LossDistribution}
+import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, ResolvedScopes, ScopeResolutionContext}
 import com.risquanter.register.services.RiskTreeServiceLive.{ErrorContext, Operation}
 import com.risquanter.register.services.helper.{SeedVarIdAssigner, Simulator}
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -31,6 +33,7 @@ import com.risquanter.register.configs.SimulationConfig
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   resolver: CachedResultResolver,
+  scopeResolvers: MitigationScopeResolverRegistry,
   invalidationHandler: InvalidationHandler,
   simulationConfig: SimulationConfig,
   tracing: Tracing,
@@ -54,6 +57,103 @@ class RiskTreeServiceLive private (
   /** The refusal of a node the tree does not hold. */
   private def nodeAbsent(nodeId: NodeId): ValidationError =
     ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotFound)
+
+  /** The read coordinate for a (branch, pin) pair. */
+  private def revisionOf(branch: BranchRef, at: Option[CommitHash]): Revision =
+    at.fold[Revision](Revision.Head(branch))(Revision.At(_))
+
+  /** The refusal of a mitigation the tree does not hold. */
+  private def mitigationAbsent(id: MitigationId): ValidationError =
+    ValidationError(
+      ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Id),
+      FieldProblem.MitigationNotFound
+    )
+
+  /** Refuse a selection naming a mitigation this tree version does not hold,
+    * accumulating every such mitigation in identifier order. Naming a
+    * mitigation that applies to nothing is a valid request whose answer is "no
+    * effect"; naming one that does not exist is a broken request. The check
+    * cannot live in the JSON decoder, which has no tree to look an id up in. */
+  private def requireKnownMitigations(tree: RiskTree, selection: MitigationSelection): IO[Failure, Unit] =
+    selection match
+      case MitigationSelection.Selected(entries) =>
+        refuseAll(
+          (entries.keySet -- tree.mitigations.map(_.id)).toList.sortBy(_.value).map(mitigationAbsent)
+        )
+      case MitigationSelection.Inherent | MitigationSelection.Residual => ZIO.unit
+
+  /** Per-mitigation resolved scopes for this tree version. A mitigation-free
+    * reading applies nothing, so nothing needs resolving and the resolver is
+    * not called at all. */
+  private def resolvedScopesFor(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    branch: BranchRef,
+    commit: CommitHash,
+    tree: RiskTree,
+    selection: MitigationSelection
+  ): UIO[ResolvedScopes] = selection match
+    case MitigationSelection.Inherent => ZIO.succeed(ResolvedScopes(Map.empty))
+    case MitigationSelection.Residual | MitigationSelection.Selected(_) =>
+      for
+        mitResolver <- scopeResolvers.forWorkspace(wsId)
+        scopes      <- mitResolver.resolve(ScopeResolutionContext(treeId, branch, commit), tree)
+        _           <- ResolvedScopes.logFailures(scopes)
+      yield scopes
+
+  /** The mitigations whose resolved scope covers this node or any node below
+    * it, in the order `MitigationApplication.scoped` composes them. Computed per
+    * requested node, so the cost follows the requested subtrees rather than the
+    * whole tree.
+    *
+    * Membership is decided by scope alone, which makes this list two things it
+    * is easy to mistake it for, and neither of them:
+    *
+    *   - It is not the set the caller selected. A selected mitigation whose
+    *     scope covers nothing in this subtree is absent from it.
+    *   - It is not the set that changed the figure. A mitigation whose scope
+    *     covers the subtree is present even when the reading is identical to
+    *     the mitigation-free one — a cap set above an exceedance threshold
+    *     moves trials down to the cap, and trials already at or above that
+    *     threshold stay above it. Deciding "did this change the figure" would
+    *     require computing the mitigation-free reading as well, which the
+    *     single-reading exceedance answer deliberately does not do.
+    *
+    * The list is also the reached test: it is empty exactly when neither the
+    * node nor any descendant is inside an applied mitigation's scope. On the
+    * curve response such a node carries no second reading. */
+  private def withMitigationsFor(
+    tree: RiskTree,
+    scoped: Map[NodeId, List[Mitigation]],
+    nodeId: NodeId
+  ): List[MitigationId] =
+    tree.index.descendants(nodeId).toList
+      .flatMap(scoped.getOrElse(_, Nil))
+      .distinct
+      .sortBy(m => (m.precedence.key, m.id.value))
+      .map(_.id)
+
+  /** Key for the one shared tick-domain computation. Both valuations of a node
+    * must be evaluated against the same ticks, or the two curves land on
+    * different x-axes and cannot be read against each other; keying by
+    * (node, mitigated) puts them through a single
+    * `LECGenerator.generateCurvePointsMulti` call. */
+  private case class SeriesKey(nodeId: NodeId, mitigated: Boolean)
+
+  /** One node's curve from its evaluated points and its own result. */
+  private def curveOf(
+    node: RiskNode,
+    points: Vector[(Long, Probability)],
+    result: LossDistribution
+  ): LECNodeCurve =
+    LECNodeCurve(
+      node.id,
+      node.name,
+      points.map { case (loss, prob) => LECPoint(loss, prob) },
+      LECGenerator.calculateQuantiles(result),
+      LECGenerator.averageAnnualLoss(result),
+      LECGenerator.probabilityOfNoLoss(result)
+    )
 
   /** Fetch tree, its resolved commit, and the node together. Fails with
     * `RiskTreeRepository.treeAbsent` when the revision lacks the tree, and with
@@ -455,7 +555,17 @@ class RiskTreeServiceLive private (
   // LEC Query APIs (ADR-015)
   // ========================================
 
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[Failure, Probability] =
+  override def probOfExceedance(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    nodeId: NodeId,
+    threshold: Long,
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean,
+    branch: BranchRef,
+    at: Option[CommitHash],
+    selection: MitigationSelection
+  )(using Checked[Authority]): IO[Failure, ExceedanceSeries] =
     traced(Operation.ProbOfExceedance) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -463,20 +573,30 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("threshold", threshold)
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
 
-        // Fetch requested tree and ensure node exists within it
-        (tree, _, _) <- lookupNodeInTree(wsId, treeId, nodeId, rev)
-        
-        // Ensure result is cached (cache-aside pattern via CachedResultResolver)
-        result <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
-        _ <- tracing.setAttribute("cache_resolved", true)
-        
-        // Compute exceedance probability from cached result
-        prob = result.probOfExceedance(threshold)
-        _ <- tracing.setAttribute("exceedance_probability", prob)
-      } yield prob
+        (tree, commit, _) <- lookupNodeInTree(wsId, treeId, nodeId, revisionOf(branch, at))
+        _        <- requireKnownMitigations(tree, selection)
+        scopes   <- resolvedScopesFor(wsId, treeId, branch, commit, tree, selection)
+        applied   = scopes.appliedScopes
+        scoped    = MitigationApplication.scoped(tree, selection, applied)
+        reached   = withMitigationsFor(tree, scoped, nodeId)
+
+        result   <- if reached.isEmpty
+                    then resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
+                    else resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance, selection, applied)
+      } yield ExceedanceSeries(result.probOfExceedance(threshold), reached)
     }
-  
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean)(using Checked[Authority]): IO[Failure, Map[NodeId, LECNodeCurve]] =
+
+  override def getLECCurvesMulti(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    nodeIds: Set[NodeId],
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean,
+    branch: BranchRef,
+    at: Option[CommitHash],
+    omitAbsent: Boolean,
+    selection: MitigationSelection
+  )(using Checked[Authority]): IO[Failure, Map[NodeId, List[LECNodeSeries]]] =
     traced(Operation.GetLECCurvesMulti) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -487,39 +607,47 @@ class RiskTreeServiceLive private (
         // Validate inputs and fetch requested tree + nodes
         _ <- ZIO.when(nodeIds.isEmpty)(refuseAll(List(ValidationError(
                ErrorLocation.requestField(FieldName.Nodes), FieldProblem.NodeIdsEmpty))))
-        (tree, _, nodesMap) <- lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
+        rev = revisionOf(branch, at)
+        (tree, commit, nodesMap) <- lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
         // With omitAbsent, nodesMap holds only the ids present at this revision;
         // resolve and log against that present set (empty input still failed above).
         presentIds = nodesMap.keySet
         _ <- ZIO.when(omitAbsent && presentIds.size < nodeIds.size)(
                ZIO.logInfo(s"lec-multi omitAbsent: ${nodeIds.size - presentIds.size} absent node(s) omitted at $rev"))
+        _         <- requireKnownMitigations(tree, selection)
+        scopes    <- resolvedScopesFor(wsId, treeId, branch, commit, tree, selection)
+        applied    = scopes.appliedScopes
+        scoped     = MitigationApplication.scoped(tree, selection, applied)
 
-        // Batch cache-aside: ensure all present results are cached
-        results <- resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance)
-        _ <- tracing.setAttribute("results_resolved", results.size.toLong)
-        
-        // Generate curves with shared tick domain (ADR-014 render-time strategy)
-        curvesData = LECGenerator.generateCurvePointsMulti(results, simulationConfig.curveTickCount, simulationConfig.curveTailCutoff)
-        
-        // One curve per node present at this revision. The point set is keyed
-        // by the results, which are keyed by `presentIds`, so every node here
-        // has a result and a node.
-        enriched = curvesData.flatMap { case (nodeId, points) =>
-          for
-            result <- results.get(nodeId)
-            node   <- nodesMap.get(nodeId)
-          yield nodeId -> LECNodeCurve(
-            nodeId,
-            node.name,
-            points.map { case (loss, prob) => LECPoint(loss, prob) },
-            LECGenerator.calculateQuantiles(result),
-            LECGenerator.averageAnnualLoss(result),
-            LECGenerator.probabilityOfNoLoss(result)
-          )
-        }
-        
-        _ <- tracing.setAttribute("curves_generated", enriched.size.toLong)
-      } yield enriched
+        inherent  <- resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance)
+        mitigated <- selection match
+                       case MitigationSelection.Inherent =>
+                         ZIO.succeed(Map.empty[NodeId, LossDistribution])
+                       case MitigationSelection.Residual | MitigationSelection.Selected(_) =>
+                         resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance, selection, applied)
+
+        // One tick domain for every curve in the answer, both valuations included.
+        points = LECGenerator.generateCurvePointsMulti(
+                   inherent.map((id, result) => SeriesKey(id, mitigated = false) -> result) ++
+                   mitigated.map((id, result) => SeriesKey(id, mitigated = true) -> result),
+                   simulationConfig.curveTickCount,
+                   simulationConfig.curveTailCutoff
+                 )
+
+        series = nodesMap.map { (id, node) =>
+                   val reached = withMitigationsFor(tree, scoped, id)
+                   val base = for
+                     result <- inherent.get(id)
+                     curve  <- points.get(SeriesKey(id, mitigated = false))
+                   yield LECNodeSeries(curveOf(node, curve, result), Nil)
+                   val extra = for
+                     result <- mitigated.get(id) if reached.nonEmpty
+                     curve  <- points.get(SeriesKey(id, mitigated = true))
+                   yield LECNodeSeries(curveOf(node, curve, result), reached)
+                   id -> (base.toList ++ extra.toList)
+                 }
+        _ <- tracing.setAttribute("curves_generated", series.size.toLong)
+      } yield series
     }
 }
 
@@ -567,10 +695,11 @@ object RiskTreeServiceLive {
     val operationsDesc = "Number of risk tree operations"
   }
   
-  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & InvalidationHandler & SimulationConfig & Tracing & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & MitigationScopeResolverRegistry & InvalidationHandler & SimulationConfig & Tracing & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       resolver <- ZIO.service[CachedResultResolver]
+      scopeResolvers <- ZIO.service[MitigationScopeResolverRegistry]
       invalidationHandler <- ZIO.service[InvalidationHandler]
       simulationConfig <- ZIO.service[SimulationConfig]
       tracing <- ZIO.service[Tracing]
@@ -582,6 +711,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.operationsUnit),
         Some(MetricNames.operationsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, resolver, invalidationHandler, simulationConfig, tracing, opsCounter)
+    } yield new RiskTreeServiceLive(repo, resolver, scopeResolvers, invalidationHandler, simulationConfig, tracing, opsCounter)
   }
 }

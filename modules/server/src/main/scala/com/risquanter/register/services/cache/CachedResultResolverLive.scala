@@ -6,8 +6,8 @@ import zio.telemetry.opentelemetry.metrics.{Meter, Histogram, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, MitigationApplicationRecord}
-import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
+import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, MitigationApplicationRecord, MitigationSelection}
+import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId}
 import com.risquanter.register.domain.errors.{ErrorLocation, Failure, FieldName, FieldProblem, PeerZone, TrustZone, ValidationError}

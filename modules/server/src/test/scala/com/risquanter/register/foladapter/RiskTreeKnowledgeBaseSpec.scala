@@ -6,9 +6,8 @@ import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
   RiskLeaf, RiskPortfolio, RiskNode, RiskTree,
   Mitigation, MitigationTarget, MitigationPrecedence, TargetingPredicate,
-  ResultTransformSpec
+  ResultTransformSpec, MitigationSelection
 }
-import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.common.ValuationBasis
 import com.risquanter.register.common.FolSymbols.{QuerySort, ValueFunction}
 import com.risquanter.register.simulation.LossDistribution
@@ -21,7 +20,7 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import vql.parser.VagueQueryParser
 import vql.semantics.VagueSemantics
 import vql.error.TypeCheckError
-import vql.typed.{Value, TypeId, FolModel, QueryBinder}
+import vql.typed.{Value, FolModel, QueryBinder}
 
 /** Tests for [[RiskTreeKnowledgeBase]] — the bridge between register's domain
   * model and the vql-engine typed evaluation pipeline.
@@ -141,7 +140,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   // ── Knowledge base under test ──────────────────────────────────────
 
   /** Build a KB whose only precomputed valuation is the inherent (base) one and
-    * whose resolved-scope set is empty — the shape every pre-M3 test needs. */
+    * whose resolved-scope set is empty — the shape every test without
+    * mitigations needs. */
   private def kbInherent(t: RiskTree, res: Map[NodeId, LossDistribution]): RiskTreeKnowledgeBase =
     RiskTreeKnowledgeBase(RiskTreeKnowledgeBase.schemaFor(t), Map(MitigationSelection.Inherent -> res), Map.empty)
 
@@ -178,7 +178,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private def lossStr(s: String): Value      = Value(lossSort, s.toLongOption.get)
   private def probStr(s: String): Value      = Value(probSort, s.toDoubleOption.get)
 
-  // ── Fixtures: mitigations + resolved scopes (M3) ────────────────────
+  // ── Fixtures: mitigations + resolved scopes ─────────────────────────
   //
   // The same 4-node tree, now carrying three mitigations. `resolvedScopes` maps
   // two of them to node scopes; the third (`mAbsent`) is omitted, modelling a
@@ -220,7 +220,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private val selectedCyber = withCfg(5) {
     leafOf(cyberId, Map(0 -> 10000L, 1 -> 10000L, 2 -> 10000L, 3 -> 10000L, 4 -> 10000L), None)
   }
-  private val mCyberSelection = MitigationSelection.Selected(Map(mCyberId -> ScopeRestriction.FullScope))
+  private val mCyberSelection = MitigationSelection.single(mCyberId)
 
   private val resolvedScopes: Map[MitigationId, Set[NodeId]] =
     Map(mCyberId -> Set(cyberId), mHardwareId -> Set(hardwareId)) // mAbsent omitted
@@ -758,7 +758,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     }
   )
 
-  // ── Mitigation predicate suite (M3: mitigate / mitigated / unmitigated) ──
+  // ── Mitigation predicate suite (mitigate / mitigated / unmitigated) ──
 
   private val mitigationPredicateSuite = suite("mitigation predicates (M3)")(
     test("mitigate: node in the mitigation's resolved scope → true") {
@@ -792,7 +792,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     }
   )
 
-  // ── Value-function selection slot (M3: inherent / residual / bound m) ──
+  // ── Value-function selection slot (inherent / residual / bound m) ──
 
   private val selectionFunctionSuite = suite("value functions read the mitigation selection slot (M3)")(
     test("p95(x, inherent) reads the base results") {
@@ -809,7 +809,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     }
   )
 
-  // ── Mitigation-reference predicates (M3: named_mitigation / mitigation_id) ──
+  // ── Mitigation-reference predicates (named_mitigation / mitigation_id) ──
 
   private val mitigationReferenceSuite = suite("mitigation-reference predicates (M3: named_mitigation / mitigation_id)")(
     test("per-sort literal validators resolve mitigation name vs id") {
@@ -829,7 +829,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     }
   )
 
-  // ── Mitigation aggregate constants (M3) ─────────────────────────────
+  // ── Mitigation aggregate constants ──────────────────────────────────
 
   private val mitigationConstantSuite = suite("mitigation aggregate constants (M3)")(
     test("inherent / residual are declared on the Mitigation sort") {

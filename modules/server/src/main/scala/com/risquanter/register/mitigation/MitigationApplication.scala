@@ -1,88 +1,13 @@
 package com.risquanter.register.mitigation
 
 import zio.prelude.*
-import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
 import com.risquanter.register.domain.data.{
-  LeafParams, LeafStageSpec, Mitigation, MitigationApplicationRecord, MitigationSpec,
-  RiskLeaf, RiskNode, RiskPortfolio, RiskTree
+  LeafParams, LeafStageSpec, Mitigation, MitigationApplicationRecord, MitigationSelection, MitigationSpec,
+  RiskLeaf, RiskNode, RiskPortfolio, RiskTree, ScopeRestriction
 }
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
 import com.risquanter.register.domain.errors.{ErrorSubject, ValidationError}
 import com.risquanter.register.simulation.TrialOutcomes
-
-/**
- * Per-mitigation scope restriction inside a selection: `FullScope`
- * applies the mitigation to its whole resolved scope (the global toggle);
- * `NodesOnly` restricts application to an explicit node subset (per-node
- * enablement). A `NodesOnly` set intersects with the mitigation's resolved
- * scope at application time — ids outside the current scope no-op.
- */
-sealed trait ScopeRestriction
-
-object ScopeRestriction {
-  case object FullScope extends ScopeRestriction
-  final case class NodesOnly(ids: Set[NodeId]) extends ScopeRestriction
-
-  given Equal[ScopeRestriction] = Equal.default
-
-  private case class Raw(kind: String, ids: Option[List[String]])
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  given codec: JsonCodec[ScopeRestriction] = JsonCodec(
-    JsonEncoder[Raw].contramap {
-      case FullScope      => Raw("full", None)
-      case NodesOnly(ids) => Raw("nodes", Some(ids.map(_.value).toList.sorted))
-    },
-    JsonDecoder[Raw].mapOrFail {
-      case Raw("full", None) => Right(FullScope)
-      case Raw("nodes", Some(rawIds)) =>
-        val (errors, ids) = rawIds.partitionMap(NodeId.fromString)
-        if (errors.nonEmpty) Left(errors.flatten.map(ValidationError.describe).mkString("; "))
-        else Right(NodesOnly(ids.toSet))
-      case other => Left(s"invalid scope restriction kind '${other.kind}'")
-    }
-  )
-}
-
-/**
- * Which mitigations a resolution applies, each optionally scope-restricted,
- * so a mitigation can be enabled for some of the nodes it scopes and not
- * others. The three cases are the register-code spelling of ADR-034's
- * valuations: `Inherent` (raw, mitigation-free — the default on every read
- * path), `Residual` (every applicable mitigation applied), and `Selected` (an
- * explicit mitigation subset, each optionally scope-restricted).
- */
-sealed trait MitigationSelection
-
-object MitigationSelection {
-  /** Mitigation-free valuation (ADR-034 raw): no mitigation applied, and the
-    * default on every read path. Named for the domain term (inherent risk =
-    * before controls) and to avoid shadowing `scala.None`. */
-  case object Inherent extends MitigationSelection
-  /** Residual valuation (ADR-034): every applicable mitigation applied
-    * (residual risk = after controls). */
-  case object Residual extends MitigationSelection
-  final case class Selected(entries: Map[MitigationId, ScopeRestriction]) extends MitigationSelection
-
-  given Equal[MitigationSelection] = Equal.default
-
-  private case class Raw(kind: String, entries: Option[Map[MitigationId, ScopeRestriction]])
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  given codec: JsonCodec[MitigationSelection] = JsonCodec(
-    JsonEncoder[Raw].contramap {
-      case Inherent          => Raw("inherent", scala.None)
-      case Residual          => Raw("residual", scala.None)
-      case Selected(entries) => Raw("selected", Some(entries))
-    },
-    JsonDecoder[Raw].mapOrFail {
-      case Raw("inherent", scala.None)      => Right(Inherent)
-      case Raw("residual", scala.None)      => Right(Residual)
-      case Raw("selected", Some(entries))   => Right(Selected(entries))
-      case other => Left(s"invalid mitigation selection kind '${other.kind}'")
-    }
-  )
-}
 
 /**
  * The monoid action `Mits × Tree → Tree`, decomposed:
@@ -141,8 +66,9 @@ object MitigationApplication {
   /** Applies every leaf-stage spec to its scoped leaves, in precedence order
     * per leaf; portfolios and out-of-scope leaves pass through. The fold
     * threads only the parameters a spec can change, so the leaf is rebuilt once
-    * at the end rather than per step. The result revalidates through
-    * `RiskTree.fromNodes` (errors accumulate). */
+    * at the end rather than per step. A spec's refusal names the mitigation and
+    * the leaf, because one leaf can carry several leaf-stage mitigations. The
+    * result revalidates through `RiskTree.fromNodes` (errors accumulate). */
   def effectiveTree(
     tree: RiskTree,
     selection: MitigationSelection,
@@ -153,12 +79,15 @@ object MitigationApplication {
     val newNodesV: Validation[ValidationError, List[RiskNode]] =
       Validation.validateAll(tree.nodes.toList.map {
         case leaf: RiskLeaf =>
-          perNode.get(leaf.id).map(_.collect { case Mitigation(_, _, _, spec: LeafStageSpec, _) => spec }) match {
+          perNode.get(leaf.id).map(_.collect {
+            case m @ Mitigation(_, _, _, spec: LeafStageSpec, _) => m.id -> spec
+          }) match {
             case Some(specs) if specs.nonEmpty =>
-              val subject = ErrorSubject.ExistingNode(leaf.id)
               specs
                 .foldLeft(Validation.succeed(LeafParams(leaf.probability, leaf.shape)): Validation[ValidationError, LeafParams]) {
-                  (accV, spec) => accV.flatMap(params => LeafStageSpec.applyTo(spec, params, subject))
+                  case (accV, (mitigationId, spec)) =>
+                    accV.flatMap(params =>
+                      LeafStageSpec.applyTo(spec, params, ErrorSubject.MitigationAtNode(mitigationId, leaf.id)))
                 }
                 .map(params =>
                   RiskLeaf.fromValidated(

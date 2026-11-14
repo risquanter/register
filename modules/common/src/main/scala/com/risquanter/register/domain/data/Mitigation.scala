@@ -86,9 +86,10 @@ object LeafStageSpec {
     * that precedes it, and `Likelihood` or `Severity` absorbs one component and
     * passes the other through.
     *
-    * `subject` names the leaf being transformed. `LeafParams` carries no
-    * identity — identity, name, parent and seed identity are outside a
-    * transform's reach — so a refusal has nothing of its own to report against.
+    * `subject` names the mitigation applied at the leaf being transformed.
+    * `LeafParams` carries no identity — identity, name, parent and seed
+    * identity are outside a transform's reach — so a refusal has nothing of its
+    * own to report against.
     */
   def applyTo(
     spec:    LeafStageSpec,

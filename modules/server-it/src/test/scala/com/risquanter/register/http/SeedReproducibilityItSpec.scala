@@ -8,18 +8,18 @@ import sttp.client3.ziojson.*
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, LECPoint, TrialId, Loss}
+import com.risquanter.register.domain.data.{MitigationSelection, RiskTree, RiskLeaf, LECPoint, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, NodeId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, LECCurvesMultiRequest}
 import com.risquanter.register.http.responses.{LECCurvesResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
-import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
+import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.TelemetryLive
@@ -61,6 +61,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       TestConfigs.simulationLayer,
       CachedResultResolverLive.layer,
       ContentCacheRegistry.layer,
+      MitigationScopeResolverRegistry.layer,
       InvalidationHandler.live,
       SSEHub.live,
       TestConfigs.telemetryLayer >>> TelemetryLive.configured
@@ -125,15 +126,14 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
   /** LEC curves + quantiles for the root and every leaf, keyed by node name —
     * node IDs are ULIDs and differ across servers, names are the stable key.
     */
-  private given zio.json.JsonEncoder[List[NodeId]] = zio.json.JsonEncoder.list[NodeId]
-
   private def curvesByName(client: SttpClientFixture.Client, key: String, tree: RiskTree): Task[Map[String, (Vector[LECPoint], Map[QuantileLevel, Double])]] =
     val nodeIds: List[NodeId] = tree.rootId :: tree.nodes.collect { case l: RiskLeaf => l.id }.toList
     basicRequest.header("X-Branch", "main").post(uri"${client.baseUrl}/w/$key/risk-trees/${tree.id.value}/nodes/lec-multi")
-      .body(nodeIds)
+      .body(LECCurvesMultiRequest.create(nodeIds, MitigationSelection.Inherent).toEither.toOption.get)
       .response(asJson[LECCurvesResponse]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
-      .map(_.curves.values.map(c => (c.name.value: String) -> (c.curve, c.quantiles)).toMap)
+      // The mitigation-free selection answers one reading per node.
+      .map(_.curves.values.map(_.head.curve).map(c => (c.name.value: String) -> (c.curve, c.quantiles)).toMap)
 
   override def spec =
     suite("SeedReproducibilityItSpec")(

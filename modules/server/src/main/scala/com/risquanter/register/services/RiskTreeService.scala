@@ -2,8 +2,9 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, Probability, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.auth.{Authority, Checked}
 
@@ -87,35 +88,52 @@ trait RiskTreeService {
   // LEC Query APIs (ADR-015: compose on ensureCached)
   // ========================================
   
-  /** Get exceedance probability at a threshold for a node.
+  /** Exceedance probability at a threshold for one node, under one mitigation
+    * selection.
     *
-    * @param wsId Workspace that owns the tree
-    * @param nodeId Node identifier
-    * @param threshold Loss threshold to compute P(Loss >= threshold)
-    * @param seedEntityId Owning workspace's stochastic identity (from the controller's resolved workspace)
-    * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
-    * @param rev Read coordinate — branch head or a pinned commit.
-    * @return The share of trials whose loss was at or above `threshold`.
+    * One reading, computed under the selection the caller passed.
+    * `withMitigations` names the mitigations whose resolved scope reached this
+    * node or any node below it, and is empty exactly when none did — which is
+    * also the whole answer for the mitigation-free selection. A caller wanting
+    * the mitigation-free figure alongside a mitigated one asks twice; the two
+    * probabilities share no tick domain and need no shared request.
+    *
+    * `branch` and `at` are taken separately rather than as a `Revision`
+    * because the scope resolver memoizes per (tree, branch) and `Revision.At`
+    * carries a commit with no branch. The method composes the `Revision` the
+    * repository reads at.
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision)(using Checked[Authority]): IO[Failure, Probability]
+  def probOfExceedance(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    nodeId: NodeId,
+    threshold: Long,
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean,
+    branch: BranchRef,
+    at: Option[CommitHash],
+    selection: MitigationSelection = MitigationSelection.Inherent
+  )(using Checked[Authority]): IO[Failure, ExceedanceSeries]
 
-  /** Get LEC curves for multiple nodes with shared tick domain.
+  /** LEC curves for several nodes on one shared tick domain, under one
+    * mitigation selection.
     *
-    * Used for multi-curve overlay (e.g., split pane comparison).
-    * All curves share the same loss ticks for aligned rendering.
-    * Returns LECNodeCurve (id + name + curve + quantiles) per node.
-    *
-    * @param wsId Workspace that owns the tree
-    * @param nodeIds Set of node identifiers
-    * @param includeProvenance Whether to include provenance metadata for reproducibility
-    * @param rev Read coordinate — branch head or a pinned commit.
-    * @param omitAbsent When true, node IDs absent from the tree at `rev` are
-    *                   omitted from the result instead of failing the request —
-    *                   the point-in-time read path (a node may not exist yet at
-    *                   an earlier commit).
-    * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
+    * Each node carries the mitigation-free curve first, and a second curve when
+    * the selection reaches it. Every curve in the answer — both valuations of
+    * every node — is evaluated against one tick domain, so any two of them can
+    * be read against each other.
     */
-  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false)(using Checked[Authority]): IO[Failure, Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    nodeIds: Set[NodeId],
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean,
+    branch: BranchRef,
+    at: Option[CommitHash],
+    omitAbsent: Boolean = false,
+    selection: MitigationSelection = MitigationSelection.Inherent
+  )(using Checked[Authority]): IO[Failure, Map[NodeId, List[LECNodeSeries]]]
 }
 
 object RiskTreeService:

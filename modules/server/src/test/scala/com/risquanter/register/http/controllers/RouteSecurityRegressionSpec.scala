@@ -7,7 +7,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
-import com.risquanter.register.services.cache.{ContentCacheRegistry, CachedResultResolverLive}
+import com.risquanter.register.services.cache.{ContentCacheRegistry, CachedResultResolverLive, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
@@ -54,6 +54,7 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
     ChangedNodesServiceLive.layer,
     ZLayer.succeed(TreeHistoryService.empty),
     ContentCacheRegistry.layer,
+    MitigationScopeResolverRegistry.layer,
     CachedResultResolverLive.layer,
     SSEHub.live,
     InvalidationHandler.live,

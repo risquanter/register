@@ -1,11 +1,10 @@
 package com.risquanter.register.mitigation
 
 import zio.test.*
-import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
-  AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence,
-  MitigationSpec, MitigationTarget, RelativeLikelihood, RelativeSeverity,
+  AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence, MitigationSelection,
+  MitigationSpec, MitigationTarget, NodeMitigationEntry, RelativeLikelihood, RelativeSeverity,
   ResultTransformSpec, RiskLeaf, RiskPortfolio, RiskTree, TargetingPredicate
 }
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
@@ -43,6 +42,14 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
   private def scopes(pairs: (Mitigation, Set[String])*): Map[MitigationId, Set[NodeId]] =
     pairs.iterator.map { case (m, ns) => m.id -> ns.map(nodeId) }.toMap
+
+  /** A selection through its smart constructor: `full` on across their whole
+    * scope, `ticks` on at the named nodes only. Every fixture is within both
+    * bounds, so construction succeeds. */
+  private def selection(full: List[Mitigation], ticks: List[(Mitigation, String)]): MitigationSelection =
+    unsafeGet(
+      MitigationSelection.create(full.map(_.id), ticks.map((m, n) => NodeMitigationEntry(nodeId(n), m.id))),
+      "selection")
 
   private def leaf(label: String, seedVarId: Long, prob: Double = 0.4,
                    min: Long = 1000L, max: Long = 100000L): RiskLeaf =
@@ -145,7 +152,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val b = resultCap("m-cap", 1000000L)
         val t = mkTree(a, b)
         val scoped = MitigationApplication.scoped(t,
-          MitigationSelection.Selected(Map(a.id -> ScopeRestriction.FullScope)),
+          MitigationSelection.single(a.id),
           scopes(a -> Set("cyber", "flood"), b -> Set("cyber")))
         assertTrue(
           scoped(nodeId("cyber")) == List(a),
@@ -157,8 +164,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val a = leafScaleSeverity("m-scale", 0.5)
         val t = mkTree(a)
         val scoped = MitigationApplication.scoped(t,
-          MitigationSelection.Selected(Map(a.id ->
-            ScopeRestriction.NodesOnly(Set(nodeId("cyber"), nodeId("ghost"))))),
+          selection(Nil, List(a -> "cyber", a -> "ghost")),
           scopes(a -> Set("cyber", "flood")))
         assertTrue(scoped.keySet == Set(nodeId("cyber")))
       }
@@ -198,6 +204,24 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val t = mkTree(m)
         val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Inherent, scopes(m -> Set("cyber"))).toEither.toOption.get
         assertTrue(minOf(eff, "cyber") == 1000L)
+      },
+      test("a refused leaf-stage spec names its mitigation and the leaf") {
+        // Two leaf-stage mitigations on one leaf: the first halves the minimum
+        // loss to 500, the second scales it below 1, which is refused. The
+        // refusal must say which of the two failed.
+        val halve = leafScaleSeverity("m-a-halve", 0.5, MitigationPrecedence(-1))
+        val crush = leafScaleSeverity("m-b-crush", 0.0001, MitigationPrecedence(1))
+        val t = mkTree(halve, crush)
+        val refused = MitigationApplication.effectiveTree(t, MitigationSelection.Residual,
+          scopes(halve -> Set("cyber"), crush -> Set("cyber"))).toEither
+        val subjects = refused.left.toOption.toList.flatMap(_.toList).map(_.location).collect {
+          case ErrorLocation.Field(subject, _) => subject
+        }
+        assertTrue(
+          refused.isLeft,
+          subjects.nonEmpty,
+          subjects.forall(_ == ErrorSubject.MitigationAtNode(crush.id, nodeId("cyber")))
+        )
       }
     ),
 
@@ -256,29 +280,13 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val b = resultCap("m-cap", 1000000L, MitigationPrecedence(5))
         val t = mkTree(a, b)
         val records = MitigationApplication.applicationRecords(t,
-          MitigationSelection.Selected(Map(
-            a.id -> ScopeRestriction.NodesOnly(Set(nodeId("cyber"))),
-            b.id -> ScopeRestriction.FullScope)),
+          selection(List(b), List(a -> "cyber")),
           scopes(a -> Set("cyber", "flood"), b -> Set("cyber")))
         assertTrue(
           records.map(_.mitigationId) == List(a.id, b.id), // precedence order
           records.head.resolvedScope == Set(nodeId("cyber")),
           records(1).resolvedScope == Set(nodeId("cyber"))
         )
-      }
-    ),
-
-    suite("selection codec")(
-      test("selection kinds round-trip") {
-        val selections: List[MitigationSelection] = List(
-          MitigationSelection.Inherent,
-          MitigationSelection.Residual,
-          MitigationSelection.Selected(Map(
-            MitigationId(nodeId("m-scale").toSafeId) -> ScopeRestriction.FullScope,
-            MitigationId(nodeId("m-cap").toSafeId)   -> ScopeRestriction.NodesOnly(Set(nodeId("cyber")))
-          ))
-        )
-        assertTrue(selections.forall(s => s.toJson.fromJson[MitigationSelection] == Right(s)))
       }
     )
   )

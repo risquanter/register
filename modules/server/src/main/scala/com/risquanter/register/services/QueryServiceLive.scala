@@ -4,14 +4,12 @@ import zio.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
 
-import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
+import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.common.ValuationBasis
 import com.risquanter.register.common.FolSymbols.ValueFunction
-import com.risquanter.register.http.errors.BindProblem
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, ScopeResolutionContext, ResolvedScopes}
@@ -57,17 +55,6 @@ class QueryServiceLive private (
         s"RiskTreeKnowledgeBase: ${kb.mitigationNameCollisions.size} mitigation name(s) " +
         s"skipped because they collide with reserved symbols: " +
         kb.mitigationNameCollisions.mkString(", ")
-      )
-    ).unit
-
-  /** Per-mitigation resolution drift signals (ADR-002): a stale predicate is a
-    * no-op for that mitigation, not a request failure, so this only logs. */
-  private def logResolutionFailures(resolved: ResolvedScopes): UIO[Unit] =
-    ZIO.when(resolved.failures.nonEmpty)(
-      ZIO.logWarning(
-        s"MitigationScopeResolver: ${resolved.failures.size} mitigation(s) did not " +
-        s"resolve against this tree version: " +
-        resolved.failures.map((id, errs) => s"${id.value} -> ${errs.map(BindProblem.describe).mkString("[", "; ", "]")}").mkString("; ")
       )
     ).unit
 
@@ -118,7 +105,7 @@ class QueryServiceLive private (
         //    results, and the resolved scopes.
         kb = RiskTreeKnowledgeBase(schema, resultsBySelection, resolved.appliedScopes)
         _ <- logNameCollisions(kb)
-        _ <- logResolutionFailures(resolved)
+        _ <- ResolvedScopes.logFailures(resolved)
 
         // 6. Pair the catalog with the runtime model. Both come from the one
         //    schema above, so a model that does not satisfy its catalog is a
@@ -179,7 +166,7 @@ object MitigationSelectionScan:
   def referenced(bound: BoundQuery, tree: RiskTree): Set[MitigationSelection] =
     lazy val everyMitigation: Set[MitigationSelection] =
       tree.mitigations
-        .map(m => MitigationSelection.Selected(Map(m.id -> ScopeRestriction.FullScope)))
+        .map(m => MitigationSelection.single(m.id))
         .toSet
 
     def fromSlot(term: BoundTerm): Set[MitigationSelection] = term match

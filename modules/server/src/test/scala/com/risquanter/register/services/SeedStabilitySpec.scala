@@ -8,7 +8,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, T
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
-import com.risquanter.register.services.cache.CachedResultResolver
+import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry}
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
@@ -225,6 +225,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.cache.ContentCacheRegistry.layer,
+      MitigationScopeResolverRegistry.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TelemetryLive.configured

@@ -1785,7 +1785,7 @@ mechanism; compiler-flag hardening; trigger granularity).
 
 ---
 
-## 40. Bound the multi-LEC endpoint's node-id list
+## 40. ~~Bound the multi-LEC endpoint's node-id list~~ — **Resolved 2026-11-14**
 
 `getWorkspaceLECCurvesMultiEndpoint` accepts `jsonBody[List[NodeId]]` with no
 maximum size — a workspace-key holder can request thousands of curves in one
@@ -1794,12 +1794,12 @@ request bounds: the 10 000-node tree ceiling and the 8 MiB body cap. Candidate t
 bounded-input mechanism with the screening-query length cap (TODO 41) — one
 limiting mechanism, not per-endpoint re-implementations.
 
-**Status:** open, and specified for implementation. `PLAN-RISKTRANSFORM` slice 1
-adds exactly this bound — its `LECCurvesMultiRequest` refines the requested node
-list against the same 10 000-node tree ceiling, alongside the two selection
-bounds. This item is marked closed when that slice lands, or immediately if the
-bound ships ahead of the rest of M4. (Moved here from the code-quality-review
-skill's known-gap note, 2026-08-10; originally flagged in a security review.)
+**Status: DONE (2026-11-14).** `PLAN-RISKTRANSFORM` M4 slice 1 landed the bound:
+`LECCurvesMultiRequest` refines the requested node list against the 10 000-node
+tree ceiling, `RiskTree.MaxNodes`, alongside the two selection bounds, and refuses
+a longer list in its decoder with `TooManyNodes`. (Moved here from the
+code-quality-review skill's known-gap note, 2026-08-10; originally flagged in a
+security review.)
 
 ---
 

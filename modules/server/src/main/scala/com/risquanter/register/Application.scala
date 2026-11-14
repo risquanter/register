@@ -294,7 +294,7 @@ object Application extends ZIOAppDefault {
       MitigationScopeResolverRegistry.layer,        // Per-workspace mitigation scope resolution
       SSEHub.live,
       InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
-      RiskTreeServiceLive.layer,    // Requires InvalidationHandler + Tracing + Meter
+      RiskTreeServiceLive.layer,    // Requires MitigationScopeResolverRegistry + InvalidationHandler + Tracing + Meter
       ChangedNodesServiceLive.layer, // Content-hash changed-nodes — requires RiskTreeService
       RepositoryConfig.layer >>> chooseTreeHistoryService, // Per-tree history — Irmin-backed, empty in-memory
       QueryServiceLive.layer,       // Requires RiskTreeRepository + CachedResultResolver + MitigationScopeResolverRegistry + Tracing

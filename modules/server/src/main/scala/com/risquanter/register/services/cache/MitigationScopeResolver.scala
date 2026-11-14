@@ -1,6 +1,6 @@
 package com.risquanter.register.services.cache
 
-import zio.{UIO, NonEmptyChunk}
+import zio.{UIO, NonEmptyChunk, ZIO}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
 import com.risquanter.register.http.errors.BindProblem
@@ -55,6 +55,19 @@ final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
 
   def failures: Map[MitigationId, NonEmptyChunk[BindProblem]] =
     outcomes.collect { case (id, ScopeOutcome.Failed(errs)) => id -> errs }
+
+object ResolvedScopes:
+  /** Per-mitigation drift signals (ADR-002): a predicate that no longer binds
+    * makes that one mitigation a no-op, never a request failure, so this only
+    * logs. */
+  def logFailures(resolved: ResolvedScopes): UIO[Unit] =
+    ZIO.when(resolved.failures.nonEmpty)(
+      ZIO.logWarning(
+        s"MitigationScopeResolver: ${resolved.failures.size} mitigation(s) did not " +
+        s"resolve against this tree version: " +
+        resolved.failures.map((id, errs) => s"${id.value} -> ${errs.map(BindProblem.describe).mkString("[", "; ", "]")}").mkString("; ")
+      )
+    ).unit
 
 trait MitigationScopeResolver:
   /** Resolve every mitigation's predicate to its applied node-id scope against

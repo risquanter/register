@@ -2643,7 +2643,7 @@ object MitigationSelection:
 
   /** The named mitigations. Never empty, and within both bounds: `create` and
     * `single` are the only ways to build one. */
-  final case class Selected private (entries: Map[MitigationId, ScopeRestriction]) extends Enumerated
+  final case class Selected private[MitigationSelection] (entries: Map[MitigationId, ScopeRestriction]) extends Enumerated
 
   given Equal[MitigationSelection] = Equal.default
 
@@ -2797,11 +2797,46 @@ reported the first one only, which contradicted its own docstring.
 
 **`modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala`** — the
 definitions of `ScopeRestriction` and `MitigationSelection` leave this file, with
-their codecs. `MitigationApplication` itself is unchanged, and imports the two
-types from `com.risquanter.register.domain.data`. The same import change reaches
-every other server file that names them: `CachedResultResolver.scala`,
+their codecs. `MitigationApplication` imports the two types from
+`com.risquanter.register.domain.data`. The same import change reaches every
+other server file that names them: `CachedResultResolver.scala`,
 `CachedResultResolverLive.scala`, `QueryServiceLive.scala` and
 `RiskTreeKnowledgeBase.scala`.
+
+`effectiveTree` changes in one respect: a refusal from a leaf-stage spec names
+the mitigation as well as the leaf. Today the fold passes
+`ErrorSubject.ExistingNode(leaf.id)` for every spec, so with two leaf-stage
+mitigations on one leaf the refusal cannot say which one failed. This slice is
+the first to let a browser send a selection, so it is the first time a browser
+can receive that refusal. The subject is the new `ErrorSubject.MitigationAtNode`,
+specified under `ErrorLocation.scala` below. `LeafStageSpec.applyTo` already
+takes a subject, so its signature is unchanged. The leaf case of `effectiveTree`
+keeps each spec's mitigation identifier beside it:
+
+```scala
+        case leaf: RiskLeaf =>
+          perNode.get(leaf.id).map(_.collect {
+            case m @ Mitigation(_, _, _, spec: LeafStageSpec, _) => m.id -> spec
+          }) match {
+            case Some(specs) if specs.nonEmpty =>
+              specs
+                .foldLeft(Validation.succeed(LeafParams(leaf.probability, leaf.shape)): Validation[ValidationError, LeafParams]) {
+                  case (accV, (mitigationId, spec)) =>
+                    accV.flatMap(params =>
+                      LeafStageSpec.applyTo(spec, params, ErrorSubject.MitigationAtNode(mitigationId, leaf.id)))
+                }
+```
+
+The rest of the case is unchanged. A result-stage refusal keeps naming the node
+alone, with `ErrorSubject.ExistingNode`. It judges the combined result of every
+result-stage mitigation on that node, so no single mitigation is responsible for
+it. That reading is the plan's.
+
+The scaladoc of `LeafStageSpec.applyTo` in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala`
+says "`subject` names the leaf being transformed". After this change the subject
+names the mitigation applied at that leaf, so the sentence is brought to current
+state in the same pass. No code in that file changes.
 
 **New file — `modules/common/src/main/scala/com/risquanter/register/http/requests/AnalysisRequests.scala`.**
 The two request bodies. Neither restates a domain type: a body is the requested
@@ -2930,6 +2965,34 @@ already carries, so the mitigation's identifier rides in the location.
 ```scala
     case MitigationNotFound                         => ValidationErrorCode.NOT_FOUND
 ```
+
+The same file gains one `ErrorSubject` case, for the refusal `effectiveTree`
+raises above. Family: the `ErrorSubject` enum, whose existing member is
+`case Mitigation(mitigationId: MitigationId)`. No existing case holds both a
+mitigation and a node. `NodeAtIndex(collection, index)` is the precedent for a
+subject with two parts: a position alone named four different rows, as a leaf
+alone names every mitigation applied to it. Both identifiers are resource names,
+which cross the client boundary in both directions (ADR-036), so the case keeps
+the enum's guarantee that no subject holds a confidential value. The pair goes
+in the subject and not in a `FieldProblem` case, because a problem case carries
+what its sentence names "and nothing else" and does not repeat what the location
+carries. The three mitigation problem cases are therefore unchanged. Approved by
+the user on 2026-11-14.
+
+```scala
+  /** A mitigation as applied to one node. */
+  case MitigationAtNode(mitigationId: MitigationId, nodeId: NodeId)
+```
+
+`describeSubject`, the one exhaustive match on the enum, gains its arm:
+
+```scala
+    case ErrorSubject.MitigationAtNode(m, n) => s"mitigation ${m.value} at node ${n.value}"
+```
+
+The derived codec writes the case as `"kind": "MitigationAtNode"` with the two
+identifiers, and the published schema gains it. No browser code matches on
+`ErrorSubject`, so the Scala.js module needs no arm.
 
 **`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`** gains the
 matching arm in `render`, beside `NodeNotFound`'s:
@@ -4204,7 +4267,7 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-033 (narrowest sound catch) | `LossDistribution.decorate` catches `ArithmeticException` from the layer's own arithmetic and converts it to a `ValidationError`; `PortfolioLosses.create` does the same for the combine. Both catches name the exception the code they wrap is documented to raise, and ADR-033's Implementation table lists both sites | Amended |
 | ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. Its Decision 4 now writes out the shipped five-field `LossDistribution`, and its §6 carries the rule that no mitigation may eliminate a risk | Amended by `DONE-PLAN-FBF-VALUATION-TRANSPLANT.md` and `DONE-PLAN-LOGNORMAL-BOUND-POSITIVITY.md` |
 | ADR-035 (error leakage prevention) | No refusal carries a sentence: each is a location and a `FieldProblem` case, rendered where it is shown. The structure read carries a non-binding predicate's `BindProblem` values, whose typed fields are the ones §5 permits. §5 governs refusals and the structure read is not one, so §5 gains a sentence stating that scope | Amended, slice 5 |
-| ADR-036 (confidential internal identifiers) | `WorkspaceId` and `BranchRef` stay on internal service signatures and never cross the client boundary. `TreeId`, `NodeId` and `MitigationId` are not confined by this record: it names `WorkspaceId` as its subject and shows `nodeId` as a client-safe reporting field, and every lookup taking a client-supplied node id resolves it inside a tree the caller is already authorized for | Compliant |
+| ADR-036 (confidential internal identifiers) | `WorkspaceId` and `BranchRef` stay on internal service signatures and never cross the client boundary. `TreeId`, `NodeId` and `MitigationId` are not confined by this record: it names `WorkspaceId` as its subject and shows `nodeId` as a client-safe reporting field, and every lookup taking a client-supplied node id resolves it inside a tree the caller is already authorized for. The new subject `ErrorSubject.MitigationAtNode` holds a `MitigationId` and a `NodeId` and nothing else, so a refusal located there names only values the caller's own request already reached | Compliant |
 | ADR-037 (constants and closed sets) | The request bounds read `RiskTree.MaxNodes` and `RiskTree.MaxMitigations` instead of restating them (§3). `MitigationScopeResolverLive.SlotCapacity` is a named constant stating what it holds. The `Operation.GetStructure` label is declared (§2). No new parameter is a defaulted `Option` (§4) | Compliant |
 | ADR-038 (response wire shapes) | The curve answer keeps its `LECCurvesResponse` object and the exceedance figure is a `Probability` (§3). The endpoint declares the domain type `MitigationSelection`, which owns its two-list wire shape as a private `Raw` and decodes through `create`, so no public twin of it exists (§1). One mitigation's resolution is the two-case enum `ScopeOutcome` with a derived discriminated codec, not a product that can hold a scope beside failures (§2). `ResolvedScopes.toWire` is owned by the source and returns a typed value (§5). A non-binding predicate is reported as `BindProblem` values, not as a string code | Compliant |
 | ADR-039 (trust-boundary ingress) | Each request decoder routes through its smart constructor, so a decoded body satisfies both bounds on the server and in the browser. The browser decodes `LECCurvesResponse` and `TreeStructureResponse` through the same shared types, and `tree` inside the structure answer decodes through `RiskTree.fromNodes` | Compliant |
@@ -4229,7 +4292,12 @@ New tests, by the behaviour each one pins:
   problem array is refused by the decoder.
 - `modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala`
   (existing) — the assertion that round-trips the two deleted codecs is removed,
-  and every selection the spec builds goes through `create` or `single`.
+  and every selection the spec builds goes through `create` or `single`; with two
+  leaf-stage mitigations on one leaf and the second one refused, the refusal is
+  located at `ErrorSubject.MitigationAtNode` naming the second mitigation and the
+  leaf. A result-stage refusal is raised in `LossDistribution.scala`, not here,
+  and its location at the node is already pinned by `LossDistributionSpec` and
+  `RiskResultTransformSpec`, which this slice does not change.
 - `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationRequestsSpec.scala` —
   a malformed predicate is rejected at the DTO boundary; a request-side
   duplicate mitigation id and a duplicate name are each rejected; the request
@@ -4916,6 +4984,7 @@ omission is a denial.
 - `modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/MitigationSelection.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/ScopeOutcome.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationSelectionSpec.scala`
