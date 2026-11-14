@@ -2219,6 +2219,9 @@ from its first ruling; the entry states both the new ruling and why it changed.
 
    ```scala
    // before
+       // The anchor is gone, or is no longer a leaf. A stored anchor that names
+       // nothing can never bind again, so the override is reported stale rather
+       // than rejected — a tree carrying one is valid and stays decodable.
        case _                    => true
    // after
        // The anchor is gone, or is no longer a leaf. The override then applies
@@ -2231,6 +2234,14 @@ from its first ruling; the entry states both the new ruling and why it changed.
    `MitigationStalenessSpec.scala` the test "anchor leaf deleted → reported
    stale" becomes "anchor leaf deleted → not reported", and it asserts the
    empty set.
+
+   **The reporting design stays recorded for later reference.** It is kept in
+   three places and none of them is deleted. The first is the ruling text and
+   its reasoning above. The second is §8.15, which holds what staleness means
+   (Part 1), the `MitigationStaleness.scala` contract with the reporting arm,
+   and OD-8 with both options and their worked cases. The third is the "before"
+   block above. Reinstating the report is that one arm returning `true` again,
+   with the test asserting the override's id.
 
 11. **Does one analysis request carry one selection or several named variants?**
    **RULED A — one selection per request.** Comparing several selections is
@@ -7641,6 +7652,11 @@ semantics, OD-6 reason 3), and the predicate participates in no monoid-action la
 — it is a total function `RiskTree → Set[MitigationId]`.
 
 #### Contract — `MitigationStaleness.scala` (determined; OD-6 ruled)
+
+> **Amended by §7.6.2 decision 9 (re-ruled 2026-11-14):** the last arm below,
+> which reports a missing or no-longer-leaf anchor stale, is replaced in M4
+> slice 3 by an arm returning `false`. This contract stays as written, as the
+> record of the reporting design.
 
 ```scala
 // server — services/cache/MitigationStaleness.scala
