@@ -178,7 +178,7 @@ the share of trials with a loss of at least 5 million is the chance of losing
 ## Stage 4 — a control reduces the chance
 
 A firewall sits in front of `db`. The register calls a risk reduction measure a
-**mitigation** (glossary 3.1). It is recorded beside the leaf, not folded into
+**mitigation** (glossary 3.1). It is recorded on the tree, not folded into
 the leaf's figures. That lets the register value the leaf both ways:
 
 - **Inherent risk** is the leaf before any mitigation (glossary 4.4).
@@ -233,7 +233,8 @@ db                    (portfolio)
 
 In each trial the register flips each leaf's coin separately and adds the three
 losses. The glossary calls this per-trial addition **combine** (1.7), and says
-of it: "Combining this way models risks that are independent of one another."
+of it in 1.8: "Combining this way models risks that are independent of one
+another."
 Independent means one vulnerability being exploited says nothing about whether
 another is.
 
@@ -538,6 +539,9 @@ method is needed: it is "Justified when the model contains genuine *defeat*, not
 merely absence-of-mitigation." With one source per fact, the rules of stage 8
 are enough.
 
+The ranking makes one source win outright. "Further areas to explore", near the
+end of this note, gives each source a probability of being right instead.
+
 ---
 
 ## Stage 11 — one asset attacked through another, and why that does not fit
@@ -584,7 +588,9 @@ only ever asks about a way in from a fixed starting point.
 set of its mitigations applied. The glossary calls such a set a **selection**
 (4.5). Valuing the tree with the firewall alone and comparing against inherent
 risk gives the firewall's worth for the year: 0.70 against 0.58 for the estate,
-and the same comparison for losses.
+and the same comparison for losses. `docs/scratch/MITIGATION-ROI.md` works out
+the comparison for losses: the drop in the mean yearly loss, the drop in the
+tail, and both set against the control's cost.
 
 **Which control to add.** A control that does not exist yet is added to the same
 tree as a mitigation and valued the same way. The answer reads "had this been in
@@ -1271,6 +1277,108 @@ the business.
 
 ---
 
+## Further areas to explore
+
+### Probabilistic argumentation graphs
+
+**What they are.** An argumentation graph of stage 10 ends with each argument
+accepted or not, and a ranking of sources settles each pair of arguments that
+attack each other. A **probabilistic argumentation graph** gives arguments, or
+attacks, a probability. Its result is the probability that each argument is
+accepted. This paragraph and the next are from general knowledge of the
+literature of about 2011 to 2013 (Li, Oren and Norman; Hunter; Thimm), not
+checked against those papers.
+
+The literature reads the probability in two ways:
+
+- **The constellation reading.** Each argument is present with a probability,
+  for example the probability that its source is right. Every combination of
+  present and absent arguments is one ordinary graph, with its own probability.
+  The grounded semantics, which `Argumentation-Engine.md` names as the usual
+  default, runs on each of them. An argument's probability of acceptance is the
+  total probability of the graphs in which it is accepted.
+- **The epistemic reading.** The probability is a degree of belief in the
+  argument itself. Rules constrain the beliefs. For example, if A attacks B and
+  A is believed above one half, B is believed at most one half. No graphs are
+  enumerated.
+
+The constellation reading fits this note, because it reduces to the law of
+total probability of stage 14.
+
+**A worked case.** The three claims about `batch` from stage 10:
+
+```
+A   batch has no way in from the internet        (source: network diagram)
+B   batch answered from the internet on 15 May   (source: scan)
+C   the scan of 15 May was run from inside       (source: scan record)
+```
+
+B attacks A, and C attacks B. Suppose the scan is right with probability 0.8
+and the scan record with probability 0.7. Both figures are invented for this
+example. Under the grounded semantics B is accepted when B is present and C is
+absent:
+
+```
+chance batch was reachable 15–24 May  =  0.8 × (1 − 0.7)  =  0.24
+leaf CVE-C on batch                   =  0.24 × 0.157      =  0.038
+```
+
+The ranking gave 0.157 without C, and no leaf with C. The probabilistic graph
+gives a figure between the two, weighted by how far each source is trusted. It
+has the form of the untested firewall in stage 14: the probability that a case
+holds, times the likelihood in that case. The form is a straight line, so the
+mean is exact (stage 16).
+
+**What it would give.**
+
+- A disagreement between sources no longer has to be settled outright. A
+  ranking that is wrong one time in five now enters the figures as one time in
+  five.
+- A source's reliability becomes a figure like the pass share. It can be stated
+  as a beta distribution and updated each time a test checks the source, for
+  example how often the network diagram was right when a scan checked it. This
+  is the method of stage 15 applied to sources. It is this note's proposal and
+  is not from the literature named above.
+- The yes or no reasoning of stage 8 stays as it is. It runs once in each
+  graph. The rules and their engine do not change.
+- The band of stage 18 can then show where a disagreement between sources
+  matters. A disagreement about an asset that carries little risk moves no
+  figure, and resolving it is not worth a test.
+
+**What it would cost.**
+
+- Reachability gains a probability. Stage 8 said reachability "carries no
+  probability", and that holds no longer. Each day counts with a probability,
+  and the life table becomes a table of probabilities.
+- With n uncertain arguments there are 2ⁿ graphs. An exact sum works for a
+  handful. Beyond that, graphs are drawn at random, which is the outer loop of
+  the two-dimensional simulation of stage 18, with its run time.
+- One uncertain fact can support many rows. If the network diagram is wrong,
+  it is wrong for every row it supports. That is the shared figure of stage 18,
+  and the register simulates leaves independently. So the tree understates
+  trials with several losses, and more so the less a source is trusted.
+- Each source needs a figure for its reliability. Where no test has checked a
+  source, the figure is a judgement, and the result is only as good as that
+  judgement.
+- The constellation reading assumes the arguments are present independently of
+  one another. Two claims from one source are not independent, and they would
+  have to be treated as one.
+
+**What it does not reach.** The attack chain of stage 11 stays outside. There,
+whether `db` is reachable depends on whether a `web` leaf came up "it happened"
+in the same trial. A probabilistic graph gives a probability for a fact about
+configuration, and that fact is fixed before the trials run.
+
+**Weighed.** The extension pays where sources often disagree and their
+reliability can be measured. Without measured reliability it replaces a ranking
+somebody chose with a probability somebody chose. That makes the judgement
+visible in the figures, but it does not make the judgement better. A first step
+that costs little is to record, per disagreement settled by the ranking, which
+source a later test showed to be right. Those records are the data the
+reliability figures would need. This weighing is this note's own.
+
+---
+
 ## What the register does not have for this today
 
 - **The asset facts and the rules.** `Argumentation-Engine.md`, section 8, calls
@@ -1281,6 +1389,13 @@ the business.
 - **Dates on a mitigation.** `ASSURANCE-ANCHORED-PARAMETERS.md` names it: "One
   primitive is missing: an expiry date on a mitigation." Stage 6 works round it
   by cutting a row into two leaves.
+- **One control with different effects on different leaves.** After the tests
+  of stage 14 the firewall has no effect on one leaf, a believed effect on
+  another, and is a fact for a third. A mitigation holds one effect and one
+  targeting condition, so the firewall becomes several mitigations.
+  `docs/dev/plans/PLAN-CONTROL-GROUPING.md` would group mitigations under one
+  control. Whether a member may have a narrower scope than its control is that
+  plan's open decision `CG-D-4`.
 - **A reduction stated on the rate.** A relative statement multiplies the
   likelihood (stage 4). For the stage 8 estate the difference is 0.579 against
   0.581. Under the reading of stage 14 the relative statement is exact, and

@@ -6,8 +6,10 @@ D6 Option 1 (retarget to `TrialOutcomes`); D3 was decided (Option 1, cache raw)
 as policy — no code exists to wire it yet. D1 is decided (stratified
 `TransformSpec` + `TransformPipeline` design locked; build deferred to the first
 consumer; the trait was later renamed `ResultTransformSpec` — §7 OD-2 ruling
-2026-08-08, `TransformPipeline` unchanged). D4 (unblocked 2026-07-18 by DD-19's closure; decide with D1's
-build or the first mitigation wiring) and D5 (after D1's build) remain open.
+2026-08-08, `TransformPipeline` unchanged). D4 was decided on 2026-09-14 (§4 D4,
+§8.16). D5 is ruled by §7.6.2 Decision 2: the client-facing mitigation contract is
+split by surface, and ADR-040 and the ADR-017 amendment state it. M4 slices 1, 2,
+3, 4, 5, 7 and 8 have landed; slice 6 (§7.6.17) is elevated and awaits approval.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
 `docs/archive/plans/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
@@ -230,11 +232,13 @@ The derivation behind this placement is in
 [`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md);
 consult it before re-opening the question.
 
-### D5 — Client-facing mitigation API (monoid B.7 decision 4)
+### D5 — Client-facing mitigation API (monoid B.7 decision 4) — ✅ DECIDED (§7.6.2 Decision 2)
 
 If mitigation becomes a concept clients send and receive, that is an API-shape
-decision (trigger #1) requiring its own ADR. It presupposes D1 Option 1 (only
-data can cross the API boundary). Not before D1 is decided.
+decision (trigger #1) requiring its own ADR. It presupposed D1 Option 1 (only
+data can cross the API boundary). §7.6.2 Decision 2 rules the contract split by
+surface: the analysis read contract is ADR-040, and the tree write path is the
+ADR-017 amendment (§7.6.9).
 
 ### D6 — Transform input type (added 2026-07-17) — ✅ DECIDED & DONE (Option 1)
 
@@ -264,11 +268,8 @@ pipeline-stage decision (B3 stands).
    consumer has arrived).
 4. Remaining, in order of external trigger:
    - **D1 build** — with the first consumer, starting from the locked sketch.
-   - **D4** — DD-19 closed 2026-07-18, so no longer gated on it; decide with
-     D1's build or the first mitigation wiring. If D1's
-     pipeline is the record embedded in provenance, D4 reduces to a placement
-     question.
-   - **D5** — after D1's build, as its own ADR.
+   - ~~**D4**~~ ✅ decided 2026-09-14 (§4 D4, §8.16).
+   - ~~**D5**~~ ✅ ruled by §7.6.2 Decision 2; ADR-040 holds the read contract.
 5. None of the remaining items blocks milestone-2b Phase A.
 
 ---
@@ -1891,9 +1892,9 @@ Ammendment:
 
 Written for slices 1 to 5 (§7.6.4 names the slices). Those five carry exact
 signatures, ADR alignment, a verification plan and a file inventory. Slice 6 —
-the interface and the user documentation — is not elevated here. §7.6.12 lists
-the decisions, and all of them are now closed: slice 6's two were ruled on
-2026-09-15 and the rest are ruled or void. Decision 11, which gates M4 slice 2,
+the interface and the user documentation — is elevated at §7.6.17. §7.6.12
+lists the decisions. Decision 21, raised by that elevation, is open, and the
+rest are ruled or void. Decision 11, which gates M4 slice 2,
 was ruled on 2026-11-15. The valuation type slice 1 consumes is built, specified by
 [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and
 landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
@@ -2474,32 +2475,32 @@ hands.
 
 #### 7.6.4 Delivery slices
 
-M4 lands in six slices. The order is forced by what each slice depends on: the
+M4 lands in eight slices. The order is forced by what each slice depends on: the
 wire types come first because everything else consumes them, and the interface
 comes last because it consumes all of them. Slicing is how the work is
 sequenced, not permission to stop partway — the plan is done when every slice
 has landed green (G8).
 
-| Slice | What it delivers | Elevated |
-|---|---|---|
-| 1 | The analysis read path: request and response types, both endpoint signatures, the controller and service threading, the scope-resolver call, and the smallest browser change that keeps the app compiling | §7.6.5 |
-| 2 | The tree write path: the two mitigation buckets on the tree PUT, the name-based override anchor, and the server-computed override stamp. No anchor cross-check — Decision 9 rules that a deleted anchor is a staleness signal, not a validation failure | §7.6.6 |
-| 3 | The tree structure read: resolved scopes, resolution failures and stale-override ids beside the tree | §7.6.7 |
-| 4 | Change notification: the mitigation-collection diff, and the scope memo's capacity-2 amendment | §7.6.8 |
-| 5 | The two decision records: the ADR-017 amendment and the new ADR-037 | §7.6.9 |
-| 6 | The interface and the user documentation | not elevated — see §7.6.12 |
-| 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 |
+| Slice | What it delivers | Elevated | Status |
+|---|---|---|---|
+| 1 | The analysis read path: request and response types, both endpoint signatures, the controller and service threading, the scope-resolver call, and the smallest browser change that keeps the app compiling | §7.6.5 | Landed |
+| 2 | The tree write path: the two mitigation buckets on the tree PUT, the override anchor checked against the saved tree's leaves, and the server-computed override stamp. A deleted anchor leaf makes the override a no-op that is not reported as stale (Decision 9) | §7.6.6 | Landed, 0.20.5 |
+| 3 | The tree structure read: resolved scopes, resolution failures and stale-override ids beside the tree | §7.6.7 | Landed |
+| 4 | Change notification: the mitigation-collection diff, and the scope memo's capacity-2 amendment | §7.6.8 | Landed |
+| 5 | The two decision records: the ADR-017 amendment and the new ADR-040 | §7.6.9 | Landed |
+| 6 | The interface and the user documentation | §7.6.17 | Awaiting approval; decision 21 open |
+| 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 | Landed |
+| 8 | Adopting vql-engine 0.20.0 and mapping its nesting-depth refusals. Lands before slice 2 | §7.6.16 | Landed, 0.20.5 |
 
-Slices 2 to 5 are specified below. Slice 2 carries one open decision — §7.6.12
-decision 11, the submitted form of a leaf-stage mitigation — and slices 3 to 5
-carry none. Slice 1 consumes
+Slices 2 to 5 are specified below and carry no open decision. Slice 2's one
+decision, §7.6.12 decision 11, the submitted form of a leaf-stage mitigation, is
+ruled. Slice 1 consumes
 the valuation type, which is specified by
 [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and
 carries no open decisions.
-Slice 6 is not elevated in this pass: it is the one part of M4 whose shape the
-twelve rulings do not determine. Its own two decisions were ruled on 2026-09-15,
-so what slice 6 still needs is elevation to implementation grade rather than a
-ruling. §7.6.12 records them with the rest.
+Slice 6 is elevated at §7.6.17. Its first two decisions were ruled on
+2026-09-15, and the elevation raised decision 21, which is open. §7.6.12
+records all three with the rest.
 
 #### 7.6.5 M4 slice 1 — the analysis read path
 
@@ -3453,9 +3454,9 @@ constructor deliberately, so this is the one place the tension shows.
 
 #### 7.6.6 M4 slice 2 — the tree write path carries mitigations
 
-**Not started.** This is M4's slice 2, not M2's. M2 slice 2 (§8.13 — the
-mitigation scope resolver and its per-workspace registry) has landed; this one has
-not, and the two are unrelated pieces of work that share a number.
+**Landed, 0.20.5, all tiers green including BATS.** This is M4's slice 2, not
+M2's. M2 slice 2 (§8.13 — the mitigation scope resolver and its per-workspace
+registry) is unrelated work that shares a number.
 
 **It lands after slice 8 (§7.6.16), which adopts vql-engine 0.20.0 and its
 T-014 depth bound** (user, 2026-11-15). It also carries the bucket paragraph of
@@ -5181,6 +5182,28 @@ the questions that elevation raised.
     slice 2 lands only after register adopts the release carrying it, expected
     to be 0.20.0 (§7.6.6).
 
+**Raised while elevating slice 6 (2026-11-15). This gates the override edit popup.**
+
+21. **Where the override edit popup saves.** The popup edits an existing
+    absolute statement's figures and re-affirms it. Saving is a whole-tree PUT,
+    because the tree PUT is the only write and omission deletes (ADR-017 §4).
+    Today only the Design view writes a tree. Review finding R1 is unresolved:
+    two overlapping PUTs silently drop one client's edit, and its fix is
+    `PLAN-TREE-WRITE-CONCURRENCY.md`, which is a draft.
+    - **A — the popup saves from the Analyze view.** It builds the PUT from the
+      tree the card loaded, with the one mitigation replaced. A second writer
+      appears. A save from a card loaded before a Design save reverts that save's
+      node edits, and a later Design save reverts the popup's edit.
+    - **B — the popup lives in the Design view.** It edits the builder's loaded
+      mitigations, and Design's existing save writes them. One writer per tab
+      stays, and Design's dirty tracking and confirm guards cover the edit. The
+      Analyze view's stale badge tells the user to edit the override in Design.
+    - **C — the popup moves to the predicate-editor plan.** This re-rules
+      decision 7's scope. Slice 6 ships the stale badge only, and an override is
+      re-affirmed through the API until the editor exists.
+
+    Open.
+
 #### 7.6.13 File inventory — M4 slices 1 to 5
 
 These lines append to the shared `## File inventory` section on approval. Files
@@ -5701,6 +5724,8 @@ on `PLAN-RISKTRANSFORM-INVENTORY.md` except one:
 
 #### 7.6.16 M4 slice 8 — adopting vql-engine 0.20.0 (approved by the user, 2026-11-15)
 
+**Landed, 0.20.5, all tiers green including BATS.**
+
 **What this slice changes, in plain terms.** vql-engine 0.20.0 bounds parse
 depth, which is that repository's T-014. Its plan is
 `docs/PLAN-parse-depth-bound.md` in the `vague-quantifier-logic` repository.
@@ -5764,6 +5789,497 @@ caller's.
   gives `Unparseable(Nesting(TooManyOperators(256)))`.
 - `TargetingPredicateSpec`: 65 nested parentheses give
   `TargetingPredicateUnparseable` carrying `Nesting(ParenthesesTooDeep(64))`.
+
+#### 7.6.17 M4 slice 6 — the selection interface and the user documentation
+
+**Status: written 2026-11-15, awaiting approval.** One decision is open:
+§7.6.12 decision 21, where the override edit popup saves. Everything else below
+is derived from rulings already given, and each derivation names the ruling it
+rests on.
+
+**What this slice changes, in plain terms.** The server already answers every
+question the interface needs. The structure read returns each mitigation's
+resolved scope and the ids of stale overrides (slice 3). The curve read takes a
+selection and answers each node with its mitigation-free reading and, where the
+selection reaches the node, a second reading (slice 1). The browser uses none of
+it. It sends the empty selection, keeps only the mitigation-free curve, and
+drops the scopes on arrival. This slice builds the interface §7.4 lists, and
+writes the user documentation §7.4.1 lists.
+
+**What this slice does not build.** No screen creates a mitigation or writes a
+targeting predicate. §7.6.12 decision 7 ruled that M4 ships selection and
+visualisation only, and that the predicate editor gets its own plan document.
+The browser's change-notification consumer is M5 (§7.7, Decision 1).
+
+##### The selection, and who owns it
+
+A selection is a `MitigationSelection.Enumerated`, the type the request body
+already carries. The browser holds the same type, because
+`MitigationSelection.create` is the only way to build one and its bounds then
+hold in the browser too (ADR-001, ADR-040 §2). No second selection type is
+written: the pair of lists `create` takes is the selection's statement, and the
+interface edits that statement through `create`.
+
+Two owners, by Decision 6. The baseline is the active tab, not a slot, so its
+selection lives in `CompareState` beside `baselineAt`. A comparand's selection
+is part of its `SlotCoordinate`, because two slots differing only in selection
+must be distinct pairs.
+
+**`modules/app/src/main/scala/app/state/CompareState.scala`:**
+
+```scala
+final case class SlotCoordinate(
+  branch: BranchChoice,
+  treeOverride: Option[TreeId],
+  at: Option[CommitHash],
+  selection: MitigationSelection.Enumerated
+):
+  def samePairAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean   // compares selection too
+  def collidesWith(
+    activeBranch: BranchChoice, activeTree: Option[TreeId],
+    activeAt: Option[CommitHash], activeSelection: MitigationSelection.Enumerated
+  ): Boolean
+  /** Same branch, effective tree and pin, whatever the selections. */
+  def samePlaceAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean
+
+object SlotCoordinate:
+  def activeTab(branch: BranchChoice, at: Option[CommitHash], selection: MitigationSelection.Enumerated): SlotCoordinate
+
+/** Which readings a view draws for each charted node. */
+enum CurveDisplay:
+  case Inherent, Mitigated, Both
+
+final class CompareSlotState(val defaultPalette: Vector[HexColor]):
+  // existing members unchanged
+  val display: Var[CurveDisplay] = Var(CurveDisplay.Mitigated)
+  /** The node selection a copy carries until its tree loads. */
+  val pendingSeed: Var[Option[Set[NodeId]]] = Var(None)
+  /** The slot's selection, derived from `target` like `atSignal`. */
+  val selectionSignal: Signal[MitigationSelection.Enumerated]
+  /** The slot's (branch, tree override, pin), distinct, so a selection change
+    * does not re-fire what depends on the place only. */
+  val placeSignal: Signal[Option[(BranchChoice, Option[TreeId], Option[CommitHash])]]
+  def setSelection(selection: MitigationSelection.Enumerated): Unit
+
+final class CompareState:
+  // existing members unchanged
+  val baselineSelection: Var[MitigationSelection.Enumerated] = Var(MitigationSelection.Inherent)
+  val baselineDisplay: Var[CurveDisplay] = Var(CurveDisplay.Both)
+  /** Claim the next free comparand slot and copy `source` into it. `None` when every slot is in use. */
+  def copyToNextFree(source: SideSnapshot): Option[Int]
+
+/** A side's complete state as copy-for-compare duplicates it (OD-3). */
+final case class SideSnapshot(coordinate: SlotCoordinate, nodeSelection: Set[NodeId], display: CurveDisplay)
+```
+
+`removeRow` also resets `display` and `pendingSeed`. `at` loses its `= None`
+default under the boyscout rule, and every call site passes it.
+`excludedBranchValues` and `excludedTreeOverrideValues` build their candidate
+with the slot's own pin and selection, which `samePairAs` now compares. Before,
+they passed no pin, so a candidate compared as live head whatever the slot's
+own pin was.
+
+**Why the two display defaults differ.** OD-3 rules that "comparand slots with
+a selection display their variant curves only (baseline shows raw)", and §7.4
+calls for "within-view variant curves beside the inherent one". `Both` on the
+baseline satisfies both statements. With the baseline's selection empty, which
+is the start of the copy-for-compare flow OD-3 describes, `Both` draws the
+mitigation-free reading only. With a selection, it draws both readings. A
+comparand defaults to `Mitigated`. OD-3c ruled the control as a per-view and
+per-slot tri-mode, so the user changes either default.
+
+**Family search.** `CurveDisplay` joins the app's display enums in
+`CompareState.scala`, beside `CompareLayout` (`case Overlay, SideBySide`). No
+existing enum names readings. `SideSnapshot` has no existing type holding a
+coordinate with a node selection. `CompareTarget.Target` holds the coordinate
+only.
+
+##### Editing a selection
+
+**`modules/app/src/main/scala/app/state/SelectionEdit.scala` (new):**
+
+```scala
+/** How much of one mitigation a selection applies. */
+enum MitigationToggle:
+  case Off, Partial, On
+
+/** The interface's edits of a selection, each built through `MitigationSelection.create`. */
+object SelectionEdit:
+  def toggleOf(selection: MitigationSelection.Enumerated, id: MitigationId): MitigationToggle
+  def appliesAt(selection: MitigationSelection.Enumerated, id: MitigationId, node: NodeId): Boolean
+  /** Off or Partial becomes On; On becomes Off. */
+  def toggleWhole(selection: MitigationSelection.Enumerated, id: MitigationId): Validation[ValidationError, MitigationSelection.Enumerated]
+  /** Flip the mitigation at one node of its resolved scope. */
+  def toggleAt(
+    selection: MitigationSelection.Enumerated, id: MitigationId, node: NodeId, scope: Set[NodeId]
+  ): Validation[ValidationError, MitigationSelection.Enumerated]
+  /** The part of the selection naming mitigations the tree holds, and the ids dropped. */
+  def present(
+    selection: MitigationSelection.Enumerated, held: Set[MitigationId]
+  ): Validation[ValidationError, (MitigationSelection.Enumerated, Set[MitigationId])]
+```
+
+`toggleAt` reads the resolved scope, because a per-node change to a mitigation
+that is `On` leaves it applied at every other node of its scope:
+
+```
+On,           Ctrl+Click n   → NodesOnly(scope − n), or Off when that is empty
+NodesOnly(s), Ctrl+Click n   → NodesOnly(s ⊕ n), On when that equals scope, Off when empty
+Off,          Ctrl+Click n   → NodesOnly({n}), or On when scope is {n}
+```
+
+A failed edit leaves the selection unchanged. It cannot occur while the ids come
+from the loaded tree, because the tree holds both of `create`'s bounds
+(`RiskTree.MaxMitigations`, `RiskTree.MaxNodes`).
+
+**Family search.** `SelectionEdit` is an operations object over
+`MitigationSelection`, like `ColorAssigner` over colour maps. It restates no
+rule: every result is built by `create`. `MitigationToggle` has no existing
+equivalent. `ScopeRestriction` states how far a selected mitigation reaches,
+and holds no `Off` case.
+
+##### The structure read in the browser
+
+**`modules/app/src/main/scala/app/state/TreeViewState.scala`:**
+
+```scala
+final class TreeViewState(
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  treeListState: TreeListState,
+  userIdAccessor: () => Option[UserId.Authenticated],
+  activeBranchSignal: StrictSignal[BranchChoice],
+  atSignal: StrictSignal[Option[CommitHash]],
+  selectionSignal: StrictSignal[MitigationSelection.Enumerated],
+  display: Signal[CurveDisplay],
+  userPalette: Signal[Vector[HexColor]],
+  branchDisplay: Option[BranchChoice => String]
+):
+  /** The structure read as answered. The fetch pipeline writes it. */
+  val structure: StrictSignal[LoadState[TreeStructureResponse]]
+  /** Derived from `structure`. */
+  val selectedTree: StrictSignal[LoadState[RiskTree]]
+  /** Selected mitigations the tree at this revision does not hold. */
+  val absentSelected: Signal[Set[MitigationId]]
+```
+
+The existing defaults on `userIdAccessor`, `activeBranchSignal`, `atSignal` and
+`userPalette` go. `atSignal` and `userPalette` are not `Option`s, but every
+caller then states every input, as the new two must be stated. A selection
+change re-reads the current curves at the same pin, as a rewind does
+(`chartState.reloadCurrentCurves()`). `selectedTree` stops being a `Var`, and
+its ten `.signal` call sites drop that member.
+
+**`modules/app/src/main/scala/app/state/MitigationReadout.scala` (new):**
+
+```scala
+/** What the tree card shows for one node: mitigations scoped at it, or only below it. */
+enum CoverageBadge:
+  case Scoped(mitigations: NonEmptyChunk[Mitigation])
+  case BelowOnly(mitigations: NonEmptyChunk[Mitigation])
+
+/** Lookups over one structure read. */
+object MitigationReadout:
+  /** In precedence order, `(precedence.key, id.value)`, the order application uses. */
+  def mitigations(response: TreeStructureResponse): List[Mitigation]
+  def scopeOf(response: TreeStructureResponse, id: MitigationId): Set[NodeId]
+  def failuresOf(response: TreeStructureResponse, id: MitigationId): Option[NonEmptyChunk[BindProblem]]
+  def scopingAt(response: TreeStructureResponse, node: NodeId): List[Mitigation]
+  def badgeAt(response: TreeStructureResponse, node: NodeId): Option[CoverageBadge]
+  /** Each node the predicate names, with its name in this tree version. */
+  def namedNodes(response: TreeStructureResponse, id: MitigationId): List[(NodeId, Option[SafeName.SafeName])]
+```
+
+**Family search.** `TreeStructureResponse` already holds the tree, the scope
+entries and the stale ids. This object adds lookups over it and holds no data
+of its own. `CoverageBadge` has no existing equivalent.
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/TargetingPredicate.scala`:**
+
+```scala
+  /** The nodes the predicate names by `node_id("…")`, in source order. The
+    * stored source already passed `create`, so the re-parse cannot fail. */
+  def referencedNodes(predicate: TargetingPredicate): List[NodeId]
+```
+
+The structure read returns identifiers, and the interface shows a name for each
+one by looking it up in the tree it holds (§7.6.12 decision 15). An identifier
+no node has shows as the identifier alone, and is not flagged (decision 14).
+
+##### Reading curves under a selection
+
+**`modules/app/src/main/scala/app/state/LECChartState.scala`:**
+
+```scala
+final class LECChartState(
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  selectedTreeId: StrictSignal[Option[TreeId]],
+  selectedTree: StrictSignal[LoadState[RiskTree]],
+  userIdAccessor: () => Option[UserId.Authenticated],
+  branchAccessor: () => BranchChoice,
+  atAccessor: () => Option[CommitHash],
+  selectionAccessor: () => MitigationSelection.Enumerated,
+  display: Signal[CurveDisplay],
+  userPalette: Signal[Vector[HexColor]],
+  origin: Signal[Option[String]]
+):
+  val curveCache: Var[LoadState[Map[NodeId, List[LECNodeSeries]]]]
+
+object LECChartState:
+  /** The readings a view draws, per node, under `display`. */
+  def readings(curves: Map[NodeId, List[LECNodeSeries]], display: CurveDisplay): Map[NodeId, List[(CurveVariant, LECNodeCurve)]]
+  def deriveDropped(selected: Set[NodeId], cache: LoadState[Map[NodeId, List[LECNodeSeries]]]): Set[NodeId]
+```
+
+`readings` replaces `inherentCurves`. `Inherent` keeps the reading whose
+`withMitigations` is empty. `Mitigated` keeps the other reading where the node
+has one, and the mitigation-free reading where it does not, because a node the
+selection does not reach has that as its figure under the selection. `Both`
+keeps every reading. The variant is read off the reading
+(`withMitigations` empty or not), never off the display mode, so a curve's
+marker always says which valuation it is (ADR-040 §4).
+
+`loadCurves` builds the request as `SelectionEdit.present` then
+`LECCurvesMultiRequest.create`. A refusal from either lands in the cache as
+`LoadState.Failed(LocalProblem.FormInvalid(errors))`, the browser's case for
+"the form's own validation rejected the input before it was sent". This
+replaces the `getOrElse(throw …)` slice 1 left (§7.6.5). `present` drops
+selected mitigations the tree at this revision does not hold, because ADR-040
+§3 refuses a request naming one, and `TreeViewState.absentSelected` names them
+in a notice beside the chart. A rewind keeps the selection, as it keeps the
+node selection.
+
+##### Drawing a reading
+
+**`modules/app/src/main/scala/app/chart/LECSpecBuilder.scala`:**
+
+```scala
+/** Which valuation a drawn curve is. `markerShape` is the Vega-Lite shape name,
+  * a contract with Vega rather than a serialised spelling. */
+enum CurveVariant(val markerShape: String):
+  case Inherent  extends CurveVariant("circle")
+  case Mitigated extends CurveVariant("triangle-up")
+
+final case class ChartSeries(
+  curve: LECNodeCurve, variant: CurveVariant, colour: HexColor,
+  seriesId: String, label: String, origin: Option[String]
+)
+
+object LECSpecBuilder:
+  /** One marker every this many loss ticks, chosen by this project: ten markers on a curve of 100 ticks. */
+  val MarkerStride: Int = 10
+  def build(
+    curves: Vector[(LECNodeCurve, CurveVariant, HexColor)],
+    origin: Option[String], width: Int, height: Int,
+    pinned: Option[PinnedAxes], responsive: Boolean, zoomable: Boolean
+  ): js.Dynamic
+```
+
+Colour stays node identity, and the variant is a point-marker shape (Decision
+7). A mitigated series' id is the node id followed by `~mitigated`, so a node's
+two readings are two series. The mitigation-free series keeps the bare node id,
+so every existing single-reading chart is unchanged. A shape legend names the
+two variants. The defaults on `width`, `height`, `responsive` and `zoomable`
+stay. They are not `Option`s, and every caller already relies on them.
+
+**`modules/app/src/main/scala/app/chart/ColorAssigner.scala`** and
+**`CompareColorAssigner.scala`** carry the variant through.
+`pairWithColors` takes `Map[NodeId, List[(CurveVariant, LECNodeCurve)]]` and
+returns `Vector[(LECNodeCurve, CurveVariant, HexColor)]`.
+`OverlaySide.curves` takes the same map, and the series id gains the variant
+suffix ahead of the slot label.
+
+##### The tree card
+
+**`modules/app/src/main/scala/app/components/MitigationPanel.scala` (new)**, a
+stateless component (ADR-019 Pattern 5) at the top of each card's body:
+
+```scala
+object MitigationPanel:
+  def apply(
+    structure: Signal[LoadState[TreeStructureResponse]],
+    selection: Signal[MitigationSelection.Enumerated],
+    onToggleWhole: MitigationId => Unit,
+    locked: Signal[Boolean]
+  ): HtmlElement
+```
+
+There is one line per mitigation, in precedence order. Each line has:
+- a tri-state checkbox, indeterminate for `Partial`;
+- the name, and the stage;
+- a warning when the predicate does not bind, `Failed`, with each
+  `BindProblem.describe` sentence in its tooltip;
+- the stale badge for an id in `staleMitigationIds`;
+- the predicate's source in its tooltip, each `node_id` shown with its name.
+
+A mitigation whose scope is empty gets no mark (decision 14). The panel is
+locked while the row mirrors the baseline, as the node selection is.
+
+**`modules/app/src/main/scala/app/views/TreeDetailView.scala`** gains these
+parameters:
+
+```scala
+    structure: Signal[LoadState[TreeStructureResponse]],
+    selection: Signal[MitigationSelection.Enumerated],
+    onSelectionEdit: (MitigationSelection.Enumerated => Validation[ValidationError, MitigationSelection.Enumerated]) => Unit,
+```
+
+It renders the same tree from `structure` that it renders today. Under each
+node it renders one child-styled row per mitigation whose resolved scope holds
+that node. On each row:
+- the tick shows `SelectionEdit.appliesAt`;
+- Ctrl+Click calls `toggleAt` through `onSelectionEdit`;
+- the stale badge shows on an absolute statement's row.
+
+Each node row carries its `CoverageBadge`. `Scoped` is drawn solid,
+`BelowOnly` faint, and each lists the mitigations in its tooltip (§7.4's
+two-tier badges). `onSelectionEdit` takes the edit rather than the result, so
+the owner applies it to the current value, and two edits in one tick cannot
+overwrite each other. The owner is `CompareState.baselineSelection` or
+`CompareSlotState.setSelection`.
+
+**`modules/app/src/main/scala/app/views/AnalyzeView.scala`** carries the
+remaining wiring:
+- **Display mode.** A three-way display control sits in each card's action row,
+  bound to `baselineDisplay` or the slot's `display`.
+- **Copy-for-compare.** A copy button sits on the baseline card and on every
+  comparand card. It calls `copyToNextFree`, and is blocked with
+  `BlockedMessages.compareFull` when no slot is free.
+- **A copied slot's tree.** A copied slot starts with its source's coordinate.
+  So the tree-loading rule loads a slot's tree whenever it shares a place with
+  the active tab (`samePlaceAs`). Before, it deselected on any collision.
+- **What stays inert.** Engagement still drops a slot whose whole coordinate
+  equals the active tab's or an earlier slot's. A copy therefore draws nothing
+  until its selection, pin or tree diverges. That is Decision 6's point: no
+  coordinate change could otherwise differentiate it.
+- **Seeding a copy.** `seedCompareCard` takes `pendingSeed` ahead of
+  `computeSeed` when one is set, and clears it.
+- **Resetting a selection.** A tree switch resets the selection of the side
+  whose tree changed to `Inherent`, as it resets the node selection. A rewind
+  does not.
+- **Diff and history reloads.** Every subscription that reloads a slot's diff or
+  history reads `placeSignal` instead of `target.signal`. A tick then fetches
+  curves only.
+
+**`modules/app/src/main/scala/app/views/NoticeMessages.scala` (new)** holds the
+sentences a view shows beside a control. `BlockedMessages` says why a button is
+disabled and `ErrorMessages` says what failed, and neither fits a notice:
+
+```scala
+object NoticeMessages:
+  def droppedSelections(count: Int): String     // the existing inline sentence, moved
+  def absentMitigations(count: Int): String     // "n selected mitigation(s) not present at this point in time"
+  val SelectionMirrored: String                 // TreeDetailView's existing inline sentence, moved
+```
+
+`Main` passes each `TreeViewState` its selection and display signals. The
+baseline gets `compareState.baselineSelection.signal` and `baselineDisplay`. A
+slot gets `selectionSignal.observe(using unsafeWindowOwner)` and its `display`.
+The Design view's tree view gets `Val(Inherent)` and `Val(CurveDisplay.Inherent)`.
+
+##### The override edit popup — waits on decision 21
+
+§7.4 lists an "override edit-popup flow (ADR-019 Pattern 6 state machine) +
+stale badge surfacing". The stale badge is specified above. The popup edits an
+existing absolute statement's figures and re-affirms it, so its save sends
+`BaseStampChoice.Restamp` (§7.6.12 decision 11). Where that save happens is
+decision 21. Its signatures are written once it is ruled.
+
+##### The user documentation
+
+Each document follows `doc-writing-style`. Every example is run against the
+code at the time of writing, as §7.4.1 and the targeting-note task require.
+
+- `README.md` gains a "Mitigations" entry under Features, and its Analyze view
+  section describes the panel, the rows, the display control and
+  copy-for-compare.
+- `docs/user/API-TUTORIAL.md` gains a mitigation section. It carries:
+  - §7.4.1's worked example, with the predicate written
+    `leaf(x) /\ descendant_of(x, node_id("…"))`, because a stored predicate
+    holds identifiers only (decision 16);
+  - the wire-format examples;
+  - the targeting note in its decision-16 form: a rename changes no scope, and
+    a deleted node leaves the target set with nothing reported (decision 14).
+- `docs/user/VQL-QUERY-EXAMPLES.md` gains a targeting-predicate section. Its
+  existing "The mitigation argument" section covers the mitigated population
+  queries.
+- `docs/user/TERMINOLOGY.md` gains the two entries in the terminology impact
+  below, once approved.
+
+The targeting-note task (the "Task — user-documentation stub" section near the
+end of this plan) is discharged here, because its note lives in these
+documents. The task that routes the "loss is dampened" material stays last, as
+it says.
+
+##### ADR alignment
+
+| Record | Finding |
+|---|---|
+| ADR-019 | Compliant. Selection and display are owned by `CompareState` and the slot states; components take signals and callbacks; `MitigationPanel` owns no state; the popup is a Pattern 6 state machine once decision 21 places it |
+| ADR-001 | Compliant. Every selection is built by `MitigationSelection.create`; every request by `LECCurvesMultiRequest.create` |
+| ADR-040 | Compliant. §2 body selection; §3 absent mitigations are dropped before sending and named in a notice; §4 the variant is read off `withMitigations` |
+| ADR-038 | Compliant. The decoded responses are read as their types state; no field is reinterpreted |
+| ADR-029 | Compliant. Mitigation names and predicate sources render as text nodes and `title` attributes through Laminar's typed setters |
+| ADR-037 | Compliant. `CurveDisplay`, `CurveVariant` and `MitigationToggle` are enums; `MarkerStride` names its origin; `markerShape` is a Vega contract |
+| ADR-010 | Compliant. A refused request is `LocalProblem.FormInvalid`, rendered inline |
+| ADR-033 | Compliant. No catch is added |
+| ADR-034 | Compliant. The browser computes no figure; it draws the readings the server returns |
+
+##### Tests
+
+- `SelectionEditSpec` (new) covers:
+  - every transition in the table above;
+  - `toggleOf` on each case;
+  - `present`, dropping an absent mitigation and keeping the rest.
+- `MitigationReadoutSpec` (new) covers:
+  - the precedence order;
+  - `scopingAt`;
+  - `badgeAt` for a scoped node, for a node with only a descendant scoped, and
+    for an unscoped node;
+  - `namedNodes`, with an identifier no node has.
+- `TargetingPredicateSpec` covers `referencedNodes` in source order, with
+  repeats and with none.
+- `LECChartStateSpec` covers:
+  - `readings` under each display mode, for a node with one reading and a node
+    with two;
+  - the `inherentCurves` case, restated as `readings(…, Inherent)`;
+  - a refused request becoming `FormInvalid`.
+- `CompareStateSpec` covers:
+  - `samePairAs` telling two selections apart;
+  - `samePlaceAs` ignoring them;
+  - `copyToNextFree` claiming the lowest free slot and refusing when full;
+  - `removeRow` resetting display and pending seed.
+- `AnalyzeViewSeedSpec` covers:
+  - `engagedSlots` keeping a slot whose selection differs from the active tab's;
+  - a pending seed winning over `computeSeed`.
+- `CompareColorAssignerSpec` covers a node's two readings on one side, as two
+  series.
+- `TreeHistoryStateSpec`'s `deriveDropped` cases take the new cache type.
+
+##### Verification
+
+```bash
+sbt 'commonJVM/test; server/test'   # green
+sbt app/test                        # green
+# register_it_ cleanup, then
+sbt serverIt/test                   # green
+```
+
+The BATS suites C and A run at the end of the slice. No BATS test reaches the
+interface, so they confirm that the images build and the stack answers.
+
+##### Terminology impact
+
+Two concepts the interface puts in front of the user have no glossary entry.
+Both are new entries, presented for approval with this section:
+- **Targeting predicate**, which §3.1 describes only as "a condition that
+  resolves to a set of nodes".
+- **Resolved scope.**
+
+No existing entry changes meaning.
+
+##### File inventory
+
+Every path is listed in the block presented with this section.
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 
@@ -5835,7 +6351,7 @@ adr-constraints skill). Per-ADR outcome for this plan:
 | 016 (config) | — | No new config in M1/M2 |
 | 017 (+NOTES) (tree API) | M4 DTO buckets | Reviewed at §7.6.10: the tree PUT gains two mitigation buckets and the record is amended in M4 slice 5 (§7.6.9) |
 | 018 (nominal wrappers) | `MitigationId` | Compliant: case-class wrapper over `SafeId`, `NodeId` pattern |
-| 019 (frontend) | M4 | Reviewed at §7.6.10 for slices 1 to 5: compliant, each browser change touches one state class and no component gains state. The interface itself is M4 slice 6, which is not elevated yet and owes its own review of this record: parent-owned state, Pattern 6 for the popup flow |
+| 019 (frontend) | M4 | Reviewed at §7.6.10 for slices 1 to 5: compliant, each browser change touches one state class and no component gains state. The interface itself is M4 slice 6, reviewed at §7.6.17: parent-owned state, stateless components, and Pattern 6 for the popup once decision 21 places it |
 | 020 (supply chain) + skill | M3 engine bump | Compliant: exact pin; first-party sibling → cooldown n/a (documented at pin site) |
 | 021 (capability URLs) | — | Endpoints stay under `/w/{key}`; no new auth surface |
 | 022 (secrets) | — | No credentials involved; mitigation data is ordinary domain content |

@@ -2893,3 +2893,37 @@ vql-engine's `docs/ADR-024.md`.
   may land once the pin is 0.20.0.
 
 **Status.** Waits on the 0.20.0 release.
+
+## 69. vql-engine 0.21.0 orders each domain and treats a dispatcher refusal as unknown — what register changes on the pin bump
+
+**What changed in the engine.** The engine record is vql-engine's
+`docs/ADR-025.md`.
+
+- `RuntimeModel.domains` is `Map[TypeId, OrderedDomain]`. A domain is built
+  with `OrderedDomain.of(carriers)(using Ordering[A])`, which sorts the
+  carriers once. Evaluation and sampling walk that order, so a result no
+  longer depends on a `Set`'s iteration order. An ordering that ranks two
+  distinct carriers equal throws `IllegalArgumentException`.
+- A dispatcher refusal is an unknown truth value under Kleene's strong
+  three-valued logic. A formula fails only when the refusal could change its
+  result, and `p ∧ q` and `q ∧ p` give the same outcome.
+- Every sampling entry takes `IndexedSeq`. Register calls none of them.
+
+**What register changes.**
+
+- `build.sbt` line 40: `vqlEngineVersion` to `"0.21.0"`.
+- `modules/server/.../foladapter/RiskTreeKnowledgeBase.scala`, `nodeDomain` and
+  `mitigationDomain` (around line 291): each becomes an `OrderedDomain`, for
+  example `OrderedDomain.of(tree.index.nodes.keys)(using Ordering.by(_.value))`
+  and `OrderedDomain.of(tree.mitigations.map(_.id))(using Ordering.by(_.value))`.
+  `NodeId.value` and `MitigationId.value` are the ULID strings.
+- Behaviour: a query whose scope or range meets a refusal that cannot change
+  its result now returns that result. The dispatcher's refusals, such as
+  `lookupResult`'s "no simulation result for node", reach the user only when
+  they decide the answer.
+- Records: `docs/dev/decision-records/ADR-028-appendix-technical-design.md`
+  line 19 states the domain as `RuntimeModel.domains(sort): Set[Value]`, and
+  `ADR-028-vague-quantifier-query-pane.md` line 54 says the class builds "one
+  domain of `Value`s per" sort. Both become wrong under 0.21.0.
+
+**Status.** Waits on the 0.21.0 release.

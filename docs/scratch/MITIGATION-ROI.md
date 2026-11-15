@@ -9,8 +9,17 @@
 > grounding and the ADR constraints; this note is kept, not superseded.
 >
 > Ties to: `DEPENDENCE.md` (with-vs-without at the portfolio node; TVaR; tail
-> allocation), `LEC-TAIL-TRIMMING.md` (0.5% render trim is visualization-only, full
-> sample retained), `MITIGATION-PRE-PLANNING.md` (targeting predicate → node set).
+> allocation), `docs/dev/plans/LEC-TAIL-TRIMMING.md` (0.5% render trim is
+> visualization-only, full sample retained),
+> `docs/archive/plans/MITIGATION-PRE-PLANNING.md` (targeting predicate → node set).
+>
+> **Vocabulary.** This note was written apart from `docs/user/TERMINOLOGY.md`, the
+> project's glossary, and uses its own words for five of the glossary's concepts. A
+> risk that "fires" is one whose event happens. Its "firing probability" or
+> "frequency" `p` is the leaf's likelihood (1.1). The "base" run is inherent risk
+> (4.4). A "mitigated" run is the tree valued under a selection (4.5). A "year" is
+> the modelling period (1.1). The glossary has no entry for AAL, VaR, TVaR, ROSI or
+> NPV. Sections 2 and 3 of this note define them.
 
 ---
 
@@ -41,7 +50,8 @@ Grounding first, because the whole conception rests on what is already there.
   unconditional loss (`unconditionalQuantile`). `probabilityOfNoLoss` and the
   exceedance-probability endpoint exist.
 - **The render curve is trimmed at 0.5% exceedance for display only** (1-in-200,
-  Solvency II convention); the full trial sample is preserved (`LEC-TAIL-TRIMMING.md`).
+  Solvency II convention; 0.5% is the default of the `curveTailCutoff` setting); the
+  full trial sample is preserved (`docs/dev/plans/LEC-TAIL-TRIMMING.md`).
 - **Missing for ROI:** (i) a **cost field** on `Mitigation` (today `Mitigation` has
   id/name/target/spec/precedence and no cost); (ii) a **TVaR** computation (nothing
   computes mean-loss-beyond-a-quantile today).
@@ -221,8 +231,9 @@ can disagree by any amount, and they disagree here.
 
 **Where to measure.** At the **nearest enclosing portfolio node**, with-vs-without the
 mitigation, exactly as `DEPENDENCE.md` (a) prescribes — because the tail is a portfolio
-property, and register's scenario branches already make with-vs-without a first-class
-flow.
+property, and register's selections (glossary 4.5) already make with-vs-without a
+first-class flow: one tree is valued under the empty selection and under the
+selection holding the mitigation.
 
 ---
 
@@ -242,7 +253,7 @@ the **portfolio LEC with the mitigation overlaid on the portfolio LEC without it
 
 This is the deliverable to foreground: one overlay chart, base vs mitigated portfolio
 curve, with the AAL gap and the tail gap called out. It reuses the existing chart and
-the existing scenario-branch comparison; it needs no new curve type. (Return-period
+the existing comparison of two selections; it needs no new curve type. (Return-period
 tables and delta/"A minus B" curves are the `DEPENDENCE.md` (c) backlog candidates,
 still pending the user's look — not filed.)
 
@@ -289,7 +300,7 @@ right: don't bake in an opinionated rate.
 - A **benefit functional selector** (ΔAAL default, ΔVaR, ΔTVaR) — a read-side choice
   over already-simulated data, no re-simulation.
 - Everything else (trial-aligned differencing, portfolio aggregation, the overlay chart,
-  with-vs-without scenario branches) **already exists**.
+  with-vs-without valuation under two selections) **already exists**.
 
 ---
 
@@ -311,7 +322,7 @@ right: don't bake in an opinionated rate.
    upfront, yearly)` variants — explicit, exhaustive-matched, correct-by-construction.
 5. **Where the benefit is measured.** Nearest enclosing portfolio node, with-vs-without
    (§5, `DEPENDENCE.md` (a)). *Leaning:* yes; this is the only dependence-aware choice
-   and it reuses scenario branches. Single-leaf ROI is available but is the frequency-
+   and it reuses selections. Single-leaf ROI is available but is the frequency-
    dominated, less informative view (§4).
 
 ---
@@ -326,8 +337,9 @@ right: don't bake in an opinionated rate.
 > whatever the two codebases actually show.
 
 Register runs a screening query language over the live risk tree. A query can call
-functions that read a simulated result — for example `p95(node)`, `p99(node)`,
-`lec(node)` return quantiles or the exceedance curve of a node's loss distribution.
+functions that read a simulated result — `p95(x, m)` and `p99(x, m)` return a
+quantile of node `x`'s losses under the selection `m` names, and `lec(x, t, m)`
+returns the chance that they reach the loss `t`.
 Producing that loss distribution is the expensive step: it is the Monte Carlo
 simulation, cached. Reading a quantile off an already-produced distribution is cheap.
 
@@ -360,13 +372,15 @@ Three structural facts, each independently sufficient:
 
 1. **Result-reading functions take their key from fixed domains, never from a computed
    value.** `p95`/`p99`/`lec` take a node drawn from the tree's pre-materialized node
-   set, and a mitigation selection fixed by the query text or mode. Neither argument is
-   ever a value the walk produced.
+   set, and a mitigation selection that is either a constant in the query text
+   (`"inherent"`, `"residual"`) or a variable ranging over the tree's mitigations.
+   Neither argument is ever a value the walk produced.
 
 2. **Mitigation scope is resolved by a structural pre-pass that cannot read a result.**
    Which nodes a mitigation applies to is decided by a targeting sublanguage that
-   forbids calling result-reading functions (and forbids quantifiers and function
-   application generally). So a mitigation's scope — and therefore the mitigated result
+   forbids calling result-reading functions. It forbids quantifiers, and it admits
+   only the two functions that return a node, `node_id` and `node_named`. So a
+   mitigation's scope — and therefore the mitigated result
    keys — can never depend on a p95 or an LEC. The selection side of every key is
    structural.
 
