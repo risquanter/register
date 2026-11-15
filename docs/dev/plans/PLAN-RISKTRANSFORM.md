@@ -3836,18 +3836,14 @@ object ScopeOutcome:
     * published in the schema. */
   final val TagField = "kind"
 
-  /** A non-empty chunk crosses as a JSON array, and the decoder refuses an
-    * empty one, so a failure that names no problem cannot be decoded. */
+  /** A failure's problems cross as a non-empty array, so a failure that names
+    * no problem cannot be decoded. */
   private given nonEmptyChunkEncoder[A: JsonEncoder]: JsonEncoder[NonEmptyChunk[A]] =
-    JsonEncoder[List[A]].contramap(_.toList)
+    IronTapirCodecs.nonEmptyEncoder[NonEmptyChunk[A], A](_.toList)
   private given nonEmptyChunkDecoder[A: JsonDecoder]: JsonDecoder[NonEmptyChunk[A]] =
-    JsonDecoder[List[A]].mapOrFail(list => NonEmptyChunk.fromIterableOption(list).toRight("expected at least one element"))
-
-  /** Published as an array of at least one item. */
+    IronTapirCodecs.nonEmptyDecoder[NonEmptyChunk[A], A](NonEmptyChunk.fromIterableOption)
   private given nonEmptyChunkSchema[A: Schema]: Schema[NonEmptyChunk[A]] =
-    Schema.schemaForIterable[A, List]
-      .validate(Validator.minSize[A, List](1))
-      .map(list => NonEmptyChunk.fromIterableOption(list))(_.toList)
+    IronTapirCodecs.nonEmptySchema[NonEmptyChunk[A], A](_.toList, NonEmptyChunk.fromIterableOption)
 
   given codec: JsonCodec[ScopeOutcome] = DeriveJsonCodec.gen[ScopeOutcome]
 
@@ -3856,12 +3852,38 @@ object ScopeOutcome:
     Schema.derived[ScopeOutcome]
 ```
 
-The three private givens mirror the ones `QueryProblem` declares for
-`NonEmptyList` in
-`modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala`.
-That they derive for `NonEmptyChunk` on both platforms is unverified here. The
-check that settles it is `sbt commonJVM/compile` and `sbt commonJS/compile` with
-this file in place.
+**One rule for a non-empty collection on the wire (§7.6.12 decision 17).** `QueryProblem` in
+`modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala`
+already stated the rule for `NonEmptyList`: the collection crosses as a JSON
+array, the decoder refuses an empty one, and the schema publishes a minimum size
+of 1. `ScopeOutcome` needs the same rule for `NonEmptyChunk`. The two types
+differ, so no single given covers both. The rule is written once, as three plain
+functions in
+`modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`,
+and each companion declares its own private givens from them. Plain functions
+rather than givens keep the instances out of every file that imports
+`IronTapirCodecs.given`.
+
+```scala
+  /** The refusal of an empty array where at least one element is required. */
+  private val NonEmptyRefusal: String = "expected at least one element"
+
+  def nonEmptyEncoder[N, A: JsonEncoder](toList: N => List[A]): JsonEncoder[N] =
+    JsonEncoder[List[A]].contramap(toList)
+
+  def nonEmptyDecoder[N, A: JsonDecoder](fromList: List[A] => Option[N]): JsonDecoder[N] =
+    JsonDecoder[List[A]].mapOrFail(list => fromList(list).toRight(NonEmptyRefusal))
+
+  def nonEmptySchema[N, A: Schema](toList: N => List[A], fromList: List[A] => Option[N]): Schema[N] =
+    Schema.schemaForIterable[A, List]
+      .validate(Validator.minSize[A, List](1))
+      .map(fromList)(toList)
+```
+
+`QueryProblem`'s three givens become calls to the same functions with
+`NonEmptyList[A]`, `_.toList` and `NonEmptyList.fromIterableOption`. The wire
+form and the refusal text are unchanged. `sbt commonJVM/compile` and
+`sbt commonJS/compile` pass with the helper in place.
 
 `MitigationScopeResolver.scala`, `MitigationScopeResolverLive.scala` and
 `MitigationScopeResolverSpec.scala` import the enum from
@@ -3884,11 +3906,11 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   * and matched nothing — a different situation from `Failed`, and the interface
   * says so differently.
   */
-final case class MitigationScopeView(mitigationId: MitigationId, outcome: ScopeOutcome)
+final case class MitigationScopeEntry(mitigationId: MitigationId, outcome: ScopeOutcome)
 
-object MitigationScopeView:
-  given codec: JsonCodec[MitigationScopeView] = DeriveJsonCodec.gen[MitigationScopeView]
-  given schema: Schema[MitigationScopeView]   = Schema.derived[MitigationScopeView]
+object MitigationScopeEntry:
+  given codec: JsonCodec[MitigationScopeEntry] = DeriveJsonCodec.gen[MitigationScopeEntry]
+  given schema: Schema[MitigationScopeEntry]   = Schema.derived[MitigationScopeEntry]
 
 /** The structure read: the tree, each mitigation's resolved scope for this
   * version, and the overrides whose stored base stamp no longer matches the
@@ -3902,7 +3924,7 @@ object MitigationScopeView:
   */
 final case class TreeStructureResponse(
   tree: RiskTree,
-  mitigationScopes: List[MitigationScopeView],
+  mitigationScopes: List[MitigationScopeEntry],
   staleMitigationIds: Set[MitigationId]
 )
 
@@ -3911,11 +3933,16 @@ object TreeStructureResponse:
   given schema: Schema[TreeStructureResponse]   = Schema.derived[TreeStructureResponse]
 ```
 
-Family search for the two new types. The family is the response wire types, in
+Family search for the two new types. `TreeStructureResponse` joins the response
+wire types, in
 `modules/common/src/main/scala/com/risquanter/register/http/responses/`, whose
 existing member `LECCurvesResponse` is a `final case class` with a derived codec
-and a derived schema in its companion. No existing type holds a tree beside its
-resolved scopes, and none holds one mitigation's resolved scope.
+and a derived schema in its companion. `MitigationScopeEntry` joins the list
+entries that pair an identifier with that item's outcome, whose existing member
+is `NodeChangeEntry(nodeId: NodeId, status: NodeChangeStatus)` in
+`ChangedNodesResponse.scala`, so it follows that member's `<Subject>Entry`
+naming. No existing type holds a tree beside its resolved scopes, and none holds
+one mitigation's resolved scope.
 
 **What a `BindProblem` in this answer discloses.** ADR-035 §5 permits a refusal
 to carry words and literals of query-language text in typed fields, and gives as
@@ -3936,8 +3963,8 @@ final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
   ...
   /** Wire form: one view per mitigation, in identifier order. Use only at the
     * wire boundary. */
-  def toWire: List[MitigationScopeView] =
-    outcomes.toList.sortBy((id, _) => id.value).map(MitigationScopeView(_, _))
+  def toWire: List[MitigationScopeEntry] =
+    outcomes.toList.sortBy((id, _) => id.value).map(MitigationScopeEntry(_, _))
 ```
 
 **`RiskTreeService`** gains one method rather than widening `getById`:
@@ -4416,8 +4443,9 @@ recorded at the end of this section: two with the rulings that answer them, and
 decision 14. Decisions 15 and 16, ruled on 2026-11-13, come before decision 14,
 which was ruled after them on the same day. Decision 11 is open too, and it was opened after the other ten
 by work outside this plan: decision 11, the leaf-stage mitigation's request shape,
-which gates slice 2. All of them are listed here so the elevation states them
-rather than implying them.
+which gates slice 2. Decision 17 was ruled on 2026-11-15 out of slice 3's family
+search. All of them are listed here so the elevation states them rather than
+implying them.
 
 **The `ValuationResult` sub-slice does not exist and no decision below gates
 slice 1.** §8.16 ruled a fourth case of a sealed `LossDistribution` hierarchy;
@@ -4978,6 +5006,25 @@ and not before.
       leaf is deleted is a no-op and is not reported stale (§7.6.2, re-ruled
       2026-11-14).
 
+17. **Where the wire rule for a non-empty collection is stated.** **RULED
+    (user, 2026-11-15): B.** The slice-3 family search found that
+    `ScopeOutcome`'s three private givens for `NonEmptyChunk` restate the rule
+    `QueryProblem`'s givens state for `NonEmptyList`. The two collection types
+    differ, so no single given serves both.
+    - A: keep two private copies, as §7.6.7 first specified.
+    - B: state the rule once, as three plain functions in `IronTapirCodecs`, and
+      have each companion declare its private givens from them.
+    - C: change `ScopeOutcome.Failed` to `NonEmptyList` and reuse
+      `QueryProblem`'s givens made public.
+
+    B was chosen because the rule is then written once, while each companion's
+    instances stay out of other files' implicit scope. C would have changed a
+    member type that moves unchanged. §7.6.7 states the functions.
+
+    The same family search renamed `MitigationScopeView` to
+    `MitigationScopeEntry` (user, 2026-11-15), after the family's member
+    `NodeChangeEntry`.
+
 #### 7.6.13 File inventory — M4 slices 1 to 5
 
 These lines append to the shared `## File inventory` section on approval. Files
@@ -5048,6 +5095,8 @@ omission is a denial.
 - `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala`
 ```
 
 Five documents change outside the gated tree and are listed for scope, not for
@@ -5058,8 +5107,10 @@ the hook: `docs/dev/decision-records/ADR-017-tree-api-design.md`,
 not exist yet; slice 5 creates it), and
 `.claude/skills/adr-constraints/SKILL.md` (ADR-040 placed in its three layers).
 
-The 2026-11-13 re-elevation changed this list. `IronTapirCodecs.scala` is no
-longer edited, because the schema it was to gain already exists.
+The 2026-11-13 re-elevation changed this list. `IronTapirCodecs.scala` no longer
+gains the schema it was first to gain, because that schema already exists.
+Decision 17 edits it instead, to hold the non-empty collection functions, and
+edits `QueryProblem.scala` to declare its givens from them.
 `LECCurvesResponse.scala`, `ErrorLocation.scala`, `ValidationMessages.scala`,
 `RiskTree.scala` and `MitigationApplication.scala` are edited by slice 1 as
 §7.6.5 states. `DecodeFailureStatusSurfaceSpec.scala` and `TreeRevertItSpec.scala`

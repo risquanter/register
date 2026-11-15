@@ -2,7 +2,7 @@ package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
-import zio.json.{DecoderOps, EncoderOps}
+import zio.json.{DecoderOps, EncoderOps, JsonDecoder, JsonEncoder}
 import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, QueryVariable, QueryWord, QueryDecimal, QueryLiteral, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
@@ -20,7 +20,10 @@ import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, Valid
  * Validation happens at the HTTP layer (codec decode), following the
  * "Parse, don't validate" principle. Invalid input returns 400 Bad Request
  * before reaching controllers or services.
- * 
+ *
+ * It also holds the wire form of a non-empty collection, which refuses an
+ * empty array in the same way.
+ *
  * @see ADR-001 for validation strategy details
  */
 object IronTapirCodecs {
@@ -384,4 +387,30 @@ object IronTapirCodecs {
   given Schema[SeedEntityId.SeedEntityId] = Schema.schemaForLong.map[SeedEntityId.SeedEntityId](
     l => SeedEntityId.fromLong(l).toOption
   )(_.value)
+
+  /** The refusal of an empty array where at least one element is required. */
+  private val NonEmptyRefusal: String = "expected at least one element"
+
+  /** The wire form of a collection that holds at least one element: it
+    * crosses as a JSON array, the decoder refuses an empty one, and the schema
+    * publishes an array of at least one item. These are plain functions rather
+    * than givens, so a companion that needs them declares its own private
+    * given from them and nothing enters any other file's implicit scope.
+    *
+    * {{{
+    * private given JsonDecoder[NonEmptyChunk[Int]] = nonEmptyDecoder(NonEmptyChunk.fromIterableOption)
+    * "[]".fromJson[NonEmptyChunk[Int]]    // a Left naming "expected at least one element"
+    * "[1]".fromJson[NonEmptyChunk[Int]]   // Right(NonEmptyChunk(1))
+    * }}}
+    */
+  def nonEmptyEncoder[N, A: JsonEncoder](toList: N => List[A]): JsonEncoder[N] =
+    JsonEncoder[List[A]].contramap(toList)
+
+  def nonEmptyDecoder[N, A: JsonDecoder](fromList: List[A] => Option[N]): JsonDecoder[N] =
+    JsonDecoder[List[A]].mapOrFail(list => fromList(list).toRight(NonEmptyRefusal))
+
+  def nonEmptySchema[N, A: Schema](toList: N => List[A], fromList: List[A] => Option[N]): Schema[N] =
+    Schema.schemaForIterable[A, List]
+      .validate(Validator.minSize[A, List](1))
+      .map(fromList)(toList)
 }

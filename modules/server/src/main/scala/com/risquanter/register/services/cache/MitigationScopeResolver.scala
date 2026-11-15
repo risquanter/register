@@ -4,7 +4,7 @@ import zio.{UIO, NonEmptyChunk, ZIO}
 import com.risquanter.register.domain.data.{RiskTree, ScopeOutcome}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
 import com.risquanter.register.http.errors.BindProblem
-import com.risquanter.register.http.responses.MitigationScopeView
+import com.risquanter.register.http.responses.MitigationScopeEntry
 
 /** Names the tree version whose scopes are resolved. The owning workspace is NOT
   * a field: one resolver instance exists per workspace
@@ -34,8 +34,8 @@ final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
 
   /** Wire form: one view per mitigation, in identifier order. Use only at the
     * wire boundary. */
-  def toWire: List[MitigationScopeView] =
-    outcomes.toList.sortBy((id, _) => id.value).map(MitigationScopeView(_, _))
+  def toWire: List[MitigationScopeEntry] =
+    outcomes.toList.sortBy((id, _) => id.value).map(MitigationScopeEntry(_, _))
 
 object ResolvedScopes:
   /** Per-mitigation drift signals (ADR-002): a predicate that no longer binds

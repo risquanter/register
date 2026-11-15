@@ -2,10 +2,11 @@ package com.risquanter.register.domain.data
 
 import zio.NonEmptyChunk
 import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder, jsonDiscriminator}
-import sttp.tapir.{Schema, Validator}
+import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.http.codecs.IronTapirCodecs
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.errors.BindProblem
 
@@ -37,18 +38,14 @@ object ScopeOutcome:
     * published in the schema. */
   final val TagField = "kind"
 
-  /** A non-empty chunk crosses as a JSON array, and the decoder refuses an
-    * empty one, so a failure that names no problem cannot be decoded. */
+  /** A failure's problems cross as a non-empty array, so a failure that names
+    * no problem cannot be decoded. */
   private given nonEmptyChunkEncoder[A: JsonEncoder]: JsonEncoder[NonEmptyChunk[A]] =
-    JsonEncoder[List[A]].contramap(_.toList)
+    IronTapirCodecs.nonEmptyEncoder[NonEmptyChunk[A], A](_.toList)
   private given nonEmptyChunkDecoder[A: JsonDecoder]: JsonDecoder[NonEmptyChunk[A]] =
-    JsonDecoder[List[A]].mapOrFail(list => NonEmptyChunk.fromIterableOption(list).toRight("expected at least one element"))
-
-  /** Published as an array of at least one item. */
+    IronTapirCodecs.nonEmptyDecoder[NonEmptyChunk[A], A](NonEmptyChunk.fromIterableOption)
   private given nonEmptyChunkSchema[A: Schema]: Schema[NonEmptyChunk[A]] =
-    Schema.schemaForIterable[A, List]
-      .validate(Validator.minSize[A, List](1))
-      .map(list => NonEmptyChunk.fromIterableOption(list))(_.toList)
+    IronTapirCodecs.nonEmptySchema[NonEmptyChunk[A], A](_.toList, NonEmptyChunk.fromIterableOption)
 
   given codec: JsonCodec[ScopeOutcome] = DeriveJsonCodec.gen[ScopeOutcome]
 

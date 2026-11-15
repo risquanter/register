@@ -2,7 +2,7 @@ package com.risquanter.register.http.errors
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.GreaterEqual
-import sttp.tapir.{Schema, Validator}
+import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder, jsonDiscriminator}
 import zio.prelude.NonEmptyList
@@ -12,6 +12,7 @@ import vql.error.{ParseRefusal, QueryError}
 
 import com.risquanter.register.common.FolSymbols.QueryGrammarSymbol
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, QueryDecimal, QueryLiteral, QueryVariable, QueryWord, given}
+import com.risquanter.register.http.codecs.IronTapirCodecs
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Where in the submitted query text a refusal points.
@@ -465,15 +466,11 @@ object QueryProblem:
   /** A non-empty list crosses as a JSON array, and the decoder refuses an
     * empty one, so a refusal that names nothing cannot be decoded either. */
   private given nonEmptyListEncoder[A: JsonEncoder]: JsonEncoder[NonEmptyList[A]] =
-    JsonEncoder[List[A]].contramap(_.toList)
+    IronTapirCodecs.nonEmptyEncoder[NonEmptyList[A], A](_.toList)
   private given nonEmptyListDecoder[A: JsonDecoder]: JsonDecoder[NonEmptyList[A]] =
-    JsonDecoder[List[A]].mapOrFail(list => NonEmptyList.fromIterableOption(list).toRight("expected at least one element"))
-
-  /** Published as an array of at least one item. */
+    IronTapirCodecs.nonEmptyDecoder[NonEmptyList[A], A](NonEmptyList.fromIterableOption)
   private given nonEmptyListSchema[A: Schema]: Schema[NonEmptyList[A]] =
-    Schema.schemaForIterable[A, List]
-      .validate(Validator.minSize[A, List](1))
-      .map(list => NonEmptyList.fromIterableOption(list))(_.toList)
+    IronTapirCodecs.nonEmptySchema[NonEmptyList[A], A](_.toList, NonEmptyList.fromIterableOption)
 
   given codec: JsonCodec[QueryProblem] = DeriveJsonCodec.gen[QueryProblem]
 

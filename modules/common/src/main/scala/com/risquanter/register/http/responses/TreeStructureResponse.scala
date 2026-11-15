@@ -12,11 +12,11 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   * and matched nothing — a different situation from `Failed`, and the interface
   * says so differently.
   */
-final case class MitigationScopeView(mitigationId: MitigationId, outcome: ScopeOutcome)
+final case class MitigationScopeEntry(mitigationId: MitigationId, outcome: ScopeOutcome)
 
-object MitigationScopeView:
-  given codec: JsonCodec[MitigationScopeView] = DeriveJsonCodec.gen[MitigationScopeView]
-  given schema: Schema[MitigationScopeView]   = Schema.derived[MitigationScopeView]
+object MitigationScopeEntry:
+  given codec: JsonCodec[MitigationScopeEntry] = DeriveJsonCodec.gen[MitigationScopeEntry]
+  given schema: Schema[MitigationScopeEntry]   = Schema.derived[MitigationScopeEntry]
 
 /** The structure read: the tree, each mitigation's resolved scope for this
   * version, and the overrides whose stored base stamp no longer matches the
@@ -30,7 +30,7 @@ object MitigationScopeView:
   */
 final case class TreeStructureResponse(
   tree: RiskTree,
-  mitigationScopes: List[MitigationScopeView],
+  mitigationScopes: List[MitigationScopeEntry],
   staleMitigationIds: Set[MitigationId]
 )
 
