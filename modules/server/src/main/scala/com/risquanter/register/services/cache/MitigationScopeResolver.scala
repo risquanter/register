@@ -39,7 +39,7 @@ final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
   def failures: Map[MitigationId, NonEmptyChunk[BindProblem]] =
     outcomes.collect { case (id, ScopeOutcome.Failed(errs)) => id -> errs }
 
-  /** Wire form: one view per mitigation, in identifier order. Use only at the
+  /** Wire form: one entry per mitigation, in identifier order. Use only at the
     * wire boundary. */
   def toWire: List[MitigationScopeEntry] =
     outcomes.toList.sortBy((id, _) => id.value).map(MitigationScopeEntry(_, _))

@@ -17,7 +17,10 @@ import com.risquanter.register.domain.data.iron.{BranchChoice, ContentHash, Safe
 import com.risquanter.register.http.errors.{BindProblem, QuerySymbolName}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, ContentHashIndex, MitigationScopeResolverRegistry, MitigationStaleness}
+import com.risquanter.register.services.cache.{
+  CachedResultResolverLive, ContentCacheRegistry, ContentHashIndex, MitigationScopeResolver, MitigationScopeResolverLive,
+  MitigationScopeResolverRegistry, MitigationStaleness, ResolvedScopes
+}
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
@@ -1002,6 +1005,39 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               ValidationError(ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Id), FieldProblem.MitigationNotFound))
             assertTrue(refusals.contains(expected))
           }
+        },
+
+        test("a mitigation-free read resolves no scope, and a mitigated read resolves once") {
+          for
+            asked    <- Ref.make(0)
+            counting  = new MitigationScopeResolverRegistry:
+                          def forWorkspace(workspaceId: WorkspaceId): UIO[MitigationScopeResolver] =
+                            asked.update(_ + 1) *>
+                              Ref.make(Map.empty[(TreeId, BranchRef), Vector[(CommitHash, ResolvedScopes)]])
+                                .map(MitigationScopeResolverLive(_))
+            env      <- (ZIO.service[RiskTreeService] <*> ZIO.service[RiskTreeRepository]).provide(
+                          RiskTreeServiceLive.layer,
+                          stubRepoLayer,
+                          ZLayer.succeed[MitigationScopeResolverRegistry](counting),
+                          TestConfigs.simulationLayer,
+                          CachedResultResolverLive.layer,
+                          ContentCacheRegistry.layer,
+                          InvalidationHandler.live,
+                          SSEHub.live,
+                          TestConfigs.telemetryLayer >>> TelemetryLive.configured
+                        )
+            (svc, repo) = env
+            created  <- svc.create(stubWsId, seedTreeRequest("No Resolution"), BranchRef.Main)
+            seeded   <- seedMitigations(repo, created, cyberControl(created))
+            _        <- svc.getLECCurvesMulti(stubWsId, seeded.id, seeded.index.nodes.keySet, testEntity,
+                          false, BranchRef.Main, None, false, MitigationSelection.Inherent)
+            _        <- svc.probOfExceedance(stubWsId, seeded.id, seeded.rootId, 1000L,
+                          testEntity, false, BranchRef.Main, None, MitigationSelection.Inherent)
+            inherent <- asked.get
+            _        <- svc.getLECCurvesMulti(stubWsId, seeded.id, seeded.index.nodes.keySet, testEntity,
+                          false, BranchRef.Main, None, false, MitigationSelection.Residual)
+            residual <- asked.get
+          yield assertTrue(inherent == 0, residual == 1)
         }
       ),
 

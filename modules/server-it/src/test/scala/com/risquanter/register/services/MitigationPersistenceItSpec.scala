@@ -12,6 +12,11 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceId, SafeName, ContentHash, BranchRef, Revision, SeedEntityId}
 import com.risquanter.register.domain.errors.ErrorSubject
+import com.risquanter.register.http.requests.{
+  AbsoluteReplacementRequest, BaseStampChoice, DistributionShapeRequest, MitigationDefinitionRequest,
+  MitigationSpecRequest, MitigationUpdateRequest, RiskLeafDefinitionRequest, RiskLeafUpdateRequest,
+  RiskPortfolioDefinitionRequest, RiskPortfolioUpdateRequest, RiskTreeDefinitionRequest, RiskTreeUpdateRequest
+}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
@@ -26,8 +31,9 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mit
   * against a real Irmin container: a tree's mitigations are stored as per-id
   * blobs beside its nodes and round-trip through create/update/read with their
   * authoring-time anchor and base stamp intact. Omitting a previously-stored
-  * mitigation deletes it, because a write replaces the whole subtree. A stored
-  * mitigation also reads back through `RiskTreeService`: the structure read
+  * mitigation deletes it, because a write replaces the whole subtree. A
+  * mitigation written through `RiskTreeService`'s tree PUT also reads back
+  * through the service: the structure read
   * answers its resolved scope and its staleness, and a curve read under a
   * selection naming it names it on the reading it reached.
   *
@@ -74,6 +80,49 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
     ).toEither.toOption.get
     RiskTree.fromNodes(tid, sname("Mit Persist"), Seq(root, cyber), rootId, seedVarHighWater = None, mitigations = mits.toList)
       .toEither.toOption.get
+
+  private val CyberProbability: Double       = 0.2
+  private val ReEstimatedProbability: Double = 0.4
+
+  private val cyberShape: DistributionShapeRequest = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 100000L)
+
+  /** Root → {Cyber}, submitted through the service with no mitigations. */
+  private val serviceTreeRequest: RiskTreeDefinitionRequest =
+    RiskTreeDefinitionRequest(
+      name = "Mit Persist Service",
+      portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+      leaves = Seq(RiskLeafDefinitionRequest(
+        name = "Cyber", parentName = Some("Root"), probability = CyberProbability,
+        distributionShape = cyberShape, seedVarId = None)),
+      newMitigations = Nil
+    )
+
+  private def serviceLeaf(tree: RiskTree): RiskLeaf =
+    tree.nodes.collectFirst { case l: RiskLeaf => l }.get
+
+  /** `tree` resubmitted with its leaf `cyber` at `probability`, keeping `mitigations`. */
+  private def keepTree(tree: RiskTree, cyber: RiskLeaf, probability: Double,
+                       mitigations: Seq[MitigationUpdateRequest]): RiskTreeUpdateRequest =
+    RiskTreeUpdateRequest(
+      name = tree.name.value,
+      portfolios = Seq(RiskPortfolioUpdateRequest(id = tree.rootId.value, name = "Root", parentName = None)),
+      leaves = Seq(RiskLeafUpdateRequest(
+        id = cyber.id.value, name = "Cyber", parentName = Some("Root"), probability = probability,
+        distributionShape = cyberShape, seedVarId = None)),
+      newPortfolios = Nil,
+      newLeaves = Nil,
+      mitigations = mitigations,
+      newMitigations = Nil
+    )
+
+  /** A new absolute statement that the leaf `anchor` occurs with probability 0.05. */
+  private def pinRequest(anchor: NodeId): MitigationDefinitionRequest =
+    MitigationDefinitionRequest(
+      name = "m-service", target = "leaf(x)",
+      spec = MitigationSpecRequest.LeafAbsolute(
+        AbsoluteReplacementRequest.Likelihood(0.05), anchor.value, BaseStampChoice.KeepIfUnchanged),
+      precedence = MitigationPrecedence.overrideFinal
+    )
 
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient & RiskTreeService] =
     ZLayer.make[RiskTreeRepository & IrminClient & RiskTreeService](
@@ -144,22 +193,28 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
         )
       },
 
-      test("a stored mitigation reads back through the service with its resolved scope, and a curve read under it names it") {
-        // The fixed base stamp matches no leaf, so the override is also stale.
-        val m = overrideMit("m-service", cyberId)
+      test("a mitigation written through the tree PUT reads back through the service with its resolved scope, and a curve read under it names it") {
+        // The PUT stamps the statement from the anchor leaf. Re-estimating that
+        // leaf in a second PUT that keeps the statement unchanged makes it stale.
         for
-          repo      <- ZIO.service[RiskTreeRepository]
-          tid        = treeId("mit-tree-service")
-          _         <- repo.create(wsId, treeWith(tid, m), BranchRef.Main)
-          structure <- ZIO.serviceWithZIO[RiskTreeService](_.getStructure(wsId, tid, BranchRef.Main, None))
+          service   <- ZIO.service[RiskTreeService]
+          created   <- service.create(wsId, serviceTreeRequest, BranchRef.Main)
+          cyber      = serviceLeaf(created)
+          pinned    <- service.update(wsId, created.id, keepTree(created, cyber, CyberProbability, Nil)
+                         .copy(newMitigations = List(pinRequest(cyber.id))), BranchRef.Main)
+          m          = pinned.mitigations.head
+          _         <- service.update(wsId, created.id,
+                         keepTree(pinned, cyber, ReEstimatedProbability, pinned.mitigations.map(MitigationUpdateRequest.fromMitigation)),
+                         BranchRef.Main)
+          structure <- service.getStructure(wsId, created.id, BranchRef.Main, None)
           (tree, scopes, stale) = structure
-          curves    <- ZIO.serviceWithZIO[RiskTreeService](_.getLECCurvesMulti(wsId, tid, Set(rootId), seedEntity,
-                         false, BranchRef.Main, None, false, MitigationSelection.single(m.id)))
+          curves    <- service.getLECCurvesMulti(wsId, created.id, Set(created.rootId), seedEntity,
+                         false, BranchRef.Main, None, false, MitigationSelection.single(m.id))
         yield assertTrue(
-          tree.mitigations == List(m),
-          scopes.outcomes == Map(m.id -> ScopeOutcome.Resolved(Set(cyberId))),
+          tree.mitigations.map(_.id) == List(m.id),
+          scopes.outcomes == Map(m.id -> ScopeOutcome.Resolved(Set(cyber.id))),
           stale == Set(m.id),
-          curves(rootId).map(_.withMitigations) == List(Nil, List(m.id))
+          curves(created.rootId).map(_.withMitigations) == List(Nil, List(m.id))
         )
       }
 

@@ -140,6 +140,13 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
         assertTrue(MitigationStaleness.staleOverrides(tree).isEmpty)
       },
 
+      test("anchor names a node that is not a leaf → not reported") {
+        val stamp = ContentHashIndex.hashOf(cyber(prob = 0.2))
+        val m     = absoluteMit("m-portfolio", stamp, rootId)
+        val tree  = mkTree(root(cyberId, floodId), Seq(cyber(prob = 0.2), flood), m)
+        assertTrue(MitigationStaleness.staleOverrides(tree).isEmpty)
+      },
+
       test("resolution ignores staleness — the statement applies whether stale or fresh") {
         val authored = cyber(prob = 0.2)
         val stamp    = ContentHashIndex.hashOf(authored)

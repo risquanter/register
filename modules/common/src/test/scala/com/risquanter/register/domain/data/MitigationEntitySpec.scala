@@ -248,6 +248,13 @@ object MitigationEntitySpec extends ZIOSpecDefault {
         val json = t.toJson
         val tampered = json.replace("leaf(x)", "forall x . leaf(x)")
         assertTrue(json != tampered, tampered.fromJson[RiskTree].isLeft)
+      },
+      test("an absolute statement whose anchor names no node of the tree builds and decodes") {
+        // A save may delete the anchor leaf; the statement then applies to no
+        // node, and the tree stays valid.
+        val m = mk("m-orphan", absoluteLeafSpec(stamp, nodeId("deleted-leaf"))).toEither.toOption.get
+        val t = tree(m).toEither.toOption.get
+        assertTrue(t.toJson.fromJson[RiskTree].toOption.get.mitigations == List(m))
       }
     )
   )

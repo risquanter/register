@@ -11,10 +11,11 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.errors.BindProblem
 
 /** One mitigation's resolution against one tree version. `Failed` carries why
-  * the predicate does not bind against that version, such as a quoted node
-  * that was renamed or deleted. It still contributes an empty applied scope: a
-  * predicate that does not bind makes that one mitigation a no-op and never
-  * fails a request.
+  * the predicate does not bind against that version: a stored predicate the
+  * current catalog cannot read. A predicate naming a deleted node's identifier
+  * binds and matches nothing, so it is `Resolved`. `Failed` still contributes
+  * an empty applied scope: a predicate that does not bind makes that one
+  * mitigation a no-op and never fails a request.
   */
 @jsonDiscriminator(ScopeOutcome.TagField)
 enum ScopeOutcome:

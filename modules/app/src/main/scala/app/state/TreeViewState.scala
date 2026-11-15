@@ -1,6 +1,6 @@
 package app.state
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import scala.scalajs.js
 

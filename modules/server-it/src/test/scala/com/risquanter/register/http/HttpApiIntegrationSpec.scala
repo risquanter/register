@@ -6,10 +6,10 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
-import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest, LECCurvesMultiRequest, ProbOfExceedanceRequest}
+import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest, LECCurvesMultiRequest, ProbOfExceedanceRequest, MitigationDefinitionRequest, MitigationSpecRequest, ResultTransformSpecRequest}
 import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeStructureResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
-import com.risquanter.register.domain.data.{MitigationSelection, RiskLeaf}
+import com.risquanter.register.domain.data.{MitigationPrecedence, MitigationSelection, MitigationSpec, ResultTransformSpec, RiskLeaf}
 import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice, CommitHash}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
@@ -21,10 +21,10 @@ import com.risquanter.register.testcontainers.IrminCompose
   *   - `GET  /w/{key}/risk-trees`                   → list trees in workspace
   *   - `GET  /w/{key}/risk-trees/{treeId}/structure` → full tree structure
   *
-  * Auth layers: `UserContextExtractor.noOp` + `AuthorizationServiceNoOp` (Wave 1).
+  * Auth layers: `UserContextExtractor.noOp` + `AuthorizationServiceNoOp`.
   * No `x-user-id` header is sent — capability-only mode (Layer 0).
   *
-  * @see ADR-021 (Capability URLs), AUTHORIZATION-PLAN.md (Wave 1 regression gate)
+  * @see ADR-021 (Capability URLs)
   */
 object HttpApiIntegrationSpec extends ZIOSpecDefault:
 
@@ -170,6 +170,54 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           listed.trees.length == 2,
           listed.trees.exists(_.id == bootstrap.tree.id),
           listed.trees.exists(_.id == created.id)
+        )
+      },
+      test("a result-stage mitigation created over HTTP reads back with its pipeline steps in order") {
+        // The result-stage decoder is hand-assembled, so only bytes sent over the
+        // wire, not bytes its own encoder produced, show that it reads what a
+        // client sends.
+        val cap: Long      = 5000L
+        val factor: Double = 0.5
+        val mitigation = MitigationDefinitionRequest(
+          name       = "Policy",
+          target     = "leaf(x)",
+          spec       = MitigationSpecRequest.ResultStage(List(
+                         ResultTransformSpecRequest.CapLosses(cap),
+                         ResultTransformSpecRequest.ScaleLosses(factor))),
+          precedence = MitigationPrecedence.default
+        )
+        val treeReq = sampleRequest().copy(newMitigations = List(mitigation))
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(sampleRequest())
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+
+          createResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/w/$key/risk-trees")
+            .body(treeReq)
+            .response(asJson[TreeSummaryResponse])
+            .send(client.backend)
+          created <- ZIO.fromEither(createResp.body)
+
+          structResp <- basicRequest.header("X-Branch", "main")
+            .get(uri"${client.baseUrl}/w/$key/risk-trees/${created.id.value}/structure")
+            .response(asJson[TreeStructureResponse])
+            .send(client.backend)
+          structure <- ZIO.fromEither(structResp.body).map(_.tree)
+          steps      = structure.mitigations.map(_.spec).collect { case MitigationSpec.ResultStage(p) => p.steps }
+        yield assertTrue(
+          createResp.code == StatusCode.Created,
+          structure.mitigations.map(_.name.value) == List("Policy"),
+          steps match
+            case List(List(ResultTransformSpec.CapLosses(c), ResultTransformSpec.ScaleLosses(f))) =>
+              c == cap && f.toFraction == factor
+            case _ => false
         )
       },
       test("get tree summary by ID via GET /w/{key}/risk-trees/{treeId}") {

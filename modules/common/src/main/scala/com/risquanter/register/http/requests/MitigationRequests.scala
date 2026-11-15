@@ -235,6 +235,7 @@ final case class MitigationDefinitionRequest(
 
 object MitigationDefinitionRequest:
   given codec: JsonCodec[MitigationDefinitionRequest] = DeriveJsonCodec.gen
+  given schema: Schema[MitigationDefinitionRequest] = Schema.derived
 
 /** Identity-preserving bucket: a stored mitigation the request keeps, by id. */
 final case class MitigationUpdateRequest(
@@ -247,6 +248,7 @@ final case class MitigationUpdateRequest(
 
 object MitigationUpdateRequest:
   given codec: JsonCodec[MitigationUpdateRequest] = DeriveJsonCodec.gen
+  given schema: Schema[MitigationUpdateRequest] = Schema.derived
 
   /** A stored mitigation as the entry that keeps it unchanged. The tree
     * builder sends one for every mitigation it loaded, so a save from it keeps
