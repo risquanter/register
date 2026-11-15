@@ -4107,8 +4107,8 @@ workspace nor a commit to key a memo with.
     * precedence — so renaming one contributes nothing, which is correct: a name
     * changes no figure. A mitigation whose effect changed affects every node in
     * either version's scope. A mitigation whose effect is unchanged but whose
-    * scope moved — a node was renamed into or out of what its predicate matches
-    * — affects exactly the nodes the two scopes disagree on.
+    * scope moved — a node was added, removed or moved into or out of what its
+    * predicate matches — affects exactly the nodes the two scopes disagree on.
     *
     * Resolving both versions costs two knowledge-base builds per mutation,
     * which is the same order as the tree-diff this method already performs and
@@ -4380,8 +4380,11 @@ New tests, by the behaviour each one pins:
 - `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
   (new, or added to the existing pipeline spec) — adding a mitigation publishes
   its scope and the ancestors; removing one publishes the scope it had; renaming
-  a mitigation publishes nothing; renaming a node into a predicate's match
-  publishes the difference between the two scopes.
+  a mitigation publishes nothing; changing a mitigation's precedence publishes
+  its whole scope; adding a node into a predicate's match publishes the
+  difference between the two scopes, including the new node, which the node
+  diff alone does not name. A stored predicate names a
+  node by identifier (§7.6.12 decision 16), so a rename cannot move a scope.
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala` —
   alternating between head and one pinned revision hits the memo on both after
   the first pass; a third revision evicts the least recently used of the two.

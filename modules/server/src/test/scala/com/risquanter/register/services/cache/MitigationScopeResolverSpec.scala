@@ -94,11 +94,12 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
 
   private val rev1 = CommitHash.fromString("a" * 40).toOption.get
   private val rev2 = CommitHash.fromString("b" * 40).toOption.get
+  private val rev3 = CommitHash.fromString("c" * 40).toOption.get
   private def ctx(rev: CommitHash) =
     ScopeResolutionContext(treeId("scope-tree"), BranchRef.Main, rev)
 
   private def newResolver: UIO[MitigationScopeResolverLive] =
-    Ref.make(Map.empty[(TreeId, BranchRef), (CommitHash, ResolvedScopes)])
+    Ref.make(Map.empty[(TreeId, BranchRef), Vector[(CommitHash, ResolvedScopes)]])
       .map(MitigationScopeResolverLive(_))
 
   // ── Spec ─────────────────────────────────────────────────────────────
@@ -176,19 +177,32 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         )
       },
 
-      test("memoization is per tree version and head-only") {
-        // Same (treeId, branch, revision) reuses the cached ResolvedScopes object
-        // (reference identity); a new revision recomputes; head-only eviction
-        // means the slot now holds the new revision, so the original revision
-        // recomputes on its next request too.
+      test("memoization is per tree version; a slot holds the head and one pinned revision") {
+        // Reference identity shows a hit: the cached ResolvedScopes object comes
+        // back. After the first pass, alternating between two revisions hits on
+        // both.
         val t = mkTree(mit("m-ok", "leaf(x)", resultSpec))
         for
           r <- newResolver
           a <- r.resolve(ctx(rev1), t)
           b <- r.resolve(ctx(rev1), t)   // memo hit
-          c <- r.resolve(ctx(rev2), t)   // new revision → recompute + replace slot
-          d <- r.resolve(ctx(rev1), t)   // slot now holds rev2 → recompute
-        yield assertTrue(b eq a, !(c eq a), !(d eq a))
+          c <- r.resolve(ctx(rev2), t)   // new revision → recompute, rev1 kept second
+          d <- r.resolve(ctx(rev1), t)   // hit
+          e <- r.resolve(ctx(rev2), t)   // hit
+        yield assertTrue(b eq a, !(c eq a), d eq a, e eq c)
+      },
+
+      test("a third revision evicts the least recently used of the two") {
+        val t = mkTree(mit("m-ok", "leaf(x)", resultSpec))
+        for
+          r <- newResolver
+          a <- r.resolve(ctx(rev1), t)
+          c <- r.resolve(ctx(rev2), t)
+          _ <- r.resolve(ctx(rev1), t)   // rev1 most recent, rev2 least
+          _ <- r.resolve(ctx(rev3), t)   // evicts rev2
+          d <- r.resolve(ctx(rev1), t)   // still held
+          e <- r.resolve(ctx(rev2), t)   // evicted → recompute
+        yield assertTrue(d eq a, !(e eq c))
       },
 
       test("per-workspace isolation — one resolver instance per WorkspaceId") {

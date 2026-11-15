@@ -3,8 +3,9 @@ package com.risquanter.register.services.pipeline
 import zio.*
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
-import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, BranchChoice}
+import com.risquanter.register.services.cache.MitigationScopeResolver
 
 /**
   * Result of a mutation notification.
@@ -43,6 +44,8 @@ trait InvalidationHandler {
     * - Removed nodes: parent in old tree (if it survives in new tree)
     * - Reparented nodes: old parent (if surviving) + new parent
     * - Content-changed nodes: the node itself
+    * - Mitigation changes: the nodes whose mitigated figures moved, from the
+    *   mitigation collection and both versions' resolved scopes
     * Reparent and content-change contributions are unioned ADDITIVELY — a
     * node that is both reparented and param-changed in one mutation yields
     * both contributions. Treating them as alternatives drops the content
@@ -165,6 +168,7 @@ final case class InvalidationHandlerLive(
     * - Removed node → its parent in old tree (if parent survives in new tree)
     * - Reparented node → old parent (if surviving) + new parent
     * - Content-changed node → the node itself
+    * - Mitigation change → each node `mitigationAffectedNodes` names
     *
     * Reparent and content-change checks are independent and their
     * contributions are unioned ADDITIVELY (see the trait doc).
@@ -218,7 +222,43 @@ final case class InvalidationHandlerLive(
         fromReparent ++ fromContentChange
       }
 
-    (affectedFromAdded ++ affectedFromRemoved ++ affectedFromChanged, removed)
+    (affectedFromAdded ++ affectedFromRemoved ++ affectedFromChanged ++ mitigationAffectedNodes(oldTree, newTree), removed)
   }
+
+  /** Nodes whose mitigated figures changed because the mitigation collection
+    * changed.
+    *
+    * A mitigation is compared on what it does — its target, its spec and its
+    * precedence — so renaming one contributes nothing, which is correct: a name
+    * changes no figure. A mitigation whose effect changed affects every node in
+    * either version's scope. A mitigation whose effect is unchanged but whose
+    * scope moved — a node was added, removed or moved into or out of what its
+    * predicate matches — affects exactly the nodes the two scopes disagree on.
+    *
+    * Resolving both versions costs two knowledge-base builds per mutation,
+    * which is the same order as the tree-diff this method already performs and
+    * orders of magnitude below a simulation.
+    */
+  private def mitigationAffectedNodes(oldTree: RiskTree, newTree: RiskTree): Set[NodeId] = {
+    val oldScopes = MitigationScopeResolver.resolveUncached(oldTree).appliedScopes
+    val newScopes = MitigationScopeResolver.resolveUncached(newTree).appliedScopes
+    val oldById   = oldTree.mitigations.map(m => m.id -> m).toMap
+    val newById   = newTree.mitigations.map(m => m.id -> m).toMap
+
+    (oldById.keySet ++ newById.keySet).flatMap { id =>
+      val before = oldScopes.getOrElse(id, Set.empty)
+      val after  = newScopes.getOrElse(id, Set.empty)
+      val effectChanged = oldById.get(id).map(mitigationEffect) != newById.get(id).map(mitigationEffect)
+      if effectChanged then before ++ after
+      else (before ++ after) -- (before intersect after)
+    }.filter(newTree.index.nodes.contains)
+  }
+
+  /** What a mitigation does, as a comparison key: its target, its spec and
+    * its precedence. Every field these hold is a value or an immutable
+    * sequence, so the derived `==` is content equality, as it is for a node.
+    * The name is deliberately not part of the key. */
+  private def mitigationEffect(m: Mitigation): (MitigationTarget, MitigationSpec, MitigationPrecedence) =
+    (m.target, m.spec, m.precedence)
 
 }

@@ -3,7 +3,11 @@ package com.risquanter.register.services.pipeline
 import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
-import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
+import com.risquanter.register.domain.data.{
+  RiskLeaf, RiskPortfolio, RiskTree, RiskNode,
+  Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
+  RelativeLikelihood, RelativeSeverity
+}
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.services.sse.SSEHub
@@ -18,7 +22,8 @@ import com.risquanter.register.testutil.TestHelpers.*
   * node whose figures changed (nodes + ancestors), with reparent and
   * content-change contributions unioned ADDITIVELY. An exclusive if/else-if
   * would drop the content change for a node that was both reparented and
-  * param-changed in one mutation.
+  * param-changed in one mutation. A mitigation change contributes the nodes
+  * whose mitigated figures moved.
   */
 object InvalidationHandlerSpec extends ZIOSpecDefault {
 
@@ -81,7 +86,10 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     "Test fixture has invalid RiskTree"
   )
 
-  private def treeWith(nodes: Seq[com.risquanter.register.domain.data.RiskNode]): RiskTree =
+  private def treeWith(nodes: Seq[RiskNode]): RiskTree =
+    treeWithMitigations(nodes, Nil)
+
+  private def treeWithMitigations(nodes: Seq[RiskNode], mitigations: List[Mitigation]): RiskTree =
     unsafeGet(
       RiskTree.fromNodes(
         id = testTreeId,
@@ -89,10 +97,35 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         nodes = nodes,
         rootId = nodeId("ops-risk"),
         seedVarHighWater = None,
-        mitigations = Nil
+        mitigations = mitigations
       ),
       "Mutated fixture has invalid RiskTree"
     )
+
+  /** A leaf-stage mitigation named `name`, targeting what `predicate` selects. */
+  private def mitigation(name: String, predicate: String, precedence: MitigationPrecedence): Mitigation =
+    unsafeGet(
+      Mitigation.create(
+        mitigationId("control"),
+        SafeName.fromString(name).toOption.get,
+        MitigationTarget.Predicate(TargetingPredicate.create(predicate).toEither.toOption.get),
+        MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep),
+        precedence
+      ),
+      "mitigation"
+    )
+
+  /** Targets the one leaf "Software Bug". */
+  private val softwareControl: Mitigation =
+    mitigation("Software Control", s"""eq(x, node_id("${idStr("software")}"))""", MitigationPrecedence.default)
+
+  /** Targets every leaf under "IT Risk". */
+  private val itControl: Mitigation =
+    mitigation("IT Control", s"""leaf_descendant_of(x, node_id("${idStr("it-risk")}"))""", MitigationPrecedence.default)
+
+  private def published(oldTree: RiskTree, newTree: RiskTree): ZIO[InvalidationHandler, Nothing, Set[String]] =
+    ZIO.serviceWithZIO[InvalidationHandler](_.handleMutation(oldTree, newTree, BranchChoice.Main))
+      .map(_.invalidatedNodes.map(_.value).toSet)
 
   val testLayer: ZLayer[Any, Nothing, InvalidationHandler & SSEHub] =
     ZLayer.make[InvalidationHandler & SSEHub](
@@ -253,6 +286,56 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         assertTrue(ids.contains(idStr("hardware"))) &&     // removed node
         assertTrue(ids.contains(idStr("it-risk")))          // surviving parent
       }
+    },
+
+    test("adding a mitigation publishes its scope and the ancestors") {
+      published(testTree, treeWithMitigations(allNodes, List(softwareControl))).map(ids =>
+        assertTrue(ids == Set(idStr("software"), idStr("it-risk"), idStr("ops-risk"))))
+    },
+
+    test("removing a mitigation publishes the scope it had") {
+      published(treeWithMitigations(allNodes, List(softwareControl)), testTree).map(ids =>
+        assertTrue(ids == Set(idStr("software"), idStr("it-risk"), idStr("ops-risk"))))
+    },
+
+    test("renaming a mitigation publishes nothing") {
+      val renamed = mitigation("Software Guard", s"""eq(x, node_id("${idStr("software")}"))""", MitigationPrecedence.default)
+      published(treeWithMitigations(allNodes, List(softwareControl)), treeWithMitigations(allNodes, List(renamed)))
+        .map(ids => assertTrue(ids.isEmpty))
+    },
+
+    test("changing a mitigation's precedence publishes its whole scope") {
+      val reordered = mitigation("IT Control", s"""leaf_descendant_of(x, node_id("${idStr("it-risk")}"))""", MitigationPrecedence(5))
+      published(treeWithMitigations(allNodes, List(itControl)), treeWithMitigations(allNodes, List(reordered)))
+        .map(ids => assertTrue(ids == Set(idStr("hardware"), idStr("software"), idStr("it-risk"), idStr("ops-risk"))))
+    },
+
+    test("adding a node into a predicate's match publishes the difference between the two scopes") {
+      // A new leaf under it-risk enters itControl's scope. The node diff names
+      // only the new leaf's parent; the leaf itself comes from the mitigation
+      // diff.
+      val networkLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
+        id = idStr("network"),
+        name = "Network Outage",
+        probability = 0.2,
+        shape = lognormalShape(1000L, 20000L),
+        parentId = Some(nodeId("it-risk")),
+        seedVarId = 5L
+      ), "leaf")
+      val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(subject = ErrorSubject.Request,
+        id = idStr("it-risk"),
+        name = "IT Risk",
+        childIds = Vector(idStr("hardware"), idStr("software"), idStr("network")),
+        parentId = Some(nodeId("ops-risk"))
+      ), "portfolio")
+      val grown = Seq(rootPortfolio, cyberLeaf, newItPortfolio, hardwareLeaf, softwareLeaf, networkLeaf)
+      for
+        withMitigation    <- published(treeWithMitigations(allNodes, List(itControl)), treeWithMitigations(grown, List(itControl)))
+        withoutMitigation <- published(treeWith(allNodes), treeWith(grown))
+      yield assertTrue(
+        withMitigation == Set(idStr("network"), idStr("it-risk"), idStr("ops-risk")),
+        !withoutMitigation.contains(idStr("network"))
+      )
     },
 
     test("tree deletion publishes every node ID") {
