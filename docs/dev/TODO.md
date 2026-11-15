@@ -2861,3 +2861,35 @@ the repository `vague-quantifier-logic`. Five surface changes reach register:
   wording gives way, as decision 15 ruled on 2026-11-13.
 
 **Status.** Resolved by `PLAN-RISKTRANSFORM.md` §7.6.15, slice 7.
+
+## 68. vql-engine 0.20.0 refuses deeply nested input before parsing — what register changes on the pin bump
+
+**What changed in the engine.** `FOLParser.parse` and `VagueQueryParser.parse`
+run a check on the token list before parsing. They refuse a list whose
+parentheses nest deeper than 64, or that holds more than 256 operator tokens
+and quantified variables. The engine's lexer is stack-safe. Within the limits,
+every input parses as before. A realistic targeting predicate of 85 hand-picked
+nodes counts 84 operators and nests two parentheses deep. The engine record is
+vql-engine's `docs/ADR-024.md`.
+
+- `parser.ParseError` gains `Nesting(failure: NestingFailure, position: SourcePosition)`.
+  The position is always `Unknown`.
+- `vql.error.ParseRefusal` gains `Nesting(failure: NestingFailure)`.
+- `parser.NestingFailure` is `ParenthesesTooDeep(limit: Int)` or
+  `TooManyOperators(limit: Int)`. Neither holds caller text.
+
+**What register changes.**
+
+- `build.sbt` line 40: `vqlEngineVersion` to `"0.20.0"`.
+- `modules/common/.../http/errors/QueryProblem.scala`. Two matches are
+  exhaustive and stop compiling until each gains an arm:
+  - the `ParseRefusal` match, beside line 278, gains `ParseRefusal.Nesting(failure)`;
+  - the `FormulaParseError` match, beside line 313, gains
+    `FormulaParseError.Nesting(failure, position)`.
+
+  Each maps to a `ParseProblem` case register adds for the two
+  `NestingFailure` cases and their limits.
+- `PLAN-RISKTRANSFORM.md` §7.6.12 decision 20 waits on this release. Slice 2
+  may land once the pin is 0.20.0.
+
+**Status.** Waits on the 0.20.0 release.
