@@ -32,9 +32,9 @@ object ResultTransformInterpreterSpec extends ZIOSpecDefault {
           ResultTransformInterpreter.toTransform(spec).run(outcomes).outcomes == direct.run(outcomes).outcomes
         })
       },
-      test("InsurancePolicy interprets as deductible then cap") {
-        val policy = InsurancePolicy.create(10000L, 1000000L).toEither.toOption.get
-        val direct = RiskResultTransform.applyDeductible(10000L).andThen(RiskResultTransform.capLosses(1000000L))
+      test("InsurancePolicy interprets as insurancePolicy") {
+        val policy = InsurancePolicy(10000L, 1000000L)
+        val direct = RiskResultTransform.insurancePolicy(10000L, 1000000L)
         assertTrue(
           ResultTransformInterpreter.toTransform(policy).run(outcomes).outcomes == direct.run(outcomes).outcomes
         )
@@ -58,8 +58,8 @@ object ResultTransformInterpreterSpec extends ZIOSpecDefault {
           TransformPipeline(List(ScaleLosses(retentionFactor(0.5)), ApplyDeductible(10000L)))
         val input = outcomesOf(100,Map(1 -> 100000L))
         assertTrue(
-          ResultTransformInterpreter.toTransform(deductibleThenScale).run(input).outcomeOf(1) == 45000L,
-          ResultTransformInterpreter.toTransform(scaleThenDeductible).run(input).outcomeOf(1) == 40000L
+          ResultTransformInterpreter.toTransform(deductibleThenScale).run(input).outcomeOf(1) == 5000L,  // min(100K, 10K) × 0.5
+          ResultTransformInterpreter.toTransform(scaleThenDeductible).run(input).outcomeOf(1) == 10000L  // min(100K × 0.5, 10K)
         )
       }
     )

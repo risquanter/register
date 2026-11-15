@@ -4,7 +4,7 @@ import io.github.iltotore.iron.autoRefine
 import zio.json.*
 import zio.test.*
 import lexer.{DecimalText, Found, GrammarSymbol, LexFailure, LiteralText, TokenKind, VariableText, WordText}
-import parser.{SourcePosition, SyntaxFailure, ParseError as FormulaParseError}
+import parser.{NestingFailure, SourcePosition, SyntaxFailure, ParseError as FormulaParseError}
 import vql.error.{ParseRefusal, QueryError}
 import vql.id.TypeId
 
@@ -51,7 +51,11 @@ object ParseProblemSpec extends ZIOSpecDefault:
             ParseProblem.fromRefusal(ParseRefusal.Formula(SyntaxFailure.ClosingBracketExpected(TokenKind.Symbol(GrammarSymbol.RParen), Found.EndOfInput))) ==
               Right(ParseProblem.Formula(SyntaxProblem.ClosingBracketExpected(QueryToken.Symbol(QueryGrammarSymbol.RParen), QueryFound.EndOfInput()))),
             ParseProblem.fromRefusal(ParseRefusal.Lexical(LexFailure.NewlineInLiteral)) ==
-              Right(ParseProblem.Lexical(LexProblem.NewlineInLiteral))
+              Right(ParseProblem.Lexical(LexProblem.NewlineInLiteral)),
+            ParseProblem.fromRefusal(ParseRefusal.Nesting(NestingFailure.ParenthesesTooDeep(64))) ==
+              Right(ParseProblem.Nesting(NestingProblem.ParenthesesTooDeep(64))),
+            ParseProblem.fromRefusal(ParseRefusal.Nesting(NestingFailure.TooManyOperators(256))) ==
+              Right(ParseProblem.Nesting(NestingProblem.TooManyOperators(256)))
           )
         },
         test("a negative integer the parser cannot produce is a defect") {
@@ -85,7 +89,9 @@ object ParseProblemSpec extends ZIOSpecDefault:
             ParseProblem.fromFormulaError(FormulaParseError.Trailing(engineX, Nil, SourcePosition.Unknown)) ==
               Right(Positioned(QueryPosition.Unknown(), ParseProblem.TrailingTokens(x, Nil))),
             ParseProblem.fromFormulaError(FormulaParseError.Lex(LexFailure.RefusedLiteralCharacter, SourcePosition.At(12))) ==
-              Right(Positioned(QueryPosition.At(12), ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter)))
+              Right(Positioned(QueryPosition.At(12), ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter))),
+            ParseProblem.fromFormulaError(FormulaParseError.Nesting(NestingFailure.ParenthesesTooDeep(64), SourcePosition.Unknown)) ==
+              Right(Positioned(QueryPosition.Unknown(), ParseProblem.Nesting(NestingProblem.ParenthesesTooDeep(64))))
           )
         },
         test("a negative position is a defect") {
@@ -107,7 +113,8 @@ object ParseProblemSpec extends ZIOSpecDefault:
             Positioned(QueryPosition.At(4), ParseProblem.SymbolExpected(QueryGrammarSymbol.RBrace, ParseContext.Denominator, foundX)),
             Positioned(QueryPosition.Unknown(), ParseProblem.RangeVariablesNotAnswered(Set(wordVar("y")), Nil)),
             Positioned(QueryPosition.Unknown(), ParseProblem.Lexical(LexProblem.UnterminatedLiteral)),
-            Positioned(QueryPosition.Unknown(), ParseProblem.ToleranceOutOfRange())
+            Positioned(QueryPosition.Unknown(), ParseProblem.ToleranceOutOfRange()),
+            Positioned(QueryPosition.Unknown(), ParseProblem.Nesting(NestingProblem.TooManyOperators(256)))
           )
           assertTrue(problems.forall(p => p.toJson.fromJson[Positioned[ParseProblem]] == Right(p)))
         },
@@ -162,6 +169,10 @@ object ParseProblemSpec extends ZIOSpecDefault:
               "A quoted literal holds a line break before its closing '\"'",
             at(ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter)) ==
               "A quoted literal holds a character other than letters, digits, spaces and / _ . + -",
+            at(ParseProblem.Nesting(NestingProblem.ParenthesesTooDeep(64))) ==
+              "The text nests its parentheses deeper than 64 levels",
+            at(ParseProblem.Nesting(NestingProblem.TooManyOperators(256))) ==
+              "The text holds more than 256 operators and quantified variables",
             at(ParseProblem.QuantifiedVariableNotInRange(wordVar("x"), Set(wordVar("y")))) ==
               "The quantified variable 'x' must occur free in the range formula",
             ParseProblem.describe(Positioned(QueryPosition.At(9), ParseProblem.Lexical(LexProblem.UnterminatedLiteral))) ==

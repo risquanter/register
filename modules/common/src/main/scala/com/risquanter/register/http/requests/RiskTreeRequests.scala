@@ -2,12 +2,15 @@ package com.risquanter.register.http.requests
 
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
-import com.risquanter.register.domain.data.{DistributionShape, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, NodeId, Probability}
+import com.risquanter.register.domain.data.{
+  AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget, RiskLeaf,
+  RiskNode, RiskPortfolio, TargetingPredicate
+}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, MitigationId, SafeName, SafeId, SeedVarId, NodeId, Probability}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedCollection, ValidationError
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedCollection, SubmittedMitigations, ValidationError
 }
 
 /** ADR-017 DTO validators for hierarchical risk tree operations. */
@@ -105,6 +108,32 @@ object RiskTreeRequests {
     kind: NodeKind
   )
 
+  /** A submitted mitigation, refined and checked against the stored tree. Its
+    * subject names it in a later error. */
+  final case class ResolvedMitigation(
+    subject:    ErrorSubject,
+    id:         MitigationId,
+    name:       SafeName.SafeName,
+    target:     MitigationTarget,
+    spec:       ResolvedSpec,
+    precedence: MitigationPrecedence
+  )
+
+  /** A spec that is final, or an absolute statement whose base stamp the
+    * service computes, because the stamp hashes the anchor leaf as the request
+    * builds it.
+    *
+    * {{{
+    * // a new absolute statement on stored leaf L
+    * ResolvedSpec.Unstamped(AbsoluteReplacement.Likelihood(p), L)
+    * // the same statement kept unchanged, with KeepIfUnchanged
+    * ResolvedSpec.Complete(MitigationSpec.LeafAbsolute(AbsoluteReplacement.Likelihood(p), L, storedStamp))
+    * }}}
+    */
+  enum ResolvedSpec:
+    case Complete(spec: MitigationSpec)
+    case Unstamped(replacement: AbsoluteReplacement, anchor: NodeId)
+
   /** A resolved create request: names refined, ids generated, topology
     * validated, shapes gated. `nodes` and `leaves` are keyed by name for parent
     * resolution in the service. Each leaf keeps the subject that names it in a
@@ -114,13 +143,15 @@ object RiskTreeRequests {
     nodes: Map[SafeName.SafeName, ResolvedNode],
     leaves: Map[SafeName.SafeName, SubmittedLeaf],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
-    rootName: SafeName.SafeName
+    rootName: SafeName.SafeName,
+    mitigations: Seq[ResolvedMitigation]
   )
 
   /** A resolved update request: existing nodes keep the caller's ids and new
     * nodes get generated ones. Shapes are gated here, so the service does not
     * repeat the cross-field checks. Each leaf keeps the subject that names it
-    * in a later error. */
+    * in a later error. Kept and added mitigations meet in one collection,
+    * because each already carries its id. */
   final case class ResolvedUpdate(
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
@@ -128,15 +159,21 @@ object RiskTreeRequests {
     existingLeaves: Map[SafeName.SafeName, ExistingLeaf],
     addedLeaves: Map[SafeName.SafeName, SubmittedLeaf],
     providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
-    rootName: SafeName.SafeName
+    rootName: SafeName.SafeName,
+    mitigations: Seq[ResolvedMitigation]
   )
 
   // Entry points that delegate to the request companions.
   def resolveCreate(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] =
     RiskTreeDefinitionRequest.resolve(req, newId)
 
-  def resolveUpdate(req: RiskTreeUpdateRequest, stored: TreeIndex, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] =
-    RiskTreeUpdateRequest.resolve(req, stored, newId)
+  def resolveUpdate(
+    req: RiskTreeUpdateRequest,
+    stored: TreeIndex,
+    storedMitigations: Seq[Mitigation],
+    newId: IdGenerator
+  ): Validation[ValidationError, ResolvedUpdate] =
+    RiskTreeUpdateRequest.resolve(req, stored, storedMitigations, newId)
 
   /** The single place the wire's absent parent and the domain's named case meet.
     * A JSON `null`, an absent key and a blank string all mean the root.
@@ -289,27 +326,139 @@ object RiskTreeRequests {
     leaves: Seq[RiskLeafUpdateRequest],
     stored: TreeIndex
   ): Validation[ValidationError, Unit] =
-    def check(id: SafeId.SafeId, listedAs: NodeKind, seenBefore: Boolean): Validation[ValidationError, Unit] =
-      val location = ErrorLocation.Field(ErrorSubject.ExistingNode(NodeId(id)), FieldName.Id)
-      (seenBefore, stored.nodes.get(NodeId(id)), listedAs) match
-        case (true, _, _) =>
-          Validation.fail(ValidationError(location, FieldProblem.StoredNodeListedTwice))
-        case (false, Some(_: RiskPortfolio), NodeKind.Portfolio) | (false, Some(_: RiskLeaf), NodeKind.Leaf) =>
-          Validation.succeed(())
-        case (false, Some(_: RiskLeaf), NodeKind.Portfolio) =>
-          Validation.fail(ValidationError(location, FieldProblem.StoredNodeIsLeaf))
-        case (false, Some(_: RiskPortfolio), NodeKind.Leaf) =>
-          Validation.fail(ValidationError(location, FieldProblem.StoredNodeIsPortfolio))
-        case (false, None, _) =>
-          Validation.fail(ValidationError(location, FieldProblem.StoredNodeNotInTree))
-    val listed: Seq[(SafeId.SafeId, NodeKind)] =
+    def location(id: NodeId): ErrorLocation = ErrorLocation.Field(ErrorSubject.ExistingNode(id), FieldName.Id)
+    val listed: Seq[(NodeId, NodeKind)] =
       (portfolios.map(p => (p.id, NodeKind.Portfolio)) ++ leaves.map(l => (l.id, NodeKind.Leaf)))
-        .flatMap((rawId, kind) => ValidationUtil.refineId(rawId, ErrorLocation.requestField(FieldName.Id)).toOption.map(_ -> kind))
+        .flatMap((rawId, kind) =>
+          ValidationUtil.refineId(rawId, ErrorLocation.requestField(FieldName.Id)).toOption.map(NodeId(_) -> kind))
+    // The kind an id is checked against is the one its first listing gives.
+    val firstKind: Map[NodeId, NodeKind] = listed.reverse.toMap
+    checkFirstListings(listed.map(_._1))(
+      id => requireStoredNodeOfKind(id, firstKind(id), stored.nodes, location(id)),
+      id => ValidationError(location(id), FieldProblem.StoredNodeListedTwice)
+    )
+
+  /** Refuses each key at its second and later listing; every first listing
+    * goes to `check`. The refusals accumulate.
+    *
+    * {{{
+    * checkFirstListings(Seq(a, b, a))(check, twice) // check(a), check(b), and twice(a) for the third
+    * }}}
+    */
+  private[requests] def checkFirstListings[K](listed: Seq[K])(
+    check: K => Validation[ValidationError, Unit],
+    listedTwice: K => ValidationError
+  ): Validation[ValidationError, Unit] =
     val (_, checks) =
-      listed.foldLeft((Set.empty[SafeId.SafeId], Vector.empty[Validation[ValidationError, Unit]])) {
-        case ((seen, acc), (id, kind)) => (seen + id, acc :+ check(id, kind, seen.contains(id)))
+      listed.foldLeft((Set.empty[K], Vector.empty[Validation[ValidationError, Unit]])) {
+        case ((seen, acc), key) =>
+          val result = if seen.contains(key) then Validation.fail(listedTwice(key)) else check(key)
+          (seen + key, acc :+ result)
       }
     Validation.validateAll(checks).as(())
+
+  /** The id names a stored node of `kind`, refused at `location` otherwise. */
+  private[requests] def requireStoredNodeOfKind(
+    id: NodeId,
+    kind: NodeKind,
+    stored: Map[NodeId, RiskNode],
+    location: ErrorLocation
+  ): Validation[ValidationError, Unit] =
+    (stored.get(id), kind) match
+      case (Some(_: RiskPortfolio), NodeKind.Portfolio) | (Some(_: RiskLeaf), NodeKind.Leaf) =>
+        Validation.succeed(())
+      case (Some(_: RiskLeaf), NodeKind.Portfolio) =>
+        Validation.fail(ValidationError(location, FieldProblem.StoredNodeIsLeaf))
+      case (Some(_: RiskPortfolio), NodeKind.Leaf) =>
+        Validation.fail(ValidationError(location, FieldProblem.StoredNodeIsPortfolio))
+      case (None, _) =>
+        Validation.fail(ValidationError(location, FieldProblem.StoredNodeNotInTree))
+
+  /** The fields every submitted mitigation refines, at `subject`. */
+  private def refineMitigationFields(
+    name: String,
+    target: String,
+    spec: MitigationSpecRequest,
+    subject: ErrorSubject
+  ): Validation[ValidationError, (SafeName.SafeName, MitigationTarget, ResolvedSpec)] =
+    Validation.validateWith(
+      refineNameField(name, ErrorLocation.Field(subject, FieldName.Name)),
+      TargetingPredicate.create(target, subject).map(MitigationTarget.Predicate(_)),
+      spec.toSpec(subject)
+    )((n, t, s) => (n, t, s))
+
+  /** The mitigations a request adds, each with an id minted by `newId`. */
+  private[requests] def refineMitigationDefs(
+    mitigations: Seq[MitigationDefinitionRequest],
+    newId: IdGenerator
+  ): Validation[ValidationError, Seq[ResolvedMitigation]] =
+    collectAllWithIndex(mitigations) { (m, idx) =>
+      val subject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, idx)
+      refineMitigationFields(m.name, m.target, m.spec, subject).map((name, target, spec) =>
+        ResolvedMitigation(subject, MitigationId(newId()), name, target, spec, m.precedence))
+    }
+
+  /** The mitigations a request keeps, by id. A kept absolute statement becomes
+    * `Complete` with the stored spec, stamp included, when its replacement and
+    * anchor equal the stored ones and its choice is `KeepIfUnchanged`.
+    * Otherwise it stays `Unstamped`, and the service stamps it. */
+  private[requests] def refineExistingMitigations(
+    mitigations: Seq[MitigationUpdateRequest],
+    stored: Seq[Mitigation]
+  ): Validation[ValidationError, Seq[ResolvedMitigation]] =
+    val storedById: Map[MitigationId, Mitigation] = stored.map(m => m.id -> m).toMap
+    collectAllWithIndex(mitigations) { (m, idx) =>
+      val subject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.Mitigations, idx)
+      Validation.validateWith(
+        toValidation(ValidationUtil.refineId(m.id, ErrorLocation.Field(subject, FieldName.Id))).map(MitigationId(_)),
+        refineMitigationFields(m.name, m.target, m.spec, subject)
+      ) { case (id, (name, target, spec)) =>
+        ResolvedMitigation(
+          ErrorSubject.Mitigation(id), id, name, target, keptSpec(m.spec, spec, storedById.get(id)), m.precedence)
+      }
+    }
+
+  /** The stored spec, stamp included, for an absolute statement resubmitted
+    * unchanged with `KeepIfUnchanged`; the resolved spec otherwise. */
+  private def keptSpec(submitted: MitigationSpecRequest, resolved: ResolvedSpec, stored: Option[Mitigation]): ResolvedSpec =
+    (submitted, resolved, stored.map(_.spec)) match
+      case (
+            MitigationSpecRequest.LeafAbsolute(_, _, BaseStampChoice.KeepIfUnchanged),
+            ResolvedSpec.Unstamped(replacement, anchor),
+            Some(storedSpec @ MitigationSpec.LeafAbsolute(storedReplacement, storedAnchor, _))
+          ) if replacement == storedReplacement && anchor == storedAnchor =>
+        ResolvedSpec.Complete(storedSpec)
+      case _ => resolved
+
+  /** Every kept entry names a stored mitigation, and none is named twice. An
+    * id that does not refine is skipped here, because the entry's own
+    * refinement reports it. */
+  private[requests] def requireStoredMitigations(
+    mitigations: Seq[MitigationUpdateRequest],
+    stored: Seq[Mitigation]
+  ): Validation[ValidationError, Unit] =
+    val storedIds: Set[MitigationId] = stored.map(_.id).toSet
+    def location(id: MitigationId): ErrorLocation = ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Id)
+    val listed: Seq[MitigationId] =
+      mitigations.flatMap(m =>
+        ValidationUtil.refineId(m.id, ErrorLocation.requestField(FieldName.Id)).toOption.map(MitigationId(_)))
+    checkFirstListings(listed)(
+      id =>
+        if storedIds.contains(id) then Validation.succeed(())
+        else Validation.fail(ValidationError(location(id), FieldProblem.StoredMitigationNotInTree)),
+      id => ValidationError(location(id), FieldProblem.StoredMitigationListedTwice)
+    )
+
+  /** Every unstamped statement's anchor names a stored leaf. Two mitigations
+    * may anchor the same leaf. */
+  private[requests] def requireStoredAnchors(
+    mitigations: Seq[ResolvedMitigation],
+    stored: Map[NodeId, RiskNode]
+  ): Validation[ValidationError, Unit] =
+    Validation.validateAll(mitigations.collect {
+      case ResolvedMitigation(subject, _, _, _, ResolvedSpec.Unstamped(_, anchor), _) =>
+        requireStoredNodeOfKind(anchor, NodeKind.Leaf, stored, ErrorLocation.Field(subject, FieldName.Anchor))
+    }).as(())
 
   // Guard: portfolios must point to portfolios in the provided set (or be root).
   private[requests] def requirePortfolioParents(

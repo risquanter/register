@@ -5,10 +5,11 @@ import zio.prelude.{Equal, Identity}
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.ResultTransformSpec.*
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValueRange}
 import com.risquanter.register.testutil.TestHelpers.retentionFactor
 
 /**
- * ResultTransformSpec as shared data: the InsurancePolicy cross-field rule,
+ * ResultTransformSpec as shared data: the field rules each case refines,
  * Equal lawfulness on reified data, discriminated codec round-trips, and the
  * TransformPipeline monoid. Interpreting a spec into an executable transform
  * is the server's concern and is tested there.
@@ -20,16 +21,31 @@ object ResultTransformSpecSpec extends ZIOSpecDefault {
     CapLosses(1000000L),
     ScaleLosses(retentionFactor(0.8)),
     FilterBelowThreshold(10000L),
-    InsurancePolicy.create(10000L, 1000000L).toEither.toOption.get
+    InsurancePolicy(10000L, 1000000L)
   )
 
   def spec = suite("ResultTransformSpecSpec")(
 
-    suite("cross-field rules")(
-      test("InsurancePolicy.create rejects cap <= deductible") {
+    suite("field rules")(
+      test("InsurancePolicy.refine accumulates both field refusals at the subject it is given") {
+        val subject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 1)
+        val errors  = InsurancePolicy.refine(-1L, 0L, subject).toEither.swap.toOption.get.toList
+        assertTrue(errors.map(_.location) == List(
+          ErrorLocation.Field(subject, FieldName.Deductible),
+          ErrorLocation.Field(subject, FieldName.Limit)
+        ))
+      },
+      test("InsurancePolicy.refine accepts a zero deductible — first-unit coverage") {
+        assertTrue(InsurancePolicy.refine(0L, 50L, ErrorSubject.Request).toEither == Right(InsurancePolicy(0L, 50L)))
+      },
+      test("InsurancePolicy.refine accepts a limit at or below the deductible") {
+        assertTrue(InsurancePolicy.refine(50L, 5L, ErrorSubject.Request).toEither == Right(InsurancePolicy(50L, 5L)))
+      },
+      test("ApplyDeductible.refine refuses zero — the entity would bear nothing") {
+        val errors = ApplyDeductible.refine(0L, ErrorSubject.Request).toEither.swap.toOption.get.toList
         assertTrue(
-          InsurancePolicy.create(10000L, 10000L).toEither.isLeft,
-          InsurancePolicy.create(10000L, 5000L).toEither.isLeft
+          errors.map(_.problem) == List(FieldProblem.OutOfRange(ValueRange.Deductible)),
+          errors.map(_.location) == List(ErrorLocation.Field(ErrorSubject.Request, FieldName.Deductible))
         )
       }
     ),
@@ -52,7 +68,7 @@ object ResultTransformSpecSpec extends ZIOSpecDefault {
       },
       test("op discriminator prevents cross-case decoding") {
         // InsurancePolicy JSON must not decode as ApplyDeductible despite the shared field
-        val policyJson = (InsurancePolicy.create(10000L, 1000000L).toEither.toOption.get: ResultTransformSpec).toJson
+        val policyJson = (InsurancePolicy(10000L, 1000000L): ResultTransformSpec).toJson
         assertTrue(policyJson.fromJson[ResultTransformSpec].toOption.get match {
           case _: InsurancePolicy => true
           case _                  => false
@@ -64,9 +80,18 @@ object ResultTransformSpecSpec extends ZIOSpecDefault {
       test("a cap of zero is rejected at decode — the entity would bear nothing") {
         assertTrue("""{"op":"CapLosses","cap":0}""".fromJson[ResultTransformSpec].isLeft)
       },
-      test("an insurance policy with a cap of zero is rejected at decode") {
+      test("a deductible of zero is rejected at decode — the entity would bear nothing") {
+        assertTrue("""{"op":"ApplyDeductible","deductible":0}""".fromJson[ResultTransformSpec].isLeft)
+      },
+      test("an insurance policy with a limit of zero is rejected at decode") {
         assertTrue(
-          """{"op":"InsurancePolicy","deductible":0,"cap":0}"""
+          """{"op":"InsurancePolicy","deductible":0,"limit":0}"""
+            .fromJson[ResultTransformSpec].isLeft
+        )
+      },
+      test("an insurance policy written with a cap is rejected at decode — the field is limit") {
+        assertTrue(
+          """{"op":"InsurancePolicy","deductible":1,"cap":10}"""
             .fromJson[ResultTransformSpec].isLeft
         )
       }

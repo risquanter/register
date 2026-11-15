@@ -82,14 +82,16 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       probability = 0.25,
       distributionShape = DistributionShapeRequest.Lognormal(
         minLoss = 1000L, maxLoss = 50000L
-      )
+      ),
+      seedVarId = None
     )
 
   private def treeReq(treeName: String): RiskTreeDefinitionRequest =
     RiskTreeDefinitionRequest(
       name = treeName,
       portfolios = Seq(RiskPortfolioDefinitionRequest("Repro Root", None)),
-      leaves = Seq(leafDef("Cyber Attack", "Repro Root"), leafDef("Fraud", "Repro Root"))
+      leaves = Seq(leafDef("Cyber Attack", "Repro Root"), leafDef("Fraud", "Repro Root")),
+      newMitigations = Nil
     )
 
   // ── Parts 2 & 3: full HTTP servers (in-memory repo, production sim config) ──

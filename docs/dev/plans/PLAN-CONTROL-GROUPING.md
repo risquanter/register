@@ -14,8 +14,8 @@ Its whole job is to hold what is already established and what has to be
 researched or ruled, so neither has to be rebuilt. The direction was chosen on
 2026-10-23 — the idea is the user's — and the choice was only that this becomes
 its own plan rather than being folded into
-[`PLAN-LOSS-SHAPE-ALGEBRA.md`](PLAN-LOSS-SHAPE-ALGEBRA.md), which runs first and
-is unfinished.
+[`DONE-PLAN-LOSS-SHAPE-ALGEBRA.md`](../../archive/plans/DONE-PLAN-LOSS-SHAPE-ALGEBRA.md),
+which ran first and has landed.
 
 The user creates `PLAN-CONTROL-GROUPING-INVENTORY.md` if and when this plan is
 elevated and approved.
@@ -116,7 +116,7 @@ relation across members. That correction is its own work and is not part of this
 plan.
 
 **The two-layer stage split is compatible with this plan.**
-`PLAN-LOSS-SHAPE-ALGEBRA.md` has landed, and the split it shipped is not symmetric:
+`DONE-PLAN-LOSS-SHAPE-ALGEBRA.md` has landed, and the split it shipped is not symmetric:
 `MitigationSpec` has a `sealed trait LeafStageSpec` grouping `LeafRelative` and
 `LeafAbsolute`, and one `ResultStage` case holding a `TransformPipeline`. There is
 no `ResultStageSpec`. Under this plan the result-stage side would hold one
@@ -175,11 +175,11 @@ This needs the existing per-path merge behaviour examined first.
 
 **To research.** Each `Mitigation` carries `target: MitigationTarget`, a predicate
 resolved server-side into a node set by `MitigationScopeResolver`, which memoizes
-per mitigation identifier. If members kept their own targets, a control would be a
+per tree version one outcome map keyed by mitigation identifier. If members kept their own targets, a control would be a
 bag of independently-scoped things and the problem this plan exists to remove —
 two predicates to keep in step for one authored control — would remain. So the
-target belongs on the control and members inherit it, and the resolver's
-memoization key changes with it.
+target belongs on the control and members inherit it, and the key of the
+resolver's outcome map changes with it.
 
 **`CG-D-4` — may a member narrow its control's scope, or does it always inherit
 the whole of it?** Open. Strict inheritance is simpler to reason about. A
@@ -190,7 +190,7 @@ which is a capability nobody has asked for yet.
 
 **To research.** `MitigationSelection.Selected` is keyed by `MitigationId`, and
 `Mitigation.requireDistinctNames` exists so that a user naming one in a selection
-cannot mean two. The analytics query language references mitigations by that name.
+cannot mean two. A screening query references a mitigation by that name or by its identifier.
 If a control is what an author toggles, the selection map keys on control
 identifiers and the uniqueness rule moves with it — which changes the vocabulary
 users type, not only an internal name.
@@ -206,13 +206,13 @@ down, so removing it narrows an existing capability.
 
 The correction to `RiskResultTransform.applyDeductible` and
 `RiskResultTransform.insurancePolicy` — the arithmetic computes the insurer's
-payment where it should compute the loss the entity still bears. That is a
-correctness defect in shipped code, it is being fixed separately, and this plan
-assumes it is already done.
+payment where it should compute the loss the entity still bears. That
+correctness defect is fixed by `PLAN-RISKTRANSFORM.md` §10, which this plan
+builds on.
 
-`PLAN-LOSS-SHAPE-ALGEBRA.md`'s own scope: the loss-shape coproduct, the deletion
-of `AbsoluteReplacement.Both`, the two-layer stage split, and the `EffectiveTree`
-wrapper. That plan runs first.
+`DONE-PLAN-LOSS-SHAPE-ALGEBRA.md`'s own scope: the loss-shape coproduct, the
+two-layer stage split, and the `EffectiveTree` wrapper. That plan has landed. It
+kept `AbsoluteReplacement.Both`, which section 1 of this plan would remove.
 
 ---
 

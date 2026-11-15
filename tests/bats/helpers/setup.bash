@@ -100,7 +100,8 @@ create_workspace() {
             "minLoss": 1000,
             "maxLoss": 50000
         }
-    }]
+    }],
+    "newMitigations": []
 }
 EOF
     )

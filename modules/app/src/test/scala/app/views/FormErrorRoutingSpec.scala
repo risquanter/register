@@ -62,7 +62,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
     FieldName.percentileAt(0), FieldName.quantileAt(0), FieldName.childAt(0),
     FieldName.LossRange, FieldName.PercentileQuantilePairing,
     FieldName.Mitigations, FieldName.Precedence, FieldName.Cap, FieldName.Factor,FieldName.TargetingSource,
-    FieldName.Deductible, FieldName.Threshold,
+    FieldName.Deductible, FieldName.Limit, FieldName.Threshold, FieldName.Anchor,
     FieldName.Branch, FieldName.Scenario, FieldName.At, FieldName.Source,
     FieldName.ToCommit, FieldName.CommitHash, FieldName.ContentHash,
     FieldName.WorkspaceKey, FieldName.WorkspaceKeyHash, FieldName.UserId, FieldName.Email, FieldName.Url,
@@ -357,7 +357,8 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
             probability       = 1.5,
             distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
             seedVarId         = None
-          ))
+          )),
+          newMitigations = Nil
         )
         val server = RiskTreeRequests.resolveCreate(request, () => safeId("generated")) match
           case Validation.Failure(_, es) => es.toList.map(_.location)

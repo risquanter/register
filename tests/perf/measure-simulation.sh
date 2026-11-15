@@ -100,7 +100,8 @@ tree_body() {
             minLoss: (1000 + .),
             maxLoss: (1000000 + $salt * 100000 + .)
           }
-        }] }'
+        }],
+        newMitigations: [] }'
 }
 
 # The update body for the stored tree on stdin: every node as stored, with the
@@ -117,7 +118,9 @@ update_body() {
                     distributionShape: (if .name == "L1" then .shape | .minLoss += 1 else .shape end),
                     seedVarId: null}],
         newPortfolios: [],
-        newLeaves: [] }'
+        newLeaves: [],
+        mitigations: [],
+        newMitigations: [] }'
 }
 
 # Runs curl with the given arguments and prints the request's seconds. A

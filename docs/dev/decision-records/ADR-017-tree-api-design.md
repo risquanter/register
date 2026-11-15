@@ -43,7 +43,8 @@ Structure enforces the type constraint; leaves reference portfolios by name only
 final case class RiskTreeDefinitionRequest(
   name: String,
   portfolios: Seq[RiskPortfolioDefinitionRequest],
-  leaves: Seq[RiskLeafDefinitionRequest]
+  leaves: Seq[RiskLeafDefinitionRequest],
+  newMitigations: Seq[MitigationDefinitionRequest]
 )
 ```
 
@@ -68,9 +69,9 @@ def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[Risk
 // validateTopologyUpdate: unique names ∧ single root ∧ parents resolve ∧ no cycles ∧ no empty portfolio
 ```
 
-### 4. Four Buckets: Identity-Preserving vs. New
+### 4. Buckets: Identity-Preserving vs. New
 
-`RiskTreeUpdateRequest` partitions nodes by whether they already have server identity.
+`RiskTreeUpdateRequest` partitions nodes, and mitigations, by whether they already have server identity.
 
 ```scala
 final case class RiskTreeUpdateRequest(
@@ -78,15 +79,28 @@ final case class RiskTreeUpdateRequest(
   portfolios: Seq[RiskPortfolioUpdateRequest],     // existing: matched by ULID → same NodeId, same store path
   leaves: Seq[RiskLeafUpdateRequest],              // existing: matched by ULID → fields updated in place
   newPortfolios: Seq[RiskPortfolioDefinitionRequest], // added: server mints ULID
-  newLeaves: Seq[RiskLeafDefinitionRequest]           // added: server mints ULID
+  newLeaves: Seq[RiskLeafDefinitionRequest],          // added: server mints ULID
+  mitigations: Seq[MitigationUpdateRequest],          // existing: matched by ULID → same MitigationId
+  newMitigations: Seq[MitigationDefinitionRequest]    // added: server mints ULID
 )
 ```
 
-| Bucket | id | Effect on node | Effect on store |
+| Bucket | id | Effect on node or mitigation | Effect on store |
 |--------|----|----|----|
 | `portfolios` / `leaves` | required | update fields, keep ULID | rewrite **same** path → history continues |
 | `newPortfolios` / `newLeaves` | none | create, mint ULID | new path → new lineage |
-| in tree, omitted from request | — | **deleted** (reject if it would empty a portfolio) | path removed → lineage ends |
+| `mitigations` | required | update fields, keep ULID | stored with the tree |
+| `newMitigations` | none | create, mint ULID | stored with the tree |
+| in tree, omitted from request | — | **deleted** (a node is refused if deleting it would empty a portfolio) | path removed → lineage ends |
+
+Every bucket is a required key, so a request cannot omit one by accident and
+delete what it held. A create request carries `newMitigations` only, because
+§1 keeps id-bearing buckets out of create requests.
+
+An absolute statement's anchor is the identifier of a leaf the stored tree
+holds, so a new one can be written only by an update, and the server computes
+its base stamp from that leaf. A request may delete the anchor leaf. The
+mitigation is then accepted, applies to no node, and is not reported as stale.
 
 ### 5. Identity Preservation Enables History and Time Travel
 

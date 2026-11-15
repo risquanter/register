@@ -120,16 +120,18 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         name = "Test Leaf",
         parentName = Some("Root"),
         probability = 0.1,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+        seedVarId = None
       )
-    )
+    ),
+    newMitigations = Nil
   )
 
   private val validUuid = "550e8400-e29b-41d4-a716-446655440000"
 
   private def bootstrapRequest(
     backend: SttpBackend[Task, Any],
-    userId:  Option[String] = None
+    userId:  Option[String]
   ): Task[Response[Either[String, String]]] =
     val base = basicRequest
       .post(uri"http://localhost/workspaces")

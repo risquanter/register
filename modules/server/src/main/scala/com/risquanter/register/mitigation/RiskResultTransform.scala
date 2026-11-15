@@ -2,7 +2,6 @@ package com.risquanter.register.mitigation
 
 import zio.prelude.*
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.simulation.TrialOutcomes
 
 /**
@@ -24,10 +23,8 @@ import com.risquanter.register.simulation.TrialOutcomes
  * - Composable: Multiple strategies combine via function composition
  * - Identity instance: Lawful associative combination with identity element
  *
- * Constructor parameters are Iron-refined (ADR-001): single-field rules live
- * in the parameter types, so those constructors are total; only the
- * cross-field rule of `insurancePolicy` (cap > deductible) returns
- * `Validation`.
+ * Constructor parameters are Iron-refined (ADR-001): every rule lives in the
+ * parameter types, so every constructor is total.
  *
  * The Identity instance enables:
  * ```scala
@@ -106,22 +103,22 @@ object RiskResultTransform {
   // ══════════════════════════════════════════════════════════════════
 
   /**
-   * Apply a deductible to each trial.
-   * Reduces losses by deductible amount (minimum 0).
+   * Apply a deductible to each trial: the entity bears the first `deductible`
+   * of each loss and nothing beyond it. The same function as `capLosses` at the
+   * same figure, read from the other end.
    *
-   * @param deductible Amount to subtract from each loss (non-negative)
+   * @param deductible The part of each loss the entity bears (at least 1)
    * @return Transformation applying deductible
    *
    * @example
    * {{{
    * val transform = RiskResultTransform.applyDeductible(10000L)
-   * // Loss of 50000 becomes 40000
-   * // Loss of 5000 becomes 0
+   * // Loss of 50000 becomes 10000
+   * // Loss of 5000 remains 5000
    * }}}
    */
-  def applyDeductible(deductible: NonNegativeLong): RiskResultTransform = RiskResultTransform { to =>
-    to.mapLosses(loss => Math.max(0L, loss - deductible))
-      .filterLosses(_ > 0L)  // Remove zero losses (sparse storage)
+  def applyDeductible(deductible: PositiveLong): RiskResultTransform = RiskResultTransform { to =>
+    to.mapLosses(loss => Math.min(loss, deductible))
   }
 
   /**
@@ -177,29 +174,27 @@ object RiskResultTransform {
   }
 
   /**
-   * Apply both deductible and cap (insurance policy).
-   * Equivalent to: applyDeductible(ded) andThen capLosses(cap)
+   * Apply an insurance policy to each trial: the entity bears the first
+   * `deductible`, the policy covers the next `limit`, and the loss above both
+   * is the entity's again. A deductible of zero is first-unit coverage.
    *
-   * Cross-field rule: the cap must exceed the deductible, otherwise the
-   * policy would zero out every loss it covers.
+   * @param deductible The first part of each loss the entity bears (non-negative)
+   * @param limit The most the policy pays on one loss (at least 1)
+   * @return Transformation applying the policy
    *
-   * @param deductible Amount subtracted first (non-negative)
-   * @param cap Maximum after deductible applied (at least 1)
-   * @return Validation with the combined transformation, or the cross-field error
+   * @example
+   * {{{
+   * val transform = RiskResultTransform.insurancePolicy(5L, 50L)
+   * // Loss of 3 remains 3: inside the deductible
+   * // Loss of 30 becomes 5: the deductible, the policy pays 25
+   * // Loss of 100 becomes 50: the deductible plus the 45 above the limit
+   * }}}
    */
-  def insurancePolicy(
-    deductible: NonNegativeLong,
-    cap: PositiveLong
-  ): Validation[ValidationError, RiskResultTransform] =
-    if (cap > deductible)
-      Validation.succeed(
-        Identity[RiskResultTransform].combine(
-          applyDeductible(deductible),
-          capLosses(cap)
-        )
-      )
-    else
-      Validation.fail(ValidationError(ErrorLocation.requestField(FieldName.Cap), FieldProblem.CapMustExceedDeductible))
+  def insurancePolicy(deductible: NonNegativeLong, limit: PositiveLong): RiskResultTransform =
+    RiskResultTransform { to =>
+      to.mapLosses(loss => Math.min(loss, deductible) + Math.max(0L, loss - deductible - limit))
+        .filterLosses(_ > 0L)  // Remove zero losses (sparse storage)
+    }
 
   /**
    * Filter out trials below a threshold.

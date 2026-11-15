@@ -112,7 +112,8 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
           "maxLoss": 2000000
         }
       }
-    ]
+    ],
+    "newMitigations": []
   }')
 
 WS_KEY=$(echo "$BOOTSTRAP" | jq -r '.workspaceKey')

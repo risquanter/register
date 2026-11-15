@@ -30,7 +30,8 @@ object RequestBodyLimitItSpec extends ZIOSpecDefault:
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+      seedVarId = None
     )
 
   /** Small valid tree request (well under `MaxBytes` serialized). */
@@ -38,7 +39,8 @@ object RequestBodyLimitItSpec extends ZIOSpecDefault:
     RiskTreeDefinitionRequest(
       name = "Body Limit Tree",
       portfolios = Seq(RiskPortfolioDefinitionRequest("Root", None)),
-      leaves = Seq(leafDef("Cyber", "Root"))
+      leaves = Seq(leafDef("Cyber", "Root")),
+      newMitigations = Nil
     )
 
   private def withServer[A](f: SttpClientFixture.Client => Task[A]): Task[A] =

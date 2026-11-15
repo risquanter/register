@@ -49,7 +49,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
 
   /** Generate simple RiskResultTransform (deductible, cap, scale, or filter) */
   val genSimpleTransform: Gen[Any, RiskResultTransform] = Gen.oneOf(
-    genLoss.map(RiskResultTransform.applyDeductible),
+    genCap.map(RiskResultTransform.applyDeductible),
     genCap.map(RiskResultTransform.capLosses),
     genScaleFactor.map(RiskResultTransform.scaleLosses),
     genLoss.map(RiskResultTransform.filterBelowThreshold)
@@ -130,36 +130,24 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
     // ══════════════════════════════════════════════════════════════════
 
     suite("Deductible Transformation")(
-      test("applyDeductible reduces losses by deductible amount") {
+      test("applyDeductible keeps the first d of each loss") {
         val outcomes = outcomesOf(100,Map(1 -> 50000L, 2 -> 10000L, 3 -> 5000L))
         val transform = RiskResultTransform.applyDeductible(10000L)
         val mitigated = transform.run(outcomes)
 
         assertTrue(
-          mitigated.outcomeOf(1) == 40000L,  // 50000 - 10000
-          mitigated.outcomeOf(2) == 0L,      // 10000 - 10000
-          mitigated.outcomeOf(3) == 0L       // 5000 - 10000 -> 0
+          mitigated.outcomeOf(1) == 10000L,  // min(50000, 10000)
+          mitigated.outcomeOf(2) == 10000L,  // min(10000, 10000)
+          mitigated.outcomeOf(3) == 5000L    // inside the deductible, borne in full
         )
       },
 
-      test("deductible removes trials below threshold (sparse)") {
-        val outcomes = outcomesOf(100,Map(1 -> 50000L, 2 -> 8000L))
-        val transform = RiskResultTransform.applyDeductible(10000L)
-        val mitigated = transform.run(outcomes)
-
-        assertTrue(
-          mitigated.outcomes.size == 1,  // Only trial 1 remains
-          mitigated.outcomes.contains(1),
-          !mitigated.outcomes.contains(2)
-        )
-      },
-
-      test("zero deductible is identity") {
-        check(genTrialOutcomes) { outcomes =>
-          val transform = RiskResultTransform.applyDeductible(0L)
-          val mitigated = transform.run(outcomes)
-
-          assertTrue(mitigated.outcomes == outcomes.outcomes)
+      test("applyDeductible equals capLosses at the same figure") {
+        check(genTrialOutcomes, genCap) { (outcomes, d) =>
+          assertTrue(
+            RiskResultTransform.applyDeductible(d).run(outcomes).outcomes ==
+              RiskResultTransform.capLosses(d).run(outcomes).outcomes
+          )
         }
       }
     ),
@@ -305,39 +293,27 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("Insurance Policy (Combined)")(
-      test("insurancePolicy applies deductible then cap") {
-        val outcomes = outcomesOf(100,Map(1 -> 2000000L, 2 -> 50000L, 3 -> 5000L))
-        val insured = RiskResultTransform.insurancePolicy(
-          deductible = 10000L,
-          cap = 1000000L
-        ).map(_.run(outcomes).outcomes).toEither
+    suite("Insurance Policy")(
+      test("insurancePolicy leaves the three bands of the loss borne") {
+        val outcomes = outcomesOf(100,Map(1 -> 3L, 2 -> 30L, 3 -> 100L))
+        val insured  = RiskResultTransform.insurancePolicy(deductible = 5L, limit = 50L).run(outcomes)
 
         assertTrue(
-          insured == Right(Map(
-            1 -> 1000000L,  // (2M - 10K) capped to 1M
-            2 -> 40000L     // 50K - 10K = 40K
-                            // trial 3: 5K - 10K = 0, removed (sparse)
-          ))
+          insured.outcomes == Map(
+            1 -> 3L,   // inside the deductible, borne in full
+            2 -> 5L,   // the deductible; the policy pays 25
+            3 -> 50L   // the deductible plus the 45 above the limit
+          )
         )
       },
 
-      test("insurancePolicy fails when cap <= deductible (property test)") {
-        check(genLoss, genLoss) { (loss1, loss2) =>
-          val deductible: NonNegativeLong = if (loss1 >= loss2) loss1 else loss2
-          val cap: PositiveLong = (if (loss1 >= loss2) loss2 else loss1: Long).refineUnsafe
+      test("a zero-deductible policy is first-unit coverage") {
+        val outcomes = outcomesOf(100,Map(1 -> 30L, 2 -> 15L))
+        val insured  = RiskResultTransform.insurancePolicy(deductible = 0L, limit = 20L).run(outcomes)
 
-          // cap <= deductible must yield a validation failure
-          assertTrue(RiskResultTransform.insurancePolicy(deductible, cap).toEither.isLeft)
-        }
-      },
-
-      test("insurancePolicy succeeds when cap > deductible") {
-        check(genLoss, Gen.long(1L, 10000L)) { (deductible, gap) =>
-          val cap: PositiveLong = (deductible + gap).refineUnsafe
-
-          assertTrue(RiskResultTransform.insurancePolicy(deductible, cap).toEither.isRight)
-        }
+        assertTrue(
+          insured.outcomes == Map(1 -> 10L)  // 30 − 20 above the limit; 15 is covered, removed (sparse)
+        )
       }
     ),
 
@@ -376,11 +352,11 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val deductible = RiskResultTransform.applyDeductible(10000L)
         val scale = RiskResultTransform.scaleLosses(retentionFactor(0.5))
 
-        // Apply deductible (100K -> 90K), then scale (90K -> 45K)
+        // Apply deductible (100K -> 10K), then scale (10K -> 5K)
         val combined = deductible.andThen(scale)
         val transformed = combined.run(outcomes)
 
-        assertTrue(transformed.outcomeOf(1) == 45000L)
+        assertTrue(transformed.outcomeOf(1) == 5000L)
       },
 
       test("compose applies transformations in reverse") {
@@ -389,11 +365,11 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val deductible = RiskResultTransform.applyDeductible(10000L)
         val scale = RiskResultTransform.scaleLosses(retentionFactor(0.5))
 
-        // Compose: scale first (100K -> 50K), then deductible (50K -> 40K)
+        // Compose: scale first (100K -> 50K), then deductible (50K -> 10K)
         val combined = deductible.compose(scale)
         val transformed = combined.run(outcomes)
 
-        assertTrue(transformed.outcomeOf(1) == 40000L)
+        assertTrue(transformed.outcomeOf(1) == 10000L)
       },
 
       test("order matters for non-commutative operations") {
@@ -411,8 +387,8 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val result2 = order2.run(outcomes).outcomeOf(1)
 
         assertTrue(
-          result1 == 45000L,  // (100K - 10K) * 0.5
-          result2 == 40000L,  // (100K * 0.5) - 10K
+          result1 == 5000L,   // min(100K, 10K) * 0.5
+          result2 == 10000L,  // min(100K * 0.5, 10K)
           result1 != result2  // Order matters!
         )
       }

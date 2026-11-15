@@ -3,10 +3,10 @@ package app.state
 import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
-import com.risquanter.register.domain.data.{DistributionShape, RiskTree, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.{DistributionShape, Mitigation, RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil, TreeId, SafeName, NodeId, Probability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest, MitigationUpdateRequest}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.frontend.TreeBuilderLogic
 import app.state.TreeBuilderField.*
@@ -365,12 +365,14 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val topologyV = topologyOf(portfolios, leaves)
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
-      RiskTreeDefinitionRequest(treeName.value, ports, leafs)
+      RiskTreeDefinitionRequest(treeName.value, ports, leafs, newMitigations = Nil)
     }
 
   /** Build update request — the whole tree, with each loaded node submitted
     * under its own identifier and each node added this session submitted as
-    * new. The tree ID is preserved.
+    * new. The tree ID is preserved. Every mitigation the loaded tree carried is
+    * submitted unchanged, because the request enumerates the mitigations and
+    * one it omits is deleted; the builder authors none of its own.
     */
   def toUpdateRequest(): Validation[ValidationError, RiskTreeUpdateRequest] =
     val portfolios = portfoliosVar.now()
@@ -403,9 +405,14 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
           portfolios = existPorts,
           leaves = existLeaves,
           newPortfolios = newPorts,
-          newLeaves = newLeaves
+          newLeaves = newLeaves,
+          mitigations = loadedMitigationsVar.now().map(MitigationUpdateRequest.fromMitigation),
+          newMitigations = Nil
         )
     }
+
+  /** The mitigations of the tree last loaded, which an update submits back. */
+  private val loadedMitigationsVar: Var[List[Mitigation]] = Var(Nil)
 
   /** Snapshot of (name, portfolios, leaves) taken right after `loadFromTree` —
     * the baseline `isDirty` compares against. `None` in create-mode (no tree
@@ -478,6 +485,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     resetFormFieldsBus.emit(())
     currentDraftVar.set(None)
     loadedSnapshotVar.set(None)
+    loadedMitigationsVar.set(Nil)
     resetTouched()
 
   /** Populate builder vars from a server-loaded tree.
@@ -515,6 +523,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     leavesVar.set(leaves)
     editingTreeId.set(Some(tree.id))
     loadedSnapshotVar.set(Some((tree.name.value, portfolios, leaves)))
+    loadedMitigationsVar.set(tree.mitigations.toList)
     activeForm.set(FormMode.Blank)
     resetFormFieldsBus.emit(())
     resetTouched()

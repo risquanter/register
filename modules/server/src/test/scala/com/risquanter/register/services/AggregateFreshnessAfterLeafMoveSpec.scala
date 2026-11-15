@@ -69,7 +69,8 @@ object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
       leafDef("Cyber", "Sub", 0.25),
       leafDef("Hw", "Sub", 0.25),
       leafDef("Fraud", "Root", 0.25)
-    )
+    ),
+    newMitigations = Nil
   )
 
   private def leafIdByName(tree: RiskTree, name: String): String =
@@ -119,7 +120,9 @@ object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
               leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Root", probability = 0.25)
             ),
             newPortfolios = Seq.empty,
-            newLeaves = Seq.empty
+            newLeaves = Seq.empty,
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main))
 
           after   <- resolver.ensureCached(updated, updated.rootId, entity1)

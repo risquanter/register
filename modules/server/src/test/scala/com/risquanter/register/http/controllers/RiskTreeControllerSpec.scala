@@ -92,9 +92,11 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         name = "Test Risk",
         parentName = Some("Root Portfolio"),
         probability = 0.25,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+        seedVarId = None
       )
-    )
+    ),
+    newMitigations = Nil
   )
 
   override def spec = suite("RiskTreeController")(
@@ -108,13 +110,15 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
               name = "Cyber Attack",
               parentName = Some("Total Operational Risk"),
               probability = 0.25,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+              seedVarId = None
             ),
             RiskLeafDefinitionRequest(
               name = "Data Breach",
               parentName = Some("Total Operational Risk"),
               probability = 0.15,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 25000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 25000L),
+              seedVarId = None
             )
           )
         )
@@ -138,7 +142,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
               name = "Risk B",
               parentName = Some("Root Portfolio"),
               probability = 0.3,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 10000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 10000L),
+              seedVarId = None
             )
           )
         )

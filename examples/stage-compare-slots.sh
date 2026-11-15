@@ -70,7 +70,8 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
         "probability": 0.1,
         "distributionShape": { "distributionType": "Lognormal", "minLoss": 20000, "maxLoss": 150000 }
       }
-    ]
+    ],
+    "newMitigations": []
   }')
 
 WS_KEY=$(echo "$BOOTSTRAP" | jq -r '.workspaceKey // empty')
@@ -107,7 +108,8 @@ TREE_B_RESP=$(curl -s -X POST "$BASE/w/$WS_KEY/risk-trees" \
         "probability": 0.2,
         "distributionShape": { "distributionType": "Lognormal", "minLoss": 150000, "maxLoss": 1200000 }
       }
-    ]
+    ],
+    "newMitigations": []
   }')
 
 TREE_B=$(echo "$TREE_B_RESP" | jq -r '.id // .tree.id // empty')
@@ -165,7 +167,9 @@ else
           \"distributionShape\": { \"distributionType\": \"Lognormal\", \"minLoss\": 20000, \"maxLoss\": 150000 } }
       ],
       \"newPortfolios\": [],
-      \"newLeaves\": []
+      \"newLeaves\": [],
+      \"mitigations\": [],
+      \"newMitigations\": []
     }")
   if [[ "$UPDATE" == "200" ]]; then
     ok "Leaf One probability 0.10 -> 0.30 on scenario alpha (diff vs main)"

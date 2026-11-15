@@ -1,10 +1,11 @@
 package com.risquanter.register.domain.data
 
+import io.github.iltotore.iron.autoRefine
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import com.risquanter.register.domain.data.iron.ValidationMessages
-import com.risquanter.register.domain.errors.{FieldProblem, ValidationErrorCode}
-import com.risquanter.register.http.errors.{LexProblem, ParseProblem, Positioned, QueryPosition, QueryToken}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationErrorCode}
+import com.risquanter.register.http.errors.{LexProblem, NestingProblem, ParseProblem, Positioned, QueryPosition, QueryToken}
 
 /** Boundary validation for the targeting sublanguage: a bare single-free-variable
   * FOL formula, in the targeting fragment (no quantifiers, no function term
@@ -15,13 +16,13 @@ import com.risquanter.register.http.errors.{LexProblem, ParseProblem, Positioned
 object TargetingPredicateSpec extends ZIOSpecDefault:
 
   private def firstCode(source: String): Option[ValidationErrorCode] =
-    TargetingPredicate.create(source).toEither.swap.toOption.map(errs => FieldProblem.code(errs.head.problem))
+    TargetingPredicate.create(source, ErrorSubject.Request).toEither.swap.toOption.map(errs => FieldProblem.code(errs.head.problem))
 
   private def firstProblem(source: String): Option[FieldProblem] =
-    TargetingPredicate.create(source).toEither.swap.toOption.map(_.head.problem)
+    TargetingPredicate.create(source, ErrorSubject.Request).toEither.swap.toOption.map(_.head.problem)
 
   private def problems(source: String): List[FieldProblem] =
-    TargetingPredicate.create(source).toEither.swap.toOption.toList.flatMap(_.map(_.problem).toList)
+    TargetingPredicate.create(source, ErrorSubject.Request).toEither.swap.toOption.toList.flatMap(_.map(_.problem).toList)
 
   /** A well-formed node identifier. */
   private val nodeId: String = "01HQ8ZK3V4N5P6Q7R8S9T0W1X2"
@@ -32,17 +33,17 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
   def spec = suite("TargetingPredicateSpec")(
     suite("accepts")(
       test("a plain single-variable predicate") {
-        assertTrue(TargetingPredicate.create("leaf(x)").toEither.isRight)
+        assertTrue(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.isRight)
       },
       test("a comparison against a literal") {
-        assertTrue(TargetingPredicate.create("x < 5").toEither.isRight)
+        assertTrue(TargetingPredicate.create("x < 5", ErrorSubject.Request).toEither.isRight)
       },
       test("a node named by its identifier") {
-        assertTrue(TargetingPredicate.create(s"""descendant_of(x, node_id("$nodeId"))""").toEither.isRight)
+        assertTrue(TargetingPredicate.create(s"""descendant_of(x, node_id("$nodeId"))""", ErrorSubject.Request).toEither.isRight)
       },
       test("a source of exactly the length bound") {
         val source = "leaf(x)" + " " * (MaxSourceLength - "leaf(x)".length)
-        assertTrue(source.length == MaxSourceLength, TargetingPredicate.create(source).toEither.isRight)
+        assertTrue(source.length == MaxSourceLength, TargetingPredicate.create(source, ErrorSubject.Request).toEither.isRight)
       }
     ),
     suite("rejects")(
@@ -88,6 +89,11 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
           case Some(FieldProblem.TargetingPredicateUnparseable(Positioned(_, ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter)))) => true
           case _ => false)
       },
+      test("parentheses nested past the engine's depth limit are refused before parsing, at no position") {
+        val source = "(" * 65 + "leaf(x)" + ")" * 65
+        assertTrue(firstProblem(source) == Some(FieldProblem.TargetingPredicateUnparseable(
+          Positioned(QueryPosition.Unknown(), ParseProblem.Nesting(NestingProblem.ParenthesesTooDeep(64))))))
+      },
       test("a quantifier (targeting fragment)") {
         assertTrue(firstCode("forall x . leaf(x)") == Some(ValidationErrorCode.CONSTRAINT_VIOLATION))
       },
@@ -100,7 +106,7 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       test("an unquoted attribute value is reported with a quoting hint, and the typed words are not echoed") {
         // `fraud` parses as a second variable; the sentence must point at
         // quoting without repeating what was typed (ADR-035).
-        val problem = TargetingPredicate.create("category(x, fraud)").toEither.swap.toOption.get.head.problem
+        val problem = TargetingPredicate.create("category(x, fraud)", ErrorSubject.Request).toEither.swap.toOption.get.head.problem
         val msg     = ValidationMessages.render(problem)
         assertTrue(
           problem == FieldProblem.TargetingSeveralFreeVariables,
@@ -119,7 +125,7 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       test("accumulates every independent formula-level violation at once") {
         // A quantifier (fragment) and a reserved predicate (mitigation state)
         // are independent checks on the parsed formula; both must be reported.
-        val errs     = TargetingPredicate.create("forall x . mitigated(y)").toEither.swap.toOption.get
+        val errs     = TargetingPredicate.create("forall x . mitigated(y)", ErrorSubject.Request).toEither.swap.toOption.get
         val problems = errs.map(_.problem).toList
         assertTrue(
           errs.size >= 2,
@@ -128,8 +134,13 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
         )
       }
     ),
+    test("every refusal is located at the given subject's TargetingSource") {
+      val subject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.Mitigations, 1)
+      val errs    = TargetingPredicate.create("forall x . mitigated(y)", subject).toEither.swap.toOption.get
+      assertTrue(errs.forall(_.location == ErrorLocation.Field(subject, FieldName.TargetingSource)))
+    },
     test("round-trips through its JSON codec") {
-      val p = TargetingPredicate.create("leaf(x)").toEither.toOption.get
+      val p = TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get
       assertTrue(p.toJson.fromJson[TargetingPredicate] == Right(p))
     }
   )

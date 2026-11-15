@@ -368,7 +368,8 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
         "terms": null
       }
     }
-  ]')
+  ]' \
+  newMitigations:='[]')
 
 WS_KEY=$(echo "$BOOTSTRAP" | jq -r '.workspaceKey')
 TREE_ID=$(echo "$BOOTSTRAP" | jq -r '.tree.id')

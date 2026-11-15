@@ -1,11 +1,14 @@
 package com.risquanter.register.http.requests
 
+import io.github.iltotore.iron.autoRefine
 import zio.prelude.NonEmptyList
 import zio.test.*
 
 import com.risquanter.register.domain.data.iron.QueryVariable
 import com.risquanter.register.common.FolSymbols.QueryGrammarSymbol
-import com.risquanter.register.http.errors.{LexProblem, ParseProblem, Positioned, QueryFound, QueryPosition, QueryProblem, QueryToken}
+import com.risquanter.register.http.errors.{
+  LexProblem, NestingProblem, ParseProblem, Positioned, QueryFound, QueryPosition, QueryProblem, QueryToken
+}
 
 /** `QueryRequest.resolve`, the boundary that parses query text and refuses a
   * query the service cannot answer. */
@@ -36,6 +39,12 @@ object QueryRequestSpec extends ZIOSpecDefault:
         assertTrue(result match
           case Left(QueryProblem.Unparseable(Positioned(_, ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter)))) => true
           case _ => false)
+      },
+      test("a scope of 300 conjoined atoms passes the engine's operator limit and is refused before parsing") {
+        val scope  = List.fill(300)("leaf(x)").mkString(" /\\ ")
+        val result = QueryRequest.resolve(QueryRequest(s"Q[>=]^{1/2} x (leaf(x), $scope)"))
+        assertTrue(result == Left(QueryProblem.Unparseable(
+          Positioned(QueryPosition.Unknown(), ParseProblem.Nesting(NestingProblem.TooManyOperators(256))))))
       }
     )
 

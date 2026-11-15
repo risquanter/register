@@ -49,27 +49,32 @@ object QueryEndpointSpec extends ZIOSpecDefault:
         name             = "Cyber Breach",
         parentName       = Some("IT Risk"),
         probability      = 0.20,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 8000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 8000000L),
+        seedVarId        = None
       ),
       RiskLeafDefinitionRequest(
         name             = "Ransomware",
         parentName       = Some("IT Risk"),
         probability      = 0.10,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 200000L, maxLoss = 4000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 200000L, maxLoss = 4000000L),
+        seedVarId        = None
       ),
       RiskLeafDefinitionRequest(
         name             = "Supply Chain Disruption",
         parentName       = Some("Third Party Risk"),
         probability      = 0.15,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 300000L, maxLoss = 3000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 300000L, maxLoss = 3000000L),
+        seedVarId        = None
       ),
       RiskLeafDefinitionRequest(
         name             = "Regulatory Fine",
         parentName       = Some("Third Party Risk"),
         probability      = 0.08,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 100000L, maxLoss = 2000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 100000L, maxLoss = 2000000L),
+        seedVarId        = None
       )
-    )
+    ),
+    newMitigations = Nil
   )
 
   override def spec =

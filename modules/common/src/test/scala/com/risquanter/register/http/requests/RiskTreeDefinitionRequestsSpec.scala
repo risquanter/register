@@ -2,11 +2,18 @@ package com.risquanter.register.http.requests
 
 import zio.test.*
 import zio.prelude.Validation
-import com.risquanter.register.testutil.TestHelpers.{lognormalShape, safeId, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{
+  lognormalShape, mitigationId, residualProbability, retentionFactor, safeId, unsafeGet
+}
 import com.risquanter.register.http.requests.RiskTreeRequests.*
-import com.risquanter.register.domain.data.{DistributionShape, RiskLeaf, RiskNode, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{NodeId, SafeId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.{
+  AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget,
+  RelativeLikelihood, RelativeSeverity, RiskLeaf, RiskNode, RiskPortfolio, TargetingPredicate
+}
+import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeId, SafeName, ValidationMessages}
+import com.risquanter.register.domain.errors.{
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationError, ValidationErrorCode
+}
 import com.risquanter.register.domain.tree.TreeIndex
 
 object RiskTreeRequestsSpec extends ZIOSpecDefault {
@@ -25,7 +32,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       name              = name,
       parentName        = parent,
       probability       = 0.8,
-      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 5000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 5000L),
+      seedVarId         = None
     )
 
   // Update request helpers use raw ULID string literals for `id` fields because
@@ -77,6 +85,50 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       case Validation.Failure(_, errors) => errors.toList
       case Validation.Success(_, _)      => Nil
 
+  /** Whether `errors` holds one with `code` at `location`. */
+  private def refusedAt(errors: List[ValidationError], code: ValidationErrorCode, location: ErrorLocation): Boolean =
+    errors.exists(e => FieldProblem.code(e.problem) == code && e.location == location)
+
+  private val storedStamp: ContentHash = ContentHash.fromString("a" * 64).toOption.get
+
+  /** A stored absolute statement on the stored leaf, as `stored(NodeKind.Leaf)` holds it. */
+  private val storedAbsolute: Mitigation =
+    unsafeGet(Mitigation.create(
+      mitigationId("floor"),
+      SafeName.fromString("Floor").toOption.get,
+      MitigationTarget.Predicate(unsafeGet(TargetingPredicate.create("leaf(x)", ErrorSubject.Request), "target")),
+      MitigationSpec.LeafAbsolute(
+        AbsoluteReplacement.Likelihood(residualProbability(0.05)), nodeIdOf(childIdStr), storedStamp),
+      MitigationPrecedence.default
+    ), "storedAbsolute")
+
+  /** An update keeping the stored root and leaf, with the given mitigation buckets. */
+  private def keepNodes(
+    mitigations: Seq[MitigationUpdateRequest],
+    newMitigations: Seq[MitigationDefinitionRequest]
+  ): RiskTreeUpdateRequest =
+    RiskTreeUpdateRequest(
+      name = "Tree",
+      portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+      leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root"))),
+      newPortfolios = Seq.empty,
+      newLeaves = Seq.empty,
+      mitigations = mitigations,
+      newMitigations = newMitigations
+    )
+
+  /** A new absolute statement anchored on `anchor`. */
+  private def newAbsolute(anchor: String): MitigationDefinitionRequest =
+    MitigationDefinitionRequest(
+      name = "Floor",
+      target = "leaf(x)",
+      spec = MitigationSpecRequest.LeafAbsolute(
+        AbsoluteReplacementRequest.Likelihood(0.05), anchor, BaseStampChoice.KeepIfUnchanged),
+      precedence = MitigationPrecedence.default
+    )
+
+  private val atFirstNew: ErrorSubject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
+
   def spec = suite("RiskTreeRequests")(
     test("resolveCreate fails when a leaf's shape breaks its own rule") {
       val req = RiskTreeDefinitionRequest(
@@ -88,9 +140,11 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             parentName        = Some("Root"),
             probability       = 0.8,
             // The bounds are the wrong way round, which `LossRange` refuses.
-            distributionShape = DistributionShapeRequest.Lognormal(minLoss = 5000L, maxLoss = 1000L)
+            distributionShape = DistributionShapeRequest.Lognormal(minLoss = 5000L, maxLoss = 1000L),
+            seedVarId         = None
           )
-        )
+        ),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -101,7 +155,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
-        leaves = Seq(validLeafDef("Leaf", Some("Root")))
+        leaves = Seq(validLeafDef("Leaf", Some("Root"))),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -124,7 +179,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
-        leaves = Seq(validLeafDef("Root", Some("Root"))) // duplicate name with portfolio
+        leaves = Seq(validLeafDef("Root", Some("Root"))), // duplicate name with portfolio
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -139,7 +195,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         leaves = Seq(
           validLeafDef("Leaf1", Some("Root")),
           validLeafDef("Leaf2", Some("Leaf1")) // parent is a leaf
-        )
+        ),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -151,7 +208,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
-        leaves = Seq(validLeafDef("Leaf", Some("Missing")))
+        leaves = Seq(validLeafDef("Leaf", Some("Missing"))),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -168,7 +226,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
           RiskPortfolioDefinitionRequest(name = "Child", parentName = Some("Missing"))
         ),
-        leaves = Seq(validLeafDef("Leaf", Some("Root")))
+        leaves = Seq(validLeafDef("Leaf", Some("Root"))),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -183,7 +242,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
           RiskPortfolioDefinitionRequest(name = "AnotherRoot", parentName = None)
         ),
-        leaves = Seq.empty
+        leaves = Seq.empty,
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -199,7 +259,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           RiskPortfolioDefinitionRequest(name = "A", parentName = Some("B")),
           RiskPortfolioDefinitionRequest(name = "B", parentName = Some("A"))
         ),
-        leaves = Seq.empty
+        leaves = Seq.empty,
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -214,7 +275,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
           RiskPortfolioDefinitionRequest(name = "Child", parentName = Some("Root"))
         ),
-        leaves = Seq.empty
+        leaves = Seq.empty,
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -231,7 +293,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           RiskPortfolioDefinitionRequest(name = "P1", parentName = Some("Root")),
           RiskPortfolioDefinitionRequest(name = "P2", parentName = Some("Root"))
         ),
-        leaves = Seq(validLeafDef("L1", Some("P1")))
+        leaves = Seq(validLeafDef("L1", Some("P1"))),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -247,7 +310,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           RiskPortfolioDefinitionRequest(name = "P1", parentName = Some("Root")),
           RiskPortfolioDefinitionRequest(name = "P2", parentName = Some("Root"))
         ),
-        leaves = Seq(validLeafDef("L1", Some("P1")), validLeafDef("L2", Some("P2")))
+        leaves = Seq(validLeafDef("L1", Some("P1")), validLeafDef("L2", Some("P2"))),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -265,10 +329,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         ),
         leaves = Seq.empty,
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
-      val result = resolveUpdate(req, stored(NodeKind.Portfolio), () => safeId("generated"))
+      val result = resolveUpdate(req, stored(NodeKind.Portfolio), Nil, () => safeId("generated"))
 
       assertFailsWith(result)("Every portfolio must have at least one child")
     },
@@ -279,10 +345,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq.empty,
         newPortfolios = Seq.empty,
-        newLeaves = Seq(validLeafDef("Root", Some("Root"))) // duplicates existing portfolio name
+        newLeaves = Seq(validLeafDef("Root", Some("Root"))), // duplicates existing portfolio name
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
-      val result = resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated"))
+      val result = resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated"))
 
       assertFailsWith(result)("duplicate node name")
     },
@@ -293,10 +361,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
-        newLeaves = Seq(validLeafDef("Leaf2", Some("Leaf1"))) // parent is a leaf
+        newLeaves = Seq(validLeafDef("Leaf2", Some("Leaf1"))), // parent is a leaf
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
-      val result = resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated"))
+      val result = resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated"))
 
       assertFailsWith(result)("refers to a leaf")
     },
@@ -305,7 +375,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
-        leaves = Seq(validLeafDef("leaf", Some("Root"))) // "leaf" is a reserved predicate
+        leaves = Seq(validLeafDef("leaf", Some("Root"))), // "leaf" is a reserved predicate
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -319,10 +390,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(childIdStr, "p95", Some("Root"))), // "p95" is a reserved function
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
-      val result = resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated"))
+      val result = resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated"))
 
       assertFailsWith(result)("reserved query symbol")
     },
@@ -336,7 +409,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         leaves = Seq(
           validLeafDef("L1", Some("Root")).copy(seedVarId = Some(7L)),
           validLeafDef("L2", Some("Root")) // no ID — server assigns
-        )
+        ),
+        newMitigations = Nil
       )
 
       val result = resolveCreate(req, () => safeId("generated"))
@@ -354,7 +428,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
-        leaves = Seq(validLeafDef("L1", Some("Root")).copy(seedVarId = Some(50000000L)))
+        leaves = Seq(validLeafDef("L1", Some("Root")).copy(seedVarId = Some(50000000L))),
+        newMitigations = Nil
       )
 
       assertFailsWith(resolveCreate(req, () => safeId("generated")))("seedVarId must be between 1 and 49999999")
@@ -367,7 +442,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         leaves = Seq(
           validLeafDef("L1", Some("Root")).copy(seedVarId = Some(5L)),
           validLeafDef("L2", Some("Root")).copy(seedVarId = Some(5L))
-        )
+        ),
+        newMitigations = Nil
       )
 
       assertFailsWith(resolveCreate(req, () => safeId("generated")))("seedVarId 5 is used by multiple nodes", "L1", "L2")
@@ -379,7 +455,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
         leaves = Seq(
           validLeafDef("L1", Some("Root")).copy(seedVarId = Some(0L), probability = 1.5)
-        )
+        ),
+        newMitigations = Nil
       )
 
       assertFailsWith(resolveCreate(req, () => safeId("generated")))(
@@ -394,10 +471,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root")).copy(seedVarId = Some(3L))),
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
-      assertFailsWith(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))("seedVarId is immutable once assigned")
+      assertFailsWith(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated")))("seedVarId is immutable once assigned")
     },
 
     test("resolveUpdate carries provided seedVarIds for new leaves only") {
@@ -406,10 +485,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
-        newLeaves = Seq(validLeafDef("Leaf2", Some("Root")).copy(seedVarId = Some(9L)))
+        newLeaves = Seq(validLeafDef("Leaf2", Some("Root")).copy(seedVarId = Some(9L))),
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
-      val result = resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated"))
+      val result = resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated"))
 
       result match
         case Validation.Success(_, resolved) =>
@@ -429,10 +510,12 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         newLeaves = Seq(
           validLeafDef("N1", Some("Root")).copy(seedVarId = Some(4L)),
           validLeafDef("N2", Some("Root")).copy(seedVarId = Some(4L))
-        )
+        ),
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
-      assertFailsWith(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))("seedVarId 4 is used by multiple nodes", "N1", "N2")
+      assertFailsWith(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated")))("seedVarId 4 is used by multiple nodes", "N1", "N2")
     },
 
     test("resolveUpdate preserves existing node ids verbatim (time-travel identity precondition)") {
@@ -443,11 +526,13 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(childIdStr, "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
 
       // The id generator would mint a *different* id; existing nodes must not call it.
-      val result = resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("REGENERATED-MUST-NOT-BE-USED"))
+      val result = resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("REGENERATED-MUST-NOT-BE-USED"))
 
       result match
         case Validation.Success(_, resolved) =>
@@ -470,9 +555,11 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(unknown, "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
-      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
+      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated")))
       assertTrue(errors.exists(e =>
         FieldProblem.code(e.problem) == ValidationErrorCode.MISSING_REFERENCE &&
           e.location == ErrorLocation.Field(ErrorSubject.ExistingNode(nodeIdOf(unknown)), FieldName.Id)
@@ -488,20 +575,24 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         ),
         leaves = Seq.empty,
         newPortfolios = Seq.empty,
-        newLeaves = Seq(validLeafDef("Leaf2", Some("Leaf1")))
+        newLeaves = Seq(validLeafDef("Leaf2", Some("Leaf1"))),
+        mitigations = Nil,
+        newMitigations = Nil
       )
       val portfolioAsLeaf = RiskTreeUpdateRequest(
         name = "Tree",
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(childIdStr, "Child", Some("Root"))),
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
       val atChildId = ErrorLocation.Field(ErrorSubject.ExistingNode(nodeIdOf(childIdStr)), FieldName.Id)
       assertTrue(
-        errorsOf(resolveUpdate(leafAsPortfolio, stored(NodeKind.Leaf), () => safeId("generated")))
+        errorsOf(resolveUpdate(leafAsPortfolio, stored(NodeKind.Leaf), Nil, () => safeId("generated")))
           .exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE && e.location == atChildId),
-        errorsOf(resolveUpdate(portfolioAsLeaf, stored(NodeKind.Portfolio), () => safeId("generated")))
+        errorsOf(resolveUpdate(portfolioAsLeaf, stored(NodeKind.Portfolio), Nil, () => safeId("generated")))
           .exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE && e.location == atChildId)
       )
     },
@@ -512,9 +603,11 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate(childIdStr, "Child", Some("Root")).copy(probability = 1.5)),
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
-      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Portfolio), () => safeId("generated")))
+      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Portfolio), Nil, () => safeId("generated")))
       assertTrue(
         errors.exists(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_NODE_TYPE),
         errors.exists(_.location match
@@ -529,9 +622,11 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate("not-an-id", "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
-      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
+      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated")))
       assertTrue(
         errors.count(e => FieldProblem.code(e.problem) == ValidationErrorCode.INVALID_FORMAT) == 1,
         !errors.exists(e =>
@@ -549,12 +644,105 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
           validLeafUpdate(childIdStr, "Leaf2", Some("Root"))
         ),
         newPortfolios = Seq.empty,
-        newLeaves = Seq.empty
+        newLeaves = Seq.empty,
+        mitigations = Nil,
+        newMitigations = Nil
       )
-      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), () => safeId("generated")))
+      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated")))
       val atChildId = ErrorLocation.Field(ErrorSubject.ExistingNode(nodeIdOf(childIdStr)), FieldName.Id)
       assertTrue(
         errors.count(e => FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE && e.location == atChildId) == 1
+      )
+    },
+
+    // ── mitigations travel in the tree request ──
+
+    test("resolveCreate resolves a new relative mitigation with a minted id") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+        leaves = Seq(validLeafDef("Leaf", Some("Root"))),
+        newMitigations = Seq(MitigationDefinitionRequest(
+          name = "MFA",
+          target = "leaf(x)",
+          spec = MitigationSpecRequest.LeafRelative(RelativeLikelihoodRequest.Scale(0.3), RelativeSeverityRequest.Keep),
+          precedence = MitigationPrecedence.default
+        ))
+      )
+      val minted = safeId("minted")
+      resolveCreate(req, () => minted) match
+        case Validation.Success(_, resolved) =>
+          assertTrue(
+            resolved.mitigations.map(_.id) == Seq(MitigationId(minted)),
+            resolved.mitigations.map(_.spec) == Seq(ResolvedSpec.Complete(
+              MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.3)), RelativeSeverity.Keep)))
+          )
+        case Validation.Failure(_, errors) =>
+          assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
+    },
+
+    test("resolveCreate refuses an absolute statement at its anchor, because a new tree stores no leaf") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+        leaves = Seq(validLeafDef("Leaf", Some("Root"))),
+        newMitigations = Seq(newAbsolute(childIdStr))
+      )
+      val errors = errorsOf(resolveCreate(req, () => safeId("generated")))
+      assertTrue(refusedAt(errors, ValidationErrorCode.MISSING_REFERENCE, ErrorLocation.Field(atFirstNew, FieldName.Anchor)))
+    },
+
+    test("resolveUpdate refuses an absolute statement whose anchor is not stored, or is a stored portfolio, at its anchor") {
+      val unknown = "01H0R8Z3F5J2N4R8Z3F5J2N4RA"
+      val atAnchor = ErrorLocation.Field(atFirstNew, FieldName.Anchor)
+      assertTrue(
+        refusedAt(
+          errorsOf(resolveUpdate(keepNodes(Nil, Seq(newAbsolute(unknown))), stored(NodeKind.Leaf), Nil, () => safeId("generated"))),
+          ValidationErrorCode.MISSING_REFERENCE, atAnchor),
+        refusedAt(
+          errorsOf(resolveUpdate(keepNodes(Nil, Seq(newAbsolute(rootIdStr))), stored(NodeKind.Leaf), Nil, () => safeId("generated"))),
+          ValidationErrorCode.INVALID_NODE_TYPE, atAnchor)
+      )
+    },
+
+    test("resolveUpdate refuses a kept mitigation the stored tree does not hold, at that mitigation's Id") {
+      val req = keepNodes(Seq(MitigationUpdateRequest.fromMitigation(storedAbsolute)), Nil)
+      val errors = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated")))
+      assertTrue(refusedAt(
+        errors, ValidationErrorCode.MISSING_REFERENCE, ErrorLocation.Field(ErrorSubject.Mitigation(storedAbsolute.id), FieldName.Id)))
+    },
+
+    test("resolveUpdate refuses a stored mitigation listed twice, once, at its Id") {
+      val entry = MitigationUpdateRequest.fromMitigation(storedAbsolute)
+      val errors = errorsOf(resolveUpdate(keepNodes(Seq(entry, entry), Nil), stored(NodeKind.Leaf), Seq(storedAbsolute), () => safeId("generated")))
+      val atId = ErrorLocation.Field(ErrorSubject.Mitigation(storedAbsolute.id), FieldName.Id)
+      assertTrue(errors.count(e => FieldProblem.code(e.problem) == ValidationErrorCode.DUPLICATE_VALUE && e.location == atId) == 1)
+    },
+
+    test("a stored absolute statement resubmitted by fromMitigation keeps its stamp") {
+      val req = keepNodes(Seq(MitigationUpdateRequest.fromMitigation(storedAbsolute)), Nil)
+      resolveUpdate(req, stored(NodeKind.Leaf), Seq(storedAbsolute), () => safeId("generated")) match
+        case Validation.Success(_, resolved) =>
+          assertTrue(resolved.mitigations.map(_.spec) == Seq(ResolvedSpec.Complete(storedAbsolute.spec)))
+        case Validation.Failure(_, errors) =>
+          assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
+    },
+
+    test("a kept absolute statement is left for the service to stamp when it asks to restamp or its replacement changed") {
+      val kept = MitigationUpdateRequest.fromMitigation(storedAbsolute)
+      val restamp = kept.copy(spec = MitigationSpecRequest.LeafAbsolute(
+        AbsoluteReplacementRequest.Likelihood(0.05), childIdStr, BaseStampChoice.Restamp))
+      val changed = kept.copy(spec = MitigationSpecRequest.LeafAbsolute(
+        AbsoluteReplacementRequest.Likelihood(0.04), childIdStr, BaseStampChoice.KeepIfUnchanged))
+      def specsOf(entry: MitigationUpdateRequest): Seq[ResolvedSpec] =
+        resolveUpdate(keepNodes(Seq(entry), Nil), stored(NodeKind.Leaf), Seq(storedAbsolute), () => safeId("generated")) match
+          case Validation.Success(_, resolved) => resolved.mitigations.map(_.spec)
+          case Validation.Failure(_, _)        => Nil
+      assertTrue(
+        specsOf(restamp) == Seq(ResolvedSpec.Unstamped(
+          AbsoluteReplacement.Likelihood(residualProbability(0.05)), nodeIdOf(childIdStr))),
+        specsOf(changed) == Seq(ResolvedSpec.Unstamped(
+          AbsoluteReplacement.Likelihood(residualProbability(0.04)), nodeIdOf(childIdStr)))
       )
     }
   )

@@ -2,6 +2,7 @@ package com.risquanter.register.http.requests
 
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import zio.prelude.Validation
+import com.risquanter.register.domain.data.Mitigation
 import com.risquanter.register.domain.data.iron.SeedVarId
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, SubmittedCollection, ValidationError}
 import com.risquanter.register.domain.tree.TreeIndex
@@ -12,31 +13,48 @@ final case class RiskTreeUpdateRequest(
   portfolios: Seq[RiskPortfolioUpdateRequest],
   leaves: Seq[RiskLeafUpdateRequest],
   newPortfolios: Seq[RiskPortfolioDefinitionRequest],
-  newLeaves: Seq[RiskLeafDefinitionRequest]
+  newLeaves: Seq[RiskLeafDefinitionRequest],
+  mitigations: Seq[MitigationUpdateRequest],
+  newMitigations: Seq[MitigationDefinitionRequest]
 )
 object RiskTreeUpdateRequest:
   given JsonCodec[RiskTreeUpdateRequest] = DeriveJsonCodec.gen
 
   /** The request refined and checked against the stored tree it updates:
-    * each `portfolios` entry must name a stored portfolio and each `leaves`
-    * entry a stored leaf, and that check accumulates with every other. */
-  def resolve(req: RiskTreeUpdateRequest, stored: TreeIndex, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] = {
+    * each `portfolios` entry must name a stored portfolio, each `leaves` entry
+    * a stored leaf, each `mitigations` entry a stored mitigation, and each
+    * absolute statement's anchor a stored leaf. Those checks accumulate with
+    * every other. */
+  def resolve(
+    req: RiskTreeUpdateRequest,
+    stored: TreeIndex,
+    storedMitigations: Seq[Mitigation],
+    newId: IdGenerator
+  ): Validation[ValidationError, ResolvedUpdate] = {
     val treeNameV = refineNameField(req.name, ErrorLocation.requestField(FieldName.Name))
     val portfoliosV = refineExistingPortfolios(req.portfolios)
     val leavesV = refineExistingLeaves(req.leaves)
     val newPortfoliosV = refinePortfolioDefs(req.newPortfolios, SubmittedCollection.NewPortfolios)
     val newLeavesV = refineLeafDefs(req.newLeaves, SubmittedCollection.NewLeaves)
     val storedNodesV = requireStoredNodes(req.portfolios, req.leaves, stored)
+    val mitigationsV = refineExistingMitigations(req.mitigations, storedMitigations)
+    val newMitigationsV = refineMitigationDefs(req.newMitigations, newId)
+    val storedMitigationsV = requireStoredMitigations(req.mitigations, storedMitigations)
 
-    Validation.validateWith(treeNameV, portfoliosV, leavesV, newPortfoliosV, newLeavesV, storedNodesV) {
-      (treeName, portfolios, leaves, newPortfolios, newLeaves, _) =>
+    Validation.validateWith(
+      treeNameV, portfoliosV, leavesV, newPortfoliosV, newLeavesV, storedNodesV,
+      mitigationsV, newMitigationsV, storedMitigationsV
+    ) {
+      (treeName, portfolios, leaves, newPortfolios, newLeaves, _, kept, added, _) =>
         val providedSeeds = newLeaves.collect {
           case SubmittedLeaf(_, name, _, _, _, SeedVarIdChoice.Provided(seed)) => name -> seed
         }
+        val mitigations = kept ++ added
         Validation.validateWith(
           validateTopologyUpdate(treeName, portfolios, leaves, newPortfolios, newLeaves),
-          SeedVarId.requireDistinct(providedSeeds, ErrorLocation.requestField(FieldName.SeedVarId))
-        ) { (rootName, _) =>
+          SeedVarId.requireDistinct(providedSeeds, ErrorLocation.requestField(FieldName.SeedVarId)),
+          requireStoredAnchors(mitigations, stored.nodes)
+        ) { (rootName, _, _) =>
           val existingPortfolioNodes = portfolios.map { p =>
             p.name -> ResolvedNode(p.id, p.name, p.parent, NodeKind.Portfolio)
           }
@@ -57,7 +75,8 @@ object RiskTreeUpdateRequest:
             existingLeaves = leaves.map(l => l.name -> l).toMap,
             addedLeaves = newLeaves.map(l => l.name -> l).toMap,
             providedSeedVarIds = providedSeeds.toMap,
-            rootName = rootName
+            rootName = rootName,
+            mitigations = mitigations
           )
         }
     }.flatMap(identity)

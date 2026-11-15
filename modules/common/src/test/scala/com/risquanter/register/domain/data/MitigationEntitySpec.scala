@@ -32,7 +32,7 @@ object MitigationEntitySpec extends ZIOSpecDefault {
   /** A well-formed targeting predicate; resolution is a server concern, so any
     * member of the targeting fragment serves for entity-level tests. */
   private val pred: MitigationTarget =
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get)
 
   private def resultStage(steps: List[ResultTransformSpec]) =
     MitigationSpec.ResultStage.create(TransformPipeline(steps), specLocation)

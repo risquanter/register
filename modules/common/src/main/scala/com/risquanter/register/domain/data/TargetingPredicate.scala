@@ -8,7 +8,7 @@ import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 
 import com.risquanter.register.common.FolSymbols.{NodeFunction, QueryPredicate, Signatures}
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, TargetingSource}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.errors.{ParseProblem, Positioned}
 
 import parser.{FOLParser, ParseError}
@@ -32,8 +32,6 @@ import vql.fragment.{Fragment, FragmentCheck, FragmentViolation}
 final case class TargetingPredicate private (source: TargetingSource)
 
 object TargetingPredicate:
-
-  private val location: ErrorLocation = ErrorLocation.requestField(FieldName.TargetingSource)
 
   /** The length bounds of `TargetingSource`, as the values a refusal carries.
     * They mirror the type's `MinLength` and `MaxLength` literals, which cannot
@@ -67,37 +65,41 @@ object TargetingPredicate:
     * operator or punctuation crosses as a case, and anything else as a kind
     * with no text (ADR-035). A parser refusal that does not translate is a
     * defect and throws.
+    *
+    * Every refusal is at `subject`'s `TargetingSource` field, so a predicate
+    * inside the third submitted mitigation is refused at that mitigation.
     */
-  def create(source: String): Validation[ValidationError, TargetingPredicate] =
-    val gate: Either[ValidationError, (TargetingSource, Formula[FOL])] =
+  def create(source: String, subject: ErrorSubject): Validation[ValidationError, TargetingPredicate] =
+    val location = ErrorLocation.Field(subject, FieldName.TargetingSource)
+    val gate: Either[FieldProblem, (TargetingSource, Formula[FOL])] =
       for
         refined <- source
           .refineEither[MinLength[1] & MaxLength[4096]]
-          .left.map(_ => err(FieldProblem.LengthOutOfRange(MinSourceLength, MaxSourceLength)))
+          .left.map(_ => FieldProblem.LengthOutOfRange(MinSourceLength, MaxSourceLength))
         formula <- FOLParser.parse(refined)
-          .left.map(error => err(FieldProblem.TargetingPredicateUnparseable(parseProblem(error))))
+          .left.map(error => FieldProblem.TargetingPredicateUnparseable(parseProblem(error)))
       yield (refined, formula)
 
-    Validation.fromEither(gate).flatMap { case (refined, formula) =>
+    def checked(check: Either[FieldProblem, Unit]): Validation[ValidationError, Unit] =
+      Validation.fromEither(check.left.map(ValidationError(location, _)))
+
+    Validation.fromEither(gate.left.map(ValidationError(location, _))).flatMap { case (refined, formula) =>
       Validation.validateWith(
-        Validation.fromEither(checkFragment(formula)),
-        Validation.fromEither(requireSingleFreeVariable(formula)),
-        Validation.fromEither(requireNoMitigationPredicate(formula)),
-        Validation.fromEither(requireNoNodeName(formula))
+        checked(checkFragment(formula)),
+        checked(requireSingleFreeVariable(formula)),
+        checked(requireNoMitigationPredicate(formula)),
+        checked(requireNoNodeName(formula))
       )((_, _, _, _) => new TargetingPredicate(refined))
     }
-
-  private def err(problem: FieldProblem): ValidationError =
-    ValidationError(location, problem)
 
   private def parseProblem(error: ParseError): Positioned[ParseProblem] =
     ParseProblem.fromFormulaError(error).fold(
       reason => throw new IllegalStateException(s"The formula parser returned a refusal that does not translate: $reason"),
       identity)
 
-  private def checkFragment(formula: Formula[FOL]): Either[ValidationError, Unit] =
+  private def checkFragment(formula: Formula[FOL]): Either[FieldProblem, Unit] =
     FragmentCheck.check(formula, Fragment.Targeting(Signatures.targetingFunctions))
-      .left.map(v => err(fragmentProblem(v)))
+      .left.map(fragmentProblem)
 
   private def fragmentProblem(v: FragmentViolation): FieldProblem = v match
     case FragmentViolation.QuantifierNotAllowed            => FieldProblem.TargetingQuantifierNotAllowed
@@ -105,22 +107,22 @@ object TargetingPredicate:
     case FragmentViolation.QuantifierDepthExceeded(limit, found) =>
       FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(limit), NonNegativeInt.count(found))
 
-  private def requireSingleFreeVariable(formula: Formula[FOL]): Either[ValidationError, Unit] =
+  private def requireSingleFreeVariable(formula: Formula[FOL]): Either[FieldProblem, Unit] =
     FOLUtil.fvFOL(formula).distinct match
       case _ :: Nil => Right(())
-      case Nil      => Left(err(FieldProblem.TargetingNoFreeVariable))
-      case _        => Left(err(FieldProblem.TargetingSeveralFreeVariables))
+      case Nil      => Left(FieldProblem.TargetingNoFreeVariable)
+      case _        => Left(FieldProblem.TargetingSeveralFreeVariables)
 
-  private def requireNoMitigationPredicate(formula: Formula[FOL]): Either[ValidationError, Unit] =
+  private def requireNoMitigationPredicate(formula: Formula[FOL]): Either[FieldProblem, Unit] =
     val offending = atomPredicates(formula).filter(p => reservedPredicates.contains(p.toLowerCase))
     if offending.isEmpty then Right(())
-    else Left(err(FieldProblem.TargetingMitigationStateReferenced))
+    else Left(FieldProblem.TargetingMitigationStateReferenced)
 
   /** A stored predicate names a node by its identifier only, so a name cannot
     * follow a rename onto a different node. */
-  private def requireNoNodeName(formula: Formula[FOL]): Either[ValidationError, Unit] =
+  private def requireNoNodeName(formula: Formula[FOL]): Either[FieldProblem, Unit] =
     if appliedFunctions(formula).contains(NodeFunction.ByName.symbol) then
-      Left(err(FieldProblem.TargetingNodeNameReferenced))
+      Left(FieldProblem.TargetingNodeNameReferenced)
     else Right(())
 
   /** The predicate names of every atom in the formula. Total over the tree;
@@ -159,7 +161,7 @@ object TargetingPredicate:
   /** Wire format is the source string; decode == create (boundary validation). */
   given JsonCodec[TargetingPredicate] =
     JsonCodec[String].transformOrFail(
-      s => create(s).toEither.left.map(_.map(ValidationError.describe).mkString("; ")),
+      s => create(s, ErrorSubject.Request).toEither.left.map(_.map(ValidationError.describe).mkString("; ")),
       _.source
     )
 

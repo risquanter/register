@@ -46,7 +46,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
   private def sname(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
 
   private val pred: MitigationTarget =
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get)
 
   /** A fixed authoring-time base stamp; the round-trip cares that whatever stamp
     * was written survives, not its exact value. */

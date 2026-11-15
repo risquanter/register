@@ -4,25 +4,30 @@ import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
+import com.risquanter.register.http.requests.{
+  AbsoluteReplacementRequest, BaseStampChoice, DistributionShapeRequest, MitigationDefinitionRequest, MitigationSpecRequest,
+  MitigationUpdateRequest, RelativeLikelihoodRequest, RelativeSeverityRequest, RiskLeafDefinitionRequest,
+  RiskLeafUpdateRequest, RiskPortfolioDefinitionRequest, RiskPortfolioUpdateRequest, RiskTreeDefinitionRequest,
+  RiskTreeUpdateRequest
+}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, ScopeOutcome, TargetingPredicate, RelativeLikelihood, RelativeSeverity, ResultTransformSpec}
+import com.risquanter.register.domain.data.{AbsoluteReplacement, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, ScopeOutcome, TargetingPredicate, RelativeLikelihood, RelativeSeverity, ResultTransformSpec}
 import com.risquanter.register.domain.data.iron.ValidationUtil
-import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, NodeId, MitigationId, QueryWord, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
+import com.risquanter.register.domain.data.iron.{BranchChoice, ContentHash, SafeName, NodeId, MitigationId, QueryWord, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.http.errors.{BindProblem, QuerySymbolName}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
+import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, ContentHashIndex, MitigationScopeResolverRegistry, MitigationStaleness}
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
   Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
-  TrustZone, ValidationError, ValidationErrorCode
+  SubmittedMitigations, TrustZone, ValidationError, ValidationErrorCode
 }
 import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.{
-  safeId, nodeId, treeId, mitigationId, unsafeGet, lognormalShape, retentionFactor, resultStage
+  safeId, nodeId, treeId, mitigationId, unsafeGet, lognormalShape, residualProbability, retentionFactor, resultStage
 }
 import com.risquanter.register.auth.{Authority, Checked, TestChecked}
 
@@ -102,9 +107,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         name = "Test Risk",
         parentName = None,
         probability = 0.75,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+        seedVarId = None
       )
-    )
+    ),
+    newMitigations = Nil
   )
 
   // ── Seed-identity test helpers ──────────────────────────────────────
@@ -114,7 +121,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       name = name,
       parentName = Some(parent),
       probability = 0.25,
-      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+      seedVarId = None
     )
 
   /** Two-leaf tree under "Seed Root": "Cyber Attack" and "Fraud". */
@@ -122,7 +130,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     RiskTreeDefinitionRequest(
       name = treeName,
       portfolios = Seq(RiskPortfolioDefinitionRequest("Seed Root", None)),
-      leaves = Seq(leafDef("Cyber Attack", "Seed Root"), leafDef("Fraud", "Seed Root"))
+      leaves = Seq(leafDef("Cyber Attack", "Seed Root"), leafDef("Fraud", "Seed Root")),
+      newMitigations = Nil
     )
 
   private def seedsByName(tree: RiskTree): Map[String, Long] =
@@ -153,8 +162,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private val scenarioBranch: BranchRef =
     BranchRef.scenario(stubWsId, ScenarioName.fromString("test-scenario").toOption.get).toOption.get
 
-  /** Rename a `seedTreeRequest`-shaped tree, keeping its "Seed Root" portfolio
-    * and "Cyber Attack"/"Fraud" leaves unchanged. */
+  /** Rename a `seedTreeRequest`-shaped tree, keeping its "Seed Root" portfolio,
+    * its "Cyber Attack"/"Fraud" leaves and its mitigations unchanged. */
   private def renameOnly(tree: RiskTree, newName: String): RiskTreeUpdateRequest =
     RiskTreeUpdateRequest(
       name = newName,
@@ -164,10 +173,71 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         leafUpd(leafIdByName(tree, "Fraud"), "Fraud", "Seed Root")
       ),
       newPortfolios = Seq.empty,
-      newLeaves = Seq.empty
+      newLeaves = Seq.empty,
+      mitigations = keptMitigations(tree),
+      newMitigations = Nil
     )
 
-  // ── Mitigation carry-over helpers ───────────────────────────────────
+  /** Every mitigation of `tree`, as the entries that keep it unchanged. */
+  private def keptMitigations(tree: RiskTree): Seq[MitigationUpdateRequest] =
+    tree.mitigations.map(MitigationUpdateRequest.fromMitigation)
+
+  /** `tree` without its "Fraud" leaf, which the request therefore deletes. */
+  private def dropFraud(tree: RiskTree): RiskTreeUpdateRequest =
+    renameOnly(tree, tree.name.value).copy(
+      leaves = Seq(leafUpd(leafIdByName(tree, "Cyber Attack"), "Cyber Attack", "Seed Root")))
+
+  /** `tree` with "Cyber Attack" re-estimated to a likelihood of 0.6, submitting
+    * `mitigations` as its kept entries. */
+  private def reEstimateCyber(tree: RiskTree, mitigations: Seq[MitigationUpdateRequest]): RiskTreeUpdateRequest =
+    renameOnly(tree, tree.name.value).copy(
+      leaves = Seq(
+        leafUpd(leafIdByName(tree, "Cyber Attack"), "Cyber Attack", "Seed Root").copy(probability = 0.6),
+        leafUpd(leafIdByName(tree, "Fraud"), "Fraud", "Seed Root")
+      ),
+      mitigations = mitigations
+    )
+
+  /** A kept entry that re-affirms its absolute statement. */
+  private def restamped(entry: MitigationUpdateRequest): MitigationUpdateRequest =
+    entry.spec match
+      case absolute: MitigationSpecRequest.LeafAbsolute => entry.copy(spec = absolute.copy(stamp = BaseStampChoice.Restamp))
+      case _                                            => entry
+
+  private val halveAll: MitigationSpec =
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep)
+
+  /** A new mitigation halving every leaf's likelihood. */
+  private def halveAllDef(name: String): MitigationDefinitionRequest =
+    MitigationDefinitionRequest(
+      name, "leaf(x)",
+      MitigationSpecRequest.LeafRelative(RelativeLikelihoodRequest.Scale(0.5), RelativeSeverityRequest.Keep),
+      MitigationPrecedence.default)
+
+  /** A new absolute statement that the leaf `anchor` occurs with probability 0.05. */
+  private def pinDef(name: String, anchor: String): MitigationDefinitionRequest =
+    MitigationDefinitionRequest(
+      name, "leaf(x)",
+      MitigationSpecRequest.LeafAbsolute(AbsoluteReplacementRequest.Likelihood(0.05), anchor, BaseStampChoice.KeepIfUnchanged),
+      MitigationPrecedence.overrideFinal)
+
+  /** The same statement stored on `tree`'s leaf `leafName`, stamped with that leaf as `tree` holds it. */
+  private def pin(tree: RiskTree, label: String, leafName: String): Mitigation =
+    val anchor = leafNamed(tree, leafName)
+    targeted(label, "leaf(x)",
+      MitigationSpec.LeafAbsolute(
+        AbsoluteReplacement.Likelihood(residualProbability(0.05)), anchor.id, ContentHashIndex.hashOf(anchor)))
+
+  private def leafNamed(tree: RiskTree, name: String): RiskLeaf =
+    tree.nodes.collectFirst { case l: RiskLeaf if l.name.value == name => l }.get
+
+  /** The base stamp of `tree`'s absolute statement named `name`. */
+  private def stampOf(tree: RiskTree, name: String): Option[ContentHash] =
+    tree.mitigations.collectFirst {
+      case Mitigation(_, n, _, MitigationSpec.LeafAbsolute(_, _, stamp), _) if n.value == name => stamp
+    }
+
+  // ── Mitigation helpers ──────────────────────────────────────────────
 
   /** A well-formed mitigation. Scope resolution is a server concern settled
     * elsewhere, so any member of the targeting fragment serves here; what these
@@ -177,7 +247,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       Mitigation.create(
         id = mitigationId(label),
         name = SafeName.fromString(label).toOption.get,
-        target = MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
+        target = MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get),
         spec = MitigationSpec.LeafRelative(
           RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep),
         precedence = MitigationPrecedence.default
@@ -191,7 +261,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       Mitigation.create(
         id = mitigationId(label),
         name = SafeName.fromString(label).toOption.get,
-        target = MitigationTarget.Predicate(TargetingPredicate.create(predicate).toEither.toOption.get),
+        target = MitigationTarget.Predicate(TargetingPredicate.create(predicate, ErrorSubject.Request).toEither.toOption.get),
         spec = spec,
         precedence = MitigationPrecedence.default
       ),
@@ -212,9 +282,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       resultStage(ResultTransformSpec.CapLosses(
         ValidationUtil.refineLossCap(cap, ErrorLocation.requestField(FieldName.Cap)).toOption.get)))
 
-  /** Attach mitigations to an already-stored tree. No request can do this — the
-    * request DTOs carry no mitigation field — so writing through the repository
-    * is the only way to reach the state an update has to preserve. */
+  /** Attach mitigations to an already-stored tree by writing through the
+    * repository, so a test reaches stored state without the request path it
+    * exercises. */
   private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): IO[Failure, RiskTree] =
     repo.update(
       stubWsId,
@@ -387,15 +457,18 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               name = "Cyber Attack",
               parentName = Some("Operational Risk"),
               probability = 0.25,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 50000L),
+              seedVarId = None
             ),
             RiskLeafDefinitionRequest(
               name = "Fraud",
               parentName = Some("Operational Risk"),
               probability = 0.15,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 10000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500L, maxLoss = 10000L),
+              seedVarId = None
             )
-          )
+          ),
+          newMitigations = Nil
         )
 
         val program = service(_.create(stubWsId, hierarchicalRequest, BranchRef.Main))
@@ -515,15 +588,18 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               name = "Leaf 1",
               parentName = Some("Multi Root"),
               probability = 0.3,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 30000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 30000L),
+              seedVarId = None
             ),
             RiskLeafDefinitionRequest(
               name = "Leaf 2",
               parentName = Some("Multi Root"),
               probability = 0.2,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 2000L, maxLoss = 40000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 2000L, maxLoss = 40000L),
+              seedVarId = None
             )
-          )
+          ),
+          newMitigations = Nil
         )
 
         val program = for {
@@ -549,15 +625,18 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               name = "Node A",
               parentName = Some("Shared Root"),
               probability = 0.3,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 5000L, maxLoss = 15000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 5000L, maxLoss = 15000L),
+              seedVarId = None
             ),
             RiskLeafDefinitionRequest(
               name = "Node B",
               parentName = Some("Shared Root"),
               probability = 0.2,
-              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 10000L, maxLoss = 50000L)
+              distributionShape = DistributionShapeRequest.Lognormal(minLoss = 10000L, maxLoss = 50000L),
+              seedVarId = None
             )
-          )
+          ),
+          newMitigations = Nil
         )
 
         val program = for {
@@ -629,7 +708,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             leafDef("Zeta Risk", "Seed Root"),
             leafDef("Alpha Risk", "Seed Root"),
             leafDef("Mid Risk", "Seed Root")
-          )
+          ),
+          newMitigations = Nil
         )
         val program = service(_.create(stubWsId, request, BranchRef.Main))
         program.assert { tree =>
@@ -662,7 +742,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")
             ),
             newPortfolios = Seq.empty,
-            newLeaves = Seq.empty
+            newLeaves = Seq.empty,
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main))
         } yield (created, updated)
         program.assert { case (created, updated) =>
@@ -682,7 +764,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             leafDef("Pinned Risk", "Seed Root").copy(seedVarId = Some(5L)),
             leafDef("Auto Beta", "Seed Root"),
             leafDef("Auto Alpha", "Seed Root")
-          )
+          ),
+          newMitigations = Nil
         )
         val program = service(_.create(stubWsId, request, BranchRef.Main))
         program.assert { tree =>
@@ -703,7 +786,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")
             ),
             newPortfolios = Seq.empty,
-            newLeaves = Seq(leafDef("Usurper", "Seed Root").copy(seedVarId = Some(clashId)))
+            newLeaves = Seq(leafDef("Usurper", "Seed Root").copy(seedVarId = Some(clashId))),
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main)).exit
         } yield exit
         program.assert {
@@ -728,7 +813,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             ),
             leaves = Seq(leafUpd(leafIdByName(created, "Cyber Attack"), "Cyber Attack", "Seed Root")),
             newPortfolios = Seq.empty,
-            newLeaves = Seq(leafDef("Under Fraud", "Fraud"))
+            newLeaves = Seq(leafDef("Under Fraud", "Fraud")),
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main)).exit
           after   <- service(_.getById(stubWsId, created.id, Revision.Head(BranchRef.Main)))
         } yield (created, exit, after)
@@ -752,7 +839,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             portfolios = Seq(portfolioUpd(created, "Seed Root")),
             leaves = Seq(leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")),
             newPortfolios = Seq.empty,
-            newLeaves = Seq(leafDef("Cyber Attack Reborn", "Seed Root").copy(seedVarId = Some(freedId)))
+            newLeaves = Seq(leafDef("Cyber Attack Reborn", "Seed Root").copy(seedVarId = Some(freedId))),
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main))
         } yield (freedId, created, after)
         program.assert { case (freedId, created, after) =>
@@ -770,7 +859,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             portfolios = Seq(portfolioUpd(created, "Seed Root")),
             leaves = Seq(leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")),
             newPortfolios = Seq.empty,
-            newLeaves = Seq(leafDef("New Risk", "Seed Root"))
+            newLeaves = Seq(leafDef("New Risk", "Seed Root")),
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main))
         } yield (created, afterDelete)
         program.assert { case (created, after) =>
@@ -947,7 +1038,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
                              leafUpd(leafIdByName(seeded, "Fraud"), "Fraud", "Seed Root")
                            ),
                            newPortfolios = Seq.empty,
-                           newLeaves = Seq.empty
+                           newLeaves = Seq.empty,
+                           mitigations = keptMitigations(seeded),
+                           newMitigations = Nil
                          )
             _         <- service(_.update(stubWsId, seeded.id, renamed, BranchRef.Main))
             structure <- service(_.getStructure(stubWsId, seeded.id, BranchRef.Main, None))
@@ -988,57 +1081,150 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       ),
 
       // ========================================
-      // Mitigation carry-over across an update
+      // Mitigations through the tree write path
       // ========================================
-      // ADR-017's omission-means-delete governs the node collection, which the
-      // request enumerates. `RiskTreeUpdateRequest` has no mitigation field, so
-      // an update cannot express a mitigation deletion and must not perform one.
-      // The repository writes the whole subtree in one commit, so a tree handed to it
-      // without its mitigations loses them from the store — these tests pin the
-      // service's side of that contract, which the repository-level
-      // MitigationPersistenceItSpec cannot see.
-      suite("Mitigation carry-over")(
-        test("create starts a tree with no mitigations") {
+      // The update request enumerates the mitigations as it does the nodes, so
+      // a mitigation it lists is kept and one it omits is deleted (ADR-017 §4).
+      // An absolute statement's base stamp is computed here, from its anchor
+      // leaf, which the repository-level MitigationPersistenceItSpec cannot see.
+      suite("Mitigations through the tree write path")(
+        test("create starts a tree with no mitigations when it submits none") {
           service(_.create(stubWsId, validRequest, BranchRef.Main)).assert(_.mitigations.isEmpty)
         },
 
-        test("update preserves mitigations the request cannot express") {
-          val program = for {
-            repo    <- ZIO.service[RiskTreeRepository]
-            created <- service(_.create(stubWsId, seedTreeRequest("Carry Over"), BranchRef.Main))
-            seeded  <- seedMitigations(repo, created, mitigation("cyber-control"), mitigation("flood-control"))
-            updated <- service(_.update(stubWsId, seeded.id, renameOnly(seeded, "Carried"), BranchRef.Main))
-            reread  <- service(_.getById(stubWsId, seeded.id, Revision.Head(BranchRef.Main)))
-          } yield (updated, reread)
-
-          program.assert { case (updated, reread) =>
-            val expected = Set("cyber-control", "flood-control")
-            updated.mitigations.map(_.name.value).toSet == expected &&
-              updated.name == SafeName.SafeName("Carried".refineUnsafe) &&
-              reread.exists((t, _) => t.mitigations.map(_.name.value).toSet == expected)
+        test("create stores a submitted mitigation under a minted id") {
+          val request = seedTreeRequest("Create With").copy(newMitigations = Seq(halveAllDef("halve-all")))
+          service(_.create(stubWsId, request, BranchRef.Main)).assert { tree =>
+            tree.mitigations.map(_.name.value) == Seq("halve-all") &&
+              tree.mitigations.map(_.spec) == Seq(halveAll)
           }
         },
 
-        test("an update that deletes a node still preserves mitigations") {
-          // Dropping "Fraud" from the request deletes that leaf, because nodes
-          // ARE enumerated. The mitigations, which cannot be enumerated, stay.
+        test("create refuses an absolute statement at its anchor, because a create has no stored leaf") {
+          val anchor  = "01H0R8Z3F5J2N4R8Z3F5J2N4R8"
+          val request = seedTreeRequest("Create Absolute").copy(newMitigations = Seq(pinDef("pin", anchor)))
+          service(_.create(stubWsId, request, BranchRef.Main)).exit.map { exit =>
+            val subject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
+            assertTrue(exit.causeOption.flatMap(_.failureOption).flatMap(clientRefusals).exists(_.contains(
+              ValidationError(ErrorLocation.Field(subject, FieldName.Anchor), FieldProblem.StoredNodeNotInTree))))
+          }
+        },
+
+        test("update keeps the mitigations it lists") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Keep Listed"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, mitigation("cyber-control"), mitigation("flood-control"))
+            updated <- service(_.update(stubWsId, seeded.id, renameOnly(seeded, "Kept"), BranchRef.Main))
+            reread  <- service(_.getById(stubWsId, seeded.id, Revision.Head(BranchRef.Main)))
+          } yield (seeded, updated, reread)
+
+          program.assert { case (seeded, updated, reread) =>
+            updated.mitigations.toSet == seeded.mitigations.toSet &&
+              updated.name == SafeName.SafeName("Kept".refineUnsafe) &&
+              reread.exists((t, _) => t.mitigations.toSet == seeded.mitigations.toSet)
+          }
+        },
+
+        test("update deletes a mitigation it omits") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Omit One"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, mitigation("cyber-control"), mitigation("flood-control"))
+            request  = renameOnly(seeded, "Omit One").copy(
+                         mitigations = keptMitigations(seeded).filter(_.name == "cyber-control"))
+            updated <- service(_.update(stubWsId, seeded.id, request, BranchRef.Main))
+          } yield updated
+
+          program.assert(_.mitigations.map(_.name.value) == Seq("cyber-control"))
+        },
+
+        test("an update that deletes a node keeps a mitigation it lists") {
           val program = for {
             repo    <- ZIO.service[RiskTreeRepository]
             created <- service(_.create(stubWsId, seedTreeRequest("Node Drop"), BranchRef.Main))
             seeded  <- seedMitigations(repo, created, mitigation("surviving-control"))
-            dropFraud = RiskTreeUpdateRequest(
-                          name = "Node Drop",
-                          portfolios = Seq(portfolioUpd(seeded, "Seed Root")),
-                          leaves = Seq(leafUpd(leafIdByName(seeded, "Cyber Attack"), "Cyber Attack", "Seed Root")),
-                          newPortfolios = Seq.empty,
-                          newLeaves = Seq.empty
-                        )
-            updated <- service(_.update(stubWsId, seeded.id, dropFraud, BranchRef.Main))
+            updated <- service(_.update(stubWsId, seeded.id, dropFraud(seeded), BranchRef.Main))
           } yield updated
 
           program.assert { updated =>
             !updated.nodes.exists(_.name.value == "Fraud") &&
               updated.mitigations.map(_.name.value) == Seq("surviving-control")
+          }
+        },
+
+        test("update refuses a kept entry naming no stored mitigation, at that entry's id") {
+          val unknown = mitigation("never-stored")
+          val program = for {
+            created <- service(_.create(stubWsId, seedTreeRequest("Unknown Kept"), BranchRef.Main))
+            request  = renameOnly(created, "Unknown Kept").copy(
+                         mitigations = Seq(MitigationUpdateRequest.fromMitigation(unknown)))
+            exit    <- service(_.update(stubWsId, created.id, request, BranchRef.Main)).exit
+          } yield exit
+
+          program.map { exit =>
+            assertTrue(exit.causeOption.flatMap(_.failureOption).flatMap(clientRefusals).exists(_.contains(
+              ValidationError(
+                ErrorLocation.Field(ErrorSubject.Mitigation(unknown.id), FieldName.Id),
+                FieldProblem.StoredMitigationNotInTree))))
+          }
+        },
+
+        test("a new absolute statement is stamped with its anchor leaf as the update builds it") {
+          val program = for {
+            created <- service(_.create(stubWsId, seedTreeRequest("New Absolute"), BranchRef.Main))
+            request  = renameOnly(created, "New Absolute").copy(
+                         newMitigations = Seq(pinDef("pin", leafIdByName(created, "Cyber Attack"))))
+            updated <- service(_.update(stubWsId, created.id, request, BranchRef.Main))
+          } yield updated
+
+          program.assert { updated =>
+            stampOf(updated, "pin") == Some(ContentHashIndex.hashOf(leafNamed(updated, "Cyber Attack"))) &&
+              MitigationStaleness.staleOverrides(updated).isEmpty
+          }
+        },
+
+        test("an unchanged kept absolute statement keeps its stamp, so editing its leaf reports it stale") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Keep Stamp"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, pin(created, "pin", "Cyber Attack"))
+            updated <- service(_.update(stubWsId, seeded.id, reEstimateCyber(seeded, keptMitigations(seeded)), BranchRef.Main))
+          } yield (seeded, updated)
+
+          program.assert { case (seeded, updated) =>
+            stampOf(updated, "pin") == stampOf(seeded, "pin") &&
+              MitigationStaleness.staleOverrides(updated) == Set(mitigationId("pin"))
+          }
+        },
+
+        test("Restamp re-stamps a kept absolute statement to its anchor leaf as the update builds it") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Restamp"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, pin(created, "pin", "Cyber Attack"))
+            updated <- service(_.update(stubWsId, seeded.id,
+                         reEstimateCyber(seeded, keptMitigations(seeded).map(restamped)), BranchRef.Main))
+          } yield updated
+
+          program.assert { updated =>
+            stampOf(updated, "pin") == Some(ContentHashIndex.hashOf(leafNamed(updated, "Cyber Attack"))) &&
+              MitigationStaleness.staleOverrides(updated).isEmpty
+          }
+        },
+
+        test("an absolute statement whose anchor leaf the update deletes is stamped from the stored leaf") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Deleted Anchor"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, pin(created, "pin", "Fraud"))
+            request  = dropFraud(seeded).copy(mitigations = keptMitigations(seeded).map(restamped))
+            updated <- service(_.update(stubWsId, seeded.id, request, BranchRef.Main))
+          } yield (seeded, updated)
+
+          program.assert { case (seeded, updated) =>
+            stampOf(updated, "pin") == Some(ContentHashIndex.hashOf(leafNamed(seeded, "Fraud"))) &&
+              MitigationStaleness.staleOverrides(updated).isEmpty
           }
         }
       ),

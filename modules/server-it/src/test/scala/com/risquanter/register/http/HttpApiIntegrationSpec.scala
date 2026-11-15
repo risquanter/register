@@ -45,15 +45,18 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           name = "Leaf 1",
           parentName = Some("Root"),
           probability = 0.1,
-          distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 2000L)
+          distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1000L, maxLoss = 2000L),
+          seedVarId = None
         ),
         RiskLeafDefinitionRequest(
           name = "Leaf 2",
           parentName = Some("Root"),
           probability = 0.2,
-          distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1500L, maxLoss = 3000L)
+          distributionShape = DistributionShapeRequest.Lognormal(minLoss = 1500L, maxLoss = 3000L),
+          seedVarId = None
         )
-      )
+      ),
+      newMitigations = Nil
     )
 
   override def spec =
@@ -259,7 +262,9 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           portfolios = Seq.empty,
           leaves = Seq.empty,
           newPortfolios = Seq.empty,
-          newLeaves = Seq.empty
+          newLeaves = Seq.empty,
+          mitigations = Nil,
+          newMitigations = Nil
         )
         for
           client <- ZIO.service[SttpClientFixture.Client]
@@ -402,7 +407,9 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           portfolios = Seq.empty,
           leaves = Seq.empty,
           newPortfolios = Seq.empty,
-          newLeaves = Seq.empty
+          newLeaves = Seq.empty,
+          mitigations = Nil,
+          newMitigations = Nil
         )
         for
           client <- ZIO.service[SttpClientFixture.Client]

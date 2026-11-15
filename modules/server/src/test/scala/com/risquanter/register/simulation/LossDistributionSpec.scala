@@ -8,7 +8,7 @@ import com.risquanter.register.domain.data.{
   NodeProvenance, ResultTransformSpec
 }
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem}
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, resultStage, retentionFactor}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -47,7 +47,15 @@ object LossDistributionSpec extends ZIOSpecDefault {
   private def deductibleRecord(label: String, deductible: Long): MitigationApplicationRecord =
     MitigationApplicationRecord(
       mitigationId(label),
-      resultStage(ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(deductible, paramAt).toOption.get)),
+      resultStage(ResultTransformSpec.ApplyDeductible(ValidationUtil.refineDeductible(deductible, paramAt).toOption.get)),
+      Set.empty,
+      MitigationPrecedence.default
+    )
+
+  private def policyRecord(label: String, deductible: Long, limit: Long): MitigationApplicationRecord =
+    MitigationApplicationRecord(
+      mitigationId(label),
+      resultStage(ResultTransformSpec.InsurancePolicy.refine(deductible, limit, ErrorSubject.Request).toEither.toOption.get),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -240,13 +248,13 @@ object LossDistributionSpec extends ZIOSpecDefault {
           case Right(_) => assertTrue(false)
         }
       },
-      test("a deductible at or above every loss is refused — a mitigation cannot eliminate a risk") {
-        // A deductible is data-dependent: 5000 is ordinary against losses in the
-        // millions and annihilating against these. No type can close it, so the
-        // layer boundary compares the figures before and after.
+      test("a zero-deductible policy whose limit covers every loss is refused — a mitigation cannot eliminate a risk") {
+        // A policy's limit is data-dependent: 5000 is ordinary against losses in
+        // the millions and annihilating against these. No type can close it, so
+        // the layer boundary compares the figures before and after.
         val id     = nodeId("risk-001")
         val result = withCfg(100) {
-          decorated(id, Map(1 -> 1000L, 2 -> 2000L), List(deductibleRecord("ded-a", 5000L)))
+          decorated(id, Map(1 -> 1000L, 2 -> 2000L), List(policyRecord("pol-a", 0L, 5000L)))
         }
 
         result.toEither match {
@@ -270,10 +278,19 @@ object LossDistributionSpec extends ZIOSpecDefault {
           case Right(_) => assertTrue(false)
         }
       },
+      test("a standalone deductible at or above every loss is accepted and leaves the losses unchanged") {
+        val id    = nodeId("risk-001")
+        val value = withCfg(100) {
+          decorated(id, Map(1 -> 1000L, 2 -> 2000L), List(deductibleRecord("ded-a", 5000L)))
+            .toEither.toOption.get
+        }
+
+        assertTrue(value.trials.outcomes == Map(1 -> 1000L, 2 -> 2000L))
+      },
       test("a layer that leaves one loss standing is accepted") {
         val id    = nodeId("risk-001")
         val value = withCfg(100) {
-          decorated(id, Map(1 -> 1000L, 2 -> 9000L), List(deductibleRecord("ded-a", 5000L)))
+          decorated(id, Map(1 -> 1000L, 2 -> 9000L), List(policyRecord("pol-a", 0L, 5000L)))
             .toEither.toOption.get
         }
 

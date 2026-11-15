@@ -32,7 +32,8 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
         name             = "Cyber Breach",
         parentName       = Some("IT Risk"),
         probability      = 0.20,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 8000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 500000L, maxLoss = 8000000L),
+        seedVarId        = None
       ),
       RiskLeafDefinitionRequest(
         name             = "Ransomware",
@@ -42,21 +43,25 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
           percentiles = Vector(0.25, 0.50, 0.75, 0.95),
           quantiles   = Vector(200000.0, 1000000.0, 4000000.0, 15000000.0),
           terms       = None
-        )
+        ),
+        seedVarId        = None
       ),
       RiskLeafDefinitionRequest(
         name             = "Supply Chain Disruption",
         parentName       = Some("Third Party Risk"),
         probability      = 0.15,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 300000L, maxLoss = 3000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 300000L, maxLoss = 3000000L),
+        seedVarId        = None
       ),
       RiskLeafDefinitionRequest(
         name             = "Regulatory Fine",
         parentName       = Some("Third Party Risk"),
         probability      = 0.08,
-        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 100000L, maxLoss = 2000000L)
+        distributionShape = DistributionShapeRequest.Lognormal(minLoss = 100000L, maxLoss = 2000000L),
+        seedVarId        = None
       )
-    )
+    ),
+    newMitigations = Nil
   )
 
   private def query = DemoSpecSupport.query

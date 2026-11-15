@@ -194,7 +194,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     Mitigation.create(
       mitigationId(idLabel),
       SafeName.fromString(nm).toOption.get,
-      MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
+      MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get),
       resultStage(ResultTransformSpec.CapLosses(1000000L)),
       MitigationPrecedence.default
     ).toEither.toOption.get

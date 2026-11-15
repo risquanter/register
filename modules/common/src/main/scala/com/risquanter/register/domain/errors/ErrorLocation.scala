@@ -38,6 +38,19 @@ object SubmittedCollection:
     given Configuration = discriminated
     Schema.derived[SubmittedCollection]
 
+/** Which submitted mitigation collection an entry came from. A tree update
+  * submits two, each indexed from zero independently. */
+@jsonDiscriminator(TagField)
+enum SubmittedMitigations:
+  case Mitigations, NewMitigations
+
+object SubmittedMitigations:
+  given codec: JsonCodec[SubmittedMitigations] = DeriveJsonCodec.gen[SubmittedMitigations]
+
+  given schema: Schema[SubmittedMitigations] =
+    given Configuration = discriminated
+    Schema.derived[SubmittedMitigations]
+
 /** What a failure is about.
   *
   * A subject and a field vary independently — the same field can fail under any
@@ -78,6 +91,10 @@ enum ErrorSubject:
   /** A mitigation as applied to one node. */
   case MitigationAtNode(mitigationId: MitigationId, nodeId: NodeId)
 
+  /** A submitted mitigation pointed at by its position, because it has no id
+    * yet or because its id is what failed to refine. */
+  case MitigationAtIndex(collection: SubmittedMitigations, index: NonNegativeInt)
+
   /** The workspace the request is scoped to, for a limit the workspace holds
     * rather than the request. */
   case Workspace
@@ -103,6 +120,11 @@ object ErrorSubject:
     */
   def nodeAtIndex(collection: SubmittedCollection, index: Int): ErrorSubject =
     index.refineEither[GreaterEqual[0]].fold(_ => Request, NodeAtIndex(collection, _))
+
+  /** The mitigation at a zero-based position in one of the submitted
+    * mitigation collections, on the same terms as `nodeAtIndex`. */
+  def mitigationAtIndex(collection: SubmittedMitigations, index: Int): ErrorSubject =
+    index.refineEither[GreaterEqual[0]].fold(_ => Request, MitigationAtIndex(collection, _))
 
 /** Which field or computed aspect failed.
   *
@@ -149,7 +171,7 @@ enum FieldName:
 
   // Mitigations and the transform parameters a mitigation spec carries
   case Mitigations, Precedence, Cap, Factor, TargetingSource
-  case Deductible, Threshold
+  case Deductible, Limit, Threshold, Anchor
 
   // References to a revision or a branch
   case Branch, Scenario, At, Source, ToCommit, CommitHash, ContentHash
@@ -251,6 +273,7 @@ object ErrorLocation:
     case ErrorSubject.Tree(treeId)           => s"tree ${treeId.value}"
     case ErrorSubject.Mitigation(id)         => s"mitigation ${id.value}"
     case ErrorSubject.MitigationAtNode(m, n) => s"mitigation ${m.value} at node ${n.value}"
+    case ErrorSubject.MitigationAtIndex(c, i) => s"submitted $c[$i]"
     case ErrorSubject.Workspace              => "workspace"
 
 /** The request headers this application declares.
@@ -423,7 +446,7 @@ object ValueFormat:
 enum ValueRange:
   case NonNegative, Positive, SeedEntityId, SeedVarId
   case OpenUnitInterval, ClosedUnitInterval, Percent, Percentile
-  case PositiveLoss, LossCap, MetalogTerms, RetentionFactor, ResidualProbability
+  case PositiveLoss, LossCap, Deductible, MetalogTerms, RetentionFactor, ResidualProbability
 
 object ValueRange:
   given codec: JsonCodec[ValueRange] = DeriveJsonCodec.gen[ValueRange]
@@ -499,6 +522,10 @@ enum FieldProblem:
   case StoredNodeIsPortfolio
   case StoredNodeNotInTree
 
+  // A stored mitigation named by a tree update; the location carries its id
+  case StoredMitigationListedTwice
+  case StoredMitigationNotInTree
+
   /** A node is a leaf on one side of a merge and a portfolio on the other. */
   case StoredNodeKindDiffers
 
@@ -524,7 +551,6 @@ enum FieldProblem:
   // Mitigation
   case PipelineEmpty(min: NonNegativeInt)
   case PipelineTooLong(count: NonNegativeInt, limit: NonNegativeInt)
-  case CapMustExceedDeductible
   case AggregatedLossOverflow
   case MitigationEliminatesRisk
   case MitigationLowersMinLossBelowFloor(min: PositiveLong, minFactor: PositiveDouble)
@@ -599,6 +625,8 @@ object FieldProblem:
     case StoredNodeIsLeaf                           => ValidationErrorCode.INVALID_NODE_TYPE
     case StoredNodeIsPortfolio                      => ValidationErrorCode.INVALID_NODE_TYPE
     case StoredNodeNotInTree                        => ValidationErrorCode.MISSING_REFERENCE
+    case StoredMitigationListedTwice                => ValidationErrorCode.DUPLICATE_VALUE
+    case StoredMitigationNotInTree                  => ValidationErrorCode.MISSING_REFERENCE
     case StoredNodeKindDiffers                      => ValidationErrorCode.INVALID_NODE_TYPE
     case ChildParentMismatch(_, _)                  => ValidationErrorCode.CONSTRAINT_VIOLATION
     case ChildNotFound(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
@@ -617,7 +645,6 @@ object FieldProblem:
     case LognormalFitFailed                         => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS
     case PipelineEmpty(_)                          => ValidationErrorCode.CONSTRAINT_VIOLATION
     case PipelineTooLong(_, _)                      => ValidationErrorCode.CONSTRAINT_VIOLATION
-    case CapMustExceedDeductible                    => ValidationErrorCode.INVALID_COMBINATION
     case AggregatedLossOverflow                     => ValidationErrorCode.CONSTRAINT_VIOLATION
     case MitigationEliminatesRisk                   => ValidationErrorCode.CONSTRAINT_VIOLATION
     case MitigationLowersMinLossBelowFloor(_, _)    => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS

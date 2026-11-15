@@ -6,13 +6,17 @@ import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
 import app.core.LocalProblem
-import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, DistributionShape}
+import com.risquanter.register.domain.data.{
+  DistributionShape, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget, RelativeLikelihood,
+  RelativeSeverity, RiskLeaf, RiskNode, RiskPortfolio, RiskTree, TargetingPredicate
+}
+import com.risquanter.register.http.requests.MitigationUpdateRequest
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, Probability, SeedVarId, ValidationMessages}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.http.responses.TreeSummaryResponse
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
-import com.risquanter.register.testutil.TestHelpers.{unsafeGet, metalogShape, lognormalShape}
+import com.risquanter.register.testutil.TestHelpers.{lognormalShape, metalogShape, mitigationId, retentionFactor, unsafeGet}
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
 
@@ -334,6 +338,39 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
             assertTrue(
               emittedIds.nonEmpty,
               emittedIds.forall(s => NodeId.fromString(s).isRight)
+            )
+          case Validation.Failure(_, errors) =>
+            assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
+      },
+
+      test("the loaded tree's mitigations are sent back as kept entries, and none as new") {
+        // The update deletes any stored mitigation it omits, so a save from the
+        // builder must list every one it loaded.
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          probability      = 0.3,
+          shape            = lognormalShape(1000L, 50000L),
+          parentId         = Some(rootId),
+          seedVarId = 9L
+        ), "leaf")
+        val mfa = unsafeGet(Mitigation.create(
+          mitigationId("mfa"),
+          n("MFA"),
+          MitigationTarget.Predicate(unsafeGet(TargetingPredicate.create("leaf(x)", ErrorSubject.Request), "target")),
+          MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.3)), RelativeSeverity.Keep),
+          MitigationPrecedence.default
+        ), "mitigation")
+        val tree = RiskTree.fromNodesUnsafe(
+          TreeId.fromString(treeUlid).toOption.get, n("Mitigated"), Seq(rootPortfolio, leafUnderRoot), rootId,
+          Some(leafUnderRoot.seedVarId), mitigations = Seq(mfa))
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        state.toUpdateRequest() match
+          case Validation.Success(_, req) =>
+            assertTrue(
+              req.mitigations == List(MitigationUpdateRequest.fromMitigation(mfa)),
+              req.newMitigations.isEmpty
             )
           case Validation.Failure(_, errors) =>
             assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))

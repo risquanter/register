@@ -159,8 +159,15 @@ http POST localhost:18080/workspaces \
         "maxLoss": 2000000
       }
     }
-  ]'
+  ]' \
+  newMitigations:='[]'
 ```
+
+`newMitigations` lists the [mitigations](TERMINOLOGY.md#31-mitigation) the request adds, and the empty list adds none. The key is required, so a body without it is refused with `400`.
+
+A request that replaces a stored tree, `PUT /w/{key}/risk-trees/{treeId}`, carries mitigations in two lists, the way it carries nodes. `mitigations` lists each stored mitigation to keep, by its `id`. `newMitigations` lists each one to add, with no `id`, and the server assigns one. A stored mitigation that neither list names is deleted. So to keep a tree's mitigations, send back every one its structure read returned.
+
+An [absolute statement](TERMINOLOGY.md#36-relative-and-absolute-statements) names the stored leaf it was written against in its `anchor`. A tree being created has no stored leaf yet, so an absolute statement can be added only by a replacing request.
 
 The server answers `201 Created`. The `Location` header is `w/{key}`, a reference relative to `/workspaces` that resolves to the new workspace's address. The body carries your workspace key and the new tree's id and name:
 
@@ -607,7 +614,8 @@ http POST localhost:18080/workspaces \
         "terms": null
       }
     }
-  ]'
+  ]' \
+  newMitigations:='[]'
 ```
 
 ### Bootstrap (curl)
@@ -945,6 +953,7 @@ curl -s -X POST http://localhost:18080/workspaces \
           "terms": null
         }
       }
-    ]
+    ],
+    "newMitigations": []
   }' | jq '{workspaceKey: .workspaceKey, treeId: .tree.id, expiresAt: .expiresAt}'
 ```

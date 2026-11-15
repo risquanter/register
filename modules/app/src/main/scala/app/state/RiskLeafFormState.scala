@@ -704,7 +704,8 @@ object RiskLeafFormState:
                FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater |
                FieldName.SeedVarId | FieldName.SeedEntityId | FieldName.Spec | FieldName.ChildAt(_) |
                FieldName.Mitigations | FieldName.Precedence | FieldName.Cap | FieldName.Factor |
-               FieldName.TargetingSource | FieldName.Deductible | FieldName.Threshold |
+               FieldName.TargetingSource | FieldName.Deductible | FieldName.Limit | FieldName.Threshold |
+               FieldName.Anchor |
                FieldName.Branch | FieldName.Scenario | FieldName.At |
                FieldName.Source | FieldName.ToCommit | FieldName.CommitHash | FieldName.ContentHash |
                FieldName.WorkspaceKey | FieldName.WorkspaceKeyHash | FieldName.UserId |

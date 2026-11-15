@@ -403,7 +403,8 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
           "terms": null
         }
       }
-    ]
+    ],
+    "newMitigations": []
   }')
 
 WS_KEY=$(echo "$BOOTSTRAP" | jq -r '.workspaceKey')

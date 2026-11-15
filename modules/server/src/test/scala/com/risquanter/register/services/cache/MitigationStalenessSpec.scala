@@ -62,7 +62,7 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
 
   private def sname(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
   private val pred: MitigationTarget =
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get)
 
   /** An absolute statement asserting probability 0.05 on `anchor`, stamped with
     * `stamp` (the caller supplies the authoring-time hash). It runs last, so the
@@ -132,12 +132,12 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
         assertTrue(MitigationStaleness.staleOverrides(tree).isEmpty)
       },
 
-      test("anchor leaf deleted → reported stale") {
+      test("anchor leaf deleted → not reported") {
         val stamp = ContentHashIndex.hashOf(cyber(prob = 0.2))
         val m     = absoluteMit("m-orphan", stamp, cyberId)
         // Tree no longer contains the anchor leaf; root references only flood.
         val tree  = mkTree(root(floodId), Seq(flood), m)
-        assertTrue(MitigationStaleness.staleOverrides(tree) == Set(m.id))
+        assertTrue(MitigationStaleness.staleOverrides(tree).isEmpty)
       },
 
       test("resolution ignores staleness — the statement applies whether stale or fresh") {

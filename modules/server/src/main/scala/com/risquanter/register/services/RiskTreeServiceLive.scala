@@ -8,15 +8,15 @@ import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape, Mitigation, MitigationSelection}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, MitigationId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape, Mitigation, MitigationSelection, MitigationSpec}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, MitigationId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, ContentHash, Revision, BranchChoice}
 import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, Failure, TrustZone}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.{LECGenerator, LossDistribution}
-import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, MitigationStaleness, ResolvedScopes, ScopeResolutionContext}
+import com.risquanter.register.services.cache.{CachedResultResolver, ContentHashIndex, MitigationScopeResolverRegistry, MitigationStaleness, ResolvedScopes, ScopeResolutionContext}
 import com.risquanter.register.services.RiskTreeServiceLive.{ErrorContext, Operation}
 import com.risquanter.register.services.helper.{SeedVarIdAssigner, Simulator}
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -357,6 +357,39 @@ class RiskTreeServiceLive private (
   // error channel, which carries only failures that have a wire case.
   }.orDie
 
+  /** The resolved mitigations as stored ones. An unstamped statement is
+    * stamped with the content hash of its anchor leaf as this request builds
+    * it, or as stored when the request deletes that leaf, and the override then
+    * applies to nothing. `resolve` checked every anchor against the stored
+    * leaves, so a miss is a broken invariant and dies, as in `buildNodes`.
+    *
+    * {{{
+    * // an update that edits leaf L and adds an absolute statement on L
+    * stampMitigations(Seq(Unstamped(replacement, L)), builtNodes, storedNodes)
+    * // LeafAbsolute(replacement, L, ContentHashIndex.hashOf(the edited L))
+    * }}}
+    */
+  private def stampMitigations(
+    resolved: Seq[RiskTreeRequests.ResolvedMitigation],
+    built: Seq[RiskNode],
+    stored: Map[NodeId, RiskNode]
+  ): IO[Failure, Seq[Mitigation]] =
+    val builtById: Map[NodeId, RiskNode] = built.map(n => n.id -> n).toMap
+
+    def anchorHash(anchor: NodeId): UIO[ContentHash] =
+      (builtById.get(anchor), stored.get(anchor)) match
+        case (Some(leaf: RiskLeaf), _) => ZIO.succeed(ContentHashIndex.hashOf(leaf))
+        case (_, Some(leaf: RiskLeaf)) => ZIO.succeed(ContentHashIndex.hashOf(leaf))
+        case _ => ZIO.die(new IllegalStateException(s"anchor ${anchor.value} names no leaf after resolve checked it"))
+
+    ZIO.foreach(resolved) { m =>
+      val spec: UIO[MitigationSpec] = m.spec match
+        case RiskTreeRequests.ResolvedSpec.Complete(complete) => ZIO.succeed(complete)
+        case RiskTreeRequests.ResolvedSpec.Unstamped(replacement, anchor) =>
+          anchorHash(anchor).map(MitigationSpec.LeafAbsolute(replacement, anchor, _))
+      spec.flatMap(s => Mitigation.create(m.id, m.name, m.target, s, m.precedence).toZIOValidation(TrustZone.Client))
+    }
+
   /** The leaf's shape fitted, or its refusal at the leaf's `DistributionType`
     * paired with the fitter's own text for the log line, which never crosses
     * (ADR-035).
@@ -418,13 +451,14 @@ class RiskTreeServiceLive private (
     val operation = for {
       // Identifier generation failing is a broken invariant, as in `allocateIds`.
       treeId <- IdGenerators.nextTreeId.orDie
-      ids <- allocateIds(req.portfolios.size + req.leaves.size)
+      ids <- allocateIds(req.portfolios.size + req.leaves.size + req.newMitigations.size)
       resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation(TrustZone.Client)
       _ <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch, excludeId = None)
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(leafNamesOf(resolved.nodes), resolved.providedSeedVarIds, highWater = 0L))
         .mapError(seedVarIdRefused)
       (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leaves.view.mapValues(l => (l.probability, l.shape)).toMap, resolved.rootName, seedVarIds)
+      mitigations <- stampMitigations(resolved.mitigations, nodes, Map.empty)
       riskTree <- rejectedUnlessFit(
         RiskTree.fromNodes(
           id = treeId,
@@ -432,9 +466,7 @@ class RiskTreeServiceLive private (
           nodes = nodes,
           rootId = rootId,
           seedVarHighWater = Some(seedVarHighWater),
-          // A tree is created from its node definition alone; mitigations are
-          // attached afterwards, never at creation.
-          mitigations = Nil
+          mitigations = mitigations
         ),
         // `resolve` keys `leaves` by every leaf's name, so the lookup is total.
         Validation.validateAll(nodes.collect { case leaf: RiskLeaf => fitCheck(leaf, resolved.leaves(leaf.name).subject) }).as(())
@@ -451,8 +483,10 @@ class RiskTreeServiceLive private (
   override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree] = {
     val operation = for {
       (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
-      ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
-      resolved <- RiskTreeUpdateRequest.resolve(req, oldTree.index, idGeneratorFrom(ids)).toZIOValidation(TrustZone.Client)
+      ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size + req.newMitigations.size)
+      resolved <- RiskTreeUpdateRequest
+        .resolve(req, oldTree.index, oldTree.mitigations, idGeneratorFrom(ids))
+        .toZIOValidation(TrustZone.Client)
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
       allLeafOccurrenceAndShape =
@@ -479,6 +513,9 @@ class RiskTreeServiceLive private (
         ))
         .mapError(seedVarIdRefused)
       (nodes, rootId) <- buildNodes(allNodes, allLeafOccurrenceAndShape, resolved.rootName, seedVarIds)
+      // The request enumerates the mitigation collection as it does the nodes,
+      // so a mitigation it omits is deleted (ADR-017 §4).
+      mitigations <- stampMitigations(resolved.mitigations, nodes, oldTree.index.nodes)
       riskTree <- rejectedUnlessFit(
         RiskTree.fromNodes(
           id = id,
@@ -486,13 +523,7 @@ class RiskTreeServiceLive private (
           nodes = nodes,
           rootId = rootId,
           seedVarHighWater = Some(seedVarHighWater),
-          // Carried over from the tree being updated. ADR-017's
-          // omission-means-delete covers the node collection, which the request
-          // enumerates; `RiskTreeUpdateRequest` has no mitigation field at all, so
-          // an update cannot express "delete the mitigations" and must not imply
-          // it. The repository writes the whole subtree in one commit, so
-          // anything not passed here is deleted from the store.
-          mitigations = oldTree.mitigations
+          mitigations = mitigations
         ),
         // `resolve` keys both leaf maps by every leaf's name, so the lookup is total.
         Validation.validateAll(changedLeaves(nodes, oldTree.index).map(leaf => fitCheck(leaf, leafSubjects(leaf.name)))).as(())

@@ -55,7 +55,7 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
       Mitigation.create(
         id = mitigationId(label),
         name = SafeName.fromString(label).toOption.get,
-        target = MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
+        target = MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get),
         spec = MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep),
         precedence = MitigationPrecedence.default
       ),

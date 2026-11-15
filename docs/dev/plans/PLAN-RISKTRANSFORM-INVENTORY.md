@@ -390,3 +390,14 @@ PATCH bump; plan close = MINOR bump.
 - modules/common/src/test/scala/com/risquanter/register/http/requests/QueryRequestSpec.scala
 - modules/common/src/main/scala/com/risquanter/register/http/errors/BindProblem.scala
 - modules/common/src/test/scala/com/risquanter/register/http/errors/BindProblemSpec.scala
+- modules/app/src/main/scala/app/state/TreeBuilderState.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/RequestBodyLimitItSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/LognormalBoundPositivityItSpec.scala
+- modules/app/src/main/scala/app/state/PortfolioFormState.scala
+- modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+- modules/server/src/main/scala/com/risquanter/register/mitigation/RiskResultTransform.scala
+- modules/server/src/main/scala/com/risquanter/register/mitigation/ResultTransformInterpreter.scala
+- modules/server/src/test/scala/com/risquanter/register/mitigation/RiskResultTransformSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/mitigation/ResultTransformInterpreterSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/simulation/LossDistributionSpec.scala
+- modules/app/src/test/scala/app/views/FormErrorRoutingSpec.scala

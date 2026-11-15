@@ -96,7 +96,7 @@ final case class LossDistribution private (
 ```
 
 Recording is unconditional because a no-op mitigation is authorable —
-`ScaleLosses(1.0)`, `ApplyDeductible(0)`, `FilterBelowThreshold(0)` — so
+`ScaleLosses(1.0)`, `FilterBelowThreshold(0)` — so
 "record when something changed" would make the answer depend on a parameter's
 numeric value. `source` is figures, not a nested value: the value names no
 internal type and holds no reference to another node, so its size is bounded by
@@ -146,11 +146,12 @@ that never occurs, which is a statement about the world, while a mitigation may
 not set the probability to zero, which claims a control cannot fail.
 
 **A check at the layer boundary, where the outcomes decide it.** Three parameters
-annihilate only against particular trial outcomes: a deductible at or above every
-loss, a threshold above every loss, and a scale factor small enough that every
-loss rounds to zero and is dropped by `scaleLosses`' sparse-storage filter. The
-same deductible is ordinary for a node whose losses run in the millions and
-annihilating for one whose losses run in the thousands, and a factor of `0.001`
+annihilate only against particular trial outcomes: an insurance policy with a
+zero deductible whose limit is at or above every loss, a threshold above every
+loss, and a scale factor small enough that every loss rounds to zero and is
+dropped by `scaleLosses`' sparse-storage filter. The same limit is ordinary for a
+node whose losses run in the millions and annihilating for one whose losses run in
+the thousands, and a factor of `0.001`
 is harmless against millions and fatal against hundreds. No type can close any of
 the three, so `LossDistribution.decorate` compares the node's source outcomes
 against the layer's result and refuses a layer that leaves no loss where there was
@@ -166,7 +167,7 @@ happens in the rounding, not in the parameter.
 Adding a transform therefore means deciding its annihilating case against the
 layer check, rather than assuming a factor bound covers it.
 
-One thing is not an instance of the rule: `applyDeductible` and `scaleLosses` end
+One thing is not an instance of the rule: `insurancePolicy` and `scaleLosses` end
 with `.filterLosses(_ > 0L)`. `TrialOutcomes.outcomeOf` reads an absent trial as `0L`,
 so a stored zero and an absent entry are the same value and the filter puts a zero
 into its canonical form. No outcome is discarded.

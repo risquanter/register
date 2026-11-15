@@ -85,7 +85,7 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
     Mitigation.create(
       mitigationId(label),
       SafeName.fromString(label).toOption.get,
-      MitigationTarget.Predicate(TargetingPredicate.create(predSrc).toEither.toOption.get),
+      MitigationTarget.Predicate(TargetingPredicate.create(predSrc, ErrorSubject.Request).toEither.toOption.get),
       spec,
       MitigationPrecedence.default
     ).toEither.toOption.get

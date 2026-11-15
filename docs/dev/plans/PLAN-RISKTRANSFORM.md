@@ -3457,8 +3457,8 @@ constructor deliberately, so this is the one place the tension shows.
 mitigation scope resolver and its per-workspace registry) has landed; this one has
 not, and the two are unrelated pieces of work that share a number.
 
-**It lands after register adopts the vql-engine release carrying T-014, expected
-to be 0.20.0** (user, 2026-11-15). It also carries the bucket paragraph of
+**It lands after slice 8 (§7.6.16), which adopts vql-engine 0.20.0 and its
+T-014 depth bound** (user, 2026-11-15). It also carries the bucket paragraph of
 the ADR-017 amendment that §7.6.9 specifies, because that paragraph describes this
 slice's tree PUT. This slice is the first that stores a
 targeting predicate. A 4096-character source can nest deeply enough to overflow
@@ -3471,284 +3471,333 @@ mitigations forward so that the omission does not delete them. This slice gives
 the request both mitigation buckets, deletes the carry-over, and closes the two
 reference problems the buckets create.
 
-**The request types below name the superseded param-stage shape, and the slice
-cannot be implemented from them as written.** `MitigationSpecRequest`,
-`ResolvedMitigationStage` and their `LeafStage(transform: RiskLeafTransform, …)`
-case do not exist in the code, and `RiskLeafTransform` is no longer a type a
-request could carry — `PLAN-LOSS-SHAPE-ALGEBRA.md` replaced it with the
-`LeafRelative`/`LeafAbsolute` pair over `RelativeLikelihood`, `RelativeSeverity`
-and `AbsoluteReplacement` (see the supersession note at §7.1.3). The stored side
-of that shape has landed; the wire side has not, so what a request carries for a
-leaf-stage mitigation is an open wire-shape question rather than a rename.
+**Approved by the user on 2026-11-15, with §7.6.12 decision 11 ruled and its
+re-affirmation question ruled A.** The signatures below replace the draft that
+named the superseded param-stage shape. That draft carried
+`MitigationSpecRequest.LeafStage(transform: RiskLeafTransform, overrideAnchorName: Option[String])`,
+a name-based anchor, a request-level `requireDistinctMitigations`, and
+`buildMitigations` returning `Task`. None of those is built.
 
-**The request types below also carry the defect slice 1 removed.** This is
-recorded on 2026-11-13 as input to decision 11 and is not ruled here. ADR-001 §1
-has JSON decoders call the domain type's smart constructor, and ADR-038 §1 has
-the endpoint declare the domain type so that "there is no public twin class to
-keep in step". Against those two passages:
+**The placement rule.** ADR-001 §2 states it: "A command refined as a whole
+checks every kind of rule in one `Validation`, inside its `resolve` function, so
+that every refusal is reported together and each is located at its entry." So
+every field whose value can be refused is a primitive on the wire, and every
+nested coproduct with such a field has a request mirror. The mirror pattern is
+`DistributionShapeRequest`: a sealed trait of primitive cases, a gate that
+refines at a subject, and an inverse. A field whose decoder refuses nothing
+keeps its refined type: `precedence` is `MitigationPrecedence`, whose codec is
+`JsonCodec[Int].transform(...)`.
 
-- `MitigationSpecRequest.ResultStage(pipeline: TransformPipeline)` restates
-  `MitigationSpec.ResultStage` case for case.
-- `MitigationDefinitionRequest` and `MitigationUpdateRequest` declare
-  `name: String`, `target: String` and `id: String`, where `SafeName`,
-  `TargetingPredicate` and `MitigationId` exist with codecs. They declare
-  `precedence: Int = 0`, where `MitigationPrecedence` and
-  `MitigationPrecedence.default` exist.
-- `overrideAnchorName: Option[String]` is a node name with no `SafeName`.
-- `ResolvedMitigation` and `ResolvedMitigationStage` are a second intermediate
-  between the request and `Mitigation`.
-- `buildMitigations` returns `Task[Seq[Mitigation]]`, where every service
-  operation now fails with `Failure`.
+**The anchor and the stamp.** An absolute statement's anchor is the identifier
+of a stored leaf (decision 8, re-ruled 2026-11-14). The request carries no base
+stamp. The server computes it with `ContentHashIndex.hashOf`, which is in
+`server`, so stamping happens in the service once the nodes are built. A kept
+absolute statement keeps its stored stamp when its replacement and anchor are
+unchanged and its choice is `KeepIfUnchanged`. Otherwise the stamp is the hash
+of the anchor leaf as this save builds it. If the save deletes that leaf, the
+stored leaf is hashed, and the override applies to nothing (decision 9). The
+server never re-stamps an unchanged statement on its own: the browser sends
+every mitigation back on every save, so automatic re-stamping would clear every
+stale report on the next save.
 
-One fact bears on how decision 11 settles this. The node buckets of the same
-request already use raw-primitive request types, such as
-`RiskLeafUpdateRequest(id: String, name: String, …)`, refined by
-`RiskTreeRequests.resolveUpdate`. So the mitigation buckets either follow the
-node buckets or follow the two passages above, and that choice belongs to
-decision 11.
+**Re-affirmation (decision 11, option A, user, 2026-11-15).** `Restamp` is how an
+author records that the figures still hold after the leaf changed. The
+override keeps its identifier, so a selection naming it keeps working.
 
-**§7.6.12 decision 11 is ruled (user, 2026-11-15): the mitigation buckets follow
-the node buckets, refined by `resolve` at the service's entry step.** The types
-below predate that ruling and are rewritten from it before the slice is
-implemented. They are kept as the record of what slice 2 was authorized to build
-before the shape changed beneath them.
+**Omission means deletion.** The mitigation collections are required keys, like
+the node collections. An update that lists no mitigation deletes every
+mitigation the tree had. The carry-over `mitigations = oldTree.mitigations` in
+`RiskTreeServiceLive.update` is deleted. The browser sends back every mitigation
+it loaded, so a save from the tree builder keeps them. This slice is the first
+that lets the API create a mitigation, so without that round trip the next
+browser save would delete it.
 
 **`modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`** — new file:
 
 ```scala
-package com.risquanter.register.http.requests
-
-import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
-import sttp.tapir.Schema
-import sttp.tapir.generic.Configuration
-
-import com.risquanter.register.domain.data.{RiskLeafTransform, TransformPipeline}
-
-/** A mitigation's effect as a request states it. It differs from the stored
-  * `MitigationSpec` in exactly two ways, both deliberate. The override anchor
-  * is a node NAME, because a request may attach an override to a node the same
-  * request creates and ids are minted server-side. There is no override base
-  * stamp field at all, because the stamp is the content hash of the anchored
-  * leaf and is computed server-side; a client cannot state it and now cannot
-  * send it.
-  *
-  * The tag field is the body's only discriminator, and each case's tag value is
-  * its own name, derived rather than declared.
-  */
-@jsonDiscriminator(MitigationSpecRequest.StageField)
-sealed trait MitigationSpecRequest
+/** A submitted mitigation effect, mirroring `MitigationSpec` case for case with
+  * primitives in place of refined values. */
+@jsonDiscriminator(MitigationSpec.StageField)
+sealed trait MitigationSpecRequest:
+  def toSpec(subject: ErrorSubject): Validation[ValidationError, RiskTreeRequests.ResolvedSpec]
 
 object MitigationSpecRequest:
-
-  /** The key naming which stage a submitted spec belongs to. Read by this
-    * coproduct's decoder and published in its schema, and stated here once so
-    * the two cannot disagree. */
-  final val StageField = "stage"
-
-  final case class LeafStage(
-    transform: RiskLeafTransform,
-    overrideAnchorName: Option[String]
+  final case class LeafRelative(
+    likelihood: RelativeLikelihoodRequest,
+    severity:   RelativeSeverityRequest
   ) extends MitigationSpecRequest
 
-  final case class ResultStage(pipeline: TransformPipeline) extends MitigationSpecRequest
+  final case class LeafAbsolute(
+    replacement: AbsoluteReplacementRequest,
+    anchor:      String,            // → NodeId by ValidationUtil.refineId, at FieldName.Anchor
+    stamp:       BaseStampChoice
+  ) extends MitigationSpecRequest
 
-  given codec: JsonCodec[MitigationSpecRequest] = DeriveJsonCodec.gen[MitigationSpecRequest]
+  final case class ResultStage(
+    pipeline: List[ResultTransformSpecRequest]   // → MitigationSpec.ResultStage.create, at FieldName.Spec
+  ) extends MitigationSpecRequest
 
-  given schema: Schema[MitigationSpecRequest] =
-    import sttp.tapir.generic.auto.*
-    given Configuration = Configuration.default.withDiscriminator(StageField)
-    Schema.derived[MitigationSpecRequest]
+  def fromSpec(spec: MitigationSpec): MitigationSpecRequest
 
-/** Create bucket: a mitigation the request is adding. No id — the server mints
-  * it (ADR-017 Decision 1). */
+/** Whether a kept absolute statement keeps the stamp it was stored with. */
+@jsonDiscriminator(BaseStampChoice.TagField)   // companion: final val TagField = "kind"
+enum BaseStampChoice:
+  /** Keep the stored stamp when the replacement and the anchor are unchanged;
+    * otherwise, and on a new mitigation, stamp the anchor leaf now. */
+  case KeepIfUnchanged
+  /** Stamp the anchor leaf now: the author re-affirms the statement. */
+  case Restamp
+
+@jsonDiscriminator(RiskLeafTransform.OpField)
+sealed trait RelativeLikelihoodRequest:
+  def toLikelihood(subject: ErrorSubject): Validation[ValidationError, RelativeLikelihood]
+object RelativeLikelihoodRequest:
+  case object Keep extends RelativeLikelihoodRequest
+  final case class Scale(factor: Double) extends RelativeLikelihoodRequest          // → RetentionFactor, at FieldName.Factor
+  def fromLikelihood(likelihood: RelativeLikelihood): RelativeLikelihoodRequest
+
+@jsonDiscriminator(RiskLeafTransform.OpField)
+sealed trait RelativeSeverityRequest:
+  def toSeverity(subject: ErrorSubject): Validation[ValidationError, RelativeSeverity]
+object RelativeSeverityRequest:
+  case object Keep extends RelativeSeverityRequest
+  final case class ScaleSeverity(factor: Double) extends RelativeSeverityRequest    // → RetentionFactor, at FieldName.Factor
+  def fromSeverity(severity: RelativeSeverity): RelativeSeverityRequest
+
+@jsonDiscriminator(RiskLeafTransform.ReplacesField)
+sealed trait AbsoluteReplacementRequest:
+  def toReplacement(subject: ErrorSubject): Validation[ValidationError, AbsoluteReplacement]
+object AbsoluteReplacementRequest:
+  final case class Likelihood(probability: Double) extends AbsoluteReplacementRequest // → ResidualProbability, at FieldName.Probability
+  final case class Severity(shape: DistributionShapeRequest) extends AbsoluteReplacementRequest
+  final case class Both(probability: Double, shape: DistributionShapeRequest) extends AbsoluteReplacementRequest
+  def fromReplacement(replacement: AbsoluteReplacement): AbsoluteReplacementRequest
+
+@jsonDiscriminator(ResultTransformSpec.OpField)
+sealed trait ResultTransformSpecRequest:
+  def toStep(subject: ErrorSubject): Validation[ValidationError, ResultTransformSpec]
+object ResultTransformSpecRequest:
+  final case class ApplyDeductible(deductible: Long) extends ResultTransformSpecRequest
+  final case class CapLosses(cap: Long) extends ResultTransformSpecRequest
+  final case class ScaleLosses(factor: Double) extends ResultTransformSpecRequest
+  final case class FilterBelowThreshold(threshold: Long) extends ResultTransformSpecRequest
+  final case class InsurancePolicy(deductible: Long, cap: Long) extends ResultTransformSpecRequest
+  def fromStep(step: ResultTransformSpec): ResultTransformSpecRequest
+
+/** Create bucket: a mitigation the request adds. No id; the server mints it. */
 final case class MitigationDefinitionRequest(
-  name: String,
-  target: String,
-  spec: MitigationSpecRequest,
-  precedence: Int = 0
+  name:       String,                 // → SafeName by refineNameField
+  target:     String,                 // → TargetingPredicate by TargetingPredicate.create
+  spec:       MitigationSpecRequest,
+  precedence: MitigationPrecedence
 )
 
-object MitigationDefinitionRequest:
-  given codec: JsonCodec[MitigationDefinitionRequest] = DeriveJsonCodec.gen
-
-  given schema: Schema[MitigationDefinitionRequest] =
-    import sttp.tapir.generic.auto.*
-    Schema.derived[MitigationDefinitionRequest]
-
-/** Identity-preserving bucket: a mitigation the request is keeping, by id. */
+/** Identity-preserving bucket: a stored mitigation the request keeps, by id. */
 final case class MitigationUpdateRequest(
-  id: String,
-  name: String,
-  target: String,
-  spec: MitigationSpecRequest,
-  precedence: Int = 0
+  id:         String,                 // → MitigationId by ValidationUtil.refineId
+  name:       String,
+  target:     String,
+  spec:       MitigationSpecRequest,
+  precedence: MitigationPrecedence
 )
-
 object MitigationUpdateRequest:
-  given codec: JsonCodec[MitigationUpdateRequest] = DeriveJsonCodec.gen
-
-  given schema: Schema[MitigationUpdateRequest] =
-    import sttp.tapir.generic.auto.*
-    Schema.derived[MitigationUpdateRequest]
+  /** A stored mitigation as the entry that keeps it unchanged. */
+  def fromMitigation(m: Mitigation): MitigationUpdateRequest
 ```
 
-`target` is the predicate source text, which is the only stored form of a
-targeting predicate; refinement runs `TargetingPredicate.create` at the DTO
-boundary, so a malformed predicate is a 400 before any handler runs.
+Each sealed trait and entry type has a derived codec and a declared schema,
+both naming its discriminator.
 
-Three things in that block follow the approach `PLAN-LOSS-SHAPE-ALGEBRA.md`
-settled, rather than the earlier draft of this slice. The codec is derived and
-tagged by case name, so no stage spelling is written as a string and a rename of
-a case cannot leave a stale tag behind. The schema names the discriminator, so
-the published description states the key the decoder reads instead of leaving a
-reader to infer the case from which fields are present. And `Schema.any` is gone
-from all three types: it publishes an unconstrained value, which is the opposite
-of what a request body owes a generated client.
-
-One consequence is not reached by any derivation. A hand-written JSON body in a
-document or an example script carries the tag value as data, so none of the
-above updates it. Every such body this slice adds states `"stage":"LeafStage"`
-or `"stage":"ResultStage"`, and the mitigation endpoints' entries in
-`docs/user/API-TUTORIAL.md` are written the same way in the same pass.
-
-**`RiskTreeUpdateRequest` and `RiskTreeDefinitionRequest`** gain their buckets:
+**The two tree requests** gain required collections:
 
 ```scala
+final case class RiskTreeDefinitionRequest(
+  name: String,
+  portfolios: Seq[RiskPortfolioDefinitionRequest],
+  leaves: Seq[RiskLeafDefinitionRequest],
+  newMitigations: Seq[MitigationDefinitionRequest]
+)
+
 final case class RiskTreeUpdateRequest(
   name: String,
   portfolios: Seq[RiskPortfolioUpdateRequest],
   leaves: Seq[RiskLeafUpdateRequest],
   newPortfolios: Seq[RiskPortfolioDefinitionRequest],
   newLeaves: Seq[RiskLeafDefinitionRequest],
-  mitigations: Seq[MitigationUpdateRequest] = Nil,
-  newMitigations: Seq[MitigationDefinitionRequest] = Nil
+  mitigations: Seq[MitigationUpdateRequest],
+  newMitigations: Seq[MitigationDefinitionRequest]
 )
 
-final case class RiskTreeDefinitionRequest(
-  name: String,
-  portfolios: Seq[RiskPortfolioDefinitionRequest],
-  leaves: Seq[RiskLeafDefinitionRequest],
-  newMitigations: Seq[MitigationDefinitionRequest] = Nil
-)
+object RiskTreeUpdateRequest:
+  def resolve(
+    req: RiskTreeUpdateRequest,
+    stored: TreeIndex,
+    storedMitigations: Seq[Mitigation],
+    newId: IdGenerator
+  ): Validation[ValidationError, ResolvedUpdate]
 ```
 
-**Omission now means deletion, and that is the point.** Once the update request
-enumerates the mitigation collection, a PUT that omits `mitigations` deletes
-every mitigation the tree had, exactly as omitting a node deletes the node. The
-carry-over in `RiskTreeServiceLive.update` — `mitigations = oldTree.mitigations`
-and the comment explaining it — is deleted in the same change, because leaving
-it would make the new buckets inert. The consequence is that any client issuing
-a tree PUT must send the mitigations back; the interface slice does that, and
-until it lands, a PUT from the current browser clears the mitigation
-collection. That is a real window and it is acceptable only because nothing can
-create a mitigation before this slice: the collection it would clear is always
-empty.
+`RiskTreeDefinitionRequest.resolve(req, newId)` keeps its signature. A create
+has no stored leaves, so every absolute statement in it is refused at its
+anchor with `StoredNodeNotInTree`.
 
-**`modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`** — resolved
-shapes and validators:
+**`modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`:**
 
 ```scala
-  /** A mitigation from a request, refined but not yet anchored. The override
-    * anchor is still a node NAME here: nodes created in the same request have
-    * no id until the service mints them, so the anchor resolves server-side
-    * against the same name-keyed map parent names resolve against. */
+  /** A submitted mitigation, refined and checked against the stored tree. */
   final case class ResolvedMitigation(
-    id: MitigationId,
-    name: SafeName.SafeName,
-    target: MitigationTarget,
-    stage: ResolvedMitigationStage,
+    subject:    ErrorSubject,
+    id:         MitigationId,
+    name:       SafeName.SafeName,
+    target:     MitigationTarget,
+    spec:       ResolvedSpec,
     precedence: MitigationPrecedence
   )
 
-  enum ResolvedMitigationStage:
-    case LeafStage(transform: RiskLeafTransform, overrideAnchorName: Option[SafeName.SafeName])
-    case ResultStage(pipeline: TransformPipeline)
-```
+  /** A spec that is final, or an absolute statement whose stamp the service
+    * computes from the anchor leaf the request builds. */
+  enum ResolvedSpec:
+    case Complete(spec: MitigationSpec)
+    case Unstamped(replacement: AbsoluteReplacement, anchor: NodeId)
 
-`ResolvedCreate` and `ResolvedUpdate` each gain `mitigations: Seq[ResolvedMitigation]`.
-Kept and added mitigations merge into one field because they end in one
-collection and the id is already decided by the time they meet: a kept
-mitigation carries the client's id, an added one carries an id minted by the
-same `IdGenerator` that mints node ids.
+  // ResolvedCreate and ResolvedUpdate each gain: mitigations: Seq[ResolvedMitigation]
 
-```scala
+  def resolveUpdate(
+    req: RiskTreeUpdateRequest, stored: TreeIndex, storedMitigations: Seq[Mitigation], newId: IdGenerator
+  ): Validation[ValidationError, ResolvedUpdate]
+
   private[requests] def refineMitigationDefs(
     mitigations: Seq[MitigationDefinitionRequest],
-    baseLabel: String,
     newId: IdGenerator
   ): Validation[ValidationError, Seq[ResolvedMitigation]]
 
   private[requests] def refineExistingMitigations(
     mitigations: Seq[MitigationUpdateRequest],
-    baseLabel: String
+    stored: Seq[Mitigation]
   ): Validation[ValidationError, Seq[ResolvedMitigation]]
 
-  /** Guard: one request may not name the same mitigation id or the same
-    * mitigation name twice. `RiskTree.fromNodes` enforces the same rule on the
-    * tree; this layer contributes the request-scoped field path so the client
-    * is told which bucket entry is at fault. */
-  private[requests] def requireDistinctMitigations(
-    mitigations: Seq[ResolvedMitigation]
+  /** Every kept entry names a stored mitigation, and none is named twice. */
+  private[requests] def requireStoredMitigations(
+    mitigations: Seq[MitigationUpdateRequest],
+    stored: Seq[Mitigation]
+  ): Validation[ValidationError, Unit]
+
+  /** Every unstamped statement's anchor names a stored leaf. */
+  private[requests] def requireStoredAnchors(
+    mitigations: Seq[ResolvedMitigation],
+    stored: Map[NodeId, RiskNode]
+  ): Validation[ValidationError, Unit]
+
+  /** Refuses each key at its second and later listing; every first listing goes to `check`. */
+  private[requests] def checkFirstListings[K](listed: Seq[K])(
+    check: K => Validation[ValidationError, Unit],
+    listedTwice: K => ValidationError
+  ): Validation[ValidationError, Unit]
+
+  /** The id names a stored node of `kind`, refused at `location` otherwise. */
+  private[requests] def requireStoredNodeOfKind(
+    id: NodeId, kind: NodeKind, stored: Map[NodeId, RiskNode], location: ErrorLocation
   ): Validation[ValidationError, Unit]
 ```
 
-Each element's refinement accumulates its own errors through
-`Validation.validateWith`: the name through `refineNameField`, the predicate
-through `TargetingPredicate.create`, the id (kept bucket only) through
-`ValidationUtil.refineId`, and the stage through a shape mapping that carries
-the anchor name through `refineNameField`.
+`requireStoredNodes` is rewritten over the last two with its behaviour
+unchanged. Mitigation names and identifiers are unique by `RiskTree.fromNodes`,
+the aggregate invariant, so the request layer adds no duplicate check of its own.
 
-**`modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`** — the anchoring
-and stamping step, and the two call sites:
+**`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`:**
 
 ```scala
-  /** Turn a request's mitigations into stored ones: resolve each override
-    * anchor name against the request's own nodes, and stamp the override with
-    * the anchor leaf's current content hash.
-    *
-    * An anchor naming something the request does not contain, or naming a
-    * portfolio, fails the request — an override asserts a value for one
-    * assessed leaf, and an anchor that names no leaf can never bind again.
-    * `Mitigation.create` then enforces the pairing rule: a transform with an
-    * Override component must have both an anchor and a stamp, and one without
-    * must have neither. */
-  private def buildMitigations(
+enum ErrorSubject:
+  /** A submitted mitigation pointed at by its position, because it has no id
+    * yet or because its id is what failed to refine. */
+  case MitigationAtIndex(collection: SubmittedMitigations, index: NonNegativeInt)
+
+object ErrorSubject:
+  def mitigationAtIndex(collection: SubmittedMitigations, index: Int): ErrorSubject
+
+enum SubmittedMitigations:
+  case Mitigations, NewMitigations
+
+enum FieldName:   … case Anchor
+enum FieldProblem:
+  … case StoredMitigationListedTwice   // DUPLICATE_VALUE
+  … case StoredMitigationNotInTree     // MISSING_REFERENCE
+```
+
+A kept entry whose id refines is reported as `ErrorSubject.Mitigation(id)`.
+
+**Two signatures gain the subject, so a refusal inside an entry is located at
+that entry.** Their codecs pass `ErrorSubject.Request`, which is today's
+location:
+
+```scala
+// TargetingPredicate.scala
+def create(source: String, subject: ErrorSubject): Validation[ValidationError, TargetingPredicate]
+
+// ResultTransformSpec.scala — each case companion states its refinement once,
+// and its codec and the request gate both call it
+object ApplyDeductible:      def refine(deductible: Long, subject: ErrorSubject): Validation[ValidationError, ApplyDeductible]
+object CapLosses:            def refine(cap: Long, subject: ErrorSubject): Validation[ValidationError, CapLosses]
+object ScaleLosses:          def refine(factor: Double, subject: ErrorSubject): Validation[ValidationError, ScaleLosses]
+object FilterBelowThreshold: def refine(threshold: Long, subject: ErrorSubject): Validation[ValidationError, FilterBelowThreshold]
+object InsurancePolicy:
+  def refine(deductible: Long, limit: Long, subject: ErrorSubject): Validation[ValidationError, InsurancePolicy]
+```
+
+`InsurancePolicy.create` and the `cap` field name are superseded by §10.4.
+
+**`modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`:**
+
+```scala
+  /** The resolved mitigations as stored ones, each unstamped statement stamped
+    * with its anchor leaf as built, or as stored when the request deletes it.
+    * `resolve` checked every anchor against the stored leaves, so a miss is a
+    * broken invariant and dies. */
+  private def stampMitigations(
     resolved: Seq[RiskTreeRequests.ResolvedMitigation],
-    nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
-    nodes: Seq[RiskNode]
-  ): Task[Seq[Mitigation]]
+    built: Seq[RiskNode],
+    stored: Map[NodeId, RiskNode]
+  ): IO[Failure, Seq[Mitigation]]
 ```
 
-The anchor resolution is: name → `ResolvedNode` → `NodeId` → the built
-`RiskLeaf` in `nodes` → `ContentHashIndex.hashOf(leaf)`. A name absent from
-`nodesByName`, or present but resolving to a portfolio, is a
-`MISSING_REFERENCE` / `INVALID_NODE_TYPE` validation error carrying the
-mitigation's field path.
+`create` passes `stampMitigations(resolved.mitigations, nodes, Map.empty)`
+instead of `Nil`, and `update` passes
+`stampMitigations(resolved.mitigations, nodes, oldTree.index.nodes)` instead of
+`oldTree.mitigations`. Both `allocateIds` calls add `req.newMitigations.size`.
 
-`create` passes `mitigations = buildMitigations(resolved.mitigations, resolved.nodes, nodes)`
-instead of `Nil`, and `update` passes the same instead of `oldTree.mitigations`.
-`allocateIds` in both methods widens to cover the added mitigations:
+**`modules/app/src/main/scala/app/state/TreeBuilderState.scala`** keeps the
+loaded tree's mitigations. `toUpdateRequest` sends them as
+`loaded.map(MitigationUpdateRequest.fromMitigation)` with `newMitigations = Nil`,
+and `toRequest` sends `newMitigations = Nil`.
 
-```scala
-      ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size + req.newMitigations.size)
-```
+**Decision 9's arm, which slice 3 did not change.** The re-ruling of 2026-11-14
+assigned the last arm of `MitigationStaleness.isStale` to slice 3, and slice 3
+landed without it. It lands here, with the plan's before and after in §7.6.2,
+and `MitigationStalenessSpec`'s "anchor leaf deleted" case asserts "not
+reported".
 
-**`modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`** — unchanged
-by this slice. Decision 9 rules that a PUT deleting an anchored leaf is accepted,
-so `validateMitigations` keeps the invariants it already enforces — unique
-mitigation ids, unique mitigation names and the collection bound — and gains no
-anchor cross-check. Its signature and its docstring stay as they are.
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`**
+is unchanged. `validateMitigations` gains no anchor cross-check, so a tree
+carrying an anchor to a deleted leaf stays decodable.
 
-> **Amended by §7.6.2 decisions 8 and 9 (re-ruled 2026-11-14):** an override's
-> anchor is the identifier of a leaf that already exists, so the name-based
-> anchor resolution above is not built. A deleted anchor makes the override a
-> no-op and is not reported stale. The request shapes in this slice are
-> rewritten when decision 11 is ruled.
+**Hand-written bodies.** `tests/bats/helpers/setup.bash`,
+`examples/demo-simple-curl.sh`, `examples/demo-enterprise-curl.sh`,
+`examples/demo-enterprise-tree.json`, `examples/stage-compare-slots.sh`,
+`examples/stage-history-slider-curl.sh` and `docs/user/API-TUTORIAL.md` gain
+the new keys. The tutorial gains the mitigation buckets.
 
-An override whose anchor names a deleted node is therefore a legal tree. It
-applies to no node and is not reported. Placing the check in `validateMitigations` would have put it in
-the decode path as well, since `RiskTree`'s decoder routes through `fromNodes`;
-not adding it keeps every stored tree readable.
+**Tests.**
+- `MitigationRequestsSpec`: each gate and each refusal at its entry, the
+  inverse of each gate, and `fromMitigation` followed by `resolve` keeping the
+  stamp.
+- `RiskTreeDefinitionRequestsSpec`: a kept entry naming no stored mitigation, an
+  entry listed twice, an anchor naming no stored leaf or naming a portfolio,
+  and a create refusing an absolute statement.
+- `RiskTreeServiceLiveSpec`: a new absolute statement is stamped, an unchanged
+  one keeps its stamp, `Restamp` re-stamps, a deleted anchor leaf stamps from
+  the stored leaf, and an update omitting a mitigation deletes it.
+- `TreeBuilderStateSpec`: the update request carries the loaded mitigations.
+- `MitigationStalenessSpec`: a deleted anchor is not reported.
 
 #### 7.6.7 M4 slice 3 — the tree read carries resolved scopes
 
@@ -4807,6 +4856,13 @@ the rest of M4, item 40 is marked closed then rather than at the end.
     leaf that already exists (decisions 8 and 9), and the server computes its
     base stamp. §7.6.6's request types are rewritten on this basis.
 
+    **Re-affirmation, RULED A (user, 2026-11-15).** An absolute statement
+    carries `stamp: BaseStampChoice`. `KeepIfUnchanged` keeps a kept statement's
+    stored stamp while its replacement and anchor are unchanged, and `Restamp`
+    re-stamps it, which is how an author records that the figures still hold
+    after the leaf changed. The alternative, re-creating the mitigation, was not
+    chosen because it changes the identifier that selections name.
+
 **Raised by the 2026-11-13 re-elevation and answered by existing rulings.**
 Each question was first presented as open and was then found settled. Slices 1
 and 3 are written under these answers.
@@ -5618,6 +5674,72 @@ code, so it takes a PATCH bump.
 and that comment is renamed with the predicate. Every source file named above is
 on `PLAN-RISKTRANSFORM-INVENTORY.md` except one:
 - `modules/common/src/test/scala/com/risquanter/register/http/errors/BindProblemSpec.scala`
+
+#### 7.6.16 M4 slice 8 — adopting vql-engine 0.20.0 (approved by the user, 2026-11-15)
+
+**What this slice changes, in plain terms.** vql-engine 0.20.0 bounds parse
+depth, which is that repository's T-014. Its plan is
+`docs/PLAN-parse-depth-bound.md` in the `vague-quantifier-logic` repository.
+`FOLParser.parse` and `VagueQueryParser.parse` make one pass over the tokens
+before parsing. That pass, `parser.NestingBound.check`, refuses a text whose
+parentheses nest deeper than `MaxParenthesisDepth = 64`, or which holds more
+than `MaxOperators = 256` operator tokens and quantified variables. Both limits
+are fixed by the engine. The lexer is iterative. Text inside both limits parses
+to the same tree as under 0.19.0.
+
+The refusal reaches register in two forms:
+- `ParseError.Nesting(failure: NestingFailure, position: SourcePosition)`,
+  whose position is always `SourcePosition.Unknown`;
+- `ParseRefusal.Nesting(failure: NestingFailure)`.
+
+This slice lands before slice 2, which is the first to store a predicate. It
+also closes a crash the query endpoint has under 0.19.0, where about 524
+characters of nested parentheses overflow the stack.
+
+**`build.sbt`:** `vqlEngineVersion` goes from `"0.19.0"` to `"0.20.0"`. A
+first-party artifact is exempt from the cooldown (ADR-020 §10).
+
+**`modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala`:**
+
+```scala
+/** Why the parser refused the text before reading it: a limit on its nesting
+  * was passed. The engine's `parser.NestingFailure`. */
+@jsonDiscriminator(QueryPosition.TagField)
+enum NestingProblem:
+  case ParenthesesTooDeep(limit: NonNegativeInt)
+  case TooManyOperators(limit: NonNegativeInt)
+
+// ParseProblem gains
+  case Nesting(failure: NestingProblem)
+
+// fromRefusal gains
+    case ParseRefusal.Nesting(failure) => nesting(failure).map(Nesting(_))
+
+// fromFormulaError gains
+    case FormulaParseError.Nesting(failure, position) =>
+      for
+        position <- QueryPosition.fromSource(position)
+        failure  <- nesting(failure)
+      yield Positioned(position, Nesting(failure))
+
+  private def nesting(failure: NestingFailure): Either[String, NestingProblem]
+```
+
+The family is the register enums that mirror an engine enum. `LexProblem`
+mirrors `lexer.LexFailure`, and no existing type describes a nesting limit. The
+limit reuses `NonNegativeInt` and the existing `count`, as `FractionOutOfRange`
+does. The two sentences are "The text nests its parentheses deeper than 64
+levels" and "The text holds more than 256 operators and quantified variables",
+with no character clause, because the position is `Unknown`. ADR-035 §5
+permits the case: it carries the engine's constant limit and no text of the
+caller's.
+
+**Tests.**
+- `ParseProblemSpec`: both mappings and both sentences.
+- `QueryRequestSpec`: a scope of 300 conjoined atoms, parsed by the engine,
+  gives `Unparseable(Nesting(TooManyOperators(256)))`.
+- `TargetingPredicateSpec`: 65 nested parentheses give
+  `TargetingPredicateUnparseable` carrying `Nesting(ParenthesesTooDeep(64))`.
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 
@@ -11947,3 +12069,323 @@ which matches on `DistributionShape.Lognormal(bounds)` and scales
 `bounds.min`/`bounds.max`; `distributionFields` no longer exists. Re-verify both
 at documentation time. The documents follow the project's user-documentation style
 rules, which differ from this plan's.
+
+---
+
+## 10. The loss borne under a deductible and an insurance policy (continuation, 2026-11-15)
+
+**Status:** implementation-grade continuation, written 2026-11-15. It authorizes
+the edits below once approved. Its files are bullets in
+`docs/dev/plans/PLAN-RISKTRANSFORM-INVENTORY.md`, apart from the one forced
+extension in §10.6.
+
+### 10.1 The defect
+
+A result-stage mitigation's figure is the loss the entity still bears. The
+glossary states it in `docs/user/TERMINOLOGY.md` 3.3: a node's figure "is never
+what a counterparty pays". Glossary 3.5 gives the arithmetic for a loss `L`, a
+deductible `d` and a limit `c`:
+
+```
+you bear        =  min(L, d)  +  max(0, L − d − c)
+the policy pays =  min( max(0, L − d), c )
+```
+
+The shipped code computes the second line. `RiskResultTransform.applyDeductible`
+maps a loss to `max(0, L − d)`, and `ResultTransformInterpreter` runs an
+`InsurancePolicy` as that deductible followed by `capLosses(c)`, which is
+`min(max(0, L − d), c)`.
+
+The glossary's example, with a 5 million deductible and a 50 million limit:
+
+| Loss | Borne, glossary 3.5 | Returned by the code today |
+|---|---|---|
+| 3 million | 3 million | 0 |
+| 30 million | 5 million | 25 million |
+| 100 million | 50 million | 50 million |
+
+`docs/dev/plans/PLAN-CONTROL-GROUPING.md` §5 records the defect as known and its
+fix as separate work. No plan or backlog item held that work. This section is it.
+
+### 10.2 Decision
+
+**`RISKTRANSFORM-D-7` — the policy's second figure is named `limit`.** Ruled by
+the user on 2026-11-15 (option A). The field is `cap` in the domain type, the
+request type and the stored spelling. The glossary calls it the limit and states
+that "A cap is not a policy with a very large limit". The rename is part of this
+section's wire change. A stored tree holding an `InsurancePolicy` written with
+`cap` no longer decodes. The labels `D1` to `D6` above are this plan's earlier
+scheme, so this one is numbered 7.
+
+There are no open decisions in this section.
+
+### 10.3 What changes, and why each change follows
+
+- **A standalone deductible keeps the first `d` of each loss:**
+  `L ↦ min(L, d)`.
+- **A policy is one operation with three bands:**
+  `L ↦ min(L, d) + max(0, L − d − c)`. A deductible followed by a cap cannot
+  produce the third band, so the policy stops being their composition.
+- **The policy's cross-field rule is deleted.** `cap > deductible` exists because
+  "the policy would zero out every loss it covers", which is false under the new
+  arithmetic. `InsurancePolicy.create`, `FieldProblem.CapMustExceedDeductible` and
+  its message and code arm go with it. A request refused today with
+  `INVALID_COMBINATION` is accepted.
+- **A standalone deductible must be positive.** A deductible of zero leaves the
+  entity bearing nothing. ADR-034 §3 refuses that state by type for a cap: "a cap
+  of zero would leave it bearing nothing, which states that the transfer cannot
+  fail". The same reason applies, so the deductible becomes `PositiveLong`.
+  Applying that rule to the deductible is this plan's derivation.
+- **A policy's deductible stays non-negative.** Glossary 3.5: "A deductible of
+  zero is first-unit coverage." A policy's limit stays positive, as the cap's
+  bound was.
+- **`applyDeductible(d)` and `capLosses(d)` compute the same function.** Glossary
+  3.4 says the deductible "is the cap read from the other end". Both stay,
+  because the glossary names five operations.
+
+### 10.4 Signatures
+
+`modules/common/src/main/scala/com/risquanter/register/domain/data/ResultTransformSpec.scala`:
+
+```scala
+/** The entity bears the first `deductible` of each loss and nothing beyond it.
+  * Strictly positive — a deductible of zero would leave it bearing nothing,
+  * which states that the transfer cannot fail. */
+final case class ApplyDeductible(deductible: PositiveLong) extends ResultTransformSpec
+
+object ApplyDeductible {
+  def refine(deductible: Long, subject: ErrorSubject): Validation[ValidationError, ApplyDeductible]
+}
+
+/** The entity bears the first `deductible`, the policy covers the next `limit`,
+  * and the loss above both is the entity's again. A deductible of zero is
+  * first-unit coverage. */
+final case class InsurancePolicy(deductible: NonNegativeLong, limit: PositiveLong) extends ResultTransformSpec
+
+object InsurancePolicy {
+  def refine(deductible: Long, limit: Long, subject: ErrorSubject): Validation[ValidationError, InsurancePolicy]
+}
+```
+
+`InsurancePolicy`'s constructor becomes public, because no rule across its fields
+remains to gate. `InsurancePolicy.create` is deleted. `refine` accumulates the two
+field refusals with `Validation.validateWith` and has no second step.
+
+`modules/server/src/main/scala/com/risquanter/register/mitigation/RiskResultTransform.scala`:
+
+```scala
+def applyDeductible(deductible: PositiveLong): RiskResultTransform
+def insurancePolicy(deductible: NonNegativeLong, limit: PositiveLong): RiskResultTransform
+```
+
+`insurancePolicy` no longer returns a `Validation`.
+
+`modules/server/src/main/scala/com/risquanter/register/mitigation/ResultTransformInterpreter.scala`:
+
+```scala
+case InsurancePolicy(d, l) => RiskResultTransform.insurancePolicy(d, l)
+```
+
+`modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`:
+
+```scala
+final case class InsurancePolicy(deductible: Long, limit: Long) extends ResultTransformSpecRequest
+```
+
+The request types carry `Long` like every other case in
+`ResultTransformSpecRequest`. The request type is the raw half that `toStep`
+refines, and the refined types appear on the domain side.
+
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationUtil.scala`:
+
+```scala
+def refineDeductible(value: Long, location: ErrorLocation): Either[List[ValidationError], PositiveLong]
+```
+
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`:
+
+```scala
+enum FieldName:
+  case Deductible, Limit, Threshold, Anchor   // Limit added to the mitigation group
+
+enum ValueRange:
+  case PositiveLoss, LossCap, Deductible, MetalogTerms, RetentionFactor, ResidualProbability   // Deductible added
+
+enum FieldProblem:
+  // case CapMustExceedDeductible   — deleted, with its arm in the code mapping
+```
+
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`:
+
+```scala
+case ValueRange.Deductible =>
+  "Deductible must be greater than 0 — a deductible of zero would leave the entity bearing nothing, which states that the transfer cannot fail"
+// case FieldProblem.CapMustExceedDeductible — deleted
+case FieldProblem.MitigationEliminatesRisk =>
+  "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap, the scale factor or the policy's deductible, lower the policy's limit, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
+```
+
+`modules/app/src/main/scala/app/state/RiskLeafFormState.scala` and
+`modules/app/src/main/scala/app/state/PortfolioFormState.scala`: `FieldName.Limit`
+joins the arm that returns `noTarget`, beside `FieldName.Cap`. The match is
+exhaustive, so the compiler requires it.
+
+**Family search.** Each new member joins an existing family:
+
+- `FieldName.Limit` joins the enum `FieldName` in `ErrorLocation.scala`, whose
+  existing member `FieldName.Cap` names the same kind of figure.
+- `ValueRange.Deductible` joins the enum `ValueRange` in the same file. Its
+  existing member `ValueRange.LossCap` is the same rule stated for a cap.
+- `ValidationUtil.refineDeductible` joins the refinement functions in
+  `ValidationUtil.scala`. Its existing member `refineLossCap` has the same body
+  shape with `ValueRange.LossCap`.
+
+No existing member denotes a policy's limit or the positive deductible.
+
+### 10.5 What the change does to stored and sent data
+
+- A stored or sent `InsurancePolicy` is written `{"op":"InsurancePolicy","deductible":…,"limit":…}`.
+  One written with `cap` is refused on decode.
+- A stored or sent `ApplyDeductible` with a deductible of 0 is refused on decode.
+- A stored `ApplyDeductible` with a positive deductible keeps decoding, and its
+  figures change from the part above the deductible to the part up to it. This
+  is the arithmetic correction itself, and no decode failure signals it.
+- A refusal can name `FieldName.Limit` at its location, and no refusal names
+  `CapMustExceedDeductible`.
+
+### 10.6 Inventory
+
+Every file in §10.4 and §10.7 is a bullet in `PLAN-RISKTRANSFORM-INVENTORY.md`,
+except one. `modules/app/src/test/scala/app/views/FormErrorRoutingSpec.scala`
+holds a list documented as "Every `FieldName` case", and `FieldName.Limit` joins
+it. That file is a forced extension of this section.
+
+The decision record and the plan document are outside the gated region:
+`docs/dev/decision-records/ADR-034-mitigation-valuation-model.md` and this file.
+
+### 10.7 Tests
+
+Each expected figure below follows from the formulas in §10.1.
+
+`modules/server/src/test/scala/com/risquanter/register/mitigation/RiskResultTransformSpec.scala`:
+
+- The deductible's generator draws positive figures: `genCap.map(RiskResultTransform.applyDeductible)`.
+- "applyDeductible reduces losses by deductible amount" becomes "applyDeductible
+  keeps the first `d` of each loss". Losses 50000, 10000 and 5000 under `d = 10000`
+  give 10000, 10000 and 5000.
+- "deductible removes trials below threshold (sparse)" is replaced by
+  "applyDeductible equals capLosses at the same figure", a property over
+  `genTrialOutcomes` and `genCap`.
+- "zero deductible is identity" is deleted, because the value is unconstructible.
+  The test that a zero deductible is refused is in `ResultTransformSpecSpec`.
+- "insurancePolicy applies deductible then cap" becomes "insurancePolicy leaves
+  the three bands of glossary 3.5". Losses 3, 30 and 100 under `d = 5` and
+  `c = 50` give 3, 5 and 50.
+- A new test, "a zero-deductible policy is first-unit coverage": loss 30 under
+  `d = 0` and `c = 20` gives 10, and loss 15 gives nothing borne, so the trial is
+  absent from the sparse map.
+- "insurancePolicy fails when cap <= deductible" and "insurancePolicy succeeds
+  when cap > deductible" are deleted with the rule they test.
+- The three composition tests keep their structure and their point: order
+  matters. On a loss of 100000 with `d = 10000` and a scale of 0.5, deductible
+  then scale gives 5000, and scale then deductible gives 10000. The comments
+  state the new arithmetic.
+
+`modules/server/src/test/scala/com/risquanter/register/mitigation/ResultTransformInterpreterSpec.scala`:
+
+- "InsurancePolicy interprets as deductible then cap" becomes "InsurancePolicy
+  interprets as insurancePolicy", comparing against
+  `RiskResultTransform.insurancePolicy(10000L, 1000000L)`.
+- The pipeline-order test on a loss of 100000 expects 5000 for deductible then
+  scale and 10000 for scale then deductible.
+
+`modules/common/src/test/scala/com/risquanter/register/domain/data/ResultTransformSpecSpec.scala`:
+
+- Fixtures build `InsurancePolicy(10000L, 1000000L)` directly.
+- "InsurancePolicy.create rejects cap <= deductible" is deleted with the rule.
+- "InsurancePolicy.refine accumulates both field refusals" expects locations
+  `FieldName.Deductible` and `FieldName.Limit`.
+- The decode test of `{"op":"InsurancePolicy","deductible":0,"cap":0}` is
+  rewritten with `limit` and still expects a refusal, for the zero limit.
+- A new test: `{"op":"InsurancePolicy","deductible":1,"cap":10}` is refused,
+  because the field is `limit`.
+- A new test: `{"op":"ApplyDeductible","deductible":0}` is refused, with
+  `ValueRange.Deductible`.
+
+`modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala`:
+
+- `resultDeductible` refines with `ValidationUtil.refineDeductible`.
+- "a node's layer composes its pipelines in precedence order" expects 5000:
+  `min(100000, 10000) × 0.5`, where it expected 45000.
+
+`modules/server/src/test/scala/com/risquanter/register/simulation/LossDistributionSpec.scala`:
+
+- `deductibleRecord` refines with `ValidationUtil.refineDeductible`. A
+  `policyRecord(label, deductible, limit)` helper is added beside it.
+- "a deductible at or above every loss is refused" becomes "a zero-deductible
+  policy whose limit covers every loss is refused". It uses losses 1000 and 2000
+  under `d = 0` and `c = 5000`, and expects `MitigationEliminatesRisk` at
+  `FieldName.MitigatedResult`.
+- A new test: a standalone deductible against the same losses is accepted and
+  leaves them unchanged, so the two losses stay at 1000 and 2000.
+- "a layer that leaves one loss standing is accepted" uses the policy: losses
+  1000 and 9000 under `d = 0` and `c = 5000` leave `Map(2 -> 4000L)`.
+
+`modules/app/src/test/scala/app/views/FormErrorRoutingSpec.scala`: `everyField`
+gains `FieldName.Limit`, and no target map gains an entry, so it routes to no
+field.
+
+### 10.8 Documents
+
+`docs/dev/decision-records/ADR-034-mitigation-valuation-model.md`, two passages:
+
+- The no-op list "`ScaleLosses(1.0)`, `ApplyDeductible(0)`, `FilterBelowThreshold(0)`"
+  becomes "`ScaleLosses(1.0)`, `FilterBelowThreshold(0)`".
+- "a deductible at or above every loss, a threshold above every loss, and a scale
+  factor small enough that every loss rounds to zero" becomes "an insurance policy
+  with a zero deductible whose limit is at or above every loss, a threshold above
+  every loss, and a scale factor small enough that every loss rounds to zero". The
+  next sentence's example, "The same deductible is ordinary for a node whose
+  losses run in the millions and annihilating for one whose losses run in the
+  thousands", names the policy's limit instead of the deductible.
+
+`docs/dev/plans/PLAN-CONTROL-GROUPING.md` §5: the paragraph that assumes the fix
+"is already done" states that this section made it.
+
+`docs/user/TERMINOLOGY.md` needs no change. It already states the arithmetic this
+section implements.
+
+### 10.9 ADR alignment
+
+- **ADR-034.** The two passages in §10.8 are stale, because they describe the
+  subtracting arithmetic. The no-elimination rule itself holds, and the layer
+  check still closes the one case no type can close.
+- **ADR-001.** Validation stays in the codecs and smart constructors.
+  `InsurancePolicy` loses its cross-field layer because no rule across its fields
+  remains.
+- **ADR-010 and ADR-035.** A refusal still carries a typed `FieldProblem` and a
+  typed location. Deleting a `FieldProblem` case is checked exhaustively wherever
+  it is matched.
+- **ADR-037.** The new field name and value range are enum cases. The message is
+  a named template.
+- **ADR-038 and ADR-039.** The stored shape is read through the same refining
+  decoder as the request, so the store-read path refuses `cap` and a zero
+  standalone deductible as the request path does.
+
+### 10.10 Terminology impact
+
+None. The glossary's 3.3 to 3.5 already state what this section implements.
+
+### 10.11 Verification
+
+The cleanup is run before the integration tier, as the register-dev skill
+requires:
+
+```bash
+sbt 'commonJVM/test; server/test'   # green
+sbt app/test                        # green
+sbt serverIt/test                   # green
+```
+
+The BATS suites are due at the end of this section, because it changes a wire
+shape. The report carries their command block.

@@ -18,8 +18,7 @@ object ResultTransformInterpreter {
     case CapLosses(c)             => RiskResultTransform.capLosses(c)
     case ScaleLosses(f)           => RiskResultTransform.scaleLosses(f)
     case FilterBelowThreshold(t)  => RiskResultTransform.filterBelowThreshold(t)
-    case InsurancePolicy(d, c)    =>
-      RiskResultTransform.applyDeductible(d).andThen(RiskResultTransform.capLosses(c))
+    case InsurancePolicy(d, l)    => RiskResultTransform.insurancePolicy(d, l)
   }
 
   /** Law (tested): toTransform(a <> b) behaves as toTransform(a) andThen toTransform(b). */

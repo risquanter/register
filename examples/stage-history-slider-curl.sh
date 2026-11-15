@@ -81,7 +81,8 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
     \"leaves\": [
       { \"name\": \"Ransomware\",  \"parentName\": \"Root\", \"probability\": 0.10, \"distributionShape\": $(dist 50000 500000) },
       { \"name\": \"Data Breach\", \"parentName\": \"Root\", \"probability\": 0.08, \"distributionShape\": $(dist 80000 1200000) }
-    ]
+    ],
+    \"newMitigations\": []
   }")
 
 WS_KEY=$(echo "$BOOTSTRAP" | jq -r '.workspaceKey // empty')
@@ -117,7 +118,9 @@ put_tree() {
     { "id": "$BREACH_ID", "name": "Data Breach", "parentName": "Root", "probability": $BREACH_P, "distributionShape": $(dist "$BREACH_MIN" "$BREACH_MAX") }${INSIDER_EXISTING:-}
   ],
   "newPortfolios": [],
-  "newLeaves": [ ${NEW_LEAVES:-} ]
+  "newLeaves": [ ${NEW_LEAVES:-} ],
+  "mitigations": [],
+  "newMitigations": []
 }
 JSON
 )

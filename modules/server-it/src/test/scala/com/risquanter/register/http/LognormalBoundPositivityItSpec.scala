@@ -39,7 +39,8 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
       name = "Cyber",
       parentName = Some("Root"),
       probability = 0.25,
-      distributionShape = DistributionShapeRequest.Lognormal(minLoss = min, maxLoss = max)
+      distributionShape = DistributionShapeRequest.Lognormal(minLoss = min, maxLoss = max),
+      seedVarId = None
     )
 
   private def metalogLeaf(quantiles: Vector[Double]): RiskLeafDefinitionRequest =
@@ -51,14 +52,16 @@ object LognormalBoundPositivityItSpec extends ZIOSpecDefault:
         percentiles = Vector(0.05, 0.50, 0.95),
         quantiles = quantiles,
         terms = Some(3)
-      )
+      ),
+      seedVarId = None
     )
 
   private def treeWith(leaf: RiskLeafDefinitionRequest): RiskTreeDefinitionRequest =
     RiskTreeDefinitionRequest(
       name = "Bound Positivity Tree",
       portfolios = Seq(RiskPortfolioDefinitionRequest("Root", None)),
-      leaves = Seq(leaf)
+      leaves = Seq(leaf),
+      newMitigations = Nil
     )
 
   private def withServer[A](f: SttpClientFixture.Client => Task[A]): Task[A] =

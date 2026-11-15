@@ -78,7 +78,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
   // Targeting resolves server-side, so each test supplies the resolved scope
   // explicitly via `scopes(...)`; the predicate here is a well-formed stand-in.
   private val pred: MitigationTarget =
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get)
 
   private def mitName(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
 

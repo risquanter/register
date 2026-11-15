@@ -10,9 +10,8 @@ import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, ContentHa
   * `LeafSimContent`, which excludes name and parentId.
   *
   * Diagnostic only: resolution ignores staleness, so a stale override still
-  * applies the figures frozen into it. Nothing in production reads this yet; it
-  * is built for HTTP handlers to report as `staleMitigationIds` on read and
-  * update payloads, with the client rendering and never computing. */
+  * applies the figures frozen into it. The structure read reports the result
+  * as `staleMitigationIds`, and the client renders it and never computes it. */
 object MitigationStaleness:
 
   def staleOverrides(tree: RiskTree): Set[MitigationId] =
@@ -25,7 +24,7 @@ object MitigationStaleness:
   private def isStale(tree: RiskTree, anchor: NodeId, stamp: ContentHash): Boolean =
     tree.index.nodes.get(anchor) match
       case Some(leaf: RiskLeaf) => ContentHashIndex.hashOf(leaf) != stamp
-      // The anchor is gone, or is no longer a leaf. A stored anchor that names
-      // nothing can never bind again, so the override is reported stale rather
-      // than rejected — a tree carrying one is valid and stays decodable.
-      case _                    => true
+      // The anchor is gone, or is no longer a leaf. The override then applies
+      // to no node, which is a no-op like any mitigation with nothing to
+      // apply to, so it is not reported.
+      case _                    => false

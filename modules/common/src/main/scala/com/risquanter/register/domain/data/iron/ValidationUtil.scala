@@ -313,6 +313,17 @@ object ValidationUtil {
       .map(_ => refusal(location, FieldProblem.OutOfRange(ValueRange.LossCap)))
   }
 
+  // Refinement for a standalone deductible: the first part of each loss the
+  // entity bears, at least 1. Shares refinePositiveLong's constraint and differs
+  // only in its range case, whose sentence states why a deductible of zero is
+  // refused.
+  def refineDeductible(value: Long, location: ErrorLocation): Either[List[ValidationError], PositiveLong] = {
+    value
+      .refineEither[Greater[0L]]
+      .left
+      .map(_ => refusal(location, FieldProblem.OutOfRange(ValueRange.Deductible)))
+  }
+
   // Refinement for distribution type (must be "Metalog" or "Lognormal")
   def refineDistributionType(value: String, location: ErrorLocation): Either[List[ValidationError], DistributionType] = {
     value

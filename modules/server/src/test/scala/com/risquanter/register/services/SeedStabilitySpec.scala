@@ -73,7 +73,8 @@ object SeedStabilitySpec extends ZIOSpecDefault {
       leaves = Seq(
         leafDef("Cyber Attack", "Stable Root", seedVarId = None),
         leafDef("Fraud", "Stable Root", seedVarId = None)
-      )
+      ),
+      newMitigations = Nil
     )
 
   private def seedsByName(tree: RiskTree): Map[String, Long] =
@@ -124,7 +125,9 @@ object SeedStabilitySpec extends ZIOSpecDefault {
               leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Stable Root")
             ),
             newPortfolios = Seq.empty,
-            newLeaves = Seq.empty
+            newLeaves = Seq.empty,
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main))
           after <- figures(updated, entity1)
         yield assertTrue(
@@ -151,7 +154,9 @@ object SeedStabilitySpec extends ZIOSpecDefault {
               leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Stable Root")
             ),
             newPortfolios = Seq.empty,
-            newLeaves = Seq.empty
+            newLeaves = Seq.empty,
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main))
           after <- figures(updated, entity1)
         yield assertTrue(
@@ -188,7 +193,8 @@ object SeedStabilitySpec extends ZIOSpecDefault {
               leafDef("Alpha", "Stable Root", seedVarId = None),
               leafDef("Beta", "Stable Root", seedVarId = None),
               leafDef("Gamma", "Stable Root", seedVarId = None)
-            )
+            ),
+            newMitigations = Nil
           ), BranchRef.Main))
           pruned <- service(_.update(wsId, created.id, RiskTreeUpdateRequest(
             name = "Export Source Tree",
@@ -198,7 +204,9 @@ object SeedStabilitySpec extends ZIOSpecDefault {
               leafUpd(leafIdByName(created, "Gamma"), "Gamma", "Stable Root")
             ),
             newPortfolios = Seq.empty,
-            newLeaves = Seq.empty
+            newLeaves = Seq.empty,
+            mitigations = Nil,
+            newMitigations = Nil
           ), BranchRef.Main))
           exported = seedsByName(pruned)
           sourceFigs <- figures(pruned, entity1)
@@ -209,7 +217,8 @@ object SeedStabilitySpec extends ZIOSpecDefault {
             leaves = Seq(
               leafDef("Alpha", "Stable Root", seedVarId = Some(exported("Alpha"))),
               leafDef("Gamma", "Stable Root", seedVarId = Some(exported("Gamma")))
-            )
+            ),
+            newMitigations = Nil
           ), BranchRef.Main))
           importedFigs <- figures(imported, entity1)
         yield assertTrue(

@@ -38,7 +38,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
   /** A well-formed placeholder predicate; the actual scope is provided per test
     * through `scopes`, standing in for the server-side resolver. */
   private val pred: MitigationTarget =
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get)
 
   private def scopes(pairs: (Mitigation, Set[String])*): Map[MitigationId, Set[NodeId]] =
     pairs.iterator.map { case (m, ns) => m.id -> ns.map(nodeId) }.toMap
@@ -111,7 +111,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
                                precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
     Mitigation.create(
       mitigationId(label), name(label), pred,
-      resultStage(ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(d, paramAt).toOption.get)),
+      resultStage(ResultTransformSpec.ApplyDeductible(ValidationUtil.refineDeductible(d, paramAt).toOption.get)),
       precedence).toEither.toOption.get
 
   /** The leaf at `label`. Every id these tests pass names a leaf, so a portfolio
@@ -240,7 +240,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val layer   = records.getOrElse(nodeId("cyber"), Nil)
         assertTrue(
           layer.map(_.mitigationId) == List(dFirst.id, scale.id),
-          MitigationApplication.run(layer, outcomes).outcomeOf(1) == 45000L // (100K − 10K) × 0.5, not 40K
+          MitigationApplication.run(layer, outcomes).outcomeOf(1) == 5000L // min(100K, 10K) × 0.5, not 10K
         )
       },
       test("a parameter-stage mitigation produces no record") {

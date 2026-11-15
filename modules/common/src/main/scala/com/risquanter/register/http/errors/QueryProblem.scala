@@ -7,7 +7,7 @@ import sttp.tapir.generic.Configuration
 import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder, jsonDiscriminator}
 import zio.prelude.NonEmptyList
 import lexer.{Found, LexFailure, TokenKind, VariableText}
-import parser.{SourcePosition, SyntaxFailure, ParseError as FormulaParseError}
+import parser.{NestingFailure, SourcePosition, SyntaxFailure, ParseError as FormulaParseError}
 import vql.error.{ParseRefusal, QueryError}
 
 import com.risquanter.register.common.FolSymbols.QueryGrammarSymbol
@@ -217,6 +217,21 @@ object LexProblem:
     given Configuration = Configuration.default.withDiscriminator(QueryPosition.TagField)
     Schema.derived[LexProblem]
 
+/** Why the parser refused the text before reading it: a limit on its nesting
+  * was passed. The engine's `parser.NestingFailure`. Each limit is the
+  * engine's constant, so the case carries no text of the caller's. */
+@jsonDiscriminator(QueryPosition.TagField)
+enum NestingProblem:
+  case ParenthesesTooDeep(limit: NonNegativeInt)
+  case TooManyOperators(limit: NonNegativeInt)
+
+object NestingProblem:
+  given codec: JsonCodec[NestingProblem] = DeriveJsonCodec.gen[NestingProblem]
+
+  given schema: Schema[NestingProblem] =
+    given Configuration = Configuration.default.withDiscriminator(QueryPosition.TagField)
+    Schema.derived[NestingProblem]
+
 /** Why the query's text was refused: the parser's refusals, and the range
   * formula's two variable rules. A targeting predicate's text is refused by
   * the same formula parser, so its refusal is one of these too. */
@@ -240,6 +255,7 @@ enum ParseProblem:
   case TrailingTokens(first: QueryToken, rest: List[QueryToken])
   case Formula(failure: SyntaxProblem)
   case Lexical(failure: LexProblem)
+  case Nesting(failure: NestingProblem)
   case QuantifiedVariableNotInRange(variable: QueryVariableName, rangeVariables: Set[QueryVariableName])
   case RangeVariablesNotAnswered(rangeVariables: Set[QueryVariableName], answerVariables: List[QueryVariableName])
 
@@ -276,6 +292,7 @@ object ParseProblem:
     case ParseRefusal.TrailingTokens(first, rest)      => trailing(first, rest)
     case ParseRefusal.Formula(failure)                 => syntax(failure).map(Formula(_))
     case ParseRefusal.Lexical(failure)                 => Right(Lexical(lex(failure)))
+    case ParseRefusal.Nesting(failure)                 => nesting(failure).map(Nesting(_))
 
   /** A range formula's broken variable rule as this service's value, or the
     * reason the problem is a defect. This service evaluates every query with
@@ -312,6 +329,11 @@ object ParseProblem:
       yield Positioned(position, problem)
     case FormulaParseError.Lex(failure, position) =>
       QueryPosition.fromSource(position).map(Positioned(_, Lexical(lex(failure))))
+    case FormulaParseError.Nesting(failure, position) =>
+      for
+        position <- QueryPosition.fromSource(position)
+        failure  <- nesting(failure)
+      yield Positioned(position, Nesting(failure))
 
   /** The sentence for a refused text, ending with the position it stands at.
     *
@@ -348,6 +370,10 @@ object ParseProblem:
       syntaxSentence(failure)
     case Lexical(failure) =>
       lexSentence(failure)
+    case Nesting(NestingProblem.ParenthesesTooDeep(limit)) =>
+      s"The text nests its parentheses deeper than $limit levels"
+    case Nesting(NestingProblem.TooManyOperators(limit)) =>
+      s"The text holds more than $limit operators and quantified variables"
     case QuantifiedVariableNotInRange(variable, _) =>
       s"The quantified variable '${QueryVariableName.text(variable)}' must occur free in the range formula"
     case RangeVariablesNotAnswered(rangeVariables, answerVariables) =>
@@ -418,6 +444,10 @@ object ParseProblem:
         found   <- QueryFound.fromEngine(found)
       yield SyntaxProblem.ClosingBracketExpected(bracket, found)
     case SyntaxFailure.NotAnInfixAtom                  => Right(SyntaxProblem.NotAnInfixAtom())
+
+  private def nesting(failure: NestingFailure): Either[String, NestingProblem] = failure match
+    case NestingFailure.ParenthesesTooDeep(limit) => count(limit, "ParenthesesTooDeep").map(NestingProblem.ParenthesesTooDeep(_))
+    case NestingFailure.TooManyOperators(limit)   => count(limit, "TooManyOperators").map(NestingProblem.TooManyOperators(_))
 
   private def trailing(first: TokenKind, rest: List[TokenKind]): Either[String, ParseProblem] =
     for

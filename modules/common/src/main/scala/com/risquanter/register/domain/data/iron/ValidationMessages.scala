@@ -75,6 +75,10 @@ object ValidationMessages:
     case FieldProblem.StoredNodeNotInTree   => "this id is not a node of this tree; a new node goes in newPortfolios or newLeaves"
     case FieldProblem.StoredNodeKindDiffers => "this node is a leaf on one branch and a portfolio on the other"
 
+    // A stored mitigation named by a tree update
+    case FieldProblem.StoredMitigationListedTwice => "this id is listed more than once; each stored mitigation appears once, in mitigations"
+    case FieldProblem.StoredMitigationNotInTree   => "this id is not a mitigation of this tree; a new mitigation goes in newMitigations"
+
     // The index of a built tree
     case FieldProblem.ChildParentMismatch(child, declaredParent) =>
       s"Node '${child.value}' is listed as a child but has parentId=${declaredParent.fold("None")(_.value)}"
@@ -112,10 +116,9 @@ object ValidationMessages:
       s"result-stage pipeline is empty: at least $min step is required"
     case FieldProblem.PipelineTooLong(count, limit) =>
       s"result-stage pipeline has too many steps: $count exceeds the limit of $limit"
-    case FieldProblem.CapMustExceedDeductible => "Cap must be greater than deductible"
     case FieldProblem.AggregatedLossOverflow  => "Aggregated loss exceeds the maximum representable value"
     case FieldProblem.MitigationEliminatesRisk =>
-      "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap or the scale factor, lower the deductible, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
+      "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap, the scale factor or the policy's deductible, lower the policy's limit, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
     case FieldProblem.MitigationLowersMinLossBelowFloor(min, minFactor) =>
       f"This mitigation reduces the minimum loss below 1, the smallest representable whole unit. The leaf's minimum loss is $min, so the smallest severity factor that still applies here is $minFactor%.3e (1 / $min)."
     case FieldProblem.MitigationLowersAnchorLossBelowFloor(min, minFactor) =>
@@ -203,6 +206,8 @@ object ValidationMessages:
     case ValueRange.PositiveLoss       => "Quantile loss amounts must be greater than zero — the distribution fit takes their logarithm"
     case ValueRange.LossCap =>
       "Loss cap must be greater than 0 — a cap of zero would leave the entity bearing nothing, which states that the transfer cannot fail"
+    case ValueRange.Deductible =>
+      "Deductible must be greater than 0 — a deductible of zero would leave the entity bearing nothing, which states that the transfer cannot fail"
     case ValueRange.MetalogTerms =>
       "Terms must be between 2 and 20 — a fit with fewer has no curve to describe, and the fitter accepts no more"
     case ValueRange.RetentionFactor =>

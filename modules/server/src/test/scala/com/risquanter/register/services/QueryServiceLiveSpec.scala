@@ -65,7 +65,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   private val mAlpha = Mitigation.create(
     mAlphaId,
     SafeName.fromString("Alpha Mitigation").toOption.get,
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get),
     resultStage(ResultTransformSpec.CapLosses(1000L)),
     MitigationPrecedence.default
   ).toEither.toOption.get

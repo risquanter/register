@@ -108,7 +108,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       Mitigation.create(
         mitigationId("control"),
         SafeName.fromString(name).toOption.get,
-        MitigationTarget.Predicate(TargetingPredicate.create(predicate).toEither.toOption.get),
+        MitigationTarget.Predicate(TargetingPredicate.create(predicate, ErrorSubject.Request).toEither.toOption.get),
         MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep),
         precedence
       ),

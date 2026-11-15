@@ -99,7 +99,7 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
     ).toEither.toOption.get
 
   private val pred: MitigationTarget =
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get)
 
   private val stamp: ContentHash = ContentHash.fromString("a" * 64).toOption.get
 

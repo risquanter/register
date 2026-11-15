@@ -17,5 +17,6 @@
         "maxLoss": 100000
       }
     }
-  ]
+  ],
+  "newMitigations": []
 }
