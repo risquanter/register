@@ -4226,8 +4226,9 @@ nothing from the memo.
   * takes the second position and the head entry survives. The bound is a
   * property of the structure, not an eviction policy.
   *
-  * The memo read and write are not atomic — last-writer-wins is a deliberate,
-  * accepted trade-off, safe because the exact-revision hit guard never serves a
+  * The memo read and write are not atomic. Each write rebuilds the slot from
+  * its content at the moment of writing, so a hit never drops an entry another
+  * fiber stored in between, and the exact-revision hit guard never serves a
   * mismatched scope.
   */
 final case class MitigationScopeResolverLive(
@@ -4239,7 +4240,10 @@ final case class MitigationScopeResolverLive(
     memo.get.map(_.getOrElse(slot, Vector.empty)).flatMap { entries =>
       entries.find(_._1 == context.revision) match
         case Some(hit) =>
-          memo.update(m => m.updated(slot, hit +: entries.filterNot(_._1 == context.revision))).as(hit._2)
+          memo.update { m =>
+            val current = m.getOrElse(slot, Vector.empty).filterNot(_._1 == context.revision)
+            m.updated(slot, (hit +: current).take(MitigationScopeResolverLive.SlotCapacity))
+          }.as(hit._2)
         case None =>
           val resolved = MitigationScopeResolver.resolveUncached(tree)
           memo.update { m =>

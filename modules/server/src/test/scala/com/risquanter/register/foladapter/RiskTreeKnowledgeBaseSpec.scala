@@ -543,6 +543,10 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossStr("5000"), inherent))
       assertTrue(r == Right(0.8))
     },
+    test("lec at a threshold of zero counts every trial, including those with no loss") {
+      val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossVal(0L), inherent))
+      assertTrue(r == Right(1.0))
+    },
     test("lec with threshold above max returns 0.0") {
       val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossVal(100000L), inherent))
       assertTrue(r == Right(0.0))

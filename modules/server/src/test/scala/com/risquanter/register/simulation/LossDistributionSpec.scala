@@ -157,6 +157,12 @@ object LossDistributionSpec extends ZIOSpecDefault {
 
         assertTrue(prob == 3.0 / 1000.0)
       },
+      test("probOfExceedance at a threshold of zero counts every trial, including those with no loss") {
+        val result = withCfg(1000) {
+          leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L), None)
+        }
+        assertTrue(result.probOfExceedance(0L) == 1.0)
+      },
       test("probOfExceedance handles threshold above max loss") {
         val result = withCfg(1000) {
           leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L), None)

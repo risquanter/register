@@ -3,7 +3,7 @@ package com.risquanter.register.http.endpoints
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 
-import com.risquanter.register.domain.data.iron.{NodeId, CommitHash}
+import com.risquanter.register.domain.data.iron.{NodeId, CommitHash, NonNegativeLong}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.requests.{LECCurvesMultiRequest, ProbOfExceedanceRequest}
 import com.risquanter.register.http.responses.{ExceedanceSeries, LECCurvesResponse}
@@ -32,7 +32,7 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .description("Get probability of exceeding a loss threshold (workspace-scoped) under one mitigation selection; optional `at` commit pin")
       .in(nodesRoute / path[NodeId]("nodeId") / "prob-of-exceedance")
       .post
-      .in(query[Long]("threshold"))
+      .in(query[NonNegativeLong]("threshold").description("The loss the probability is of meeting or exceeding; zero answers 1."))
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[ProbOfExceedanceRequest].description("The mitigation selection this reading is computed under"))
       .in(branchHeader)

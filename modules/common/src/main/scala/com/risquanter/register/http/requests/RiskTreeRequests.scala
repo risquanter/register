@@ -374,18 +374,31 @@ object RiskTreeRequests {
       case (None, _) =>
         Validation.fail(ValidationError(location, FieldProblem.StoredNodeNotInTree))
 
-  /** The fields every submitted mitigation refines, at `subject`. */
+  /** The fields every submitted mitigation refines, at `subject`. A name that
+    * refines is then checked against the reserved query symbols. */
   private def refineMitigationFields(
     name: String,
     target: String,
     spec: MitigationSpecRequest,
     subject: ErrorSubject
   ): Validation[ValidationError, (SafeName.SafeName, MitigationTarget, ResolvedSpec)] =
+    val nameLocation = ErrorLocation.Field(subject, FieldName.Name)
     Validation.validateWith(
-      refineNameField(name, ErrorLocation.Field(subject, FieldName.Name)),
+      refineNameField(name, nameLocation).flatMap(requireUnreservedMitigationName(_, nameLocation)),
       TargetingPredicate.create(target, subject).map(MitigationTarget.Predicate(_)),
       spec.toSpec(subject)
     )((n, t, s) => (n, t, s))
+
+  /** A mitigation name spelled like a reserved query symbol, such as
+    * `residual`, is refused at `location`. The knowledge base leaves such a
+    * name out of its name lookup, so `mitigation_named` could never find it. */
+  private def requireUnreservedMitigationName(
+    name: SafeName.SafeName,
+    location: ErrorLocation
+  ): Validation[ValidationError, SafeName.SafeName] =
+    if FolSymbols.reservedNames.contains(name.value) then
+      Validation.fail(ValidationError(location, FieldProblem.ReservedMitigationName(name)))
+    else Validation.succeed(name)
 
   /** The mitigations a request adds, each with an id minted by `newId`. */
   private[requests] def refineMitigationDefs(

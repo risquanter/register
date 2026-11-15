@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, NonNegativeLong, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.auth.{Authority, Checked}
@@ -122,7 +122,7 @@ trait RiskTreeService {
     wsId: WorkspaceId,
     treeId: TreeId,
     nodeId: NodeId,
-    threshold: Long,
+    threshold: NonNegativeLong,
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean,
     branch: BranchRef,

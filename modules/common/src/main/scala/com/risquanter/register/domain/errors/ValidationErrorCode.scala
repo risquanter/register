@@ -48,4 +48,4 @@ enum ValidationErrorCode(val code: String, val description: String):
   case MODEL_VALIDATION_FAILED extends ValidationErrorCode("MODEL_VALIDATION_FAILED", "Runtime model does not satisfy catalog contract")
   case EVALUATION_FAILED extends ValidationErrorCode("EVALUATION_FAILED", "Query evaluation failed unexpectedly")
   case SIMULATION_REQUIRED extends ValidationErrorCode("SIMULATION_REQUIRED", "Simulation must be run before querying")
-  case RESERVED_NAME extends ValidationErrorCode("RESERVED_NAME", "Node name collides with a reserved query symbol")
+  case RESERVED_NAME extends ValidationErrorCode("RESERVED_NAME", "Name collides with a reserved query symbol")

@@ -18,8 +18,8 @@ import com.risquanter.register.domain.data.{
   RelativeLikelihood, RelativeSeverity, RiskLeaf, RiskTree, ScopeOutcome, TargetingPredicate
 }
 import com.risquanter.register.domain.data.iron.{
-  BranchRef, CommitHash, MitigationId, NodeId, Probability, QueryLiteral, Revision, SafeName, SeedEntityId, SeedVarId,
-  TreeId, WorkspaceId, WorkspaceKeySecret
+  BranchRef, CommitHash, MitigationId, NodeId, NonNegativeLong, Probability, QueryLiteral, Revision, SafeName,
+  SeedEntityId, SeedVarId, TreeId, WorkspaceId, WorkspaceKeySecret
 }
 import com.risquanter.register.domain.errors.{ErrorSubject, Failure}
 import com.risquanter.register.http.errors.BindProblem
@@ -98,7 +98,7 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
     def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[Failure, Option[(RiskTree, CommitHash)]] = unused
     def getStructure(wsId: WorkspaceId, id: TreeId, branch: BranchRef, at: Option[CommitHash])(using Checked[Authority]): IO[Failure, (RiskTree, ResolvedScopes, Set[MitigationId])] =
       ZIO.succeed((structureTree, structureScopes, structureStale))
-    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], selection: MitigationSelection)(using Checked[Authority]): IO[Failure, ExceedanceSeries] =
+    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: NonNegativeLong, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], selection: MitigationSelection)(using Checked[Authority]): IO[Failure, ExceedanceSeries] =
       seen.update(_ :+ selection).as(ExceedanceSeries(answer, Nil))
     def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], omitAbsent: Boolean, selection: MitigationSelection)(using Checked[Authority]): IO[Failure, Map[NodeId, List[LECNodeSeries]]] = unused
 
@@ -126,9 +126,15 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
       TestConfigs.telemetryLayer >>> TelemetryLive.configured
     )
 
-  private def exceedance(backend: SttpBackend[Task, Any], key: WorkspaceKeySecret, body: String): Task[Response[Either[String, String]]] =
+  /** The threshold most cases send. */
+  private val DefaultThreshold: Long = 1000L
+
+  /** `threshold` is a raw `Long` so a case can send one the route refuses. */
+  private def exceedance(
+    backend: SttpBackend[Task, Any], key: WorkspaceKeySecret, body: String, threshold: Long
+  ): Task[Response[Either[String, String]]] =
     basicRequest
-      .post(uri"http://localhost/w/${key.reveal}/risk-trees/${tree.value}/nodes/${node.value}/prob-of-exceedance?threshold=1000")
+      .post(uri"http://localhost/w/${key.reveal}/risk-trees/${tree.value}/nodes/${node.value}/prob-of-exceedance?threshold=$threshold")
       .header("X-Branch", "main")
       .contentType("application/json")
       .body(body)
@@ -146,7 +152,7 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
       for
         seen            <- Ref.make(List.empty[MitigationSelection])
         (backend, key)  <- harness(seen)
-        response        <- exceedance(backend, key, ProbOfExceedanceRequest(selection).toJson)
+        response        <- exceedance(backend, key, ProbOfExceedanceRequest(selection).toJson, DefaultThreshold)
         recorded        <- seen.get
       yield assertTrue(
         response.code == StatusCode.Ok,
@@ -160,9 +166,20 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
       for
         seen            <- Ref.make(List.empty[MitigationSelection])
         (backend, key)  <- harness(seen)
-        response        <- exceedance(backend, key, s"""{"selection":{"fullScope":[$ids]}}""")
+        response        <- exceedance(backend, key, s"""{"selection":{"fullScope":[$ids]}}""", DefaultThreshold)
         recorded        <- seen.get
       yield assertTrue(response.code == StatusCode.BadRequest, recorded.isEmpty)
+    },
+
+    test("a negative threshold is a 400 before the handler runs, and a threshold of zero is answered") {
+      val body = ProbOfExceedanceRequest(MitigationSelection.Inherent).toJson
+      for
+        seen            <- Ref.make(List.empty[MitigationSelection])
+        (backend, key)  <- harness(seen)
+        negative        <- exceedance(backend, key, body, -1L)
+        refusedFirst    <- seen.get
+        zero            <- exceedance(backend, key, body, 0L)
+      yield assertTrue(negative.code == StatusCode.BadRequest, refusedFirst.isEmpty, zero.code == StatusCode.Ok)
     },
 
     test("the structure route answers the tree, each mitigation's resolved scope in id order, and the stale ids") {

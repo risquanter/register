@@ -9,7 +9,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, DistributionShape, Mitigation, MitigationSelection, MitigationSpec}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, MitigationId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, ContentHash, Revision, BranchChoice}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, Probability, TreeId, NodeId, MitigationId, NonNegativeLong, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, ContentHash, Revision, BranchChoice}
 import com.risquanter.register.domain.errors.{Diagnostic, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, Failure, TrustZone}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.ValidationExtensions.*
@@ -603,7 +603,7 @@ class RiskTreeServiceLive private (
     wsId: WorkspaceId,
     treeId: TreeId,
     nodeId: NodeId,
-    threshold: Long,
+    threshold: NonNegativeLong,
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean,
     branch: BranchRef,

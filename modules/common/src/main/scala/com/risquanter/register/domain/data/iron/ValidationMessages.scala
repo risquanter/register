@@ -30,6 +30,8 @@ object ValidationMessages:
     // Names and seed identity within a tree
     case FieldProblem.ReservedNodeNames(names) =>
       s"Node name must not be a reserved query symbol (e.g. 'leaf', 'p95'): ${names.map(_.value).mkString(", ")}"
+    case FieldProblem.ReservedMitigationName(name) =>
+      s"Mitigation name must not be a reserved query symbol (e.g. 'residual', 'p95'): ${name.value}"
     case FieldProblem.DuplicateNodeName(name, occurrences) =>
       s"duplicate node name: ${name.value} — used by $occurrences nodes; names must be unique within a tree. " +
       "Rename all but one of them."

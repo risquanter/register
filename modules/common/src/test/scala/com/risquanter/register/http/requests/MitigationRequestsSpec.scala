@@ -6,12 +6,15 @@ import zio.json.{DecoderOps, EncoderOps}
 import zio.prelude.Validation
 
 import com.risquanter.register.domain.data.{
-  AbsoluteReplacement, MitigationSpec, RelativeLikelihood, RelativeSeverity, ResultTransformSpec, TransformPipeline
+  AbsoluteReplacement, MitigationPrecedence, MitigationSpec, RelativeLikelihood, RelativeSeverity, ResultTransformSpec,
+  TransformPipeline
 }
 import com.risquanter.register.domain.data.iron.ContentHash
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, SubmittedMitigations, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ResolvedSpec
-import com.risquanter.register.testutil.TestHelpers.{idStr, lognormalShape, nodeId, residualProbability, retentionFactor, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{
+  idStr, lognormalShape, nodeId, residualProbability, retentionFactor, safeId, unsafeGet
+}
 
 /** The submitted mitigation effects: each gate refines its fields at the
   * subject it is given, accumulating every refusal, and `fromSpec` is its
@@ -49,6 +52,11 @@ object MitigationRequestsSpec extends ZIOSpecDefault {
   private val absolute: MitigationSpec.LeafAbsolute =
     MitigationSpec.LeafAbsolute(
       AbsoluteReplacement.Both(residualProbability(0.02), lognormalShape(1000L, 5000L)), nodeId("cyber"), stamp)
+
+  private val relativeRequest: MitigationSpecRequest =
+    MitigationSpecRequest.LeafRelative(RelativeLikelihoodRequest.Scale(0.3), RelativeSeverityRequest.ScaleSeverity(0.6))
+
+  private val mintId: RiskTreeRequests.IdGenerator = () => safeId("minted")
 
   def spec = suite("MitigationRequests")(
 
@@ -107,6 +115,26 @@ object MitigationRequestsSpec extends ZIOSpecDefault {
           case MitigationSpecRequest.LeafAbsolute(_, _, BaseStampChoice.KeepIfUnchanged) => true
           case _                                                                         => false,
         resubmitted.toSpec(subject) == Validation.succeed(ResolvedSpec.Unstamped(absolute.replacement, absolute.anchor))
+      )
+    },
+
+    test("a new or kept mitigation named like a reserved query symbol is refused at that entry's Name") {
+      val newEntry  = MitigationDefinitionRequest("residual", "leaf(x)", relativeRequest, MitigationPrecedence.overrideFinal)
+      val keptEntry = MitigationUpdateRequest(idStr("kept"), "p95", "leaf(x)", relativeRequest, MitigationPrecedence.overrideFinal)
+      val newSubject  = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
+      val keptSubject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.Mitigations, 0)
+      assertTrue(
+        locationsOf(RiskTreeRequests.refineMitigationDefs(Seq(newEntry), mintId)) ==
+          List(ErrorLocation.Field(newSubject, FieldName.Name)),
+        locationsOf(RiskTreeRequests.refineExistingMitigations(Seq(keptEntry), Nil)) ==
+          List(ErrorLocation.Field(keptSubject, FieldName.Name))
+      )
+    },
+
+    test("a mitigation with an ordinary name refines") {
+      val entry = MitigationDefinitionRequest("Backup policy", "leaf(x)", relativeRequest, MitigationPrecedence.overrideFinal)
+      assertTrue(
+        RiskTreeRequests.refineMitigationDefs(Seq(entry), mintId).toEither.isRight
       )
     },
 

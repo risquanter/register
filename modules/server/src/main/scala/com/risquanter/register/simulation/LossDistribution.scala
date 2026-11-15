@@ -119,8 +119,12 @@ final case class LossDistribution private (
   override lazy val minLoss: Loss =
     outcomeCount.keys.minOption(using Ord[Loss].toScala).getOrElse(0L)
 
+  /** The share of trials whose loss is at least `threshold`. A trial with no
+    * loss is not stored, so every trial meets a threshold at or below zero and
+    * the answer there is 1; above zero the stored losses are counted. */
   override def probOfExceedance(threshold: Loss): Probability =
-    trials.shareOf(outcomeCount.rangeFrom(threshold).values.sum)
+    if threshold <= 0L then trials.shareOf(nTrials.toLong)
+    else trials.shareOf(outcomeCount.rangeFrom(threshold).values.sum)
 }
 
 object LossDistribution {

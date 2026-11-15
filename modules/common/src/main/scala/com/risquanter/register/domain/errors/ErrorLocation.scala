@@ -494,6 +494,7 @@ enum FieldProblem:
 
   // Names and seed identity within a tree
   case ReservedNodeNames(names: List[SafeName.SafeName])
+  case ReservedMitigationName(name: SafeName.SafeName)
   case DuplicateNodeName(name: SafeName.SafeName, occurrences: NonNegativeInt)
   case DuplicateMitigationName(name: SafeName.SafeName, occurrences: NonNegativeInt)
   case DuplicateMitigationId(id: MitigationId, occurrences: NonNegativeInt)
@@ -606,6 +607,7 @@ object FieldProblem:
     case OutOfRange(_)                              => ValidationErrorCode.INVALID_RANGE
     case ScenarioNameReserved                       => ValidationErrorCode.INVALID_FORMAT
     case ReservedNodeNames(_)                       => ValidationErrorCode.RESERVED_NAME
+    case ReservedMitigationName(_)                  => ValidationErrorCode.RESERVED_NAME
     case DuplicateNodeName(_, _)                    => ValidationErrorCode.AMBIGUOUS_REFERENCE
     case DuplicateMitigationName(_, _)              => ValidationErrorCode.AMBIGUOUS_REFERENCE
     case DuplicateMitigationId(_, _)                => ValidationErrorCode.DUPLICATE_VALUE

@@ -205,6 +205,18 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         yield assertTrue(d eq a, !(e eq c))
       },
 
+      test("a hit on an older revision keeps the newer one, behind it") {
+        val t = mkTree(mit("m-ok", "leaf(x)", resultSpec))
+        for
+          memo <- Ref.make(Map.empty[(TreeId, BranchRef), Vector[(CommitHash, ResolvedScopes)]])
+          r     = MitigationScopeResolverLive(memo)
+          a    <- r.resolve(ctx(rev1), t)
+          _    <- r.resolve(ctx(rev2), t)
+          b    <- r.resolve(ctx(rev1), t)   // hit
+          slot <- memo.get.map(_.getOrElse((ctx(rev1).treeId, ctx(rev1).branch), Vector.empty))
+        yield assertTrue(b eq a, slot.map(_._1) == Vector(rev1, rev2))
+      },
+
       test("per-workspace isolation — one resolver instance per WorkspaceId") {
         val ws1 = WorkspaceId(safeId("ws-1"))
         val ws2 = WorkspaceId(safeId("ws-2"))
