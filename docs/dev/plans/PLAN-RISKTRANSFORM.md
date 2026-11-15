@@ -5291,7 +5291,7 @@ them the Scala.js module does not compile.
 
 #### 7.6.14 Terminology impact
 
-One term is affected, and the rest of the glossary's mitigation vocabulary is
+Two terms are affected, and the rest of the glossary's mitigation vocabulary is
 already current.
 
 **Affected: Part 4's framing, and the selection concept it does not name.** The
@@ -5319,6 +5319,13 @@ to a node that no longer exists.
 
 **M5 cannot be assessed.** §7.7 records a problem space with no design, so it has
 no decisions to pair a term against. The assessment is owed when M5 is designed.
+
+**Affected: 3.6 Relative and absolute statements** (approved by the user,
+2026-11-15). Decision 11, ruled A, makes a stale statement stay stale until its
+author re-affirms it. Decision 9, as re-ruled, makes a statement whose leaf is
+deleted a no-op that is not reported. The entry's fix paragraph now says the
+fingerprint is taken when the statement was written or last re-affirmed, what
+re-affirming records, and what a deleted leaf does.
 
 **Slice 7 affects no term, and neither do decisions 18 to 20.** Slice 7 changes
 how a query names a node, and the glossary's only screening-query examples,

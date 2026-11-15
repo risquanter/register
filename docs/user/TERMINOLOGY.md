@@ -550,9 +550,14 @@ exists. It still applies, and it reports a figure nobody would now assert.
 
 The **fix** is that an absolute statement must carry two pieces of evidence:
 which leaf it was asserted against, and a fingerprint of that leaf's
-simulation-relevant content at the time of writing. Comparing the stored
-fingerprint against the leaf's current one says whether the statement has gone
-stale. A rename or a move does not trigger it, because the fingerprint covers
+simulation-relevant content when the statement was written or last re-affirmed.
+Comparing the stored fingerprint against the leaf's current one says whether the
+statement has gone stale. Saving the tree with the statement unchanged keeps the
+stored fingerprint, so a stale statement stays stale until its author re-affirms
+it. Re-affirming records the leaf's current fingerprint, which states that the
+figures still hold for the leaf as it now is. If the leaf is deleted, the
+statement applies to no node, like any mitigation whose target matches nothing,
+and it is not reported as stale. A rename or a move does not trigger it, because the fingerprint covers
 the simulation-relevant content only — the same content the cache key is
 computed from. A relative statement carries neither piece, because it has
 nothing to audit.
