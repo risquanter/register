@@ -32,7 +32,7 @@ object QueryRequestSpec extends ZIOSpecDefault:
           case _ => false)
       },
       test("a literal holding a character outside its alphabet is a lexical refusal") {
-        val result = QueryRequest.resolve(QueryRequest("""Q[>=]^{1/2} x (leaf(x), named_risk(x, "<b>"))"""))
+        val result = QueryRequest.resolve(QueryRequest("""Q[>=]^{1/2} x (leaf(x), eq(x, node_named("<b>")))"""))
         assertTrue(result match
           case Left(QueryProblem.Unparseable(Positioned(_, ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter)))) => true
           case _ => false)

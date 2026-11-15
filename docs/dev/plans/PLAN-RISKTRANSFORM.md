@@ -1108,8 +1108,8 @@ drive it:
   sort polymorphism. Consequence: **the engine needs no change** — vql stays at
   0.17.0. Node identity predicates are renamed to the uniform scheme
   (`named_risk`/`risk_id`, Decision 1=A); mitigation identity uses the parallel
-  pair (`named_mitigation`/`mitigation_id`); the scheme extends later to
-  `named_asset`/`asset_id`. The two aggregate valuations are mitigation-sort
+  pair (`mitigation_named`/`mitigation_id`); the scheme extends later to
+  `asset_named`/`asset_id`. The two aggregate valuations are mitigation-sort
   *constants* `inherent`/`residual` (Decision 2 renamed the ADT cases to match:
   `MitigationSelection.Inherent`/`.Residual`; no `Raw`/`All`/`None` terminology
   anywhere — vql surface or Scala).
@@ -1143,7 +1143,7 @@ In scope:
    selection.
 2. `RiskTreeKnowledgeBase`: add the `Mitigation` domain sort and the two
    mitigation literal sorts; the `inherent`/`residual` constants; the identity
-   predicates `named_mitigation`/`mitigation_id`; the screening predicates
+   predicates `mitigation_named`/`mitigation_id`; the screening predicates
    `mitigate`/`mitigated`/`unmitigated`; the mitigation-sort selection argument
    on `p95`/`p99`/`lec` (D6=C arity break). Results become keyed by
    `MitigationSelection`. Node identity predicates renamed `named`→`named_risk`,
@@ -1187,7 +1187,7 @@ mirroring node identity:
 ```
 p95(x, "inherent") < 500000                                                    // raw
 p95(x, "residual") < 500000                                                    // all applicable
-∃m : mitigation . named_mitigation(m, "IT Risk mitigation") ∧ p95(x, m) < 500000   // specific, by name
+∃m : mitigation . mitigation_named(m, "IT Risk mitigation") ∧ p95(x, m) < 500000   // specific, by name
 ∃m : mitigation . mitigation_id(m, "01H…")                 ∧ p95(x, m) < 500000   // specific, by id
 ∃m : mitigation .                                            p95(x, m) < 500000   // what-if over all
 ```
@@ -1203,10 +1203,10 @@ name separately from the `∃`-domain enumeration, so `inherent`/`residual` are
 only.
 
 Why the specific-by-name and what-if forms are indistinguishable at precompute
-time: `p95(x, m)` carries a `VarRef` regardless of any `named_mitigation`
+time: `p95(x, m)` carries a `VarRef` regardless of any `mitigation_named`
 constraint elsewhere in the formula. `referencedSelections` therefore fans a
 bound mitigation variable out to a `Selected` per mitigation (OD-4=A). The
-`named_mitigation`/`mitigation_id` constraint narrows *which* bindings satisfy
+`mitigation_named`/`mitigation_id` constraint narrows *which* bindings satisfy
 the formula at evaluation; it does not narrow what is precomputed. Unbounded
 fan-out over `tree.mitigations` is the accepted cost of OD-4=A.
 
@@ -1277,7 +1277,7 @@ object RiskTreeKnowledgeBase:
     * enumerates the tree's mitigations. */
   val MitigationSort: TypeId            = TypeId("Mitigation")
   /** Value sort for a mitigation reference written as a quoted NAME literal
-    * (`named_mitigation(m, "IT Risk")`). Carrier: `MitigationId`, resolved at
+    * (`mitigation_named(m, "IT Risk")`). Carrier: `MitigationId`, resolved at
     * bind time by the name→id validator. */
   val MitigationNameLiteralSort: TypeId = TypeId("MitigationNameLiteral")
   /** Value sort for a mitigation reference written as a quoted ID literal
@@ -1362,7 +1362,7 @@ predicates = Map(
   SymbolName("eq")                 -> PredicateSig(List(nodeSort, nodeSort)),
   SymbolName("named_risk")         -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),   // was "named"
   SymbolName("risk_id")            -> PredicateSig(List(nodeSort, nodeIdLiteralSort)),     // was "has_id"
-  SymbolName("named_mitigation")   -> PredicateSig(List(mitigationSort, mitigationNameLiteralSort)),
+  SymbolName("mitigation_named")   -> PredicateSig(List(mitigationSort, mitigationNameLiteralSort)),
   SymbolName("mitigation_id")      -> PredicateSig(List(mitigationSort, mitigationIdLiteralSort)),
   SymbolName("mitigate")           -> PredicateSig(List(nodeSort, mitigationSort)),
   SymbolName("mitigated")          -> PredicateSig(List(nodeSort)),
@@ -1375,7 +1375,7 @@ literalValidators = Map(
   nodeIdLiteralSort         -> ((s: String) => NodeId.fromString(s).toOption),
   lossSort                  -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
   probabilitySort           -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0)),
-  mitigationNameLiteralSort -> ((s: String) => mitigationNameToId.get(s)),                 // named_mitigation's 2nd arg
+  mitigationNameLiteralSort -> ((s: String) => mitigationNameToId.get(s)),                 // mitigation_named's 2nd arg
   mitigationIdLiteralSort   -> ((s: String) => MitigationId.fromString(s).toOption)         // mitigation_id's 2nd arg
 )
 ```
@@ -1441,7 +1441,7 @@ private val mitigationIdentity: List[Value] => Either[String, Boolean] = args =>
 SymbolName("eq")               -> nodeIdentity,
 SymbolName("named_risk")       -> nodeIdentity,       // was "named"
 SymbolName("risk_id")          -> nodeIdentity,       // was "has_id"
-SymbolName("named_mitigation") -> mitigationIdentity,
+SymbolName("mitigation_named") -> mitigationIdentity,
 SymbolName("mitigation_id")    -> mitigationIdentity,
 SymbolName("mitigate")         -> { args =>
   for
@@ -1474,7 +1474,7 @@ val reservedNames: Set[String] = Set(
   // predicates
   "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
   "gt_loss", "gt_prob", "eq", "named_risk", "risk_id",
-  "named_mitigation", "mitigation_id", "mitigate", "mitigated", "unmitigated",
+  "mitigation_named", "mitigation_id", "mitigate", "mitigated", "unmitigated",
   // functions
   "p95", "p99", "lec",
   // mitigation-sort aggregate-valuation constants
@@ -1622,7 +1622,7 @@ The earlier M3-D1…M3-D6 draft labels are folded in where they map to a ruling.
   3-ary, with a mitigation-sort selection term. Hard arity break — every
   existing `p95(x)`/`p99(x)`/`lec(x,l)` migrates (§7.5.6).
 - **Selection surface = monomorphic per-sort (2026-09-10).** Two aggregate
-  constants `inherent`/`residual`; specific selection via `named_mitigation` /
+  constants `inherent`/`residual`; specific selection via `mitigation_named` /
   `mitigation_id` constraining a bound `∃m : mitigation`; what-if via an
   unconstrained bound variable (§7.5.2). Supersedes the earlier OD-2 "two
   literal sub-sorts on the selection argument" framing (now two identity
@@ -1662,7 +1662,7 @@ The earlier M3-D1…M3-D6 draft labels are folded in where they map to a ruling.
   rewrite.)
 - **Decision 1 = A (node predicate rename).** `named`→`named_risk`,
   `has_id`→`risk_id`; `eq` unchanged. Uniform `named_<sort>`/`<sort>_id` scheme,
-  extensible to `named_asset`/`asset_id`. Small internal blast radius (3 source +
+  extensible to `asset_named`/`asset_id`. Small internal blast radius (3 source +
   3 test files + demo scripts + reserved-names mirror), no persisted queries yet.
 - **Decision 2 (ADT case names).** `MitigationSelection.None`→`Inherent`,
   `All`→`Residual`. One vocabulary end-to-end: surface `inherent`/`residual`,
@@ -1817,7 +1817,7 @@ New / extended coverage:
     that same set over the node domain (M3-D5 approach (a));
   - `p95(x, "inherent")` reads base results; `p95(x, "residual")` and a bound
     `p95(x, m)` read the corresponding precomputed residual;
-  - `named_mitigation(m, "…")` / `mitigation_id(m, "…")` bind and reduce to
+  - `mitigation_named(m, "…")` / `mitigation_id(m, "…")` bind and reduce to
     `MitigationId` equality; `named_risk`/`risk_id` behave as `named`/`has_id`
     did;
   - `inherent`/`residual` used in a node slot fail to bind (TypeMismatch); a
@@ -1912,8 +1912,8 @@ two of them. The third, decision 14, was ruled on 2026-11-13 and changes no
 slice text.
 Decisions 15 and 16 were ruled on 2026-11-13 and are recorded in the same place:
 a node is written as a function term, and a stored predicate holds identifiers
-only. Neither is elevated to signatures. Both wait on an engine release that is
-not yet planned, and no text of slices 1, 3, 4 and 5 depends on them.
+only. The engine release they waited on is vql-engine 0.19.0, and §7.6.15
+elevates both as slice 7. No text of slices 1, 3, 4 and 5 depends on them.
 Two rulings are
 restated in a later record's terms: the curve answer keeps its enclosing object
 (§7.6.3), and the new decision record is numbered ADR-040 (Decision 2).
@@ -2488,6 +2488,7 @@ has landed green (G8).
 | 4 | Change notification: the mitigation-collection diff, and the scope memo's capacity-2 amendment | §7.6.8 |
 | 5 | The two decision records: the ADR-017 amendment and the new ADR-037 | §7.6.9 |
 | 6 | The interface and the user documentation | not elevated — see §7.6.12 |
+| 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 |
 
 Slices 2 to 5 are specified below. Slice 2 carries one open decision — §7.6.12
 decision 11, the submitted form of a leaf-stage mitigation — and slices 3 to 5
@@ -3455,6 +3456,11 @@ constructor deliberately, so this is the one place the tension shows.
 **Not started.** This is M4's slice 2, not M2's. M2 slice 2 (§8.13 — the
 mitigation scope resolver and its per-workspace registry) has landed; this one has
 not, and the two are unrelated pieces of work that share a number.
+
+**It lands after register adopts the vql-engine release carrying T-014, expected
+to be 0.20.0** (user, 2026-11-15). This slice is the first that stores a
+targeting predicate. A 4096-character source can nest deeply enough to overflow
+0.19.0's parser stack (§7.6.12 decision 20), and T-014 bounds that depth.
 
 **What this slice changes, in plain terms.** A mitigation can be stored today
 and read back, but no request can create one: the tree PUT has no mitigation
@@ -4801,9 +4807,9 @@ and 3 are written under these answers.
   selection itself, so its type is narrowed to the cases it can state, as
   §7.6.5 writes it.
 
-**Ruled on 2026-11-13.** Neither decision is elevated to signatures. Both wait
-on an engine release, and the plan for that release is drafted on the user's go
-and not before.
+**Ruled on 2026-11-13.** Both waited on an engine release, vql-engine 0.19.0,
+which is published. §7.6.15 elevates both as slice 7, and decisions 18 to 20 are
+the questions that elevation raised.
 
 15. **How a predicate names a node in a position that today reads a name only.**
     **RULED (user, 2026-11-13): node-returning functions, delivered by an engine
@@ -5025,6 +5031,63 @@ and not before.
     `MitigationScopeEntry` (user, 2026-11-15), after the family's member
     `NodeChangeEntry`.
 
+**Raised on 2026-11-15 by the slice 7 elevation (§7.6.15). All three are ruled.**
+
+18. **The two node functions' names.** Decision 15 calls `node_named` and
+    `node_id` "working names". They are keywords of the query language, which
+    authors type and documents print. **RULED A (user, 2026-11-15), with the
+    existing names renamed to match: "specificall whereever we have a named_
+    prefix, make a _named postfix instead".** The one such keyword is the
+    predicate `named_mitigation`, which becomes `mitigation_named` and stays a
+    predicate. `mitigation_id` already has the shape and is unchanged.
+    - A: keep `node_id` and `node_named`. They read as "the node with this id"
+      and "the node with this name", and the engine plan, the handover item and
+      every document draft already use them.
+    - B: other names the user chooses.
+
+19. **Whether a bare quoted name stays readable in a node position.** Today
+    `descendant_of(x, "AppTier")` binds, because the node sort's literal
+    validator reads a name. Decision 15 records "The bare quoted name in
+    `eq(x, "name")` goes with them: "we will remove it for consistency.
+    deliberately"". That validator serves every node position, not only `eq`.
+    Decision 16 separately says the server refuses "a quoted name in a node
+    position" in a stored predicate, which presumes the form still exists.
+    The two cannot both be read literally. **RULED A (user, 2026-11-15):
+    "remove everywhere".** The node sort's literal validator is register's, in
+    `RiskTreeKnowledgeBase.schemaFor`, so the removal needs no engine change. The
+    mitigation sort already has no validator.
+    - A: remove the node sort's literal validator. Every node position takes
+      `node_named(…)` or `node_id(…)`, in screening queries and in stored
+      predicates alike. A query reads `descendant_of(x, node_named("AppTier"))`.
+      The cost: every quoted node name in the examples, user documents and six
+      test suites is rewritten. `BindProblem`'s sentence for a quoted literal
+      gains the hint naming the two functions, because "Nothing in this tree is
+      named "AppTier"" would be wrong when `AppTier` exists.
+    - B: keep the validator for screening queries, and refuse a quoted literal in
+      a node position in a stored predicate. A screening query keeps
+      `descendant_of(x, "AppTier")`. The cost: two spellings of the same
+      reference remain, and the refusal needs each predicate's parameter sorts.
+
+20. **The targeting source's length bound.** `TargetingSource` admits 1 to 256
+    characters, a figure chosen by this project. In the identifier form one
+    hand-picked node costs about 48 characters: `eq(x, node_id("` is 15, the
+    identifier 26, `"))` 3, and the joining ` \/ ` 4. So 256 holds five nodes.
+    **RULED: 4096 (user, 2026-11-15).** It holds about 85 hand-picked nodes. At
+    the 1 000-mitigation ceiling that is 4 MB of predicate text, under the 8 MiB
+    `REGISTER_MAX_REQUEST_BYTES` body cap. Widening admits more, so every stored
+    source still decodes.
+    - A: keep 256.
+    - B: raise it.
+
+    The bound does not limit parse depth. vql-engine 0.19.0's formula parser has
+    no depth bound and throws `StackOverflowError` on 260 nested parentheses
+    around one atom, which is 524 characters, or on a chain of 200 atoms joined
+    by `\/`, which is 1 198 characters. These were measured on a 1 MiB thread
+    stack. Inside a ZIO effect under the default runtime that error ends the
+    process. The depth bound is vql-engine's T-014 in its `docs/TODOS.md`, and
+    slice 2 lands only after register adopts the release carrying it, expected
+    to be 0.20.0 (§7.6.6).
+
 #### 7.6.13 File inventory — M4 slices 1 to 5
 
 These lines append to the shared `## File inventory` section on approval. Files
@@ -5163,6 +5226,378 @@ to a node that no longer exists.
 
 **M5 cannot be assessed.** §7.7 records a problem space with no design, so it has
 no decisions to pair a term against. The assessment is owed when M5 is designed.
+
+**Slice 7 affects no term, and neither do decisions 18 to 20.** Slice 7 changes
+how a query names a node, and the glossary's only screening-query examples,
+`p95(x, "residual")` and `p95(x, m)` in Part 4.5, name no node.
+
+#### 7.6.15 M4 slice 7 — adopting vql-engine 0.19.0 (decisions 15, 16, 18, 19 and 20)
+
+**What this slice changes, in plain terms.** A query or a targeting predicate
+names a node through one of two functions, `node_id("01HQ8ZK3…")` and
+`node_named("Ransomware Attack")`, in any position that takes a node:
+`descendant_of(x, node_id("01HQ8ZK3…"))`. The predicates `named_risk` and
+`risk_id` are removed, because `eq(x, node_named(…))` and `eq(x, node_id(…))`
+say the same thing (decision 15). A bare quoted name no longer stands for a node
+anywhere, so `descendant_of(x, "AppTier")` is written
+`descendant_of(x, node_named("AppTier"))` (decision 19). The predicate
+`named_mitigation` is renamed `mitigation_named` (decision 18). A stored
+targeting predicate may name a node by its identifier only, so
+`TargetingPredicate.create` refuses `node_named` (decision 16), and its source
+may run to 4096 characters (decision 20). The browser's rewrite of names into
+identifiers belongs to the predicate editor, which decision 7 puts outside M4.
+
+**Why it lands before slice 2.** Decision 16 says "the tree write path of slice 2
+stores no predicate before that release is adopted". Slice 7 therefore lands
+first. It touches no file slice 2 is specified to change except
+`TargetingPredicate.scala`, which slice 2 only calls.
+
+**The engine release, as it reaches register.** vql-engine 0.19.0 is tagged
+`v0.19.0` in the `vague-quantifier-logic` repository, and its plan is
+`docs/PLAN-node-returning-functions.md` there, ruled `NRF-D-1` A. Three surface
+changes bear on this slice, read from the sibling checkout:
+
+- `Fragment.Targeting` is `case Targeting(admittedFunctions: Set[SymbolName])`
+  in `core/src/main/scala/vql/fragment/Fragment.scala`. `Targeting(Set.empty)`
+  admits no function. An admitted application's arguments are checked by the same
+  rule, so `node_id(p95(x, "inherent"))` is still refused.
+- `TypeCatalog.domainReturningFunctions: Set[SymbolName]` in
+  `core/src/main/scala/vql/typed/TypeCatalog.scala` returns "Functions whose
+  declared return sort is a domain type".
+- A catalog function may return a domain sort. The engine does not check that
+  the result is an element of the registered domain, so `node_id` of an
+  identifier no node has yields a value every node atom is false on. That is
+  decision 14's ruling, reached without code of register's own.
+
+`build.sbt` line 45 pins `vqlEngineVersion = "0.18.0"`, and this slice sets it to
+`"0.19.0"`. A first-party `com.risquanter` artifact is exempt from the 14-day
+cooldown (ADR-020 §10).
+
+**The tree-independent half of the catalog moves to `common`.**
+`TargetingPredicate.create` runs in `common`, and the admitted set is
+`domainReturningFunctions` of a catalog holding register's signatures. Today the
+whole catalog is built in `RiskTreeKnowledgeBase.schemaFor` in `server`, but only
+its literal validators read the tree. The sorts, constants, functions and
+predicates do not. So they are declared once in `FolSymbols`, and `schemaFor`
+builds its catalog from them plus the validators. `TypeCatalog`'s constructor is
+private and its `copy` is private with it, so `schemaFor` calls
+`TypeCatalog.unsafe` with the shared parts rather than extending a shared value.
+
+One consequence follows and is in scope. `FolSymbols.reservedNames` is today "A
+manually maintained mirror of the predicate symbol names declared in the
+`RiskTreeKnowledgeBase` catalog", kept in `common` because "the `server`-side
+catalog is not on the dependency graph". Once the signatures are in `common`,
+that reason no longer holds, so the set is derived from them. The C4 test in
+`RiskTreeKnowledgeBaseSpec`, which asserts the set equals the catalog's symbol
+union, stays and now passes by construction.
+
+**New and changed signatures — `modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`.**
+
+```scala
+  /** The query language's node-returning functions: each names one node by a
+    * literal, and may stand in any position that takes a node.
+    *
+    * `symbol` is the name the query engine binds, so it is declared rather than
+    * derived from the case name (ADR-037).
+    *
+    * {{{
+    * descendant_of(x, node_id("01HQ8ZK3…"))
+    * eq(x, node_named("Ransomware Attack"))
+    * }}}
+    */
+  enum NodeFunction(val symbol: String):
+    case ById   extends NodeFunction("node_id")
+    case ByName extends NodeFunction("node_named")
+
+  /** The query language's predicates. `symbol` is the name the engine binds
+    * (ADR-037). */
+  enum QueryPredicate(val symbol: String):
+    case Leaf             extends QueryPredicate("leaf")
+    case Portfolio        extends QueryPredicate("portfolio")
+    case ChildOf          extends QueryPredicate("child_of")
+    case DescendantOf     extends QueryPredicate("descendant_of")
+    case LeafDescendantOf extends QueryPredicate("leaf_descendant_of")
+    case GtLoss           extends QueryPredicate("gt_loss")
+    case GtProb           extends QueryPredicate("gt_prob")
+    case Eq               extends QueryPredicate("eq")
+    case MitigationNamed  extends QueryPredicate("mitigation_named")
+    case MitigationIdOf   extends QueryPredicate("mitigation_id")
+    case Mitigate         extends QueryPredicate("mitigate")
+    case Mitigated        extends QueryPredicate("mitigated")
+    case Unmitigated      extends QueryPredicate("unmitigated")
+
+  // on QuerySort, beside `symbol`:
+  /** The type the engine's catalog declares for this sort. */
+  def typeId: TypeId = TypeId(symbol)
+
+  /** The tree-independent half of the knowledge base's catalog: every sort,
+    * constant, function and predicate signature. The server adds the literal
+    * validators, which read the tree.
+    */
+  object Signatures:
+    val types: Set[TypeDecl]
+    val constants: Map[String, TypeId]
+    val functions: Map[SymbolName, FunctionSig]
+    val predicates: Map[SymbolName, PredicateSig]
+
+    /** The signatures as a catalog with no literal validator. It decides which
+      * functions a targeting predicate admits, and binds nothing. */
+    val catalog: TypeCatalog
+
+    /** The functions a targeting predicate admits: those returning a node.
+      *
+      * {{{
+      * targetingFunctions  // Set(SymbolName("node_id"), SymbolName("node_named"))
+      * }}}
+      */
+    val targetingFunctions: Set[SymbolName]
+
+  val reservedNames: Set[String]   // derived: function ∪ predicate ∪ constant names of `Signatures`
+```
+
+The bodies are the maps `schemaFor` declares today, with four changes:
+`named_risk` and `risk_id` are gone, `node_id` and `node_named` are added,
+`named_mitigation` is `mitigation_named` (decision 18), and every name is read
+from `ValueFunction`, `NodeFunction`, `QueryPredicate` or `ValuationBasis`:
+
+```scala
+    val functions: Map[SymbolName, FunctionSig] = Map(
+      SymbolName(ValueFunction.P95.symbol) -> FunctionSig(List(node, mitigation), loss),
+      SymbolName(ValueFunction.P99.symbol) -> FunctionSig(List(node, mitigation), loss),
+      SymbolName(ValueFunction.Lec.symbol) -> FunctionSig(List(node, loss, mitigation), probability),
+      SymbolName(NodeFunction.ById.symbol)   -> FunctionSig(List(nodeIdLiteral), node),
+      SymbolName(NodeFunction.ByName.symbol) -> FunctionSig(List(nodeNameLiteral), node)
+    )
+```
+
+Family search.
+- `NodeFunction` joins the declared-symbol enums of `FolSymbols`, whose member
+  `enum ValueFunction(val symbol: String)` carries `case P95 extends
+  ValueFunction("p95")`. No existing enum names a node-returning function.
+- `QueryPredicate` joins the same family. Its cases are the bare predicate
+  strings that `schemaFor`, the dispatcher and `reservedNames` each spell out
+  today. Those three places are what make it a recognised set, and the
+  `boyscout` skill's obligation 4 creates it.
+- `Signatures` has no existing family. No type in `common` holds catalog
+  signatures, and the one in `server` is the `Schema` case class, which also
+  holds the tree and the name maps.
+- `QuerySort.typeId` replaces the eight
+  `val NodeSort: TypeId = TypeId(QuerySort.Node.symbol)` declarations in
+  `RiskTreeKnowledgeBase`'s companion. Those vals stay as the server's names
+  and are written `QuerySort.Node.typeId`.
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/TargetingPredicate.scala`.**
+The fragment check admits the node functions, and a sixth check refuses a name:
+
+```scala
+  private def checkFragment(formula: Formula[FOL]): Either[ValidationError, Unit] =
+    FragmentCheck.check(formula, Fragment.Targeting(FolSymbols.Signatures.targetingFunctions))
+      .left.map(v => err(fragmentProblem(v)))
+
+  /** A stored predicate names a node by its identifier only, so a name cannot
+    * follow a rename onto a different node. */
+  private def requireNoNodeName(formula: Formula[FOL]): Either[ValidationError, Unit]
+
+  /** The function names applied anywhere in the formula's terms, nested
+    * applications included. */
+  private def appliedFunctions(formula: Formula[FOL]): Set[String]
+```
+
+`requireNoNodeName` joins the three accumulated checks in `create`, so a
+predicate breaking two rules reports both. It looks for `node_named` alone. A
+quoted literal in a node position binds nowhere after decision 19, so it needs no
+check of its own.
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorLocation.scala`**
+gains one `FieldProblem` case, beside `TargetingMitigationStateReferenced`:
+
+```scala
+  case TargetingNodeNameReferenced
+  // in the code mapping:
+  case TargetingNodeNameReferenced                => ValidationErrorCode.CONSTRAINT_VIOLATION
+```
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`**
+gains its sentence:
+
+```scala
+    case FieldProblem.TargetingNodeNameReferenced    =>
+      "A targeting predicate names a node by its identifier, node_id(\"…\"), never by its name"
+```
+
+The sentence for `TargetingFunctionNotAllowed`, "Targeting predicates may not use
+function application", stops being true once `node_id` is admitted. It becomes
+"Targeting predicates may apply no function other than node_id(\"…\")".
+
+This is the refusal's wire shape decision 16 left to the elevation. It is a case
+of the existing `FieldProblem` coproduct, so it crosses in a `Rejected` at
+`FieldName.TargetingSource` with the other targeting refusals, and needs no new
+type.
+
+**`modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`.**
+
+- `schemaFor` builds `TypeCatalog.unsafe(Signatures.types, Signatures.constants,
+  Signatures.functions, Signatures.predicates, literalValidators)`. Its validators
+  lose the `nodeSort` entry (decision 19), so the node sort reads no literal, as
+  the mitigation sort reads none today.
+- The dispatcher's `functions` gains the two node functions. Each returns the
+  `NodeId` its argument's validator produced:
+  ```scala
+      SymbolName(NodeFunction.ById.symbol)   -> (args => args(0).extract[NodeId]),
+      SymbolName(NodeFunction.ByName.symbol) -> (args => args(0).extract[NodeId])
+  ```
+- The `named_risk` and `risk_id` entries are removed, and the
+  `named_mitigation` key is `mitigation_named`. Every predicate key is read
+  from `QueryPredicate`.
+- The scaladoc's sort, function and predicate tables state the new catalog.
+
+**`MitigationScopeResolverLive.scala`.** Its comment on `satisfyingIds` says bind
+"fails when a quoted node was renamed or deleted". Under decision 16 that no
+longer arises: a deleted node's identifier binds and matches nothing (decision 14).
+What remains is a stored predicate the current catalog cannot read. The comment is
+corrected to say so.
+
+**`QuerySort.NodeReferences`** names the sorts whose unreadable literal means an
+absent node, today `Set(Node, NodeNameLiteral)`. After decision 19 the `Node`
+sort reads no literal, so the set is `Set(NodeNameLiteral)`.
+
+A quoted literal in a position whose sort has no validator raises
+`TypeCheckError.UnknownConstantOrLiteral`. This is vql-engine 0.19.0's
+`QueryBinder.scala`, lines 209 to 217:
+
+```scala
+            catalog.literalValidators.get(expected) match
+              case Some(v) => ...
+              case None    =>
+                Left(List(TypeCheckError.UnknownConstantOrLiteral(LiteralText(name))))
+```
+
+`BindProblem` reads that error as `UnknownConstant`. Today `namesAbsentNode`
+answers `true` for it, and `describe` says "Nothing in this tree is named …".
+After decision 19 both are wrong for `descendant_of(x, "AppTier")` when
+`AppTier` exists, and they are already wrong for `p95(x, "Firewall")`, whose
+mitigation position reads no literal. A node named by a name no node has now
+arrives as `UnreadableLiteral` at `NodeNameLiteral`, through `node_named`, and
+that case keeps its sentence and its absent-node answer. So in
+`modules/common/src/main/scala/com/risquanter/register/http/errors/BindProblem.scala`:
+
+```scala
+  def namesAbsentNode(problem: BindProblem): Boolean = problem match
+    case UnreadableLiteral(_, sort)    => QuerySort.NodeReferences.contains(sort)
+    case UnknownConstant(_) | UnknownPredicate(_) | UnknownFunction(_) | ArityMismatch(_, _, _, _) |
+         SortMismatch(_, _, _) | ConflictingSorts(_, _, _) | UnconstrainedVariable(_) | NotQuantifiable(_) => false
+
+    case UnknownConstant(text) =>
+      s"${doubleQuoted(text.value)} stands where the query takes no quoted text. A node is written node_named(\"…\") or node_id(\"…\")"
+```
+
+A query whose only problem is such a literal therefore answers `BIND_FAILED`
+where it answered `UNKNOWN_REFERENCE`.
+
+**The source bound (decision 20).** `TargetingSource` is
+`String :| (MinLength[1] & MaxLength[256])` in `OpaqueTypes.scala`, and
+`TargetingPredicate` restates 256 as `MaxSourceLength`. Both become 4096.
+Widening the bound only admits more, so every stored source still decodes.
+
+A source of 4096 characters can hold 260 nested parentheses, which overflow
+vql-engine 0.19.0's parser stack (decision 20). `TargetingPredicate.create`
+parses every stored source again on read, so one such source stored in a tree
+would end the server process on each read of that tree. A depth bound in the
+engine's parser, vql-engine T-014, removes this.
+
+**Documents swept by this slice.**
+- ADR-029 §3, row `TargetingPredicate.create`: "restricted to the targeting
+  fragment (no quantifiers, no function terms)" becomes "restricted to the
+  targeting fragment (no quantifiers, and no function term other than a
+  node-returning function)". "no mitigation-state predicate" gains "and no node
+  name". The length figure follows decision 20.
+- ADR-028, the predicate table rows for `named_risk` and `risk_id` (lines 110
+  and 111), are replaced by function rows for `node_id` and `node_named`. The
+  `named_mitigation` row (line 112) is renamed `mitigation_named`.
+- ADR-028 appendix, the same rows (lines 56, 57 and 63), and the mention on
+  line 77.
+- `docs/user/VQL-QUERY-EXAMPLES.md`, section "Selecting one risk, or a set
+  picked by hand", and the reference table in `docs/user/API-TUTORIAL.md`
+  (lines 227 and 228).
+- `examples/demo-enterprise-curl.sh` and `examples/demo-enterprise-httpie.sh`,
+  queries Q-E to Q-H. Every quoted name in a node position is rewritten as
+  `node_named(…)` too (decision 19), in those two scripts,
+  `examples/demo-simple-curl.sh`, `examples/demo-simple-httpie.sh`,
+  `examples/stage-screenshots.sh`, and the two user documents.
+- `docs/dev/TODO.md` item 67 is closed.
+- `README.md`, the three query examples, which also gain the mitigation
+  argument `"inherent"` their value functions take.
+
+**Terminology impact.** None. `docs/user/TERMINOLOGY.md` names no query keyword
+and no length bound.
+
+**Tests.**
+- `TargetingPredicateSpec`:
+  - `descendant_of(x, node_id("<ulid>"))` is accepted;
+  - `p95(x, "inherent")` and `node_id(p95(x, "inherent"))` are refused with
+    `TargetingFunctionNotAllowed`;
+  - `eq(x, node_named("Web"))` is refused with `TargetingNodeNameReferenced`;
+  - a predicate holding both a quantifier and `node_named` reports both
+    refusals.
+- `RiskTreeKnowledgeBaseSpec`:
+  - `eq(x, node_named("Web"))` and `eq(x, node_id(<Web's id>))` each satisfy
+    exactly Web;
+  - `descendant_of(x, node_id(<an id no node has>))` satisfies nothing, and its
+    negation under `leaf(x)` satisfies every leaf (decision 14);
+  - `named_risk` and `risk_id` are unknown predicates;
+  - `targetingFunctions` is exactly the two node functions;
+  - the C4 test is unchanged.
+- `MitigationScopeResolverSpec`:
+  - the predicates written with names are rewritten with `node_id`;
+  - the "malformed id vs unknown name" case becomes `node_id("not-an-id")`, an
+    unreadable `NodeIdLiteral`;
+  - a predicate naming a deleted node's identifier resolves without it.
+- `RiskTreeServiceLiveSpec`:
+  - `cyberControl` is built from the created tree's identifier;
+  - slice 3's renamed-node case becomes two cases. A rename leaves the scope
+    unchanged. A stored predicate using a predicate the catalog no longer
+    holds, `named_risk(x, "Fraud")` written through the repository, answers
+    `UnknownPredicate`.
+- `BinderIntegrationSpec`: `descendant_of(x, "AppTier")` with `AppTier` in
+  the tree raises `UnknownConstantOrLiteral`.
+- `modules/common/src/test/scala/com/risquanter/register/http/errors/BindProblemSpec.scala`
+  asserts today that `namesAbsentNode(UnknownConstant(literal("Cyber")))` holds
+  and pins `describe`'s sentence for it. Both assertions change, because the
+  behaviour they pin changes under decision 19: `namesAbsentNode` is `false` for
+  `UnknownConstant`, and `describe` gives the new sentence.
+- `QueryServiceLiveSpec`, `QueryProblemFromQueryErrorSpec` and
+  `QueryRequestSpec` replace `named_risk` with `eq(x, node_named(…))`.
+- `RiskTreeKnowledgeBaseSpec` writes `mitigation_named` where it writes
+  `named_mitigation`.
+- `TargetingPredicateSpec`: a source of 4096 characters is accepted, and one
+  of 4097 is refused with the length problem.
+- The quoted-name node positions in
+  `MitigationScopeResolverSpec`, `RiskTreeKnowledgeBaseSpec`,
+  `BinderIntegrationSpec`, `QueryEndpointSpec`, `DemoSimpleScriptSpec` and
+  `DemoEnterpriseScriptSpec` are rewritten as `node_named(…)`, with their
+  assertions unchanged.
+
+**Commands.** These are the same four commands as every slice, in §7.6.11, with
+the leaked-state cleanup before `sbt 'serverIt/test'`. Slice 7 changes shipped
+code, so it takes a PATCH bump.
+
+**ADR alignment.**
+- ADR-029: deviates where decision 15 ruled it gives way, and is amended in this
+  slice as stated above.
+- ADR-028: the predicate tables are amended in this slice.
+- ADR-037: compliant. The new symbols are enums with declared spellings, and the
+  predicate strings become a set.
+- ADR-020: compliant. The pin is exact, and the artifact is first-party.
+- ADR-035 §5: compliant. A `BindProblem` still carries literals within their
+  alphabets, and the engine's literal alphabet is unchanged by 0.19.0.
+- ADR-001 and ADR-039: compliant. `create` stays the one boundary, and the
+  stored-read path decodes through it.
+- ADR-018: compliant. `node_id` returns the existing `NodeId`.
+
+**Inventory.** `QueryServiceLive.scala` carries `named_mitigation` in a comment,
+and that comment is renamed with the predicate. Every source file named above is
+on `PLAN-RISKTRANSFORM-INVENTORY.md` except one:
+- `modules/common/src/test/scala/com/risquanter/register/http/errors/BindProblemSpec.scala`
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 

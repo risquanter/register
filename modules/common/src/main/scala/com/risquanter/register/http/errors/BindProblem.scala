@@ -155,13 +155,13 @@ object BindProblem:
     case TypeCheckError.UnexpectedFreeVar(name) =>
       Left(s"a targeting predicate bound a second free variable: ${name.value}")
 
-  /** Whether the problem names something the tree does not hold: an unknown
-    * constant, or a literal a node-reference sort cannot read. */
+  /** Whether the problem names a node the tree does not hold: a literal a
+    * node-reference sort cannot read. An unknown constant is quoted text in a
+    * position that reads none, which says nothing about the tree. */
   def namesAbsentNode(problem: BindProblem): Boolean = problem match
-    case UnknownConstant(_)            => true
     case UnreadableLiteral(_, sort)    => QuerySort.NodeReferences.contains(sort)
-    case UnknownPredicate(_) | UnknownFunction(_) | ArityMismatch(_, _, _, _) | SortMismatch(_, _, _) |
-         ConflictingSorts(_, _, _) | UnconstrainedVariable(_) | NotQuantifiable(_) => false
+    case UnknownConstant(_) | UnknownPredicate(_) | UnknownFunction(_) | ArityMismatch(_, _, _, _) |
+         SortMismatch(_, _, _) | ConflictingSorts(_, _, _) | UnconstrainedVariable(_) | NotQuantifiable(_) => false
 
   /** The sentence for one bind problem.
     *
@@ -178,7 +178,7 @@ object BindProblem:
     case ArityMismatch(symbol, symbolKind, expected, actual) =>
       s"The ${kindWord(symbolKind)} ${quoted(QuerySymbolName.text(symbol))} takes $expected ${argumentWord(expected)}, and the query gives it $actual"
     case UnknownConstant(text) =>
-      s"Nothing in this tree is named ${doubleQuoted(text.value)}"
+      s"${doubleQuoted(text.value)} stands where the query takes no quoted text. A node is written node_named(\"…\") or node_id(\"…\")"
     case UnreadableLiteral(text, sort) if QuerySort.NodeReferences.contains(sort) =>
       s"No node is named ${doubleQuoted(text.value)} in this tree"
     case UnreadableLiteral(text, sort) =>

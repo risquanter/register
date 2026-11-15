@@ -10,9 +10,9 @@ import com.risquanter.register.domain.data.{
   RelativeLikelihood, RelativeSeverity, ResultTransformSpec, ScopeOutcome
 }
 import com.risquanter.register.common.FolSymbols.QuerySort
-import com.risquanter.register.domain.data.iron.{NodeId, QueryLiteral, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}
+import com.risquanter.register.domain.data.iron.{NodeId, QueryLiteral, QueryWord, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}
 import com.risquanter.register.domain.errors.ErrorSubject
-import com.risquanter.register.http.errors.BindProblem
+import com.risquanter.register.http.errors.{BindProblem, QuerySymbolName}
 import com.risquanter.register.testutil.TestHelpers
 
 /** Tests for [[MitigationScopeResolver]] — turning each mitigation's stored
@@ -33,6 +33,13 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
   // leaves: Web, DB, Edge   portfolios: Servers, AppTier
 
   private def literal(s: String): QueryLiteral.QueryLiteral = QueryLiteral.fromString(s).toOption.get
+
+  private def symbol(s: String): QuerySymbolName = QuerySymbolName.Word(QueryWord.fromString(s).toOption.get)
+
+  /** A stored predicate using a predicate the catalog does not hold, so it
+    * fails to bind against every tree version. */
+  private val staleSource: String = """named_risk(x, "Gone")"""
+  private val staleProblem: BindProblem = BindProblem.UnknownPredicate(symbol("named_risk"))
 
   private val serversId = nodeId("servers")
   private val appTierId = nodeId("apptier")
@@ -101,7 +108,7 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
 
       test("happy path — predicate resolves to the matching leaf ids") {
         // leaves under AppTier = {Web, DB}; Edge is under Servers, excluded.
-        val m = mit("m-happy", """leaf(x) /\ descendant_of(x, "AppTier")""", resultSpec)
+        val m = mit("m-happy", s"""leaf(x) /\\ descendant_of(x, node_id("${appTierId.value}"))""", resultSpec)
         for
           r   <- newResolver
           out <- r.resolve(ctx(rev1), mkTree(m))
@@ -123,33 +130,40 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
       },
 
       test("per-mitigation isolation + granularity — a stale predicate fails in place, the valid one resolves") {
-        val mStale = mit("m-stale", """child_of(x, "Gone")""", resultSpec)  // "Gone" not a node
+        val mStale = mit("m-stale", staleSource, resultSpec)
         val mOk    = mit("m-ok", "leaf(x)", resultSpec)
         for
           r   <- newResolver
           out <- r.resolve(ctx(rev1), mkTree(mStale, mOk))
         yield assertTrue(
-          out.outcomes(mStale.id) == ScopeOutcome.Failed(NonEmptyChunk(BindProblem.UnreadableLiteral(literal("Gone"), QuerySort.Node))),
+          out.outcomes(mStale.id) == ScopeOutcome.Failed(NonEmptyChunk(staleProblem)),
           out.appliedScopes(mStale.id) == Set.empty[NodeId],
           out.outcomes(mOk.id) == ScopeOutcome.Resolved(Set(webId, dbId, edgeId))
         )
       },
 
-      test("malformed id vs unknown name — each is a literal its own sort cannot read") {
-        val mBadId   = mit("m-badid", """risk_id(x, "not-an-id")""", resultSpec)
-        val mBadName = mit("m-badname", """named_risk(x, "Gone")""", resultSpec)
+      test("a malformed id is a literal its sort cannot read") {
+        val mBadId = mit("m-badid", """eq(x, node_id("not-an-id"))""", resultSpec)
         for
           r   <- newResolver
-          out <- r.resolve(ctx(rev1), mkTree(mBadId, mBadName))
+          out <- r.resolve(ctx(rev1), mkTree(mBadId))
         yield assertTrue(
-          out.outcomes(mBadId.id)   == ScopeOutcome.Failed(NonEmptyChunk(BindProblem.UnreadableLiteral(literal("not-an-id"), QuerySort.NodeIdLiteral))),
-          out.outcomes(mBadName.id) == ScopeOutcome.Failed(NonEmptyChunk(BindProblem.UnreadableLiteral(literal("Gone"), QuerySort.NodeNameLiteral)))
+          out.outcomes(mBadId.id) == ScopeOutcome.Failed(NonEmptyChunk(BindProblem.UnreadableLiteral(literal("not-an-id"), QuerySort.NodeIdLiteral)))
         )
+      },
+
+      test("a deleted node's identifier binds and matches nothing") {
+        val gone = idStr("gone")
+        val m    = mit("m-gone", s"""eq(x, node_id("$gone")) \\/ eq(x, node_id("${webId.value}"))""", resultSpec)
+        for
+          r   <- newResolver
+          out <- r.resolve(ctx(rev1), mkTree(m))
+        yield assertTrue(out.outcomes(m.id) == ScopeOutcome.Resolved(Set(webId)))
       },
 
       test("projection — appliedScopes maps Resolved to its set and Failed to the empty set") {
         val mOk    = mit("m-ok", "leaf(x)", resultSpec)
-        val mStale = mit("m-stale", """named_risk(x, "Gone")""", resultSpec)
+        val mStale = mit("m-stale", staleSource, resultSpec)
         for
           r   <- newResolver
           out <- r.resolve(ctx(rev1), mkTree(mOk, mStale))

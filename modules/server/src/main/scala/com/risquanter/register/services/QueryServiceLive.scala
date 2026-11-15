@@ -156,7 +156,7 @@ object QueryServiceLive:
   * At each `p95`/`p99`/`lec` application it inspects the mitigation-slot term:
   * the `inherent`/`residual` constants map to the aggregate valuations; a bound
   * `∃m : mitigation` variable fans out to one single-mitigation `Selected` per
-  * `tree.mitigations` element — a `named_mitigation`/`mitigation_id`
+  * `tree.mitigations` element — a `mitigation_named`/`mitigation_id`
   * constraint narrows which bindings satisfy the formula at evaluation, not what
   * is precomputed. A `LiteralRef` in the mitigation slot is impossible (no
   * `mitigationSort` literal validator), so it is ignored.

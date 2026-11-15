@@ -46,7 +46,7 @@ Only the edited node and its ancestors are re-simulated when a parameter changes
 Analysts can ask proportional screening questions across a live risk tree using a first-order logic query language with *vague quantifiers* (based on Fermüller, Hofer & Ortiz, FQAS 2017):
 
 ```
-Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))
+Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))
 ```
 
 *"Do at least two-thirds of all leaf risks carry a loss above $5M in 1-in-20 occurrences?"*
@@ -166,13 +166,13 @@ Register's query language is the **Vague Query Language (VQL)**, a proportional 
 *"Do at least a third of all leaves carry a loss above $5M in 1-in-100 occurrences?"* — satisfied (2 of 4 leaves in the simple tree):
 
 ```
-Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))
+Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x, "inherent"), 5000000))
 ```
 
 *"Do at least half of IT Risk's leaves carry a loss above $2M in 1-in-20 occurrences?"* — scoped to a named branch:
 
 ```
-Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 2000000))
+Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 2000000))
 ```
 
 For the full query reference — all operators, predicates, fuzzy quantifier, nested quantifiers, and annotated PASS/FAIL contrast pairs — see [docs/user/VQL-QUERY-EXAMPLES.md](docs/user/VQL-QUERY-EXAMPLES.md).

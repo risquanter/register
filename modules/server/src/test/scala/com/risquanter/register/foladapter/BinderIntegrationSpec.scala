@@ -20,11 +20,12 @@ import vql.error.TypeCheckError
 import vql.typed.{FolModel, QueryBinder}
 
 /** Integration tests for the parse → bind path against a register-side
-  * [[RiskTreeKnowledgeBase]] populated with quoted node-name literals.
+  * [[RiskTreeKnowledgeBase]], with nodes named through `node_named("…")`.
   *
-  * Covers four cases:
+  * Covers five cases:
   *   - end-to-end parse + bind + evaluate; range projects to node ids
-  *   - unknown literal rejected by binder with `UnparseableConstant`
+  *   - unknown node name rejected by binder with `UnparseableConstant`
+  *   - a bare quoted name in a node position rejected with `UnknownConstantOrLiteral`
   *   - injection-shaped node name refused when the name is built
   *   - injection-shaped query refused at parse or bind
   */
@@ -96,12 +97,12 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
     suite("BinderIntegrationSpec — parse + bind against RiskTreeKnowledgeBase")(
 
-      test("B1: quoted-literal scope query parses, binds, and evaluates with satisfying = {Cyber, Hardware}") {
-        // The quoted node name "IT Risk" binds via
-        // the node-sort literal validator to Value(Node, itId) — a NodeId, not a string.
+      test("B1: node_named scope query parses, binds, and evaluates with satisfying = {Cyber, Hardware}") {
+        // node_named("IT Risk") binds via the node-name literal validator to
+        // Value(Node, itId) — a NodeId, not a string.
         // Both leaf descendants of IT Risk satisfy gt_loss(p95(x, "inherent"), 1000) with the
         // 5-trial fixture; satisfying elements carry their NodeIds.
-        val text   = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 1000))"""
+        val text   = """Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 1000))"""
         val parsed = VagueQueryParser.parse(text).toOption.get
         val result = for
           folModel <- FolModel(kb.catalog, kb.model)
@@ -116,11 +117,11 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         )
       },
 
-      test("B2: unknown quoted node name → Left(UnparseableConstant)") {
-        // The node-sort literal validator is present, so a token that is neither a
-        // valid NodeId nor a known node name fails as UnparseableConstant (a validator
-        // rejected it) rather than UnknownConstantOrLiteral (no validator at all).
-        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "Nonexistent"), gt_loss(p95(x, "inherent"), 1000))"""
+      test("B2: unknown node name → Left(UnparseableConstant)") {
+        // The node-name literal validator is present, so a name no node has
+        // fails as UnparseableConstant (a validator rejected it) rather than
+        // UnknownConstantOrLiteral (no validator at all).
+        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("Nonexistent")), gt_loss(p95(x, "inherent"), 1000))"""
         val parsed = VagueQueryParser.parse(text).toOption.get
         val bound  = QueryBinder.bind(parsed, kb.catalog)
         assertTrue(
@@ -128,6 +129,21 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
           bound.left.toOption.exists(_.exists {
             case TypeCheckError.UnparseableConstant(name, _, _) => name.value == "Nonexistent"
             case _                                              => false
+          })
+        )
+      },
+
+      test("B5: a bare quoted name in a node position → Left(UnknownConstantOrLiteral), though the node exists") {
+        // The node sort has no literal validator, so the quoted text binds
+        // nowhere in that position.
+        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 1000))"""
+        val parsed = VagueQueryParser.parse(text).toOption.get
+        val bound  = QueryBinder.bind(parsed, kb.catalog)
+        assertTrue(
+          bound.isLeft,
+          bound.left.toOption.exists(_.exists {
+            case TypeCheckError.UnknownConstantOrLiteral(name) => name.value == "IT Risk"
+            case _                                             => false
           })
         )
       },
@@ -164,7 +180,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         // If this test fails (assertTrue on a false value), the parser returned a
         // successful evaluation result for injection-shaped input. Stop immediately
         // and consult the user — do not attempt to work around the failure.
-        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 0"))"""
+        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 0"))"""
         val rejected = VagueQueryParser.parse(text) match
           case Left(_)       => true
           case Right(parsed) => QueryBinder.bind(parsed, kb.catalog).isLeft

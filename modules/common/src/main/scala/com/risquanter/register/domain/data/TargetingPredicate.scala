@@ -6,12 +6,13 @@ import sttp.tapir.Schema
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 
+import com.risquanter.register.common.FolSymbols.{NodeFunction, QueryPredicate, Signatures}
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, TargetingSource}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.errors.{ParseProblem, Positioned}
 
 import parser.{FOLParser, ParseError}
-import logic.{Formula, FOL, FOLUtil}
+import logic.{Formula, FOL, FOLUtil, Term}
 import vql.fragment.{Fragment, FragmentCheck, FragmentViolation}
 
 /** A mitigation's targeting predicate: a bare single-free-variable FOL formula
@@ -21,8 +22,10 @@ import vql.fragment.{Fragment, FragmentCheck, FragmentViolation}
   * state. `create` is the sole constructor and the single validation boundary
   * (decode == create), so no `TargetingPredicate` value exists whose source is
   * not a well-formed member of the targeting fragment. It admits structural and
-  * attribute predicates over one variable; it rejects quantifiers and function
-  * application (the targeting fragment) and the mitigation-state predicates
+  * attribute predicates over one variable, and names a node by
+  * `node_id("…")`. It rejects quantifiers, every function application other
+  * than a node-returning function (the targeting fragment), a node named by
+  * `node_named`, and the mitigation-state predicates
   * `mitigate`/`mitigated`/`unmitigated`, case-insensitively (a mitigation must
   * not target by the state it changes).
   */
@@ -36,24 +39,27 @@ object TargetingPredicate:
     * They mirror the type's `MinLength` and `MaxLength` literals, which cannot
     * be read back at runtime. */
   private val MinSourceLength: NonNegativeInt = 1
-  private val MaxSourceLength: NonNegativeInt = 256
+  private val MaxSourceLength: NonNegativeInt = 4096
 
   /** Mitigation-state predicates a targeting predicate may not reference — a
     * mitigation targeting by its own effect would be self-referential. These
     * are atoms (not function terms), so the targeting fragment does not exclude
     * them; this check does. Matched case-insensitively (see
     * `requireNoMitigationPredicate`). */
-  private val reservedPredicates: Set[String] = Set("mitigate", "mitigated", "unmitigated")
+  private val reservedPredicates: Set[String] =
+    Set(QueryPredicate.Mitigate, QueryPredicate.Mitigated, QueryPredicate.Unmitigated).map(_.symbol)
 
   /** Boundary validation, cross-compiled (browser and server), in two phases:
     *  - a gate that short-circuits, because each step needs the prior's output:
-    *    1. length-refine into `TargetingSource` (1–256) — also bounds the input
-    *       the parser sees; 2. parse via the foundation `FOLParser`;
-    *  - once parsed, three independent checks on the formula, whose errors
+    *    1. length-refine into `TargetingSource` (1–4096) — also bounds the
+    *       input the parser sees; 2. parse via the foundation `FOLParser`;
+    *  - once parsed, four independent checks on the formula, whose errors
     *    accumulate so an authoring form reports every problem at once:
-    *    3. targeting-fragment membership (no quantifiers, no function terms);
+    *    3. targeting-fragment membership (no quantifiers, no function term
+    *       other than a node-returning function);
     *    4. exactly one free variable (the target variable);
-    *    5. no `mitigate` / `mitigated` predicate.
+    *    5. no `mitigate` / `mitigated` predicate;
+    *    6. no `node_named`, so a rename cannot move the scope onto another node.
     *
     * A parse refusal carries the parser's typed refusal at its position, and
     * never the parser's sentence or the whole text. Of the caller's text it
@@ -66,7 +72,7 @@ object TargetingPredicate:
     val gate: Either[ValidationError, (TargetingSource, Formula[FOL])] =
       for
         refined <- source
-          .refineEither[MinLength[1] & MaxLength[256]]
+          .refineEither[MinLength[1] & MaxLength[4096]]
           .left.map(_ => err(FieldProblem.LengthOutOfRange(MinSourceLength, MaxSourceLength)))
         formula <- FOLParser.parse(refined)
           .left.map(error => err(FieldProblem.TargetingPredicateUnparseable(parseProblem(error))))
@@ -76,8 +82,9 @@ object TargetingPredicate:
       Validation.validateWith(
         Validation.fromEither(checkFragment(formula)),
         Validation.fromEither(requireSingleFreeVariable(formula)),
-        Validation.fromEither(requireNoMitigationPredicate(formula))
-      )((_, _, _) => new TargetingPredicate(refined))
+        Validation.fromEither(requireNoMitigationPredicate(formula)),
+        Validation.fromEither(requireNoNodeName(formula))
+      )((_, _, _, _) => new TargetingPredicate(refined))
     }
 
   private def err(problem: FieldProblem): ValidationError =
@@ -89,7 +96,7 @@ object TargetingPredicate:
       identity)
 
   private def checkFragment(formula: Formula[FOL]): Either[ValidationError, Unit] =
-    FragmentCheck.check(formula, Fragment.Targeting)
+    FragmentCheck.check(formula, Fragment.Targeting(Signatures.targetingFunctions))
       .left.map(v => err(fragmentProblem(v)))
 
   private def fragmentProblem(v: FragmentViolation): FieldProblem = v match
@@ -109,6 +116,13 @@ object TargetingPredicate:
     if offending.isEmpty then Right(())
     else Left(err(FieldProblem.TargetingMitigationStateReferenced))
 
+  /** A stored predicate names a node by its identifier only, so a name cannot
+    * follow a rename onto a different node. */
+  private def requireNoNodeName(formula: Formula[FOL]): Either[ValidationError, Unit] =
+    if appliedFunctions(formula).contains(NodeFunction.ByName.symbol) then
+      Left(err(FieldProblem.TargetingNodeNameReferenced))
+    else Right(())
+
   /** The predicate names of every atom in the formula. Total over the tree;
     * quantifier nodes never appear in a targeting-fragment formula but are
     * walked anyway so the function stands alone. */
@@ -122,6 +136,23 @@ object TargetingPredicate:
     case Formula.Forall(_, p)            => atomPredicates(p)
     case Formula.Exists(_, p)            => atomPredicates(p)
     case Formula.True | Formula.False    => Set.empty
+
+  /** The function names applied anywhere in the formula's terms, nested
+    * applications included. */
+  private def appliedFunctions(formula: Formula[FOL]): Set[String] = formula match
+    case Formula.Atom(FOL(_, terms))  => terms.flatMap(termFunctions).toSet
+    case Formula.Not(p)               => appliedFunctions(p)
+    case Formula.And(p, q)            => appliedFunctions(p) ++ appliedFunctions(q)
+    case Formula.Or(p, q)             => appliedFunctions(p) ++ appliedFunctions(q)
+    case Formula.Imp(p, q)            => appliedFunctions(p) ++ appliedFunctions(q)
+    case Formula.Iff(p, q)            => appliedFunctions(p) ++ appliedFunctions(q)
+    case Formula.Forall(_, p)         => appliedFunctions(p)
+    case Formula.Exists(_, p)         => appliedFunctions(p)
+    case Formula.True | Formula.False => Set.empty
+
+  private def termFunctions(term: Term): Set[String] = term match
+    case Term.Fn(name, args)      => args.flatMap(termFunctions).toSet + name
+    case Term.Var(_) | Term.Const(_) => Set.empty
 
   given Equal[TargetingPredicate] = Equal.default
 

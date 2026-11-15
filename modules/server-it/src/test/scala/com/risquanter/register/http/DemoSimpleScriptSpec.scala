@@ -91,13 +91,13 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
           q5 <- query(client, key, treeId)("""Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y, "inherent"), 1000000)))""")
 
           // Q-S1: exactly 1/2 of IT Risk leaves (Cyber Breach) have P95 > $2M — meets >=1/2 bar
-          qs1 <- query(client, key, treeId)("""Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 2000000))""")
+          qs1 <- query(client, key, treeId)("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 2000000))""")
 
           // Q-S2: no Third Party Risk leaf has P95 > $2M — same bar as Q-S1 but lighter-tailed sub-portfolio
-          qs2 <- query(client, key, treeId)("""Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x, "inherent"), 2000000))""")
+          qs2 <- query(client, key, treeId)("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("Third Party Risk")), gt_loss(p95(x, "inherent"), 2000000))""")
 
           // Q-S3: both direct children of IT Risk have P99 > $5M
-          qs3 <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x, "inherent"), 5000000))""")
+          qs3 <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, node_named("IT Risk")), gt_loss(p99(x, "inherent"), 5000000))""")
 
         yield assertTrue(q1.rangeSize == 4, !q1.satisfied) &&
           assertTrue(q2.rangeSize == 4, q2.satisfied) &&

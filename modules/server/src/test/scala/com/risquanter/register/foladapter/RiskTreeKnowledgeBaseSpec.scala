@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{
   ResultTransformSpec, MitigationSelection
 }
 import com.risquanter.register.common.ValuationBasis
-import com.risquanter.register.common.FolSymbols.{QuerySort, ValueFunction}
+import com.risquanter.register.common.FolSymbols.{NodeFunction, QuerySort, Signatures, ValueFunction}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
@@ -31,7 +31,8 @@ import vql.typed.{Value, FolModel, QueryBinder}
   *   - descendant_of irreflexivity (standard graph-theory semantics)
   *   - Value function dispatch (p95, p99, lec) and their mitigation selection slot
   *   - Mitigation predicates (mitigate, mitigated, unmitigated) and references
-  *     (named_mitigation, mitigation_id)
+  *     (mitigation_named, mitigation_id)
+  *   - Node-returning functions (node_id, node_named)
   *   - Domain element completeness
   */
 object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
@@ -590,8 +591,12 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // NodeNameLiteral, NodeIdLiteral, MitigationNameLiteral, MitigationIdLiteral).
       assertTrue(
         kb.catalog.typeIds.size == 8,
-        kb.dispatcher.functionSymbols.size == 3,
-        kb.dispatcher.predicateSymbols.size == 15
+        // p95, p99, lec, node_id, node_named
+        kb.dispatcher.functionSymbols.size == 5,
+        kb.dispatcher.functionSymbols.toSet == kb.catalog.functions.keySet,
+        // every QueryPredicate case
+        kb.dispatcher.predicateSymbols.size == 13,
+        kb.dispatcher.predicateSymbols.toSet == kb.catalog.predicates.keySet
       )
     },
     test("riskNameToId maps names to correct NodeIds") {
@@ -622,20 +627,18 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     )
 
   private val constantsSuite = suite("node constants via literal validator")(
-    test("C1: 4-node fixture — only the two mitigation aggregate constants; riskNameToId carries the names; per-sort validators resolve name vs id; no collisions") {
-      val nodeV = kb.catalog.literalValidators(nodeSort)
+    test("C1: 4-node fixture — only the two mitigation aggregate constants; riskNameToId carries the names; the node sort reads no literal; per-sort validators resolve name vs id; no collisions") {
       val nameV = kb.catalog.literalValidators(nodeNameLiteralSort)
       val idV   = kb.catalog.literalValidators(nodeIdLiteralSort)
       assertTrue(
         kb.catalog.constants.keySet == ValuationBasis.values.map(_.symbol).toSet,
         kb.riskNameToId.keySet == Set("Root", "IT Risk", "Cyber", "Hardware"),
-        nodeV("Cyber")       == Some(cyberId),   // Node slot: quoted node name → its id
-        nodeV(cyberId.value) == None,            // Node slot is name-only: an id does not bind
-        nodeV("Nonexistent") == None,            // unknown name → unbindable
-        nameV("Cyber")       == Some(cyberId),   // named_risk: name → id
-        nameV(cyberId.value) == None,            // named_risk rejects an id
-        idV(cyberId.value)   == Some(cyberId),   // risk_id: id → id
-        idV("Cyber")         == None,            // risk_id rejects a name
+        !kb.catalog.literalValidators.contains(nodeSort), // a node position takes node_id or node_named
+        nameV("Cyber")       == Some(cyberId),   // node_named: name → id
+        nameV(cyberId.value) == None,            // node_named rejects an id
+        nameV("Nonexistent") == None,            // unknown name → unbindable
+        idV(cyberId.value)   == Some(cyberId),   // node_id: id → id
+        idV("Cyber")         == None,            // node_id rejects a name
         kb.riskNameCollisions.isEmpty
       )
     },
@@ -660,25 +663,29 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       )
     },
     test("C4: reservedFolNames equals the union of catalog function, predicate & constant symbol names") {
-      // Drift guard for the FolSymbols.reservedNames literal. That literal is a
-      // manual mirror of the catalog's symbol names, held in `common` because the
-      // DTO gate needs it there and cannot see the server-side catalog. This is
-      // the one place both are visible, so it asserts they still agree — add a
-      // catalog symbol without updating the literal and this goes red.
+      // The DTO gate reads FolSymbols.reservedNames in `common`, and the bound
+      // catalog is built in `server`. This asserts the two agree, and pins the
+      // query language's keywords.
       val symbolStrings: Set[String] =
         kb.catalog.functions.keySet.map(_.value) ++
         kb.catalog.predicates.keySet.map(_.value) ++
         kb.catalog.constants.keySet
       val baseline = Set(
         "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
-        "gt_loss", "gt_prob", "eq", "named_risk", "risk_id",
-        "named_mitigation", "mitigation_id", "mitigate", "mitigated", "unmitigated",
-        "p95", "p99", "lec",
+        "gt_loss", "gt_prob", "eq",
+        "mitigation_named", "mitigation_id", "mitigate", "mitigated", "unmitigated",
+        "p95", "p99", "lec", "node_id", "node_named",
         "inherent", "residual"
       )
       assertTrue(
         kb.reservedFolNames == symbolStrings,
-        baseline.subsetOf(kb.reservedFolNames)
+        baseline == kb.reservedFolNames
+      )
+    },
+    test("a targeting predicate admits exactly the two node-returning functions") {
+      assertTrue(
+        Signatures.targetingFunctions ==
+          NodeFunction.values.map(f => vql.typed.SymbolName(f.symbol)).toSet
       )
     },
     test("every value function's symbol reads back as that function, and the catalog declares each") {
@@ -702,7 +709,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     }
   )
 
-  // ── Node-reference predicate queries (named_risk / risk_id) ─────────
+  // ── Node-returning functions (node_id / node_named) ────────────────
 
   private val idToName: Map[NodeId, String] =
     allNodes.map { case (id, n) => id -> n.name.value }
@@ -719,22 +726,44 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       out.satisfyingElements.flatMap(v => v.raw match { case id: NodeId => idToName.get(id); case _ => None })
     }
 
-  private val nodeReferenceQuerySuite = suite("node-reference predicate queries (named_risk / risk_id)")(
-    test("named_risk(x, \"IT Risk\") pins that node") {
-      // named_risk's 2nd arg is the NodeNameLiteral sort; "IT Risk" resolves via
+  /** The binder's refusals of a query, empty when it binds. */
+  private def bindErrors(text: String): List[TypeCheckError] =
+    QueryBinder.bind(VagueQueryParser.parse(text).toOption.get, kb.catalog).left.toOption.toList.flatten
+
+  private val nodeReferenceQuerySuite = suite("node-returning functions (node_id / node_named)")(
+    test("eq(x, node_named(\"IT Risk\")) pins that node") {
+      // node_named's argument is the NodeNameLiteral sort; "IT Risk" resolves via
       // riskNameToId.get to itId, so the satisfying set is exactly {IT Risk}.
-      val names = satisfyingNames("""Q[>=]^{1/1} x (named_risk(x, "IT Risk"), portfolio(x))""")
+      val names = satisfyingNames("""Q[>=]^{1/1} x (eq(x, node_named("IT Risk")), portfolio(x))""")
       assertTrue(names.contains(Set("IT Risk")))
     },
-    test("risk_id(x, <cyberId>) pins Cyber") {
-      // risk_id's 2nd arg is the NodeIdLiteral sort; the ulid parses via
+    test("eq(x, node_id(<cyberId>)) pins Cyber") {
+      // node_id's argument is the NodeIdLiteral sort; the ulid parses via
       // NodeId.fromString to cyberId, so the satisfying set is exactly {Cyber}.
-      val names = satisfyingNames(s"""Q[>=]^{1/1} x (risk_id(x, "${cyberId.value}"), leaf(x))""")
+      val names = satisfyingNames(s"""Q[>=]^{1/1} x (eq(x, node_id("${cyberId.value}")), leaf(x))""")
       assertTrue(names.contains(Set("Cyber")))
     },
-    test("risk_id(x, \"IT Risk\") → UnparseableConstant on the NodeIdLiteral sort") {
+    test("a node function stands in a structural position") {
+      val names = satisfyingNames("""Q[>=]^{1/1} x (leaf(x), descendant_of(x, node_named("IT Risk")))""")
+      assertTrue(names.contains(Set("Cyber", "Hardware")))
+    },
+    test("an identifier no node has matches nothing, and its negation every leaf") {
+      val absent = idStr("absent-node")
+      val none   = satisfyingNames(s"""Q[>=]^{1/1} x (leaf(x), descendant_of(x, node_id("$absent")))""")
+      val all    = satisfyingNames(s"""Q[>=]^{1/1} x (leaf(x), ~descendant_of(x, node_id("$absent")))""")
+      assertTrue(none.contains(Set.empty[String]), all.contains(Set("Cyber", "Hardware")))
+    },
+    test("named_risk and risk_id are unknown predicates") {
+      val errors = bindErrors("""Q[>=]^{1/1} x (leaf(x), named_risk(x, "Cyber"))""") ++
+        bindErrors(s"""Q[>=]^{1/1} x (leaf(x), risk_id(x, "${cyberId.value}"))""")
+      assertTrue(errors.count {
+        case TypeCheckError.UnknownPredicate(_) => true
+        case _                                  => false
+      } == 2)
+    },
+    test("node_id(\"IT Risk\") → UnparseableConstant on the NodeIdLiteral sort") {
       // A name in an id slot: NodeId.fromString("IT Risk") = None → malformed id.
-      val parsed = VagueQueryParser.parse("""Q[>=]^{1/1} x (risk_id(x, "IT Risk"), leaf(x))""").toOption.get
+      val parsed = VagueQueryParser.parse("""Q[>=]^{1/1} x (eq(x, node_id("IT Risk")), leaf(x))""").toOption.get
       val bound  = QueryBinder.bind(parsed, kb.catalog)
       assertTrue(
         bound.isLeft,
@@ -744,9 +773,9 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         })
       )
     },
-    test("named_risk(x, <cyberId>) → UnparseableConstant on the NodeNameLiteral sort") {
+    test("node_named(<cyberId>) → UnparseableConstant on the NodeNameLiteral sort") {
       // An id in a name slot: riskNameToId.get(<ulid>) = None → no such node name.
-      val parsed = VagueQueryParser.parse(s"""Q[>=]^{1/1} x (named_risk(x, "${cyberId.value}"), leaf(x))""").toOption.get
+      val parsed = VagueQueryParser.parse(s"""Q[>=]^{1/1} x (eq(x, node_named("${cyberId.value}")), leaf(x))""").toOption.get
       val bound  = QueryBinder.bind(parsed, kb.catalog)
       assertTrue(
         bound.isLeft,
@@ -809,21 +838,21 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     }
   )
 
-  // ── Mitigation-reference predicates (named_mitigation / mitigation_id) ──
+  // ── Mitigation-reference predicates (mitigation_named / mitigation_id) ──
 
-  private val mitigationReferenceSuite = suite("mitigation-reference predicates (M3: named_mitigation / mitigation_id)")(
+  private val mitigationReferenceSuite = suite("mitigation-reference predicates (mitigation_named / mitigation_id)")(
     test("per-sort literal validators resolve mitigation name vs id") {
       val nameV = mitKb.catalog.literalValidators(mitigationNameLiteralSort)
       val idV   = mitKb.catalog.literalValidators(mitigationIdLiteralSort)
       assertTrue(
-        nameV("Cyber Mitigation") == Some(mCyberId),   // named_mitigation: name → id
-        nameV(mCyberId.value)     == None,             // named_mitigation rejects an id
+        nameV("Cyber Mitigation") == Some(mCyberId),   // mitigation_named: name → id
+        nameV(mCyberId.value)     == None,             // mitigation_named rejects an id
         idV(mCyberId.value)       == Some(mCyberId),   // mitigation_id: id → id
         idV("Cyber Mitigation")   == None              // mitigation_id rejects a name
       )
     },
-    test("named_mitigation / mitigation_id reduce to MitigationId equality") {
-      val same = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("named_mitigation"), List(mitVal(mCyberId), mitVal(mCyberId)))
+    test("mitigation_named / mitigation_id reduce to MitigationId equality") {
+      val same = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigation_named"), List(mitVal(mCyberId), mitVal(mCyberId)))
       val diff = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigation_id"), List(mitVal(mCyberId), mitVal(mHardwareId)))
       assertTrue(same == Right(true), diff == Right(false))
     }

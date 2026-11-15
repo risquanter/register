@@ -52,15 +52,22 @@ Count satisfying / range size → proportion → check quantifier threshold
 | `child_of(x, y)` | 2 | Direct parent-child edges | `child_of(cyber, ops_risk)` |
 | `descendant_of(x, y)` | 2 | Transitive closure (pre-computed) | `descendant_of(cyber, root)` |
 | `leaf_descendant_of(x, y)` | 2 | Transitive, leaves only | `leaf_descendant_of(cyber, root)` |
-| `eq(x, y)` | 2 | Node identity between two variables | `not eq(a, b)` |
-| `named_risk(x, "name")` | 2 | Node pinned by name (`riskNameToId.get`, name-literal sort) | `named_risk(x, "IT Risk")` |
-| `risk_id(x, "id")` | 2 | Node pinned by id (`NodeId.fromString`, id-literal sort) | `risk_id(x, "01BX…")` |
+| `eq(x, y)` | 2 | Node identity | `eq(x, node_named("IT Risk"))` |
+
+### Node-Returning Functions
+
+| Function | Arity | Source | Example |
+|---|---|---|---|
+| `node_named("name")` | 1 | Node pinned by name (`riskNameToId.get`, name-literal sort) | `child_of(x, node_named("IT Risk"))` |
+| `node_id("id")` | 1 | Node pinned by id (`NodeId.fromString`, id-literal sort) | `eq(x, node_id("01BX…"))` |
+
+The node sort has no literal validator, so a quoted literal in a node position does not bind.
 
 ### Mitigation Relations (from tree mitigations + resolved scopes)
 
 | Relation | Arity | Source | Example |
 |---|---|---|---|
-| `named_mitigation(m, "name")` | 2 | Mitigation pinned by name (`mitigationNameToId.get`, mitigation-name-literal sort) | `named_mitigation(m, "IT Risk mitigation")` |
+| `mitigation_named(m, "name")` | 2 | Mitigation pinned by name (`mitigationNameToId.get`, mitigation-name-literal sort) | `mitigation_named(m, "IT Risk mitigation")` |
 | `mitigation_id(m, "id")` | 2 | Mitigation pinned by id (`MitigationId.fromString`, mitigation-id-literal sort) | `mitigation_id(m, "01H…")` |
 | `mitigate(x, m)` | 2 | Node `x` is in mitigation `m`'s resolved scope | `mitigate(x, m)` |
 | `mitigated(x)` | 1 | Node in the union of all resolved scopes | `mitigated(x)` |
@@ -74,7 +81,7 @@ Count satisfying / range size → proportion → check quantifier threshold
 | `residual` | All-applicable valuation — `MitigationSelection.Residual` |
 
 A bound `∃m : mitigation` variable in a value function's selection slot denotes a
-single-mitigation `Selected` valuation; `named_mitigation`/`mitigation_id`
+single-mitigation `Selected` valuation; `mitigation_named`/`mitigation_id`
 constrain which mitigation.
 
 ### Simulation-Backed Functions (dispatcher functions)

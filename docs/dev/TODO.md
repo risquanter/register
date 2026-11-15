@@ -2824,7 +2824,7 @@ looked at.
 
 **Status.** Open. Recorded for investigation; no practical implication known.
 
-## 67. vql-engine 0.19.0 admits node-returning functions — what register changes on the pin bump
+## ✅ 67. vql-engine 0.19.0 admits node-returning functions — what register changes on the pin bump — RESOLVED 2026-11-15
 
 **What the release changes.** vql-engine 0.19.0 lets a catalog function return a
 domain sort, and `Fragment.Targeting` takes the functions it admits. It
@@ -2860,4 +2860,4 @@ the repository `vague-quantifier-logic`. Five surface changes reach register:
 - ADR-029 §3, row `TargetingPredicate.create`, says "no function terms". That
   wording gives way, as decision 15 ruled on 2026-11-13.
 
-**Status.** Open. Waits on the 0.19.0 release.
+**Status.** Resolved by `PLAN-RISKTRANSFORM.md` §7.6.15, slice 7.

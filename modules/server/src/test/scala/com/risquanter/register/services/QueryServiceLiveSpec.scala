@@ -225,7 +225,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
       // The bind fails before any selection is computed, so the failing
       // resolver is never reached.
       given Checked[Authority] = TestChecked.value
-      val parsed = VagueQueryParser.parse("""Q[>=]^{1/1} x (named_risk(x, "NoSuchNode"), leaf(x))""").toOption.get
+      val parsed = VagueQueryParser.parse("""Q[>=]^{1/1} x (eq(x, node_named("NoSuchNode")), leaf(x))""").toOption.get
       (for
         svc  <- ZIO.service[QueryService]
         exit <- svc.evaluate(WorkspaceId(safeId("qsl-ws")), tree.id, parsed, entity, BranchRef.Main).exit

@@ -123,7 +123,7 @@ object ValidationMessages:
     case FieldProblem.TargetingPredicateUnparseable(problem) =>
       s"Targeting predicate is not valid syntax: ${ParseProblem.describe(problem)}"
     case FieldProblem.TargetingQuantifierNotAllowed  => "Targeting predicates may not use quantifiers"
-    case FieldProblem.TargetingFunctionNotAllowed    => "Targeting predicates may not use function application"
+    case FieldProblem.TargetingFunctionNotAllowed    => "Targeting predicates may apply no function other than node_id(\"…\")"
     case FieldProblem.TargetingQuantifierDepthExceeded(limit, found) =>
       s"Targeting predicate quantifier depth $found exceeds the limit of $limit"
     case FieldProblem.TargetingNoFreeVariable =>
@@ -133,6 +133,8 @@ object ValidationMessages:
       "Unquoted words are read as variables — if one was meant as a literal value, quote it (e.g. \"cyber\")."
     case FieldProblem.TargetingMitigationStateReferenced =>
       "Targeting predicates may not reference mitigation state (mitigate, mitigated, unmitigated)"
+    case FieldProblem.TargetingNodeNameReferenced    =>
+      "A targeting predicate names a node by its identifier, node_id(\"…\"), never by its name"
 
     // Workspace limits and lookups
     case FieldProblem.SeedEntityIdInUse(seedEntityId) =>

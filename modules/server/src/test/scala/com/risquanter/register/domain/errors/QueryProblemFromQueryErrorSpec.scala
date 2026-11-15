@@ -88,13 +88,13 @@ object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
       ))))
     },
     test("a refusal whose every problem names an absent node is UNKNOWN_REFERENCE") {
-      // A node slot and named_risk(x, "…") fail on the same missing node.
-      val err = QE.BindError(List(unreadable("Foo", QuerySort.Node), unreadable("Bar", QuerySort.NodeNameLiteral)))
+      // Two node_named("…") literals each name a node the tree does not hold.
+      val err = QE.BindError(List(unreadable("Foo", QuerySort.NodeNameLiteral), unreadable("Bar", QuerySort.NodeNameLiteral)))
       assertTrue(QueryProblem.fromQueryError(err).map(code) == Right(ValidationErrorCode.UNKNOWN_REFERENCE))
     },
     test("an absent node beside an arity mismatch is BIND_FAILED") {
       val err = QE.BindError(List(
-        unreadable("Foo", QuerySort.Node),
+        unreadable("Foo", QuerySort.NodeNameLiteral),
         TypeCheckError.ArityMismatch(SymbolText.of("leaf"), EngineSymbolKind.Predicate, 1, 2)
       ))
       assertTrue(QueryProblem.fromQueryError(err).map(code) == Right(ValidationErrorCode.BIND_FAILED))
@@ -112,13 +112,14 @@ object QueryProblemFromQueryErrorSpec extends ZIOSpecDefault:
       assertTrue(QueryProblem.fromQueryError(err) ==
         Right(QueryProblem.Unbound(NonEmptyList(unpositioned(BindProblem.UnknownPredicate(QuerySymbolName.Word(word("lef"))))))))
     },
-    test("an unknown constant or literal is an unknown constant, UNKNOWN_REFERENCE") {
-      // Reachable through a quoted literal in the mitigation slot, such as
-      // p95(x, "foo"), because no literal validator exists for that sort.
+    test("an unknown constant or literal is an unknown constant, BIND_FAILED") {
+      // Reachable through a quoted literal in a node or mitigation position,
+      // such as descendant_of(x, "foo") or p95(x, "foo"), because neither sort
+      // has a literal validator. It names no node the tree lacks.
       val result = QueryProblem.fromQueryError(QE.UnknownConstantOrLiteralError(LiteralText("foo")))
       assertTrue(
         result == Right(QueryProblem.Unbound(NonEmptyList(unpositioned(BindProblem.UnknownConstant(literal("foo")))))),
-        result.map(code) == Right(ValidationErrorCode.UNKNOWN_REFERENCE)
+        result.map(code) == Right(ValidationErrorCode.BIND_FAILED)
       )
     }
   )

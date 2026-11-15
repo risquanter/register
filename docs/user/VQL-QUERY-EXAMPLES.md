@@ -26,7 +26,7 @@ Q[op]^{p/q} x (range(x), predicate(x))
 where:
 - `op` is `>=` (at least), `<=` (at most), or `~` (approximately)
 - `p/q` is the proportion threshold
-- `range(x)` restricts the domain (e.g. `leaf(x)`, `portfolio(x)`, `leaf_descendant_of(x, "Name")`)
+- `range(x)` restricts the domain (e.g. `leaf(x)`, `portfolio(x)`, `leaf_descendant_of(x, node_named("Name"))`)
 - `predicate(x)` is the condition evaluated against the simulation cache
 
 Query syntax errors are reported at parse time with position information.
@@ -143,7 +143,14 @@ Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x, "inherent"), 50000000))
 
 ## Sub-portfolio scoping with named nodes
 
-`leaf_descendant_of(x, "Name")` and `child_of(x, "Name")` scope the quantifier range to a specific named branch. This is the primary mechanism for cross-branch comparison.
+`leaf_descendant_of(x, node_named("Name"))` and `child_of(x, node_named("Name"))` scope the quantifier range to a specific named branch. This is the primary mechanism for cross-branch comparison.
+
+A query names a node through one of two functions, and either one may stand wherever a node is expected:
+
+- `node_named("Name")` stands for the one node that has that name. Node names are unique within a tree.
+- `node_id("<node id>")` stands for the one node that has that identifier.
+
+A quoted name on its own, as in `child_of(x, "IT Risk")`, is rejected, because a node position takes only a variable or one of these two functions.
 
 The following pair applies the same 1-in-20 loss bar and the same quantifier to IT Risk (heavy-tailed) and Third Party Risk (lighter-tailed) — one satisfies, the other does not:
 
@@ -151,14 +158,14 @@ The following pair applies the same 1-in-20 loss bar and the same quantifier to 
 *"Do at least half of Third Party Risk's leaves carry a loss above $2M in 1-in-20 occurrences?"*
 
 ```
-Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"),          gt_loss(p95(x, "inherent"), 2000000))
-Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x, "inherent"), 2000000))
+Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")),          gt_loss(p95(x, "inherent"), 2000000))
+Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("Third Party Risk")), gt_loss(p95(x, "inherent"), 2000000))
 ```
 
 `child_of` restricts to direct children only:
 
 ```
-Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x, "inherent"), 5000000))
+Q[>=]^{1/2} x (child_of(x, node_named("IT Risk")), gt_loss(p99(x, "inherent"), 5000000))
 ```
 
 Swapping the named scope while holding the quantifier and predicate constant is a reliable technique for locating which branch drives a risk property.
@@ -192,24 +199,21 @@ The predicate can include a negation (`~`) to exclude nodes matching a named bra
 *"Do about half of the non-Cyber leaves carry a loss above $1M in 1-in-20 occurrences?"*:
 
 ```
-Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))
+Q[~]^{1/2} x (leaf(x), ~descendant_of(x, node_named("Technology and Cyber")) /\ gt_loss(p95(x, "inherent"), 1000000))
 ```
 
 ---
 
 ## Selecting one risk, or a set picked by hand
 
-The scoping predicates above each select a group: the children of a node, or everything under it. Two predicates select one node instead:
-
-- `named_risk(x, "Name")` holds for the one node that has that name. Node names are unique within a tree.
-- `risk_id(x, "<node id>")` holds for the one node that has that identifier.
+The scoping predicates above each select a group: the children of a node, or everything under it. The predicate `eq` selects one node instead. `eq(x, node_named("Name"))` holds for the one node that has that name, and `eq(x, node_id("<node id>"))` for the one node that has that identifier.
 
 Used as the range, either one leaves a single node in it. The proportion is then 0 or 1, so the query is a yes/no question about that risk. The examples below use the enterprise tree, and the enterprise scripts run them as Q-E to Q-H.
 
 *"Does Ransomware Attack carry a loss above $10M in 1-in-100 occurrences?"*:
 
 ```
-Q[>=]^{1/1} x (named_risk(x, "Ransomware Attack"), gt_loss(p99(x, "inherent"), 10000000))
+Q[>=]^{1/1} x (eq(x, node_named("Ransomware Attack")), gt_loss(p99(x, "inherent"), 10000000))
 ```
 
 Joining two of them with `\/` ("or") picks a set by hand. Ransomware Attack and Data Breach - PII share a parent with two other leaves, so no scoping predicate selects exactly this pair. With two nodes in the range, "at least half" means "at least one of them".
@@ -217,7 +221,7 @@ Joining two of them with `\/` ("or") picks a set by hand. Ransomware Attack and 
 *"Does at least one of Ransomware Attack and Data Breach - PII carry a loss above $5M in 1-in-100 occurrences?"*:
 
 ```
-Q[>=]^{1/2} x (named_risk(x, "Ransomware Attack") \/ named_risk(x, "Data Breach - PII"), gt_loss(p99(x, "inherent"), 5000000))
+Q[>=]^{1/2} x (eq(x, node_named("Ransomware Attack")) \/ eq(x, node_named("Data Breach - PII")), gt_loss(p99(x, "inherent"), 5000000))
 ```
 
 Negating one takes a single node out of a larger range. Here the range is 20 of the 21 leaves.
@@ -225,20 +229,20 @@ Negating one takes a single node out of a larger range. Here the range is 20 of 
 *"Do at least half of all leaves other than Internal Fraud carry a loss above $1M in 1-in-100 occurrences?"*:
 
 ```
-Q[>=]^{1/2} x (leaf(x) /\ ~named_risk(x, "Internal Fraud"), gt_loss(p99(x, "inherent"), 1000000))
+Q[>=]^{1/2} x (leaf(x) /\ ~eq(x, node_named("Internal Fraud")), gt_loss(p99(x, "inherent"), 1000000))
 ```
 
-`risk_id` selects by identifier. A name can be edited and an identifier cannot, so a query written with `risk_id` keeps selecting the same risk after the risk is renamed.
+`node_id` selects by identifier. A name can be edited and an identifier cannot, so a query written with `node_id` keeps selecting the same risk after the risk is renamed. For the same reason, a mitigation's targeting predicate names a node by `node_id` only, and a predicate holding `node_named` is refused when it is saved.
 
 *"Does this one risk have a greater-than-1% annual probability of generating a loss above $10M?"*:
 
 ```
-Q[>=]^{1/1} x (risk_id(x, "<node id>"), gt_prob(lec(x, 10000000, "inherent"), 0.01))
+Q[>=]^{1/1} x (eq(x, node_id("<node id>")), gt_prob(lec(x, 10000000, "inherent"), 0.01))
 ```
 
 A node's identifier is read from the tree structure, `GET /w/<workspaceKey>/risk-trees/<treeId>/structure`, where each node carries its `id` beside its `name`. The `node_id` function in the enterprise scripts does this lookup. The `satisfyingNodeIds` field of any query response holds identifiers too.
 
-An identifier is accepted by `risk_id` only. A scoping predicate reads its quoted argument as a name, so `child_of(x, "<node id>")` is rejected.
+An identifier is accepted by `node_id` only, so `node_named("<node id>")` finds no node.
 
 ---
 

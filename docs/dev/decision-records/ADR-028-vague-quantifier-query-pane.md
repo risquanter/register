@@ -106,14 +106,19 @@ parent chain upward, which costs the tree's depth:
 | `leaf_descendant_of(x, y)` | 2 | x is a leaf descendant of y |
 | `leaf(x)` | 1 | x is a RiskLeaf |
 | `portfolio(x)` | 1 | x is a RiskPortfolio |
-| `eq(x, y)` | 2 | x and y are the same node (node identity between two variables) |
-| `named_risk(x, "name")` | 2 | x is the node with that name (name resolved to its id at bind time) |
-| `risk_id(x, "id")` | 2 | x is the node with that id (id parsed at bind time) |
-| `named_mitigation(m, "name")` | 2 | m is the mitigation with that name (name resolved to its id at bind time) |
+| `eq(x, y)` | 2 | x and y are the same node |
+| `mitigation_named(m, "name")` | 2 | m is the mitigation with that name (name resolved to its id at bind time) |
 | `mitigation_id(m, "id")` | 2 | m is the mitigation with that id (id parsed at bind time) |
 | `mitigate(x, m)` | 2 | node x is in mitigation m's resolved scope |
 | `mitigated(x)` | 1 | x is in the union of all resolved mitigation scopes |
 | `unmitigated(x)` | 1 | x is in no resolved mitigation scope (complement of `mitigated`) |
+
+A node is written as a variable or through one of two functions, which stand wherever a node is expected. A quoted literal in a node position does not bind.
+
+| Function | Arity | Denotes |
+|---|---|---|
+| `node_named("name")` | 1 | the node with that name (name resolved to its id at bind time) |
+| `node_id("id")` | 1 | the node with that id (id parsed at bind time) |
 
 This sidesteps the transitive closure limitation and prevents
 double-counting: the query author chooses the appropriate range

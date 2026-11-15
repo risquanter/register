@@ -130,8 +130,8 @@ curl -s -H "X-Branch: main" "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
 
 # ── Step 3: Vague quantifier queries ──────────────────────────────────────────
 # Q1–Q5 cover the full query surface over all leaves / all portfolios.
-# Q-S1–Q-S3 demonstrate sub-portfolio scoping with quoted node-name literals.
-# Quoted node-name literal support: PLAN-QUERY-NODE-NAME-LITERALS.md §F1–F3.
+# Q-S1–Q-S3 demonstrate sub-portfolio scoping, naming each portfolio with
+# node_named("…").
 header "Step 3 — Vague quantifier queries"
 
 run_query() {
@@ -193,17 +193,17 @@ run_query \
 # Q-S1 — IT Risk sub-scope: both leaves are heavy-tailed (Ransomware P95=$15M)
 run_query \
   "Q-S1: Do at least half of IT Risk leaves have P95 above \$2M?" \
-  'Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 2000000))'
+  'Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 2000000))'
 
 # Q-S2 — Third Party Risk sub-scope: same bar, lighter-tailed leaves
 run_query \
   "Q-S2: Do at least half of Third Party Risk leaves have P95 above \$2M?" \
-  'Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x, "inherent"), 2000000))'
+  'Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("Third Party Risk")), gt_loss(p95(x, "inherent"), 2000000))'
 
 # Q-S3 — child_of scoping: direct children of IT Risk at the $5M P99 bar (cf. Q2)
 run_query \
   "Q-S3: Do at least half of direct children of IT Risk have P99 above \$5M?" \
-  'Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x, "inherent"), 5000000))'
+  'Q[>=]^{1/2} x (child_of(x, node_named("IT Risk")), gt_loss(p99(x, "inherent"), 5000000))'
 
 header "Done — workspace info"
 ok "Workspace key : $WS_KEY"

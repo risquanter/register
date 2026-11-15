@@ -61,9 +61,10 @@ final case class MitigationScopeResolverLive(
 
   /** Re-parse (source is the only stored form) → bind against this tree version's
     * catalog → evaluate to the exact satisfying set → lift each `Value` to its
-    * `NodeId`. Bind is the tree-version-relative check: it fails when a quoted
-    * node was renamed or deleted, or when the catalog changed under a stored
-    * predicate, and that failure is the outcome. A predicate `TargetingPredicate.create`
+    * `NodeId`. A stored predicate names a node by identifier, so a renamed node
+    * still binds and a deleted node's identifier binds and matches nothing. Bind
+    * fails only when the catalog changed under a stored predicate, and that
+    * failure is the outcome. A predicate `TargetingPredicate.create`
     * accepted re-parses, has one free variable and evaluates once bound, so a
     * failure there, and a bind error that does not translate, is a defect and
     * throws (ADR-033). */

@@ -65,9 +65,9 @@ object BindProblemSpec extends ZIOSpecDefault:
         }
       ),
       suite("namesAbsentNode")(
-        test("holds for an unknown constant and a literal of a node-reference sort, and for nothing else") {
+        test("holds for a literal of a node-reference sort, and for nothing else") {
           assertTrue(
-            BindProblem.namesAbsentNode(BindProblem.UnknownConstant(literal("Cyber"))),
+            !BindProblem.namesAbsentNode(BindProblem.UnknownConstant(literal("Cyber"))),
             BindProblem.namesAbsentNode(BindProblem.UnreadableLiteral(literal("Cyber"), QuerySort.NodeNameLiteral)),
             !BindProblem.namesAbsentNode(BindProblem.UnreadableLiteral(literal("bad"), QuerySort.NodeIdLiteral)),
             !BindProblem.namesAbsentNode(BindProblem.UnknownPredicate(symbol("lef")))
@@ -105,7 +105,7 @@ object BindProblemSpec extends ZIOSpecDefault:
             BindProblem.describe(BindProblem.ArityMismatch(symbol("p95"), SymbolKind.Function, 2, 1)) ==
               "The function 'p95' takes 2 arguments, and the query gives it 1",
             BindProblem.describe(BindProblem.UnknownConstant(literal("Cyber"))) ==
-              "Nothing in this tree is named \"Cyber\"",
+              "\"Cyber\" stands where the query takes no quoted text. A node is written node_named(\"…\") or node_id(\"…\")",
             BindProblem.describe(BindProblem.UnreadableLiteral(literal("Cyber"), QuerySort.NodeNameLiteral)) ==
               "No node is named \"Cyber\" in this tree",
             BindProblem.describe(BindProblem.UnreadableLiteral(literal("abc"), QuerySort.Loss)) ==

@@ -422,9 +422,9 @@ curl -s -H "X-Branch: main" "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
 # ── Step 3: Vague quantifier queries ──────────────────────────────────────────
 # Q1–Q8 cover the full query surface without sub-portfolio scoping (gt_loss,
 # gt_prob, p95, p99, lec, leaf, portfolio, all four quantifier shapes).
-# Q-A–Q-D below demonstrate sub-portfolio scoping with quoted node-name
-# literals (leaf_descendant_of, child_of, descendant_of, with negation).
-# Q-E–Q-H name one risk, by its name (named_risk) or its identifier (risk_id).
+# Q-A–Q-D below demonstrate sub-portfolio scoping with nodes named by
+# node_named("…") (leaf_descendant_of, child_of, descendant_of, with negation).
+# Q-E–Q-H name one risk, by its name (node_named) or its identifier (node_id).
 header "Step 3 — Vague quantifier queries"
 
 # Read a node's identifier by its name from the tree structure.
@@ -525,87 +525,86 @@ run_query \
   'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y, "inherent"), 1000000)))'
 
 # ── Sub-portfolio scoped queries (Q-A – Q-D) ─────────────────────────────────
-# Scope the quantifier range to a named sub-portfolio via quoted node-name
-# literals.
+# Scope the quantifier range to a sub-portfolio named by node_named("…").
 
 # Q-A — descendant scoping + P95: tail severity within the Cyber sub-portfolio
 # NOT SATISFIED: no Cyber leaf has unconditional P95 > $5M (prob ≤ 30% means most are zero at P95)
 run_query \
   "Q-A: Do at least 2/3 of Technology and Cyber leaf risks have P95 above \$5M?" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x, "inherent"), 5000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, node_named("Technology and Cyber")), gt_loss(p95(x, "inherent"), 5000000))'
 
 # Q-Ab — same scope, P99 > $1M: all 4 Cyber leaves clear it (Insider Threat P99 well above $1M even at 5% prob)
 run_query \
   "Q-Ab: Do at least 2/3 of Technology and Cyber leaf risks have P99 above \$1M? (p99 contrast)" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p99(x, "inherent"), 1000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, node_named("Technology and Cyber")), gt_loss(p99(x, "inherent"), 1000000))'
 
 # Q-B — direct-child scoping + LEC + Probability: Operational Risk immediate sub-units
 # NOT SATISFIED: only 1 of 3 direct children (Technology and Cyber) has high enough aggregate tail
 run_query \
   "Q-B: Do at least half of direct children of Operational Risk have >5% chance of exceeding \$10M?" \
-  'Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000, "inherent"), 0.05))'
+  'Q[>=]^{1/2} x (child_of(x, node_named("Operational Risk")), gt_prob(lec(x, 10000000, "inherent"), 0.05))'
 
 # Q-Bb — scope swap to Enterprise Risk: all 4 top-level domains have high aggregate tails
 run_query \
   "Q-Bb: Do at least half of direct children of Enterprise Risk have >5% chance of exceeding \$10M? (scope swap contrast)" \
-  'Q[>=]^{1/2} x (child_of(x, "Enterprise Risk"), gt_prob(lec(x, 10000000, "inherent"), 0.05))'
+  'Q[>=]^{1/2} x (child_of(x, node_named("Enterprise Risk")), gt_prob(lec(x, 10000000, "inherent"), 0.05))'
 
 # Q-C1 / Q-C2 — cross-branch comparison: same P99 bar across two domains
 # Q-C1 NOT SATISFIED: only 1/5 Financial Risk leaves (Counterparty Default) clears $20M P99
 run_query \
   "Q-C1: Do at least 2/3 of Financial Risk leaf descendants have P99 above \$20M?" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x, "inherent"), 20000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, node_named("Financial Risk")), gt_loss(p99(x, "inherent"), 20000000))'
 
 # Q-C1b — quantifier flip: same data satisfies a <=1/3 cap
 run_query \
   "Q-C1b: Do at most 1/3 of Financial Risk leaf descendants have P99 above \$20M? (quantifier flip contrast)" \
-  'Q[<=]^{1/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x, "inherent"), 20000000))'
+  'Q[<=]^{1/3} x (leaf_descendant_of(x, node_named("Financial Risk")), gt_loss(p99(x, "inherent"), 20000000))'
 
 # Q-C2 NOT SATISFIED: only 1/10 Operational Risk leaves clear $20M P99 (even fewer than Financial Risk)
 run_query \
   "Q-C2: Do at least 2/3 of Operational Risk leaf descendants have P99 above \$20M?" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x, "inherent"), 20000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, node_named("Operational Risk")), gt_loss(p99(x, "inherent"), 20000000))'
 
 # Q-C2b — scope swap to Compliance and Legal Risk + lower threshold: all 3 leaves clear $5M P99
 run_query \
   "Q-C2b: Do at least 2/3 of Compliance and Legal Risk leaf descendants have P99 above \$5M? (scope+threshold swap contrast)" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x, "inherent"), 5000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, node_named("Compliance and Legal Risk")), gt_loss(p99(x, "inherent"), 5000000))'
 
 # Q-D — exclusion via negation: leaves outside the Cyber cluster
 # NOT SATISFIED: 9/21 non-Cyber leaves have P95 > $1M (43%) — clearly not "about 1/4"
 run_query \
   "Q-D: Do about 1/4 of non-Cyber leaves have P95 above \$1M?" \
-  'Q[~]^{1/4} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))'
+  'Q[~]^{1/4} x (leaf(x), ~descendant_of(x, node_named("Technology and Cyber")) /\ gt_loss(p95(x, "inherent"), 1000000))'
 
 # Q-Db — same proportion IS "about 1/2"; Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
 run_query \
   "Q-Db: Do about half of non-Cyber leaves have P95 above \$1M? (around-quantifier contrast)" \
-  'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))'
+  'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, node_named("Technology and Cyber")) /\ gt_loss(p95(x, "inherent"), 1000000))'
 
 # ── One risk, or a set picked by hand (Q-E – Q-H) ────────────────────────────
 # The scoping predicates above each select a group: the children of a node, or
-# everything under it. named_risk(x, "Name") holds for the one node that has
-# that name, and risk_id(x, "<id>") for the one node that has that identifier.
+# everything under it. eq(x, node_named("Name")) holds for the one node that has
+# that name, and eq(x, node_id("<id>")) for the one node that has that identifier.
 # Used as the range, either one leaves a single node in it, so the proportion
 # is 0 or 1 and the query is a yes/no question about that risk.
 
 # Q-E — one risk by name
 run_query \
   "Q-E: Does Ransomware Attack have P99 above \$10M?" \
-  'Q[>=]^{1/1} x (named_risk(x, "Ransomware Attack"), gt_loss(p99(x, "inherent"), 10000000))'
+  'Q[>=]^{1/1} x (eq(x, node_named("Ransomware Attack")), gt_loss(p99(x, "inherent"), 10000000))'
 
 # Q-F — two risks picked by hand, joined with "or" (\/). They are siblings of
 # two other leaves, so no structural predicate selects exactly this pair. With
 # two nodes in the range, "at least half" means "at least one of them".
 run_query \
   "Q-F: Does at least one of Ransomware Attack and Data Breach - PII have P99 above \$5M?" \
-  'Q[>=]^{1/2} x (named_risk(x, "Ransomware Attack") \/ named_risk(x, "Data Breach - PII"), gt_loss(p99(x, "inherent"), 5000000))'
+  'Q[>=]^{1/2} x (eq(x, node_named("Ransomware Attack")) \/ eq(x, node_named("Data Breach - PII")), gt_loss(p99(x, "inherent"), 5000000))'
 
 # Q-G — every leaf except one: the negation takes Internal Fraud out of the
 # range, which leaves 20 of the 21 leaves.
 run_query \
   "Q-G: Do at least half of all leaves other than Internal Fraud have P99 above \$1M?" \
-  'Q[>=]^{1/2} x (leaf(x) /\ ~named_risk(x, "Internal Fraud"), gt_loss(p99(x, "inherent"), 1000000))'
+  'Q[>=]^{1/2} x (leaf(x) /\ ~eq(x, node_named("Internal Fraud")), gt_loss(p99(x, "inherent"), 1000000))'
 
 # Q-H — one risk by identifier. A name can be edited and an identifier cannot,
 # so this query keeps selecting the same risk after the risk is renamed.
@@ -615,7 +614,7 @@ if [[ -z "$COUNTERPARTY_ID" ]]; then
 fi
 run_query \
   "Q-H: Does Counterparty Default, selected by its identifier, have a >1% chance of exceeding \$10M?" \
-  "Q[>=]^{1/1} x (risk_id(x, \"$COUNTERPARTY_ID\"), gt_prob(lec(x, 10000000, \"inherent\"), 0.01))"
+  "Q[>=]^{1/1} x (eq(x, node_id(\"$COUNTERPARTY_ID\")), gt_prob(lec(x, 10000000, \"inherent\"), 0.01))"
 
 header "Done — workspace info"
 ok "Workspace key : $WS_KEY"

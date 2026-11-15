@@ -8,9 +8,8 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPor
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, ScopeOutcome, TargetingPredicate, RelativeLikelihood, RelativeSeverity, ResultTransformSpec}
 import com.risquanter.register.domain.data.iron.ValidationUtil
-import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, NodeId, QueryLiteral, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
-import com.risquanter.register.common.FolSymbols.QuerySort
-import com.risquanter.register.http.errors.BindProblem
+import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, NodeId, MitigationId, QueryWord, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
+import com.risquanter.register.http.errors.{BindProblem, QuerySymbolName}
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
@@ -199,9 +198,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       "mitigation"
     )
 
-  /** Halves the likelihood of the one leaf named "Cyber Attack". */
-  private val cyberControl: Mitigation =
-    targeted("cyber-control", """named_risk(x, "Cyber Attack")""",
+  private val cyberControlId: MitigationId = mitigationId("cyber-control")
+
+  /** Halves the likelihood of `tree`'s leaf named "Cyber Attack", which it
+    * names by identifier. */
+  private def cyberControl(tree: RiskTree): Mitigation =
+    targeted("cyber-control", s"""eq(x, node_id("${leafIdByName(tree, "Cyber Attack")}"))""",
       MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep))
 
   /** Caps every leaf's loss at `cap`. */
@@ -830,7 +832,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           val program = for {
             repo    <- ZIO.service[RiskTreeRepository]
             created <- service(_.create(stubWsId, seedTreeRequest("Inherent Read"), BranchRef.Main))
-            seeded  <- seedMitigations(repo, created, cyberControl)
+            seeded  <- seedMitigations(repo, created, cyberControl(created))
             curves  <- service(_.getLECCurvesMulti(stubWsId, seeded.id, seeded.index.nodes.keySet, testEntity,
                          false, BranchRef.Main, None, false, MitigationSelection.Inherent))
           } yield curves
@@ -842,16 +844,16 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           val program = for {
             repo    <- ZIO.service[RiskTreeRepository]
             created <- service(_.create(stubWsId, seedTreeRequest("Residual Read"), BranchRef.Main))
-            seeded  <- seedMitigations(repo, created, cyberControl)
+            seeded  <- seedMitigations(repo, created, cyberControl(created))
             curves  <- service(_.getLECCurvesMulti(stubWsId, seeded.id, seeded.index.nodes.keySet, testEntity,
                          false, BranchRef.Main, None, false, MitigationSelection.Residual))
           } yield (seeded, curves)
 
           program.assert { case (seeded, curves) =>
             val readings = (name: String) => curves(leafNodeId(seeded, name)).map(_.withMitigations)
-            readings("Cyber Attack") == List(Nil, List(cyberControl.id)) &&
+            readings("Cyber Attack") == List(Nil, List(cyberControlId)) &&
               readings("Fraud") == List(Nil) &&
-              curves(seeded.rootId).map(_.withMitigations) == List(Nil, List(cyberControl.id))
+              curves(seeded.rootId).map(_.withMitigations) == List(Nil, List(cyberControlId))
           }
         },
 
@@ -859,7 +861,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           val program = for {
             repo    <- ZIO.service[RiskTreeRepository]
             created <- service(_.create(stubWsId, seedTreeRequest("Exceedance Read"), BranchRef.Main))
-            seeded  <- seedMitigations(repo, created, cyberControl)
+            seeded  <- seedMitigations(repo, created, cyberControl(created))
             atFraud <- service(_.probOfExceedance(stubWsId, seeded.id, leafNodeId(seeded, "Fraud"), 1000L,
                          testEntity, false, BranchRef.Main, None, MitigationSelection.Residual))
             atRoot  <- service(_.probOfExceedance(stubWsId, seeded.id, seeded.rootId, 1000L,
@@ -867,7 +869,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           } yield (atFraud, atRoot)
 
           program.assert { case (atFraud, atRoot) =>
-            atFraud.withMitigations.isEmpty && atRoot.withMitigations == List(cyberControl.id)
+            atFraud.withMitigations.isEmpty && atRoot.withMitigations == List(cyberControlId)
           }
         },
 
@@ -918,25 +920,25 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           val program = for {
             repo      <- ZIO.service[RiskTreeRepository]
             created   <- service(_.create(stubWsId, seedTreeRequest("Structure Read"), BranchRef.Main))
-            seeded    <- seedMitigations(repo, created, cyberControl, cap)
+            seeded    <- seedMitigations(repo, created, cyberControl(created), cap)
             structure <- service(_.getStructure(stubWsId, seeded.id, BranchRef.Main, None))
           } yield (seeded, structure)
 
           program.assert { case (seeded, (tree, scopes, stale)) =>
             tree == seeded &&
               scopes.outcomes == Map(
-                cyberControl.id -> ScopeOutcome.Resolved(Set(leafNodeId(seeded, "Cyber Attack"))),
+                cyberControlId -> ScopeOutcome.Resolved(Set(leafNodeId(seeded, "Cyber Attack"))),
                 cap.id          -> ScopeOutcome.Resolved(Set(leafNodeId(seeded, "Cyber Attack"), leafNodeId(seeded, "Fraud")))
               ) &&
               stale.isEmpty
           }
         },
 
-        test("answers the bind problems of a mitigation whose predicate names a renamed node") {
+        test("a rename leaves the scope of a mitigation naming that node unchanged") {
           val program = for {
             repo      <- ZIO.service[RiskTreeRepository]
             created   <- service(_.create(stubWsId, seedTreeRequest("Renamed Read"), BranchRef.Main))
-            seeded    <- seedMitigations(repo, created, cyberControl)
+            seeded    <- seedMitigations(repo, created, cyberControl(created))
             renamed    = RiskTreeUpdateRequest(
                            name = "Renamed Read",
                            portfolios = Seq(portfolioUpd(seeded, "Seed Root")),
@@ -949,11 +951,26 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
                          )
             _         <- service(_.update(stubWsId, seeded.id, renamed, BranchRef.Main))
             structure <- service(_.getStructure(stubWsId, seeded.id, BranchRef.Main, None))
+          } yield (seeded, structure)
+
+          program.assert { case (seeded, (_, scopes, _)) =>
+            scopes.outcomes == Map(cyberControlId -> ScopeOutcome.Resolved(Set(leafNodeId(seeded, "Cyber Attack"))))
+          }
+        },
+
+        test("answers the bind problems of a stored predicate the catalog no longer reads") {
+          val stale = targeted("stale-control", """named_risk(x, "Fraud")""",
+            MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.5)), RelativeSeverity.Keep))
+          val program = for {
+            repo      <- ZIO.service[RiskTreeRepository]
+            created   <- service(_.create(stubWsId, seedTreeRequest("Stale Read"), BranchRef.Main))
+            seeded    <- seedMitigations(repo, created, stale)
+            structure <- service(_.getStructure(stubWsId, seeded.id, BranchRef.Main, None))
           } yield structure
 
           program.assert { case (_, scopes, _) =>
-            scopes.outcomes == Map(cyberControl.id -> ScopeOutcome.Failed(NonEmptyChunk(
-              BindProblem.UnreadableLiteral(QueryLiteral.fromString("Cyber Attack").toOption.get, QuerySort.NodeNameLiteral))))
+            scopes.outcomes == Map(stale.id -> ScopeOutcome.Failed(NonEmptyChunk(
+              BindProblem.UnknownPredicate(QuerySymbolName.Word(QueryWord.fromString("named_risk").toOption.get)))))
           }
         },
 

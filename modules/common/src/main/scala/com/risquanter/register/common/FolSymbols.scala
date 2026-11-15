@@ -3,6 +3,7 @@ package com.risquanter.register.common
 import lexer.GrammarSymbol
 import sttp.tapir.Schema
 import sttp.tapir.generic.Configuration
+import vql.typed.{FunctionSig, PredicateSig, SymbolName, TypeCatalog, TypeDecl, TypeId}
 import zio.json.{DeriveJsonCodec, JsonCodec, jsonDiscriminator}
 
 /** FOL symbol names that are reserved by the vague-quantifier query engine.
@@ -39,6 +40,38 @@ object FolSymbols:
     def fromSymbol(symbol: String): Option[ValueFunction] =
       ValueFunction.values.find(_.symbol == symbol)
 
+  /** The query language's node-returning functions: each names one node by a
+    * literal, and may stand in any position that takes a node.
+    *
+    * `symbol` is the name the query engine binds, so it is declared rather than
+    * derived from the case name (ADR-037).
+    *
+    * {{{
+    * descendant_of(x, node_id("01HQ8ZK3…"))
+    * eq(x, node_named("Ransomware Attack"))
+    * }}}
+    */
+  enum NodeFunction(val symbol: String):
+    case ById   extends NodeFunction("node_id")
+    case ByName extends NodeFunction("node_named")
+
+  /** The query language's predicates. `symbol` is the name the engine binds
+    * (ADR-037). */
+  enum QueryPredicate(val symbol: String):
+    case Leaf             extends QueryPredicate("leaf")
+    case Portfolio        extends QueryPredicate("portfolio")
+    case ChildOf          extends QueryPredicate("child_of")
+    case DescendantOf     extends QueryPredicate("descendant_of")
+    case LeafDescendantOf extends QueryPredicate("leaf_descendant_of")
+    case GtLoss           extends QueryPredicate("gt_loss")
+    case GtProb           extends QueryPredicate("gt_prob")
+    case Eq               extends QueryPredicate("eq")
+    case MitigationNamed  extends QueryPredicate("mitigation_named")
+    case MitigationIdOf   extends QueryPredicate("mitigation_id")
+    case Mitigate         extends QueryPredicate("mitigate")
+    case Mitigated        extends QueryPredicate("mitigated")
+    case Unmitigated      extends QueryPredicate("unmitigated")
+
   /** The sorts the knowledge base's catalog declares.
     *
     * `symbol` is the type name the engine binds and reports back in a bind
@@ -56,6 +89,9 @@ object FolSymbols:
     case MitigationIdLiteral   extends QuerySort("MitigationIdLiteral")
     case Loss                  extends QuerySort("Loss")
     case Probability           extends QuerySort("Probability")
+
+    /** The type the engine's catalog declares for this sort. */
+    def typeId: TypeId = TypeId(symbol)
 
   object QuerySort:
     /** The key naming which sort a payload states, read by the decoder and
@@ -81,11 +117,11 @@ object FolSymbols:
     def fromSymbol(symbol: String): Option[QuerySort] =
       QuerySort.values.find(_.symbol == symbol)
 
-    /** Sorts whose unreadable literal names a node the tree does not hold: a
-      * bare node slot and the `named_risk` name literal. The id-literal sort is
-      * not one of them, because a malformed id is a type error and a
-      * well-formed absent id binds and evaluates false. */
-    val NodeReferences: Set[QuerySort] = Set(Node, NodeNameLiteral)
+    /** Sorts whose unreadable literal names a node the tree does not hold: the
+      * `node_named` name literal. The id-literal sort is not one of them,
+      * because a malformed id is a type error and a well-formed absent id binds
+      * and evaluates false. The node sort reads no literal at all. */
+    val NodeReferences: Set[QuerySort] = Set(NodeNameLiteral)
 
   /** The query language's punctuation and operators, as a refused query names
     * one. The engine's `lexer.GrammarSymbol`, case for case.
@@ -159,19 +195,67 @@ object FolSymbols:
       case GrammarSymbol.Divide       => Divide
       case GrammarSymbol.Power        => Power
 
-  /** A manually maintained mirror of the predicate symbol names declared in the
-    * `RiskTreeKnowledgeBase` catalog, plus its function symbols and its two
-    * constants, which are read from `ValueFunction` and `ValuationBasis` rather
-    * than restated. The mirror lives in `common` because the
-    * DTO-boundary gate needs it here, where the `server`-side catalog is not on
-    * the dependency graph and its symbol union cannot be computed. The C4 test
-    * in `RiskTreeKnowledgeBaseSpec` guards the mirror against drift — it
-    * asserts `reservedFolNames` equals the catalog's function ∪ predicate ∪
-    * constant symbol names.
+  /** The tree-independent half of the knowledge base's catalog: every sort,
+    * constant, function and predicate signature. The server adds the literal
+    * validators, which read the tree.
     */
-  val reservedNames: Set[String] = Set(
-    // predicates
-    "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
-    "gt_loss", "gt_prob", "eq", "named_risk", "risk_id",
-    "named_mitigation", "mitigation_id", "mitigate", "mitigated", "unmitigated"
-  ) ++ ValueFunction.values.map(_.symbol) ++ ValuationBasis.values.map(_.symbol)
+  object Signatures:
+    private val node: TypeId            = QuerySort.Node.typeId
+    private val nodeNameLiteral: TypeId = QuerySort.NodeNameLiteral.typeId
+    private val nodeIdLiteral: TypeId   = QuerySort.NodeIdLiteral.typeId
+    private val mitigation: TypeId      = QuerySort.Mitigation.typeId
+    private val loss: TypeId            = QuerySort.Loss.typeId
+    private val probability: TypeId     = QuerySort.Probability.typeId
+
+    /** Node and mitigation are domain sorts, so a query may quantify over
+      * them. Every other sort is a value sort that only flows through an
+      * argument position. */
+    val types: Set[TypeDecl] = QuerySort.values.toSet.map(sort =>
+      sort match
+        case QuerySort.Node | QuerySort.Mitigation => TypeDecl.DomainType(sort.typeId)
+        case QuerySort.NodeNameLiteral | QuerySort.NodeIdLiteral | QuerySort.MitigationNameLiteral |
+             QuerySort.MitigationIdLiteral | QuerySort.Loss | QuerySort.Probability =>
+          TypeDecl.ValueType(sort.typeId))
+
+    /** The two valuation bases, which are mitigation-sort constants. They
+      * resolve by name and are not members of `∃m : mitigation`. */
+    val constants: Map[String, TypeId] = ValuationBasis.values.map(_.symbol -> mitigation).toMap
+
+    val functions: Map[SymbolName, FunctionSig] = Map(
+      SymbolName(ValueFunction.P95.symbol)   -> FunctionSig(List(node, mitigation), loss),
+      SymbolName(ValueFunction.P99.symbol)   -> FunctionSig(List(node, mitigation), loss),
+      SymbolName(ValueFunction.Lec.symbol)   -> FunctionSig(List(node, loss, mitigation), probability),
+      SymbolName(NodeFunction.ById.symbol)   -> FunctionSig(List(nodeIdLiteral), node),
+      SymbolName(NodeFunction.ByName.symbol) -> FunctionSig(List(nodeNameLiteral), node)
+    )
+
+    val predicates: Map[SymbolName, PredicateSig] =
+      QueryPredicate.values.map(p => SymbolName(p.symbol) -> signature(p)).toMap
+
+    private def signature(predicate: QueryPredicate): PredicateSig = predicate match
+      case QueryPredicate.Leaf | QueryPredicate.Portfolio | QueryPredicate.Mitigated |
+           QueryPredicate.Unmitigated => PredicateSig(List(node))
+      case QueryPredicate.ChildOf | QueryPredicate.DescendantOf | QueryPredicate.LeafDescendantOf |
+           QueryPredicate.Eq => PredicateSig(List(node, node))
+      case QueryPredicate.GtLoss          => PredicateSig(List(loss, loss))
+      case QueryPredicate.GtProb          => PredicateSig(List(probability, probability))
+      case QueryPredicate.MitigationNamed => PredicateSig(List(mitigation, QuerySort.MitigationNameLiteral.typeId))
+      case QueryPredicate.MitigationIdOf  => PredicateSig(List(mitigation, QuerySort.MitigationIdLiteral.typeId))
+      case QueryPredicate.Mitigate        => PredicateSig(List(node, mitigation))
+
+    /** The signatures as a catalog with no literal validator. It decides which
+      * functions a targeting predicate admits, and binds nothing. */
+    val catalog: TypeCatalog = TypeCatalog.unsafe(types, constants, functions, predicates, Map.empty)
+
+    /** The functions a targeting predicate admits: those returning a node.
+      *
+      * {{{
+      * targetingFunctions  // Set(SymbolName("node_id"), SymbolName("node_named"))
+      * }}}
+      */
+    val targetingFunctions: Set[SymbolName] = catalog.domainReturningFunctions
+
+  /** Every function, predicate and constant name of the catalog. */
+  val reservedNames: Set[String] =
+    Signatures.functions.keySet.map(_.value) ++ Signatures.predicates.keySet.map(_.value) ++
+      Signatures.constants.keySet

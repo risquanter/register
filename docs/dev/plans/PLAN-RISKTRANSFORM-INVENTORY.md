@@ -385,3 +385,8 @@ PATCH bump; plan close = MINOR bump.
 - modules/server/src/main/scala/com/risquanter/register/mitigation/MitigationApplication.scala
 - modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala
 - modules/server/src/test/scala/com/risquanter/register/http/DecodeFailureStatusSurfaceSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/QueryProblem.scala
+- modules/server/src/test/scala/com/risquanter/register/domain/errors/QueryProblemFromQueryErrorSpec.scala
+- modules/common/src/test/scala/com/risquanter/register/http/requests/QueryRequestSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/http/errors/BindProblem.scala
+- modules/common/src/test/scala/com/risquanter/register/http/errors/BindProblemSpec.scala

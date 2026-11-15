@@ -89,7 +89,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
 
           queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-            .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 1000))"""))
+            .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 1000))"""))
             .response(asJson[QueryResponse])
             .send(client.backend)
           result <- ZIO.fromEither(queryResp.body)
@@ -131,7 +131,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
           // ADR-022 §4/§6: error body must not contain the workspace key
           assertTrue(!rawBody.contains(key))
       },
-      test("H3: unknown quoted node name returns 422 Unbound, naming the literal no node matches") {
+      test("H3: unknown node name returns 422 Unbound, naming the literal no node matches") {
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
@@ -146,7 +146,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
 
           queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-            .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, "NonExistentNode"), gt_loss(p95(x, "inherent"), 1000))"""))
+            .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("NonExistentNode")), gt_loss(p95(x, "inherent"), 1000))"""))
             .response(asStringAlways)
             .send(client.backend)
           rawBody    = queryResp.body

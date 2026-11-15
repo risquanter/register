@@ -221,11 +221,13 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
 | `Q[~]^{1/2} x (range(x), pred(x))` | True when approximately 1/2 of elements satisfy `pred` (fuzzy) |
 | `leaf(x)` | x is a leaf risk node |
 | `portfolio(x)` | x is a portfolio node |
-| `child_of(x, "Parent Name")` | x is a direct child of the named node |
-| `descendant_of(x, "Name")` | x is any descendant of the named node |
-| `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node |
-| `named_risk(x, "Name")` | x is the one node that has this name |
-| `risk_id(x, "<node id>")` | x is the one node that has this identifier |
+| `node_named("Name")` | the one node that has this name; stands wherever a node is expected |
+| `node_id("<node id>")` | the one node that has this identifier; stands wherever a node is expected |
+| `child_of(x, node_named("Parent Name"))` | x is a direct child of the named node |
+| `descendant_of(x, node_named("Name"))` | x is any descendant of the named node |
+| `leaf_descendant_of(x, node_named("Name"))` | x is a leaf anywhere under the named node |
+| `eq(x, node_named("Name"))` | x is the one node that has this name |
+| `eq(x, node_id("<node id>"))` | x is the one node that has this identifier |
 | `p95(x, "inherent")`, `p99(x, "inherent")` | P95 / P99 loss value for node x (returns Loss) |
 | `lec(x, 1000000, "inherent")` | Exceedance probability at \$1 M for node x (returns Probability) |
 | `gt_loss(p95(x, "inherent"), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |
