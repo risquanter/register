@@ -43,7 +43,7 @@ enum ValidationErrorCode(val code: String, val description: String):
 
   // ── FOL query codes (ADR-028) ─────────────────────────────────────────────
   case PARSE_ERROR extends ValidationErrorCode("PARSE_ERROR", "Query syntax is malformed")
-  case UNKNOWN_REFERENCE extends ValidationErrorCode("UNKNOWN_REFERENCE", "Query references an unknown constant or literal value")
+  case UNKNOWN_REFERENCE extends ValidationErrorCode("UNKNOWN_REFERENCE", "Query names a node the tree does not hold")
   case BIND_FAILED extends ValidationErrorCode("BIND_FAILED", "Query type-checking failed at bind phase")
   case MODEL_VALIDATION_FAILED extends ValidationErrorCode("MODEL_VALIDATION_FAILED", "Runtime model does not satisfy catalog contract")
   case EVALUATION_FAILED extends ValidationErrorCode("EVALUATION_FAILED", "Query evaluation failed unexpectedly")

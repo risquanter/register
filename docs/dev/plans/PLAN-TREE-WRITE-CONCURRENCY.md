@@ -1087,9 +1087,9 @@ merge queries and `ScenarioMergeService`'s compare-and-set publish.
 9. **Integration — `SeedReproducibilityItSpec`.** A tree built over several
    saves, read back, and created in a second existing workspace with its seeds
    and seed entity id provided gives the same figures.
-10. **Regression.** The existing mitigation carry-over tests stay green: the
-    version check runs before the carry-over, so a rejected update writes no
-    mitigations either.
+10. **Regression.** The mitigation bucket tests of the tree PUT stay green: the
+    version check runs before the request's mitigation buckets are applied, so
+    a rejected update writes and deletes no mitigation.
 11. **Full suite**, after the `register_it_` cleanup: `sbt 'commonJVM/test;
     server/test'`, `sbt app/test`, `sbt serverIt/test`. Expected: every tier
     passes.

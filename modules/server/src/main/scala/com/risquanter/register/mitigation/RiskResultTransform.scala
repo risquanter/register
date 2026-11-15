@@ -125,7 +125,7 @@ object RiskResultTransform {
    * Cap losses at a maximum value.
    * Limits each trial's loss to the specified cap.
    *
-   * @param cap Maximum loss per trial (non-negative)
+   * @param cap Maximum loss per trial (at least 1)
    * @return Transformation capping losses
    *
    * @example
@@ -178,6 +178,10 @@ object RiskResultTransform {
    * `deductible`, the policy covers the next `limit`, and the loss above both
    * is the entity's again. A deductible of zero is first-unit coverage.
    *
+   * The part above the deductible is taken first and the limit is then taken
+   * from that part, so no subtraction passes below zero and none can wrap,
+   * whatever the deductible and the limit are.
+   *
    * @param deductible The first part of each loss the entity bears (non-negative)
    * @param limit The most the policy pays on one loss (at least 1)
    * @return Transformation applying the policy
@@ -192,8 +196,10 @@ object RiskResultTransform {
    */
   def insurancePolicy(deductible: NonNegativeLong, limit: PositiveLong): RiskResultTransform =
     RiskResultTransform { to =>
-      to.mapLosses(loss => Math.min(loss, deductible) + Math.max(0L, loss - deductible - limit))
-        .filterLosses(_ > 0L)  // Remove zero losses (sparse storage)
+      to.mapLosses { loss =>
+        val aboveDeductible = Math.max(0L, loss - deductible)
+        Math.min(loss, deductible) + (aboveDeductible - Math.min(aboveDeductible, limit))
+      }.filterLosses(_ > 0L)  // Remove zero losses (sparse storage)
     }
 
   /**

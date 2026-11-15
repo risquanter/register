@@ -15,7 +15,9 @@ import com.risquanter.register.domain.data.iron.{TreeId, BranchRef, CommitHash, 
   * nothing to remove it; each entry holds a full mitigation-to-node-id map, so
   * an editing session would retain one per edit and grow without a ceiling. As
   * a stamp under a slot keyed by (treeId, branch), the map is bounded by the
-  * number of live tree-and-branch pairs times the slot capacity instead.
+  * number of tree-and-branch pairs this workspace has read, times the slot
+  * capacity instead. Nothing removes a slot, so the slot of a deleted tree or
+  * branch stays until the resolver itself is released.
   *
   * The memo read and write are not atomic — last-writer-wins is a deliberate,
   * accepted trade-off, safe because the exact-revision hit guard never serves a

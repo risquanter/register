@@ -314,6 +314,27 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         assertTrue(
           insured.outcomes == Map(1 -> 10L)  // 30 − 20 above the limit; 15 is covered, removed (sparse)
         )
+      },
+
+      test("a policy whose limit is the largest loss bears the deductible and never wraps") {
+        val outcomes = outcomesOf(100, Map(1 -> 2000000L, 2 -> 4000000L, 3 -> 5000000L, 4 -> 80000000L))
+        val insured  = RiskResultTransform.insurancePolicy(deductible = 5000000L, limit = Long.MaxValue).run(outcomes)
+
+        assertTrue(
+          insured.outcomes == Map(
+            1 -> 2000000L,   // inside the deductible, borne in full
+            2 -> 4000000L,
+            3 -> 5000000L,   // the deductible
+            4 -> 5000000L    // the cover never runs out
+          )
+        )
+      },
+
+      test("a policy whose deductible and limit are both the largest loss bears every loss in full") {
+        val outcomes = outcomesOf(100, Map(1 -> 1000000L, 2 -> Long.MaxValue))
+        val insured  = RiskResultTransform.insurancePolicy(deductible = Long.MaxValue, limit = Long.MaxValue).run(outcomes)
+
+        assertTrue(insured.outcomes == outcomes.outcomes)
       }
     ),
 
