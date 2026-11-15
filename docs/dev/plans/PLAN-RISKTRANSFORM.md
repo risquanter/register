@@ -1893,8 +1893,8 @@ Written for slices 1 to 5 (§7.6.4 names the slices). Those five carry exact
 signatures, ADR alignment, a verification plan and a file inventory. Slice 6 —
 the interface and the user documentation — is not elevated here. §7.6.12 lists
 the decisions, and all of them are now closed: slice 6's two were ruled on
-2026-09-15 and the rest are ruled or void, apart from decision 11, which gates
-M4 slice 2 and is deliberately left open. The valuation type slice 1 consumes is built, specified by
+2026-09-15 and the rest are ruled or void. Decision 11, which gates M4 slice 2,
+was ruled on 2026-11-15. The valuation type slice 1 consumes is built, specified by
 [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and
 landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
 to gate. No M4 source edit is authorized until the approval token names this
@@ -3507,14 +3507,11 @@ request already use raw-primitive request types, such as
 node buckets or follow the two passages above, and that choice belongs to
 decision 11.
 
-**That question is deliberately left unruled.** It is §7.6.12 decision 11, and it
-is the one open decision in §7.6 — nothing below it in this section answers it,
-and nothing should until this slice is the work in hand. A request shape is a
-published contract, so ruling it early fixes a contract against a user interface
-that does not exist yet, and §7.6.12 decision 7 already ruled that M4 ships
-selection and visualisation rather than mitigation authoring. The types written
-out below are kept as the record of what slice 2 was authorized to build before
-the shape changed beneath them.
+**§7.6.12 decision 11 is ruled (user, 2026-11-15): the mitigation buckets follow
+the node buckets, refined by `resolve` at the service's entry step.** The types
+below predate that ruling and are rewritten from it before the slice is
+implemented. They are kept as the record of what slice 2 was authorized to build
+before the shape changed beneath them.
 
 **`modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`** — new file:
 
@@ -4459,9 +4456,9 @@ Decisions 1 to 10 are all closed — each is ruled or void, and each records its
 resolution in place. Three questions the 2026-11-13 re-elevation raised are
 recorded at the end of this section: two with the rulings that answer them, and
 decision 14. Decisions 15 and 16, ruled on 2026-11-13, come before decision 14,
-which was ruled after them on the same day. Decision 11 is open too, and it was opened after the other ten
-by work outside this plan: decision 11, the leaf-stage mitigation's request shape,
-which gates slice 2. Decision 17 was ruled on 2026-11-15 out of slice 3's family
+which was ruled after them on the same day. Decision 11, the leaf-stage
+mitigation's request shape, was opened after the other ten by work outside this
+plan, gates slice 2, and was ruled on 2026-11-15. Decision 17 was ruled on 2026-11-15 out of slice 3's family
 search. All of them are listed here so the elevation states them rather than
 implying them.
 
@@ -4478,7 +4475,7 @@ inspection and decision 8 was ruled and has landed. Decisions 6 and 7 are slice
 place, and the text is kept so the sequence of rulings stays readable.
 
 Decision 11 is not one of that set. It did not exist when the other ten were
-written, and it is open.
+written, and it records its own ruling in place.
 
 Numbering is kept stable because other sections reference these by number.
 Decision 5 was answered by checking the inventory rather than by a ruling, so it
@@ -4793,11 +4790,22 @@ the rest of M4, item 40 is marked closed then rather than at the end.
     case for case, and how a relative statement that names only one component is
     submitted, since the stored form always carries both.
 
-    **OPEN, and deliberately not ruled.** A request shape is a published
-    contract. Ruling it now would fix a contract against an authoring interface
-    that does not exist, and decision 7 above ruled that M4 ships selection and
-    visualisation rather than mitigation authoring. It is ruled when M4 slice 2 is
-    the work in hand, and it gates that slice alone.
+    **RULED (user, 2026-11-15): the mitigation buckets follow the node buckets.**
+    The tree request is a command refined as a whole. Its mitigation entries are
+    raw request types, refined by `RiskTreeDefinitionRequest.resolve` and
+    `RiskTreeUpdateRequest.resolve` in the same `Validation` as the nodes, at the
+    service's entry step, and every refusal is located at its entry. ADR-001 §2
+    is amended in the same ruling so that it states this placement: a value-object
+    invariant is checked in the codec, an aggregate invariant in the aggregate's
+    smart constructor, and a command precondition against stored state at the
+    application service's entry step. A command refined as a whole checks all
+    three there, because a decoder refusal reaches the caller as one `Unreadable`
+    at `ErrorLocation.Whole`. ADR-017 §3 and the `adr-constraints` Layer 3 row
+    ADR-001 × ADR-017 name the reconciliation. The second sub-question is
+    answered by the stored type: a relative statement about one part writes
+    `Keep` for the other. An absolute statement's anchor is the identifier of a
+    leaf that already exists (decisions 8 and 9), and the server computes its
+    base stamp. §7.6.6's request types are rewritten on this basis.
 
 **Raised by the 2026-11-13 re-elevation and answered by existing rulings.**
 Each question was first presented as open and was then found settled. Slices 1

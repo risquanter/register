@@ -55,6 +55,14 @@ always a fully valid tree. This is the design intent, not a limitation.
 
 A request whose resulting tree equals the stored tree in content writes nothing and succeeds.
 
+**Relation to ADR-001.** The request types carry raw fields, such as
+`name: String`, which reads as a breach of ADR-001's rule that decoders call the
+smart constructor. It is the exception ADR-001 §2 states. A tree create or
+update is a command refined as a whole. Some of its rules read the stored tree,
+and every refusal must be reported together at its entry, so `resolve` checks
+every rule at the service's entry step. A collection the request gains, such as
+its mitigations, is refined by the same `resolve`.
+
 ```scala
 def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]
 // validateTopologyUpdate: unique names ∧ single root ∧ parents resolve ∧ no cycles ∧ no empty portfolio
@@ -228,4 +236,4 @@ and has no invalidation operation, so there is nothing for such a route to call
 - ADR-004a — Per-node content-addressed tree storage (history substrate)
 - ADR-018 — Nominal `NodeId` / `TreeId` wrappers over `SafeId`
 - ADR-021 — Capability-URL workspace scoping (`/w/{key}/...`)
-- ADR-001 — Smart constructors and boundary validation
+- ADR-001 — Smart constructors and boundary validation; §2 places a whole-command refinement at the service's entry step

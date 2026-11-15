@@ -65,10 +65,12 @@ interpolated into a new outgoing document is subject to both.
 
 ### 2. Inside the region, nothing validates
 
-ADR-001 §2 states that controllers and services "receive already-validated Iron
-types and perform no validation". "Service" there is the ZIO service: the
-in-process implementation of business logic, not a network peer. That sentence
-constrains code inside the region and does not say where the region ends. This
+ADR-001 §2 states that once a service's entry step has returned, "nothing
+validates again". "Service" there is the ZIO service: the in-process
+implementation of business logic, not a network peer. The entry step checks the
+command's preconditions against stored state, and that is still the client's
+input being checked at the client border. That sentence constrains code inside
+the region and does not say where the region ends. This
 record supplies the other half, so the two compose: ADR-001 forbids validating
 inside, and this one says where outside begins.
 
@@ -169,6 +171,6 @@ violatedConstraint(err) match
 
 ## References
 
-- [ADR-001: Validation Strategy](./ADR-001.md) — instantiates this rule for the HTTP request boundary, and owns what happens once a value crosses: smart constructors, accumulation, and no validation inside the region. Its "services perform no validation" binds in-process code, not the border; see §2 above
+- [ADR-001: Validation Strategy](./ADR-001.md) — instantiates this rule for the HTTP request boundary, and owns what happens once a value crosses: smart constructors, accumulation, and no validation inside the region. Its "nothing validates again" after a service's entry step binds in-process code, not the border; see §2 above
 - [ADR-029: Input Injection Defence](./ADR-029-input-injection-defence.md) — the same boundaries in the outgoing direction. Its §3 table is egress, this record is ingress, and neither implies the other
 - [ADR-010: Error Handling](./ADR-010.md) — the shape a failure takes once it exists. An ingress rejection is one of those typed failures, never a string another branch parses
