@@ -3,10 +3,11 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.auth.{Authority, Checked}
+import com.risquanter.register.services.cache.ResolvedScopes
 
 /** Service layer for RiskTree business logic.
   * 
@@ -83,7 +84,21 @@ trait RiskTreeService {
     * @return The tree and the commit it resolved to, or `None` when absent
     */
   def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Authority]): IO[Failure, Option[(RiskTree, CommitHash)]]
-  
+
+  /** The tree at this read coordinate, together with each mitigation's resolved
+    * scope for that version and the ids of overrides whose base stamp is stale.
+    * Fails with `RiskTreeRepository.treeAbsent` when the revision lacks the
+    * tree.
+    *
+    * Separate from `getById` because resolving scopes builds a knowledge base
+    * and evaluates every predicate. `getById` is on the update path's pre-read
+    * and on the cascade paths, none of which consume a resolution, and none of
+    * which should pay for one.
+    */
+  def getStructure(wsId: WorkspaceId, id: TreeId, branch: BranchRef, at: Option[CommitHash])(
+    using Checked[Authority]
+  ): IO[Failure, (RiskTree, ResolvedScopes, Set[MitigationId])]
+
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
   // ========================================

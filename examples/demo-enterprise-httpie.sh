@@ -395,7 +395,7 @@ header "Step 3 — Vague quantifier queries"
 # $1 node name
 node_id() {
   http --ignore-stdin GET "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/structure" "X-Branch: main" \
-    | jq -r --arg n "$1" '.nodes[] | (.RiskLeaf // .RiskPortfolio // .) | select(.name==$n) | .id' | head -1
+    | jq -r --arg n "$1" '.tree.nodes[] | (.RiskLeaf // .RiskPortfolio // .) | select(.name==$n) | .id' | head -1
 }
 
 run_query() {

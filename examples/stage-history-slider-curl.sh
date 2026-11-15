@@ -64,7 +64,7 @@ head_hash() {
 # $1 branch, $2 node name
 node_id() {
   curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE/structure" -H "X-Branch: $1" \
-    | jq -r --arg n "$2" '.nodes[] | (.RiskLeaf // .RiskPortfolio // .) | select(.name==$n) | .id' | head -1
+    | jq -r --arg n "$2" '.tree.nodes[] | (.RiskLeaf // .RiskPortfolio // .) | select(.name==$n) | .id' | head -1
 }
 
 header "Demo: Analyze History / Time Travel (curl)"

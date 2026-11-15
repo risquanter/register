@@ -1,9 +1,10 @@
 package com.risquanter.register.services.cache
 
 import zio.{UIO, NonEmptyChunk, ZIO}
-import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.{RiskTree, ScopeOutcome}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
 import com.risquanter.register.http.errors.BindProblem
+import com.risquanter.register.http.responses.MitigationScopeView
 
 /** Names the tree version whose scopes are resolved. The owning workspace is NOT
   * a field: one resolver instance exists per workspace
@@ -15,31 +16,6 @@ import com.risquanter.register.http.errors.BindProblem
   * changes resolution but not the content hash.
   */
 final case class ScopeResolutionContext(treeId: TreeId, branch: BranchRef, revision: CommitHash)
-
-/** Per-mitigation resolution outcome: a coproduct with `toEither` and wrapper
-  * projections only — no `map`/`flatMap`; it is a result, not a pipeline.
-  * `Failed` carries why the predicate no longer binds against this tree
-  * version, such as a quoted node that was renamed or deleted. It still
-  * contributes an empty applied scope (a stale predicate is a no-op for that
-  * mitigation, never a whole-request failure), so `scopeOrEmpty` is what the
-  * application algebra consumes and `failures` is the per-mitigation drift
-  * signal.
-  */
-enum ScopeOutcome:
-  case Resolved(scope: Set[NodeId])
-  case Failed(errors: NonEmptyChunk[BindProblem])
-
-  def toEither: Either[NonEmptyChunk[BindProblem], Set[NodeId]] = this match
-    case Resolved(scope) => Right(scope)
-    case Failed(errs)    => Left(errs)
-
-  def scopeOrEmpty: Set[NodeId] = this match
-    case Resolved(scope) => scope
-    case Failed(_)       => Set.empty
-
-  def failures: Option[NonEmptyChunk[BindProblem]] = this match
-    case Resolved(_)  => None
-    case Failed(errs) => Some(errs)
 
 /** The per-mitigation outcome map for one tree version. Total over
   * `tree.mitigations`: every mitigation has an entry (its `MitigationTarget` is
@@ -55,6 +31,11 @@ final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
 
   def failures: Map[MitigationId, NonEmptyChunk[BindProblem]] =
     outcomes.collect { case (id, ScopeOutcome.Failed(errs)) => id -> errs }
+
+  /** Wire form: one view per mitigation, in identifier order. Use only at the
+    * wire boundary. */
+  def toWire: List[MitigationScopeView] =
+    outcomes.toList.sortBy((id, _) => id.value).map(MitigationScopeView(_, _))
 
 object ResolvedScopes:
   /** Per-mitigation drift signals (ADR-002): a predicate that no longer binds

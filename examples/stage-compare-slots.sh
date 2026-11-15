@@ -137,10 +137,11 @@ mk_scenario "beta"
 # ── Step 4: Bump Leaf One's probability on scenario alpha ─────────────────────
 # Full-replacement update (every existing node re-sent): Leaf One's probability
 # changes, Leaf Two and Root are re-sent unchanged. Node IDs come from the tree
-# structure on the alpha branch; .rootId gives the portfolio id directly.
+# structure on the alpha branch; .rootId gives the portfolio id directly. The
+# structure answer holds the tree under .tree, beside each mitigation's scope.
 header "Step 4 — Edit Leaf One on scenario alpha (creates the diff)"
 
-STRUCT=$(curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE_A/structure" -H "X-Branch: alpha")
+STRUCT=$(curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE_A/structure" -H "X-Branch: alpha" | jq '.tree')
 ROOT_ID=$(echo "$STRUCT" | jq -r '.rootId // empty')
 # node JSON may wrap a sealed subtype as {"RiskLeaf":{…}} or be flat; tolerate both.
 leaf_id() { echo "$STRUCT" | jq -r --arg n "$1" '.nodes[] | (.RiskLeaf // .) | select(.name==$n and (.probability!=null)) | .id' | head -1; }

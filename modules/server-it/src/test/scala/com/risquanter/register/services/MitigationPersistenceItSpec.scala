@@ -3,15 +3,21 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 
+import com.risquanter.register.auth.{Authority, Checked, TestChecked}
+import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, Mitigation,
-  MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  AbsoluteReplacement
+  MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, TargetingPredicate,
+  AbsoluteReplacement, ScopeOutcome
 }
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceId, SafeName, ContentHash, BranchRef, Revision}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceId, SafeName, ContentHash, BranchRef, Revision, SeedEntityId}
 import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
+import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
+import com.risquanter.register.services.pipeline.InvalidationHandler
+import com.risquanter.register.services.sse.SSEHub
+import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, lognormalShape, residualProbability}
 
@@ -20,13 +26,19 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mit
   * against a real Irmin container: a tree's mitigations are stored as per-id
   * blobs beside its nodes and round-trip through create/update/read with their
   * authoring-time anchor and base stamp intact. Omitting a previously-stored
-  * mitigation deletes it, because a write replaces the whole subtree.
+  * mitigation deletes it, because a write replaces the whole subtree. A stored
+  * mitigation also reads back through `RiskTreeService`: the structure read
+  * answers its resolved scope and its staleness, and a curve read under a
+  * selection naming it names it on the reading it reached.
   *
   * Run: sbt "serverIt/testOnly *MitigationPersistenceItSpec"
   */
 object MitigationPersistenceItSpec extends ZIOSpecDefault:
 
+  private given Checked[Authority] = TestChecked.value
+
   private val wsId: WorkspaceId = WorkspaceId(safeId("mit-persist-ws"))
+  private val seedEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
   private val rootId:  NodeId = nodeId("root")
   private val cyberId: NodeId = nodeId("cyber")
@@ -63,11 +75,19 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
     RiskTree.fromNodes(tid, sname("Mit Persist"), Seq(root, cyber), rootId, seedVarHighWater = None, mitigations = mits.toList)
       .toEither.toOption.get
 
-  private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =
-    ZLayer.make[RiskTreeRepository & IrminClient](
+  private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient & RiskTreeService] =
+    ZLayer.make[RiskTreeRepository & IrminClient & RiskTreeService](
       IrminCompose.irminConfigLayer,
       IrminClientLive.layer,
-      RiskTreeRepositoryIrmin.layer
+      RiskTreeRepositoryIrmin.layer,
+      RiskTreeServiceLive.layer,
+      TestConfigs.simulationLayer,
+      CachedResultResolverLive.layer,
+      ContentCacheRegistry.layer,
+      MitigationScopeResolverRegistry.layer,
+      InvalidationHandler.live,
+      SSEHub.live,
+      TestConfigs.telemetryLayer >>> TelemetryLive.configured
     )
 
   override def spec =
@@ -121,6 +141,25 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
           loaded <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(
           loaded.exists(_.mitigations.sortBy(_.id.value) == List(mA, mZ).sortBy(_.id.value))
+        )
+      },
+
+      test("a stored mitigation reads back through the service with its resolved scope, and a curve read under it names it") {
+        // The fixed base stamp matches no leaf, so the override is also stale.
+        val m = overrideMit("m-service", cyberId)
+        for
+          repo      <- ZIO.service[RiskTreeRepository]
+          tid        = treeId("mit-tree-service")
+          _         <- repo.create(wsId, treeWith(tid, m), BranchRef.Main)
+          structure <- ZIO.serviceWithZIO[RiskTreeService](_.getStructure(wsId, tid, BranchRef.Main, None))
+          (tree, scopes, stale) = structure
+          curves    <- ZIO.serviceWithZIO[RiskTreeService](_.getLECCurvesMulti(wsId, tid, Set(rootId), seedEntity,
+                         false, BranchRef.Main, None, false, MitigationSelection.single(m.id)))
+        yield assertTrue(
+          tree.mitigations == List(m),
+          scopes.outcomes == Map(m.id -> ScopeOutcome.Resolved(Set(cyberId))),
+          stale == Set(m.id),
+          curves(rootId).map(_.withMitigations) == List(Nil, List(m.id))
         )
       }
 

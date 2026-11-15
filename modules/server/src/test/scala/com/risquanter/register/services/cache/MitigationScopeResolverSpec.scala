@@ -7,7 +7,7 @@ import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, RiskNode,
   Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
-  RelativeLikelihood, RelativeSeverity, ResultTransformSpec
+  RelativeLikelihood, RelativeSeverity, ResultTransformSpec, ScopeOutcome
 }
 import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.domain.data.iron.{NodeId, QueryLiteral, TreeId, BranchRef, CommitHash, WorkspaceId, SafeName, SeedVarId}

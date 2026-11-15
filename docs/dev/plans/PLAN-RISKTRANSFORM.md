@@ -4022,6 +4022,18 @@ stream is built, so every existing consumer of `selectedTree` is untouched:
 The scopes and the stale ids are carried and unused until slice 6, which is where
 a consumer for them exists.
 
+**Readers outside the browser.** Every other reader of this route took the
+answer as a bare tree, so each reads it under `tree` now:
+
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala`
+  and `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala`
+  decode `TreeStructureResponse` and take `.tree`.
+- `examples/demo-enterprise-curl.sh`, `examples/demo-enterprise-httpie.sh`,
+  `examples/stage-history-slider-curl.sh` and `examples/stage-history-slider-httpie.sh`
+  read `.tree.nodes[]`.
+- `examples/stage-compare-slots.sh` and `tests/perf/measure-simulation.sh` take
+  `.tree` from the answer before reading `.rootId` and `.nodes`.
+
 #### 7.6.8 M4 slice 4 — change notification sees mitigation edits
 
 **What this slice changes, in plain terms.** When a tree is saved, the server
@@ -4351,7 +4363,10 @@ New tests, by the behaviour each one pins:
 - `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala` —
   extended with a round trip through the service: a PUT creating a mitigation,
   a structure read returning its resolved scope, and a curve read under a
-  selection naming it.
+  selection naming it. Slice 3 writes the structure read and the curve read
+  against a mitigation stored through the repository, because the PUT that
+  carries mitigations is slice 2's. Slice 2 replaces that repository write with
+  the PUT.
 - `modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala`
   (new test) — a tree carrying a result-stage mitigation is created over the real
   HTTP API and read back with its `TransformPipeline` intact, step order and all.

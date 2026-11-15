@@ -8,7 +8,7 @@ import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, 
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.domain.data.iron.{BranchChoice, Revision}
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.http.responses.{ChangedNodesResponse, TreeHistoryResponse}
+import com.risquanter.register.http.responses.{ChangedNodesResponse, TreeHistoryResponse, TreeStructureResponse}
 import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, TreeHistoryService}
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.http.errors.TreeScope
@@ -62,11 +62,9 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
-        // The workspace holds the tree, so an empty read means the revision lacks it.
-        loaded <- riskTreeService.getById(ws.id, treeId, rev).someOrElseZIO(RiskTreeRepository.treeAbsent(ws.id, treeId, rev))
-        (tree, _) = loaded
-      yield tree).wireEither(TreeScope.InTree(treeId))
+        loaded <- riskTreeService.getStructure(ws.id, treeId, branch, at)
+        (tree, scopes, stale) = loaded
+      yield TreeStructureResponse(tree, scopes.toWire, stale)).wireEither(TreeScope.InTree(treeId))
   }
 
   val getChangedNodes: ServerEndpoint[Any, Task] = getChangedNodesEndpoint.serverLogic {

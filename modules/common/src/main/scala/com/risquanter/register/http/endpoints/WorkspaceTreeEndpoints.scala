@@ -7,8 +7,7 @@ import sttp.tapir.generic.auto.schemaForCaseClass
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.http.requests.{RiskTreeUpdateRequest, RevertTreeRequest}
-import com.risquanter.register.http.responses.{TreeSummaryResponse, ChangedNodesResponse, TreeHistoryResponse}
-import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.http.responses.{TreeSummaryResponse, ChangedNodesResponse, TreeHistoryResponse, TreeStructureResponse}
 import com.risquanter.register.domain.data.iron.{CommitHash, BranchChoice, PositiveInt}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
@@ -49,7 +48,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .get
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
-      .out(jsonBody[RiskTree])
+      .out(jsonBody[TreeStructureResponse])
 
   /** Content-hash changed-nodes comparison between two symmetric, explicit
     * revisions — no value-level comparison. Each side is a

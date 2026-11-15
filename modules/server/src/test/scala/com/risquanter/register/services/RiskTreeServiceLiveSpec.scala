@@ -6,9 +6,11 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, TargetingPredicate, RelativeLikelihood, RelativeSeverity, ResultTransformSpec}
+import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, ScopeOutcome, TargetingPredicate, RelativeLikelihood, RelativeSeverity, ResultTransformSpec}
 import com.risquanter.register.domain.data.iron.ValidationUtil
-import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
+import com.risquanter.register.domain.data.iron.{BranchChoice, SafeName, NodeId, QueryLiteral, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
+import com.risquanter.register.common.FolSymbols.QuerySort
+import com.risquanter.register.http.errors.BindProblem
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
@@ -907,6 +909,64 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
               ValidationError(ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Id), FieldProblem.MitigationNotFound))
             assertTrue(refusals.contains(expected))
           }
+        }
+      ),
+
+      suite("The structure read")(
+        test("answers the tree with each mitigation's resolved scope and no stale override") {
+          val cap = leafCap(40000L)
+          val program = for {
+            repo      <- ZIO.service[RiskTreeRepository]
+            created   <- service(_.create(stubWsId, seedTreeRequest("Structure Read"), BranchRef.Main))
+            seeded    <- seedMitigations(repo, created, cyberControl, cap)
+            structure <- service(_.getStructure(stubWsId, seeded.id, BranchRef.Main, None))
+          } yield (seeded, structure)
+
+          program.assert { case (seeded, (tree, scopes, stale)) =>
+            tree == seeded &&
+              scopes.outcomes == Map(
+                cyberControl.id -> ScopeOutcome.Resolved(Set(leafNodeId(seeded, "Cyber Attack"))),
+                cap.id          -> ScopeOutcome.Resolved(Set(leafNodeId(seeded, "Cyber Attack"), leafNodeId(seeded, "Fraud")))
+              ) &&
+              stale.isEmpty
+          }
+        },
+
+        test("answers the bind problems of a mitigation whose predicate names a renamed node") {
+          val program = for {
+            repo      <- ZIO.service[RiskTreeRepository]
+            created   <- service(_.create(stubWsId, seedTreeRequest("Renamed Read"), BranchRef.Main))
+            seeded    <- seedMitigations(repo, created, cyberControl)
+            renamed    = RiskTreeUpdateRequest(
+                           name = "Renamed Read",
+                           portfolios = Seq(portfolioUpd(seeded, "Seed Root")),
+                           leaves = Seq(
+                             leafUpd(leafIdByName(seeded, "Cyber Attack"), "Cyber Breach", "Seed Root"),
+                             leafUpd(leafIdByName(seeded, "Fraud"), "Fraud", "Seed Root")
+                           ),
+                           newPortfolios = Seq.empty,
+                           newLeaves = Seq.empty
+                         )
+            _         <- service(_.update(stubWsId, seeded.id, renamed, BranchRef.Main))
+            structure <- service(_.getStructure(stubWsId, seeded.id, BranchRef.Main, None))
+          } yield structure
+
+          program.assert { case (_, scopes, _) =>
+            scopes.outcomes == Map(cyberControl.id -> ScopeOutcome.Failed(NonEmptyChunk(
+              BindProblem.UnreadableLiteral(QueryLiteral.fromString("Cyber Attack").toOption.get, QuerySort.NodeNameLiteral))))
+          }
+        },
+
+        test("fails with the tree-absent failure at a revision that lacks the tree") {
+          // A scenario branch starts empty in this stub, so its head lacks a
+          // tree created on main.
+          val program = for {
+            created  <- service(_.create(stubWsId, seedTreeRequest("Absent Structure"), BranchRef.Main))
+            expected <- RiskTreeRepository.treeAbsent(stubWsId, created.id, Revision.Head(scenarioBranch)).flip
+            exit     <- service(_.getStructure(stubWsId, created.id, scenarioBranch, None)).exit
+          } yield (exit, expected)
+
+          program.map((exit, expected) => assertTrue(failedWith(exit, expected)))
         }
       ),
 

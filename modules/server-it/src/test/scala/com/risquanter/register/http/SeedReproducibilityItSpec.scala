@@ -13,7 +13,7 @@ import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, Node
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, LECCurvesMultiRequest}
-import com.risquanter.register.http.responses.{LECCurvesResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
+import com.risquanter.register.http.responses.{LECCurvesResponse, TreeStructureResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
 import com.risquanter.register.infra.irmin.IrminClientLive
@@ -120,8 +120,8 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
 
   private def structure(client: SttpClientFixture.Client, key: String, treeId: String): Task[RiskTree] =
     basicRequest.header("X-Branch", "main").get(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/structure")
-      .response(asJson[RiskTree]).send(client.backend)
-      .flatMap(r => ZIO.fromEither(r.body))
+      .response(asJson[TreeStructureResponse]).send(client.backend)
+      .flatMap(r => ZIO.fromEither(r.body).map(_.tree))
 
   /** LEC curves + quantiles for the root and every leaf, keyed by node name —
     * node IDs are ULIDs and differ across servers, names are the stable key.

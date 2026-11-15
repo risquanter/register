@@ -16,7 +16,7 @@ import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.mitigation.MitigationApplication
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.simulation.{LECGenerator, LossDistribution}
-import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, ResolvedScopes, ScopeResolutionContext}
+import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, MitigationStaleness, ResolvedScopes, ScopeResolutionContext}
 import com.risquanter.register.services.RiskTreeServiceLive.{ErrorContext, Operation}
 import com.risquanter.register.services.helper.{SeedVarIdAssigner, Simulator}
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -551,6 +551,19 @@ class RiskTreeServiceLive private (
       _ => recordOperation(Operation.GetById, success = true, None)
     )
 
+  override def getStructure(wsId: WorkspaceId, id: TreeId, branch: BranchRef, at: Option[CommitHash])(
+    using Checked[Authority]
+  ): IO[Failure, (RiskTree, ResolvedScopes, Set[MitigationId])] =
+    (for
+      (tree, commit) <- getTreeOrFail(wsId, id, revisionOf(branch, at))
+      mitResolver    <- scopeResolvers.forWorkspace(wsId)
+      scopes         <- mitResolver.resolve(ScopeResolutionContext(id, branch, commit), tree)
+      _              <- ResolvedScopes.logFailures(scopes)
+    yield (tree, scopes, MitigationStaleness.staleOverrides(tree))).tapBoth(
+      error => recordOperation(Operation.GetStructure, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(Operation.GetStructure, success = true, None)
+    )
+
   // ========================================
   // LEC Query APIs (ADR-015)
   // ========================================
@@ -677,6 +690,7 @@ object RiskTreeServiceLive {
     case Delete            extends Operation("delete")
     case Revert            extends Operation("revert")
     case GetById           extends Operation("getById")
+    case GetStructure      extends Operation("getStructure")
     case ProbOfExceedance  extends Operation("probOfExceedance")
     case GetLECCurvesMulti extends Operation("getLECCurvesMulti")
 

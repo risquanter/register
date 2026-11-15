@@ -62,7 +62,7 @@ head_hash() {
 # Read a node id by name from the current structure on a branch.
 node_id() {
   http --ignore-stdin GET "$BASE/w/$WS_KEY/risk-trees/$TREE/structure" "X-Branch:$1" \
-    | jq -r --arg n "$2" '.nodes[] | (.RiskLeaf // .RiskPortfolio // .) | select(.name==$n) | .id' | head -1
+    | jq -r --arg n "$2" '.tree.nodes[] | (.RiskLeaf // .RiskPortfolio // .) | select(.name==$n) | .id' | head -1
 }
 
 header "Demo: Analyze History / Time Travel (httpie)"

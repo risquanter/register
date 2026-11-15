@@ -193,7 +193,8 @@ final class TreeViewState(
     keySignal.now() match
       case Some(key) =>
         treeTrigger.emit(Some(() =>
-          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), atAccessor())).toOutcomeEventStream
+          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), atAccessor()))
+            .map(_.tree).toOutcomeEventStream
         ))
       case None => ()
 

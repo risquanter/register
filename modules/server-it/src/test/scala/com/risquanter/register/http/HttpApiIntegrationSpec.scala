@@ -7,9 +7,9 @@ import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
 import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest, LECCurvesMultiRequest, ProbOfExceedanceRequest}
-import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
+import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeStructureResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
-import com.risquanter.register.domain.data.{MitigationSelection, RiskLeaf, RiskTree}
+import com.risquanter.register.domain.data.{MitigationSelection, RiskLeaf}
 import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice, CommitHash}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
@@ -89,9 +89,9 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           // 3) Get full tree structure (GET /w/{key}/risk-trees/{treeId}/structure)
           structResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${createdTree.id.value}/structure")
-            .response(asJson[RiskTree])
+            .response(asJson[TreeStructureResponse])
             .send(client.backend)
-          structure <- ZIO.fromEither(structResp.body)
+          structure <- ZIO.fromEither(structResp.body).map(_.tree)
         yield assertTrue(
           // The bootstrap is a create: it names the workspace it made, as a
           // reference relative to `/workspaces`.
@@ -122,9 +122,9 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
 
           structResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${bootstrap.tree.id.value}/structure")
-            .response(asJson[RiskTree])
+            .response(asJson[TreeStructureResponse])
             .send(client.backend)
-          structure <- ZIO.fromEither(structResp.body)
+          structure <- ZIO.fromEither(structResp.body).map(_.tree)
           leafSeeds  = structure.nodes.collect { case l: RiskLeaf => l.seedVarId.value }.sorted
         yield assertTrue(bootstrap.seedEntityId.value == 4242L) &&
           assertTrue(leafSeeds == Seq(41L, 42L))
@@ -292,9 +292,9 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
 
           structResp <- basicRequest.header("X-Branch", "main")
             .get(uri"$treeUri/structure")
-            .response(asJson[RiskTree])
+            .response(asJson[TreeStructureResponse])
             .send(client.backend)
-          structure <- ZIO.fromEither(structResp.body)
+          structure <- ZIO.fromEither(structResp.body).map(_.tree)
           rootId     = structure.rootId
 
           onScenario = basicRequest.header("X-Branch", scenarioName).response(asStringAlways)

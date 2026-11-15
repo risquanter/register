@@ -1,7 +1,7 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, LeafStageSpec, TargetingPredicate}
+import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, LeafStageSpec, ScopeOutcome, TargetingPredicate}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash}
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given   // Extract[NodeId]
