@@ -2823,3 +2823,41 @@ looked at.
   drain period.
 
 **Status.** Open. Recorded for investigation; no practical implication known.
+
+## 67. vql-engine 0.19.0 admits node-returning functions — what register changes on the pin bump
+
+**What the release changes.** vql-engine 0.19.0 lets a catalog function return a
+domain sort, and `Fragment.Targeting` takes the functions it admits. It
+implements the engine side of `PLAN-RISKTRANSFORM.md` §7.6.12 decision 15, which
+holds the design. The engine plan is `docs/PLAN-node-returning-functions.md` in
+the repository `vague-quantifier-logic`. Five surface changes reach register:
+
+- `Fragment.Targeting` is `Targeting(admittedFunctions: Set[SymbolName])`.
+  `Targeting(Set.empty)` is the rule the nullary case stated.
+- `TypeCatalog.domainReturningFunctions` returns the functions whose declared
+  return sort is a `DomainType`.
+- `FragmentViolation.FunctionApplicationNotAllowed.function` is a `SymbolText`.
+- `TypeCatalogError.FunctionReturnIsDomainType` is removed, and `UnknownType`
+  and `NameCollision` hold a `TypeId`, a `DeclarationSite` and a `SymbolName`.
+  register references no `TypeCatalogError` case.
+- The engine does not check that a domain-returning function's result is an
+  element of the registered domain.
+
+**What register changes.**
+
+- `build.sbt` line 45: `vqlEngineVersion` to `"0.19.0"`.
+- `TargetingPredicate.scala` line 92 calls
+  `FragmentCheck.check(formula, Fragment.Targeting)`. It passes
+  `Fragment.Targeting(<set>)`, where the set is `domainReturningFunctions` of a
+  catalog holding register's function signatures. Those signatures live in
+  `RiskTreeKnowledgeBase` in `server` and do not read the tree, so they can be
+  declared where `common` reaches them.
+- `RiskTreeKnowledgeBase` declares `node_id: (NodeIdLiteral) -> Node` and
+  `node_named: (NodeNameLiteral) -> Node`, each returning the `NodeId` its
+  validator produced. The dispatcher's `functionSymbols` names them.
+- `TargetingPredicate.scala` line 97 matches
+  `FunctionApplicationNotAllowed(_)` and compiles unchanged.
+- ADR-029 §3, row `TargetingPredicate.create`, says "no function terms". That
+  wording gives way, as decision 15 ruled on 2026-11-13.
+
+**Status.** Open. Waits on the 0.19.0 release.
