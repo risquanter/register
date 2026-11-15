@@ -526,6 +526,10 @@ enum FieldProblem:
   case StoredMitigationListedTwice
   case StoredMitigationNotInTree
 
+  // An absolute statement's anchor, which names a leaf of the stored tree
+  case AnchorNotInTree
+  case AnchorIsPortfolio
+
   /** A node is a leaf on one side of a merge and a portfolio on the other. */
   case StoredNodeKindDiffers
 
@@ -627,6 +631,8 @@ object FieldProblem:
     case StoredNodeNotInTree                        => ValidationErrorCode.MISSING_REFERENCE
     case StoredMitigationListedTwice                => ValidationErrorCode.DUPLICATE_VALUE
     case StoredMitigationNotInTree                  => ValidationErrorCode.MISSING_REFERENCE
+    case AnchorNotInTree                            => ValidationErrorCode.MISSING_REFERENCE
+    case AnchorIsPortfolio                          => ValidationErrorCode.INVALID_NODE_TYPE
     case StoredNodeKindDiffers                      => ValidationErrorCode.INVALID_NODE_TYPE
     case ChildParentMismatch(_, _)                  => ValidationErrorCode.CONSTRAINT_VIOLATION
     case ChildNotFound(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION

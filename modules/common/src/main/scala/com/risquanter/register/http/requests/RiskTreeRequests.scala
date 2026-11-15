@@ -457,7 +457,11 @@ object RiskTreeRequests {
   ): Validation[ValidationError, Unit] =
     Validation.validateAll(mitigations.collect {
       case ResolvedMitigation(subject, _, _, _, ResolvedSpec.Unstamped(_, anchor), _) =>
-        requireStoredNodeOfKind(anchor, NodeKind.Leaf, stored, ErrorLocation.Field(subject, FieldName.Anchor))
+        val location = ErrorLocation.Field(subject, FieldName.Anchor)
+        stored.get(anchor) match
+          case Some(_: RiskLeaf)      => Validation.succeed(())
+          case Some(_: RiskPortfolio) => Validation.fail(ValidationError(location, FieldProblem.AnchorIsPortfolio))
+          case None                   => Validation.fail(ValidationError(location, FieldProblem.AnchorNotInTree))
     }).as(())
 
   // Guard: portfolios must point to portfolios in the provided set (or be root).

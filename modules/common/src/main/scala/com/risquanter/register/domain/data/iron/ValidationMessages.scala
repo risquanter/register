@@ -79,6 +79,10 @@ object ValidationMessages:
     case FieldProblem.StoredMitigationListedTwice => "this id is listed more than once; each stored mitigation appears once, in mitigations"
     case FieldProblem.StoredMitigationNotInTree   => "this id is not a mitigation of this tree; a new mitigation goes in newMitigations"
 
+    // An absolute statement's anchor
+    case FieldProblem.AnchorNotInTree   => "this id is not a leaf of the saved tree; an absolute statement names a saved leaf"
+    case FieldProblem.AnchorIsPortfolio => "this id is a portfolio; an absolute statement names a leaf"
+
     // The index of a built tree
     case FieldProblem.ChildParentMismatch(child, declaredParent) =>
       s"Node '${child.value}' is listed as a child but has parentId=${declaredParent.fold("None")(_.value)}"

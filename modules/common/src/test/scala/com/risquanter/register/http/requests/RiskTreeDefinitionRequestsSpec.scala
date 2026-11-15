@@ -689,19 +689,17 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         newMitigations = Seq(newAbsolute(childIdStr))
       )
       val errors = errorsOf(resolveCreate(req, () => safeId("generated")))
-      assertTrue(refusedAt(errors, ValidationErrorCode.MISSING_REFERENCE, ErrorLocation.Field(atFirstNew, FieldName.Anchor)))
+      assertTrue(errors.contains(ValidationError(ErrorLocation.Field(atFirstNew, FieldName.Anchor), FieldProblem.AnchorNotInTree)))
     },
 
     test("resolveUpdate refuses an absolute statement whose anchor is not stored, or is a stored portfolio, at its anchor") {
       val unknown = "01H0R8Z3F5J2N4R8Z3F5J2N4RA"
       val atAnchor = ErrorLocation.Field(atFirstNew, FieldName.Anchor)
       assertTrue(
-        refusedAt(
-          errorsOf(resolveUpdate(keepNodes(Nil, Seq(newAbsolute(unknown))), stored(NodeKind.Leaf), Nil, () => safeId("generated"))),
-          ValidationErrorCode.MISSING_REFERENCE, atAnchor),
-        refusedAt(
-          errorsOf(resolveUpdate(keepNodes(Nil, Seq(newAbsolute(rootIdStr))), stored(NodeKind.Leaf), Nil, () => safeId("generated"))),
-          ValidationErrorCode.INVALID_NODE_TYPE, atAnchor)
+        errorsOf(resolveUpdate(keepNodes(Nil, Seq(newAbsolute(unknown))), stored(NodeKind.Leaf), Nil, () => safeId("generated")))
+          .contains(ValidationError(atAnchor, FieldProblem.AnchorNotInTree)),
+        errorsOf(resolveUpdate(keepNodes(Nil, Seq(newAbsolute(rootIdStr))), stored(NodeKind.Leaf), Nil, () => safeId("generated")))
+          .contains(ValidationError(atAnchor, FieldProblem.AnchorIsPortfolio))
       )
     },
 

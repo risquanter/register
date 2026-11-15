@@ -3639,7 +3639,24 @@ object RiskTreeUpdateRequest:
 
 `RiskTreeDefinitionRequest.resolve(req, newId)` keeps its signature. A create
 has no stored leaves, so every absolute statement in it is refused at its
-anchor with `StoredNodeNotInTree`.
+anchor with `AnchorNotInTree`.
+
+**The anchor's own refusals** (user, 2026-11-15). An anchor is refused with two
+`FieldProblem` cases of its own, because the stored-node cases' sentences
+direct the author to a node bucket:
+
+```scala
+// ErrorLocation.scala, FieldProblem
+case AnchorNotInTree      // ValidationErrorCode.MISSING_REFERENCE
+case AnchorIsPortfolio    // ValidationErrorCode.INVALID_NODE_TYPE
+
+// ValidationMessages.scala
+case FieldProblem.AnchorNotInTree   => "this id is not a leaf of the saved tree; an absolute statement names a saved leaf"
+case FieldProblem.AnchorIsPortfolio => "this id is a portfolio; an absolute statement names a leaf"
+```
+
+`requireStoredAnchors` matches the stored node itself rather than calling
+`requireStoredNodeOfKind`.
 
 **`modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`:**
 

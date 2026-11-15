@@ -1106,7 +1106,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           service(_.create(stubWsId, request, BranchRef.Main)).exit.map { exit =>
             val subject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
             assertTrue(exit.causeOption.flatMap(_.failureOption).flatMap(clientRefusals).exists(_.contains(
-              ValidationError(ErrorLocation.Field(subject, FieldName.Anchor), FieldProblem.StoredNodeNotInTree))))
+              ValidationError(ErrorLocation.Field(subject, FieldName.Anchor), FieldProblem.AnchorNotInTree))))
           }
         },
 
