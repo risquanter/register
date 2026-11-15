@@ -2927,3 +2927,45 @@ vql-engine's `docs/ADR-024.md`.
   domain of `Value`s per" sort. Both become wrong under 0.21.0.
 
 **Status.** Waits on the 0.21.0 release.
+
+## 70. register-infra removes Istio — ADR-012 names a mesh that will no longer exist
+
+**What changes in register-infra.** `register-infra`'s
+`docs/plans/PLAN-EGC-ENVOY-GATEWAY-CLUSTER.md` replaces Istio ambient mode with
+Envoy Gateway at the edge and Cilium between pods. Its record is
+`register-infra`'s `docs/adr/ADR-INFRA-018.md`.
+
+- The Envoy Gateway proxy terminates TLS, removes client-sent `x-user-id`,
+  `x-user-email` and `x-user-roles`, validates the JWT, writes the three headers
+  from its claims, and calls OPA. Only requests over the ingress pass it.
+- No waypoint, no ztunnel and no `RequestAuthentication`, `AuthorizationPolicy`
+  or `EnvoyFilter` remain. The ingress manifest moves from
+  `infra/k8s/istio/ingress-gateway.yaml` to `infra/k8s/gateway/`.
+- Between pods, Cilium admits each flow on its container port. Cilium WireGuard
+  encrypts between nodes. Two pods on one node exchange plaintext until
+  `register-infra`'s PLAN-TLS adds TLS per connection.
+- The identity contract is unchanged: the same three headers, removed before
+  injection, with `x-user-roles` a JSON array (to be confirmed on the first run).
+
+**What in register names the mesh.** `docs/dev/decision-records/ADR-012.md`:
+
+- §1 chooses Istio ambient mode (ztunnel, waypoint).
+- §3 places OPA at "the mesh layer (Istio `ext_authz`)".
+- §4 makes retries, circuit breaking, timeouts and rate limiting "the mesh's
+  concern" and names `infra/k8s/istio/ingress-gateway.yaml`. After the change,
+  no proxy sits between register and Irmin, SpiceDB or PostgreSQL. Only the
+  edge proxy remains, in front of the frontend.
+- §5 and §6 name `outputClaimToHeaders`, the waypoint and `EnvoyFilter`.
+- §7's invariants T1–T3 name the Istio waypoint. T1 links `./THREAT-CATALOG.md`,
+  which does not exist in `docs/dev/decision-records/`.
+
+**EGC-D-4.** `register-infra` retired ADR-INFRA-015's SpiceDB write gate, which
+was keyed on mesh identity. Each caller keeps its own key, and Cilium admits
+SpiceDB only from the register pod and the runner. Accepted residual: a
+compromised register server may write any relation type. The ruling says the
+L2.0 exit criterion in `docs/dev/plans/IMPLEMENTATION-PLAN.md` is reworded to
+stop claiming scoping by credential. Neither that file nor
+`docs/dev/plans/AUTHORIZATION-PLAN.md` §L2.0 was found to state such a criterion
+on 2026-11-15; whether a passage elsewhere does is open.
+
+**Status.** Open. The amendment of ADR-012 is register's to rule.
