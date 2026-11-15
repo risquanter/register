@@ -188,14 +188,34 @@ PUT /w/{key}/risk-trees/{treeId}   { ...complete node set... }
 
 ### HTTP surface (workspace-capability scoped)
 
+Every route below starts with the workspace key `/w/{key}` (ADR-021). Every
+`risk-trees` route except `changed-nodes` also takes the required `X-Branch`
+header. `changed-nodes` names its two branches in the query instead.
+
 | Method & path | Request | Purpose |
 |---------------|---------|---------|
 | `GET /w/{key}/risk-trees` | — | List trees |
 | `POST /w/{key}/risk-trees` | `RiskTreeDefinitionRequest` | Create |
 | `GET /w/{key}/risk-trees/{treeId}` | — | Summary |
-| `GET /w/{key}/risk-trees/{treeId}/structure` | — | Full structure |
+| `GET /w/{key}/risk-trees/{treeId}/structure` | optional `at` commit pin | Full structure, with each mitigation's resolved scope and the stale override ids |
 | `PUT /w/{key}/risk-trees/{treeId}` | `RiskTreeUpdateRequest` | Full-replacement update |
 | `DELETE /w/{key}/risk-trees/{treeId}` | — | Delete tree |
+| `GET /w/{key}/risk-trees/{treeId}/changed-nodes` | query `a`, `aAt`, `b`, `bAt` | Nodes whose content hash differs between two revisions |
+| `GET /w/{key}/risk-trees/{treeId}/history` | query `n` | The tree's commits on a branch, oldest first |
+| `POST /w/{key}/risk-trees/{treeId}/revert` | `RevertTreeRequest` | Revert the tree to a chosen commit as one forward commit |
+| `POST /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance` | `ProbOfExceedanceRequest`, query `threshold`, optional `at` | Exceedance probability of one node under a mitigation selection (ADR-040) |
+| `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi` | `LECCurvesMultiRequest`, optional `at` | Loss exceedance curves of several nodes under a mitigation selection (ADR-040) |
+| `POST /w/{key}/risk-trees/{treeId}/query` | `QueryRequest` | Evaluate a vague-quantifier query (ADR-028) |
+| `POST /w/{key}/scenarios` | `CreateScenarioRequest` | Create a scenario |
+| `GET /w/{key}/scenarios` | — | List scenarios |
+| `GET /w/{key}/scenarios/{name}/merge-preview` | — | Preview merging a scenario into main; changes nothing |
+| `POST /w/{key}/scenarios/{name}/merge` | — | Merge a scenario into main |
+| `DELETE /w/{key}/scenarios/{name}` | `If-Match` header with the observed head | Delete a scenario |
+| `POST /w/{key}/rotate` | — | Rotate the workspace key |
+| `DELETE /w/{key}` | — | Delete the workspace and all its trees |
+
+Creating a workspace (`POST /workspaces`) is not workspace-scoped, because no key
+exists before it.
 
 No cache-invalidation endpoint exists. The simulation cache is content-addressed
 and has no invalidation operation, so there is nothing for such a route to call

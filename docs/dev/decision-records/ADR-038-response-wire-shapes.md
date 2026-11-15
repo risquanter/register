@@ -68,6 +68,8 @@ Each case carries its own payload, so a match is exhaustive and the reader needs
 
 This covers a map's key type as much as a field, and a response body is never a bare primitive or a bare collection.
 
+**Relation to ADR-040.** The analysis answers follow this clause: the curve answer is the object `LECCurvesResponse`, not a bare map, and the exceedance figure is a `Probability`. ADR-040 describes what those objects hold and how a reading's `withMitigations` is read. A change to the enclosing shape is this record's; a change to what a reading means is ADR-040's.
+
 ### 4. A Confidential Internal Identifier Has No Serialiser
 
 Deriving a codec requires an instance per field, so a wire-facing type naming one does not compile:
@@ -183,3 +185,4 @@ Cleanup of a non-conforming occurrence is an obligation of the `boyscout` skill:
 - ADR-022 — credential types; the bearer credential is the one value clause 4 does not confine
 - ADR-036 — which identifiers may cross the client boundary; clause 4 is its enforcement mechanism
 - ADR-037 — closed sets are enums with derived codecs, and when a spelling is declared instead
+- ADR-040 — the analysis read contract; what the objects clause 3 rules hold

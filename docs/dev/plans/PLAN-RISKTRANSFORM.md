@@ -3458,7 +3458,9 @@ mitigation scope resolver and its per-workspace registry) has landed; this one h
 not, and the two are unrelated pieces of work that share a number.
 
 **It lands after register adopts the vql-engine release carrying T-014, expected
-to be 0.20.0** (user, 2026-11-15). This slice is the first that stores a
+to be 0.20.0** (user, 2026-11-15). It also carries the bucket paragraph of
+the ADR-017 amendment that §7.6.9 specifies, because that paragraph describes this
+slice's tree PUT. This slice is the first that stores a
 targeting predicate. A 4096-character source can nest deeply enough to overflow
 0.19.0's parser stack (§7.6.12 decision 20), and T-014 bounds that depth.
 
@@ -4199,6 +4201,12 @@ object MitigationScopeResolverLive:
 Decision 2 ruled that the client-facing mitigation contract is split by surface.
 Both documents land with the code they describe, not after it.
 
+**Written on 2026-11-15:** ADR-040, the ADR-035 §5 sentence, the ADR-015 resolver
+signatures, ADR-017's completed route table, and the three routing entries. ADR-038
+§3 gained its paragraph on ADR-040, because the routing rule writes an interaction
+into both records. The bucket paragraph of the ADR-017 amendment describes slice
+2's tree PUT, so by this section's own rule it lands with slice 2 (§7.6.6).
+
 **`docs/dev/decision-records/ADR-017-tree-api-design.md` — amendment.** The
 "Four Buckets" decision describes a tree PUT that this plan changes, so leaving
 it as it stands would make it wrong. The amendment records that the update
@@ -4303,7 +4311,8 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-014 (render-time curve computation) | Both valuations of every requested node go through one `generateCurvePointsMulti` call, so the shared tick domain covers them together | Compliant |
 | ADR-015 (query APIs compose on `ensureCached`) | The mitigated reading is a second `ensureCached`/`ensureCachedAll` call with a selection, not a new resolution path — compliant. The ADR still writes the resolver trait out verbatim in a form two generations old; the return type is already as narrow as decision 2 asked, because `LossDistribution` ceased to be a base class | Amended, slice 5 |
 
-| ADR-017 (tree API design) | The tree PUT gains two buckets; the ADR is amended in slice 5 rather than contradicted | Amended, slice 5 |
+| ADR-017 (tree API design) | The tree PUT gains two buckets; the ADR is amended rather than contradicted. The route table was completed in slice 5, and the bucket paragraph lands with slice 2 | Route table amended, slice 5; buckets with slice 2 |
+| ADR-040 (analysis read contract) | Written in slice 5 to state slice 1's read contract; its interaction with ADR-038 §3 is written into both records | New, slice 5 |
 | ADR-018 (nominal id wrappers) | `MitigationId` stays distinct from `NodeId` and `TreeId` throughout the new types | Compliant |
 | ADR-019 (frontend ownership rules) | Slice 1's browser change touches one state class and adds one pure function beside it; no component gains state | Compliant |
 | ADR-024 (application as a pure enforcement point) | Both analysis handlers keep their `AnalyzeRun` check and the structure handler keeps `ViewTree`; the method change on one endpoint moves no check | Compliant |

@@ -216,6 +216,15 @@ word, and this service's vocabulary never uses it. It matters only where a clien
 writes a field unencoded into a single-quoted attribute or a script string, which
 ADR-029 §4 already forbids.
 
+This section governs refusals. The structure read is not one: it succeeds and
+reports on stored predicates. Its `ScopeOutcome.Failed` carries `BindProblem`
+values with the same typed fields as a refusal. The ground "The answer returns
+only to the caller who sent the text" does not hold for it, because the reader
+may not be the predicate's author. What holds instead is that the same answer
+already carries each predicate's whole source in `tree.mitigations`, so the
+typed fields disclose nothing the answer does not already hold. The browser
+writes them through Laminar's typed DOM calls.
+
 #### Reconciliation with ADR-029
 
 ADR-029 governs what may be built into a document an interpreter parses. This

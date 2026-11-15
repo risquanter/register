@@ -41,7 +41,7 @@ Every type here is correct-by-construction or it is a defect, so the question is
 **Always:** ADR-017 · ADR-038 · ADR-036 · ADR-035 · ADR-010 · ADR-001
 The wire is the one surface where a mistake is published: the request shape and its bounds (ADR-017), the shape a response takes and which of the two kinds it is (ADR-038), what may cross in either direction (ADR-036), what a failure may disclose (ADR-035), how a typed error becomes a status (ADR-010), and that validation happens in the codec rather than the handler (ADR-001).
 
-**Also:** ADR-021 if the route is workspace-scoped · ADR-030 and ADR-024 if it reads or mutates protected data · ADR-029 if any field carries user text · ADR-039 for the browser's own side of the crossing, since a response is ingress there too · ADR-025 and ADR-027 if a browser navigates to the path · ADR-004a if the response carries a branch.
+**Also:** ADR-040 if it is an analysis read — a curve or an exceedance probability under a mitigation selection · ADR-021 if the route is workspace-scoped · ADR-030 and ADR-024 if it reads or mutates protected data · ADR-029 if any field carries user text · ADR-039 for the browser's own side of the crossing, since a response is ingress there too · ADR-025 and ADR-027 if a browser navigates to the path · ADR-004a if the response carries a branch.
 
 ### Adding or changing a service or repository method
 
@@ -166,6 +166,7 @@ Use this when you already know the topic or the record's name. It answers "where
 | ADR-037 | `ADR-037-in-code-constants.md` | Constants and closed sets: enums in their owner's companion, declared versus derived spellings, forbidden defaults |
 | ADR-038 | `ADR-038-response-wire-shapes.md` | Response shapes: the two kinds of response and the shape each takes, no raw primitive where a refined type exists, no serialiser on a confidential identifier, `toWire` owned by the source |
 | ADR-039 | `ADR-039-trust-boundary-ingress-validation.md` | Trust-boundary ingress: where the trust region ends, which crossings have a border, and that everything crossing one is refined |
+| ADR-040 | `ADR-040-analysis-read-contract.md` | The analysis read contract: the version a read names, the selection in a POST body, absent versus empty-scope mitigations, the two response shapes and one reading of `withMitigations`, the payload bounds |
 | ADR-INFRA-006 | `ADR-INFRA-006.md` | Database credential delivery. Binds `register-infra`'s deployment, not this repository's code |
 | — | `ADR-00X.md` | The authoring template for a new record. Not a decision record |
 
@@ -203,6 +204,7 @@ Read it as an index of collisions, not as a substitute for either record. Where 
 | ADR-039 × ADR-029 | The same boundary is crossed in both directions and each record governs one. ADR-029's parser-boundary table is egress: what may be built into a document sent out. ADR-039 is ingress: what must be refined on the way in. Reading ADR-029's Irmin row as covering the boundary leaves the return path with no rule, which is how store content reaches the domain unrefined. *Stated in ADR-029 §3 and ADR-039 §1.* |
 | ADR-035 × ADR-029 | A query refusal repeats the caller's words and literals, which reads as a backend message reaching the client against ADR-035's context. It is permitted because the lexer fixes their alphabets and the sinks are structured: the refusal carries typed fields and this service's own sentence, never the engine's. The literal alphabet is stated in both records, so widening it in the engine changes what ADR-035 §5 permits. *Stated in ADR-035 §5 and ADR-029 §3, each under a heading naming the other.* |
 | ADR-039 × ADR-010 | A peer that did not answer is `Unanswered`, and a peer whose answer this service refuses is `Rejected` at that peer's zone. Collapsing them into one error case is invisible: both read as the dependency failing. Only the first is retried or reported as an outage. ADR-010 gives the shape a failure takes; ADR-039 says these are two of them. *Stated in ADR-039 §4.* |
+| ADR-040 × ADR-038 | The curve answer's enclosing object is ruled by ADR-038 §3 and its contents by ADR-040. Changing what a reading means under ADR-038's name, or reshaping the object under ADR-040's, edits one record and leaves the other describing the old answer. *Stated in ADR-038 §3 and ADR-040, each under a heading naming the other.* |
 | ADR-003 × ADR-032 | `seedVarId` is in the hashed projection and the node's name is not. That is what makes a rename free — it changes no figure and invalidates no cache entry — and it is also why a seed identifier must never be re-issued: two different risks sharing one would collide in the cache. *Stated in ADR-003 §2.* |
 
 A change that spans two rows of Layer 1 is where a new collision is likely. When one is found, write the reconciliation into both records and add a row here: the records carry the content, this table makes the collision findable.
