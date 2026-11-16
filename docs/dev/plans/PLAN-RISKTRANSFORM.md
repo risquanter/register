@@ -1893,8 +1893,7 @@ Ammendment:
 Written for slices 1 to 5 (§7.6.4 names the slices). Those five carry exact
 signatures, ADR alignment, a verification plan and a file inventory. Slice 6 —
 the interface and the user documentation — is elevated at §7.6.17. §7.6.12
-lists the decisions. Decision 21, raised by that elevation, is open, and the
-rest are ruled or void. Decision 11, which gates M4 slice 2,
+lists the decisions. All are ruled or void. Decision 11, which gates M4 slice 2,
 was ruled on 2026-11-15. The valuation type slice 1 consumes is built, specified by
 [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and
 landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
@@ -2488,7 +2487,7 @@ has landed green (G8).
 | 3 | The tree structure read: resolved scopes, resolution failures and stale-override ids beside the tree | §7.6.7 | Landed |
 | 4 | Change notification: the mitigation-collection diff, and the scope memo's capacity-2 amendment | §7.6.8 | Landed |
 | 5 | The two decision records: the ADR-017 amendment and the new ADR-040 | §7.6.9 | Landed |
-| 6 | The interface and the user documentation | §7.6.17 | Awaiting approval; decision 21 open |
+| 6 | The interface and the user documentation | §7.6.17 | Awaiting approval; the popup's signatures are not yet written |
 | 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 | Landed |
 | 8 | Adopting vql-engine 0.20.0 and mapping its nesting-depth refusals. Lands before slice 2 | §7.6.16 | Landed, 0.20.5 |
 
@@ -2499,8 +2498,8 @@ the valuation type, which is specified by
 [`DONE-PLAN-FBF-VALUATION-TRANSPLANT.md`](../../archive/plans/DONE-PLAN-FBF-VALUATION-TRANSPLANT.md) and
 carries no open decisions.
 Slice 6 is elevated at §7.6.17. Its first two decisions were ruled on
-2026-09-15, and the elevation raised decision 21, which is open. §7.6.12
-records all three with the rest.
+2026-09-15, and the elevation raised decision 21, ruled on 2026-11-16.
+§7.6.12 records all three with the rest.
 
 #### 7.6.5 M4 slice 1 — the analysis read path
 
@@ -5206,7 +5205,55 @@ the questions that elevation raised.
       decision 7's scope. Slice 6 ships the stale badge only, and an override is
       re-affirmed through the API until the editor exists.
 
-    Open.
+    **RULED B (user, 2026-11-16), with a link from the badge.** The stale badge
+    in the Analyze view carries a link that switches to the Design view with the
+    tree loaded and the popup open on that statement. The popup lives in the
+    Design view and edits the builder's loaded mitigations. Design's existing
+    save writes them, so one view per tab still writes trees.
+
+    The Design view shows no mitigation today, so the popup needs a list of the
+    tree's absolute statements to open from. That list and the link are slice 6
+    work.
+
+    The ruling holds while R1 is unresolved. `PLAN-TREE-WRITE-CONCURRENCY.md` §9
+    carries a step to revisit option A once its version check has landed.
+
+**Raised by the M4 complex review (2026-11-15).**
+
+22. **What an absolute statement's target may be.** `MitigationScopeResolver.resolveOne`
+    scopes every mitigation by its predicate alone and never reads the anchor.
+    An absolute statement whose predicate matches more than its anchor therefore
+    sets figures on leaves nobody assessed against them. §8.4-1 ruled a write
+    check that the predicate's resolution equals `{overrideAnchor}`, and §8.4-4
+    ruled apply-at-anchor with a scope-drift signal. Neither was built.
+    - **A** — build both rulings, with the drift signal as a new `ScopeOutcome`
+      case on the wire.
+    - **B** — the write check and apply-at-anchor, with no drift signal.
+    - **C** — the predicate decides, and ADR-017 §4 and the glossary are
+      rewritten.
+    - **D (user-proposed, 2026-11-16)** — the target of an absolute statement is
+      its anchor and nothing else. A merge, a rename or an added leaf can then
+      never widen it, because a node identifier names at most one node and never
+      changes. A merge keeps a mitigation's fields together, because it compares
+      each stored path's whole value. A merge also refuses a node that changed
+      kind (`StoredNodeKindDiffers`). Two forms were considered: keep the
+      `target` field and refuse any form other than `eq(x, node_id("<anchor>"))`,
+      or derive the target from the anchor.
+
+    **RULED D, derived (user, 2026-11-16).** An absolute statement carries no
+    target in the request, and a request that sends one is refused. The server
+    writes `eq(x, node_id("<anchor>"))` itself and stores it, so storage and the
+    resolver stay uniform. The read response still shows the target.
+
+    What follows from the ruling:
+
+    - The derived target's scope is `{anchor}` while the anchor leaf exists and
+      empty once it is deleted. §8.4-1's resolution check and scope-drift signal,
+      and §8.4-4's apply-at-anchor, have nothing left to act on.
+    - A deleted anchor leaves the statement applying to no node and not stale,
+      which ADR-017 §4 and the glossary already state.
+    - The request shape changes, which is a DTO change. Its signatures are
+      presented as a Signature Echo before any code.
 
 #### 7.6.13 File inventory — M4 slices 1 to 5
 
@@ -5796,8 +5843,9 @@ caller's.
 
 #### 7.6.17 M4 slice 6 — the selection interface and the user documentation
 
-**Status: written 2026-11-15, awaiting approval.** One decision is open:
-§7.6.12 decision 21, where the override edit popup saves. Everything else below
+**Status: written 2026-11-15, awaiting approval.** No decision is open.
+§7.6.12 decision 21 placed the override edit popup in the Design view on
+2026-11-16, and its signatures are not yet written below. Everything else below
 is derived from rulings already given, and each derivation names the ruling it
 rests on.
 
@@ -6180,13 +6228,23 @@ baseline gets `compareState.baselineSelection.signal` and `baselineDisplay`. A
 slot gets `selectionSignal.observe(using unsafeWindowOwner)` and its `display`.
 The Design view's tree view gets `Val(Inherent)` and `Val(CurveDisplay.Inherent)`.
 
-##### The override edit popup — waits on decision 21
+##### The override edit popup — in the Design view
 
 §7.4 lists an "override edit-popup flow (ADR-019 Pattern 6 state machine) +
 stale badge surfacing". The stale badge is specified above. The popup edits an
 existing absolute statement's figures and re-affirms it, so its save sends
-`BaseStampChoice.Restamp` (§7.6.12 decision 11). Where that save happens is
-decision 21. Its signatures are written once it is ruled.
+`BaseStampChoice.Restamp` (§7.6.12 decision 11).
+
+§7.6.12 decision 21 places it in the Design view:
+- The stale badge on an Analyze row carries a link. The link switches to the
+  Design view with the tree loaded and the popup open on that statement.
+- The Design view gains a list of the tree's absolute statements, which is where
+  the popup opens.
+- The popup edits the builder's loaded mitigations. Design's existing save
+  writes them, so its unsaved-edit tracking and confirm guards cover the edit.
+
+The signatures of the list, the link and the popup's state machine are not yet
+written.
 
 ##### The user documentation
 
@@ -6218,7 +6276,7 @@ it says.
 
 | Record | Finding |
 |---|---|
-| ADR-019 | Compliant. Selection and display are owned by `CompareState` and the slot states; components take signals and callbacks; `MitigationPanel` owns no state; the popup is a Pattern 6 state machine once decision 21 places it |
+| ADR-019 | Compliant. Selection and display are owned by `CompareState` and the slot states; components take signals and callbacks; `MitigationPanel` owns no state; the popup is a Pattern 6 state machine owned by the Design view (decision 21) |
 | ADR-001 | Compliant. Every selection is built by `MitigationSelection.create`; every request by `LECCurvesMultiRequest.create` |
 | ADR-040 | Compliant. §2 body selection; §3 absent mitigations are dropped before sending and named in a notice; §4 the variant is read off `withMitigations` |
 | ADR-038 | Compliant. The decoded responses are read as their types state; no field is reinterpreted |
@@ -6355,7 +6413,7 @@ adr-constraints skill). Per-ADR outcome for this plan:
 | 016 (config) | — | No new config in M1/M2 |
 | 017 (+NOTES) (tree API) | M4 DTO buckets | Reviewed at §7.6.10: the tree PUT gains two mitigation buckets and the record is amended in M4 slice 5 (§7.6.9) |
 | 018 (nominal wrappers) | `MitigationId` | Compliant: case-class wrapper over `SafeId`, `NodeId` pattern |
-| 019 (frontend) | M4 | Reviewed at §7.6.10 for slices 1 to 5: compliant, each browser change touches one state class and no component gains state. The interface itself is M4 slice 6, reviewed at §7.6.17: parent-owned state, stateless components, and Pattern 6 for the popup once decision 21 places it |
+| 019 (frontend) | M4 | Reviewed at §7.6.10 for slices 1 to 5: compliant, each browser change touches one state class and no component gains state. The interface itself is M4 slice 6, reviewed at §7.6.17: parent-owned state, stateless components, and Pattern 6 for the popup, owned by the Design view (decision 21) |
 | 020 (supply chain) + skill | M3 engine bump | Compliant: exact pin; first-party sibling → cooldown n/a (documented at pin site) |
 | 021 (capability URLs) | — | Endpoints stay under `/w/{key}`; no new auth surface |
 | 022 (secrets) | — | No credentials involved; mitigation data is ordinary domain content |
@@ -6572,8 +6630,9 @@ D-4 provenance record is the **applied** (post-restriction) scope.
 
 **Validation split.** `common` (`RiskTree.validateMitigations`) keeps unique
 ids/names and predicate parse-level validation; everything needing
-resolution moves server-side to tree-write validation: an Override's
-predicate must resolve to exactly `{overrideAnchor}` (§8.4-1, ruled C).
+resolution moves server-side to tree-write validation. An absolute
+statement's target is derived from its anchor and carries no predicate of
+its own (§7.6.12 decision 22, superseding §8.4-1's resolution check).
 Unresolvable predicates (valid syntax, empty scope) are a no-op, not an
 error — consistent with the dynamic-scope worked example (§7.4.1).
 Provenance continues to record the resolved scope set per LEC (D-4 layer;
@@ -6587,12 +6646,10 @@ failures alongside all successes), not `flatMap` sequencing. A predicate
 that fails to *bind* against the tree version (its quoted node name was
 renamed/deleted → `UnknownConstantOrLiteralError`) yields, for that
 mitigation only, an empty scope plus a per-mitigation resolution-failure
-signal in `ResolvedScopes` — a sibling of the §8.4-1 scope-drift signal;
+signal in `ResolvedScopes`;
 the request as a whole never fails because one stored predicate went
-stale. The tree-write anchor check blocks a PUT only on resolution errors
-of the mitigation(s) being written, never on pre-existing ones. Read-time
-semantics of a *divergent* (bound but anchor-mismatched) override:
-apply-at-anchor, ruled (§8.4-4).
+stale. A target derived from its anchor cannot diverge from it, so no
+divergent override exists to read (§7.6.12 decision 22, superseding §8.4-4).
 
 **Size bounds (F4 residue, absorbed here).** With enumeration gone, the
 remaining wire bounds are small and land with the rework:
@@ -6707,6 +6764,12 @@ M4 elevation respectively).
    (2026-08-10) confirmed the write-time anchor check is sound: no
    storable predicate can make an override touch a node other than its
    anchor at the moment of writing.
+
+   > **Superseded by §7.6.12 decision 22 (2026-11-16):** an absolute statement's
+   > target is derived from its anchor as `eq(x, node_id("<anchor>"))`, and a
+   > request carries none. No hand-written predicate, no resolution check and no
+   > scope-drift signal remain. The anchor field and the stamp stand as ruled
+   > here.
 2. **Bounds numbers** (§8.1). **RULED (user, 2026-08-10): values
    confirmed (`RiskTree.mitigations` max 1000, `TransformPipeline.steps`
    max 10 — revised from 100, user 2026-08-14), enforced as Iron literals** — the codebase's uniform vehicle
@@ -6779,6 +6842,10 @@ M4 elevation respectively).
    dissolved, not ruled: the stage-domain scope definition (§8.1) makes
    non-leaf matches fall outside a LeafStage mitigation's scope by
    construction — no suspend semantics needed.
+
+   > **Superseded by §7.6.12 decision 22 (2026-11-16):** a target derived from
+   > the anchor cannot diverge from it, so there is no divergent override to
+   > read and no scope-drift signal.
 5. **Resolver-cache eviction for historic revisions (security-review
    F6).** Compare slots and history scrubbing resolve historic revisions;
    memoizing those without bound accretes a heavyweight KB entry
@@ -6946,10 +7013,8 @@ beside `LeafRelative(likelihood, severity)`. Both fields are non-optional and si
 only on the absolute case, so the two cross-field rules stated next are enforced by
 the type: a relative statement has nowhere to put an anchor or a stamp, and an
 absolute one cannot be constructed without both. The anchor is named `anchor` and
-the stamp `baseStamp`. Everything this plan says about what the anchor is *for* —
-the scope-drift staleness layer, the resolution-equals-`{overrideAnchor}` check —
-is unaffected, because that design is about the anchored leaf rather than the
-field's name or its optionality.
+the stamp `baseStamp`. The anchor is the leaf the stamp is computed from, and
+the leaf the derived target names (§7.6.12 decision 22).
 
 `Mitigation.create` (signature unchanged) cross-field rules become:
 LeafStage + Override component ⇒ `overrideBaseStamp` AND `overrideAnchor` both

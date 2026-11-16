@@ -45,7 +45,11 @@ object MitigationSpecRequest:
     anchor:      String,
     stamp:       BaseStampChoice
   ) extends MitigationSpecRequest:
-    def toSpec(subject: ErrorSubject): Validation[ValidationError, ResolvedSpec] =
+    def toSpec(subject: ErrorSubject): Validation[ValidationError, ResolvedSpec] = toUnstamped(subject)
+
+    /** The refined statement, unstamped, so its anchor is at hand for the
+      * target derived from it. */
+    def toUnstamped(subject: ErrorSubject): Validation[ValidationError, ResolvedSpec.Unstamped] =
       Validation.validateWith(
         replacement.toReplacement(subject),
         ValidationUtil.toValidation(
@@ -225,10 +229,11 @@ object ResultTransformSpecRequest:
     Schema.derived[ResultTransformSpecRequest]
 
 /** Create bucket: a mitigation the request adds. No id; the server mints it
-  * (ADR-017 §1). `target` is the predicate's source text. */
+  * (ADR-017 §1). `target` is the predicate's source text, absent for an
+  * absolute statement, whose target the server derives from its anchor. */
 final case class MitigationDefinitionRequest(
   name:       String,
-  target:     String,
+  target:     Option[String],
   spec:       MitigationSpecRequest,
   precedence: MitigationPrecedence
 )
@@ -237,11 +242,12 @@ object MitigationDefinitionRequest:
   given codec: JsonCodec[MitigationDefinitionRequest] = DeriveJsonCodec.gen
   given schema: Schema[MitigationDefinitionRequest] = Schema.derived
 
-/** Identity-preserving bucket: a stored mitigation the request keeps, by id. */
+/** Identity-preserving bucket: a stored mitigation the request keeps, by id.
+  * `target` is as in `MitigationDefinitionRequest`. */
 final case class MitigationUpdateRequest(
   id:         String,
   name:       String,
-  target:     String,
+  target:     Option[String],
   spec:       MitigationSpecRequest,
   precedence: MitigationPrecedence
 )
@@ -252,8 +258,9 @@ object MitigationUpdateRequest:
 
   /** A stored mitigation as the entry that keeps it unchanged. The tree
     * builder sends one for every mitigation it loaded, so a save from it keeps
-    * them. */
+    * them. An absolute statement's target is derived, so it is not sent. */
   def fromMitigation(m: Mitigation): MitigationUpdateRequest =
-    val source = m.target match
-      case MitigationTarget.Predicate(predicate) => predicate.source
+    val source = (m.spec, m.target) match
+      case (_: MitigationSpec.LeafAbsolute, _)         => None
+      case (_, MitigationTarget.Predicate(predicate)) => Some(predicate.source)
     MitigationUpdateRequest(m.id.value, m.name.value, source, MitigationSpecRequest.fromSpec(m.spec), m.precedence)

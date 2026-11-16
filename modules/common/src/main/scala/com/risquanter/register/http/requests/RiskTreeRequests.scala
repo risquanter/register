@@ -375,19 +375,41 @@ object RiskTreeRequests {
         Validation.fail(ValidationError(location, FieldProblem.StoredNodeNotInTree))
 
   /** The fields every submitted mitigation refines, at `subject`. A name that
-    * refines is then checked against the reserved query symbols. */
+    * refines is then checked against the reserved query symbols. An absolute
+    * statement's target is derived from its refined anchor; every other
+    * statement's is parsed. */
   private def refineMitigationFields(
     name: String,
-    target: String,
+    target: Option[String],
     spec: MitigationSpecRequest,
     subject: ErrorSubject
   ): Validation[ValidationError, (SafeName.SafeName, MitigationTarget, ResolvedSpec)] =
     val nameLocation = ErrorLocation.Field(subject, FieldName.Name)
-    Validation.validateWith(
-      refineNameField(name, nameLocation).flatMap(requireUnreservedMitigationName(_, nameLocation)),
-      TargetingPredicate.create(target, subject).map(MitigationTarget.Predicate(_)),
-      spec.toSpec(subject)
-    )((n, t, s) => (n, t, s))
+    val nameV = refineNameField(name, nameLocation).flatMap(requireUnreservedMitigationName(_, nameLocation))
+    spec match
+      case absolute: MitigationSpecRequest.LeafAbsolute =>
+        Validation.validateWith(
+          nameV,
+          requireAbsentTarget(target, ErrorLocation.Field(subject, FieldName.TargetingSource)),
+          absolute.toUnstamped(subject)
+        )((n, _, u) => (n, MitigationTarget.Predicate(TargetingPredicate.ofNode(u.anchor)), u))
+      case other =>
+        Validation.validateWith(nameV, refineTargetField(target, subject), other.toSpec(subject))((n, t, s) => (n, t, s))
+
+  /** An absolute statement's target is derived from its anchor, so a submitted
+    * one is refused at `location`. */
+  private[requests] def requireAbsentTarget(raw: Option[String], location: ErrorLocation): Validation[ValidationError, Unit] =
+    raw match
+      case Some(_) => Validation.fail(ValidationError(location, FieldProblem.TargetingDerivedFromAnchor))
+      case None    => Validation.succeed(())
+
+  /** Every other statement's target, parsed at `subject`; absent is refused as
+    * required. */
+  private[requests] def refineTargetField(raw: Option[String], subject: ErrorSubject): Validation[ValidationError, MitigationTarget] =
+    raw match
+      case Some(source) => TargetingPredicate.create(source, subject).map(MitigationTarget.Predicate(_))
+      case None =>
+        Validation.fail(ValidationError(ErrorLocation.Field(subject, FieldName.TargetingSource), FieldProblem.Required))
 
   /** A mitigation name spelled like a reserved query symbol, such as
     * `residual`, is refused at `location`. The knowledge base leaves such a

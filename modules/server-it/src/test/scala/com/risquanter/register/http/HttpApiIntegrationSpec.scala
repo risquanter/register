@@ -180,7 +180,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         val factor: Double = 0.5
         val mitigation = MitigationDefinitionRequest(
           name       = "Policy",
-          target     = "leaf(x)",
+          target     = Some("leaf(x)"),
           spec       = MitigationSpecRequest.ResultStage(List(
                          ResultTransformSpecRequest.CapLosses(cap),
                          ResultTransformSpecRequest.ScaleLosses(factor))),

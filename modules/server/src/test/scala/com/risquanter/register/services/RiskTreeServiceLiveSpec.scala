@@ -213,21 +213,21 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   /** A new mitigation halving every leaf's likelihood. */
   private def halveAllDef(name: String): MitigationDefinitionRequest =
     MitigationDefinitionRequest(
-      name, "leaf(x)",
+      name, Some("leaf(x)"),
       MitigationSpecRequest.LeafRelative(RelativeLikelihoodRequest.Scale(0.5), RelativeSeverityRequest.Keep),
       MitigationPrecedence.default)
 
   /** A new absolute statement that the leaf `anchor` occurs with probability 0.05. */
   private def pinDef(name: String, anchor: String): MitigationDefinitionRequest =
     MitigationDefinitionRequest(
-      name, "leaf(x)",
+      name, None,
       MitigationSpecRequest.LeafAbsolute(AbsoluteReplacementRequest.Likelihood(0.05), anchor, BaseStampChoice.KeepIfUnchanged),
       MitigationPrecedence.overrideFinal)
 
   /** The same statement stored on `tree`'s leaf `leafName`, stamped with that leaf as `tree` holds it. */
   private def pin(tree: RiskTree, label: String, leafName: String): Mitigation =
     val anchor = leafNamed(tree, leafName)
-    targeted(label, "leaf(x)",
+    targeted(label, TargetingPredicate.ofNode(anchor.id).source,
       MitigationSpec.LeafAbsolute(
         AbsoluteReplacement.Likelihood(residualProbability(0.05)), anchor.id, ContentHashIndex.hashOf(anchor)))
 

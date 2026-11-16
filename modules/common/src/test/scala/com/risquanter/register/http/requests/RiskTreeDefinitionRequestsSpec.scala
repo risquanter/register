@@ -96,7 +96,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     unsafeGet(Mitigation.create(
       mitigationId("floor"),
       SafeName.fromString("Floor").toOption.get,
-      MitigationTarget.Predicate(unsafeGet(TargetingPredicate.create("leaf(x)", ErrorSubject.Request), "target")),
+      MitigationTarget.Predicate(TargetingPredicate.ofNode(nodeIdOf(childIdStr))),
       MitigationSpec.LeafAbsolute(
         AbsoluteReplacement.Likelihood(residualProbability(0.05)), nodeIdOf(childIdStr), storedStamp),
       MitigationPrecedence.default
@@ -121,7 +121,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
   private def newAbsolute(anchor: String): MitigationDefinitionRequest =
     MitigationDefinitionRequest(
       name = "Floor",
-      target = "leaf(x)",
+      target = None,
       spec = MitigationSpecRequest.LeafAbsolute(
         AbsoluteReplacementRequest.Likelihood(0.05), anchor, BaseStampChoice.KeepIfUnchanged),
       precedence = MitigationPrecedence.default
@@ -664,7 +664,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         leaves = Seq(validLeafDef("Leaf", Some("Root"))),
         newMitigations = Seq(MitigationDefinitionRequest(
           name = "MFA",
-          target = "leaf(x)",
+          target = Some("leaf(x)"),
           spec = MitigationSpecRequest.LeafRelative(RelativeLikelihoodRequest.Scale(0.3), RelativeSeverityRequest.Keep),
           precedence = MitigationPrecedence.default
         ))

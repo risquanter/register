@@ -6,14 +6,16 @@ import zio.json.{DecoderOps, EncoderOps}
 import zio.prelude.Validation
 
 import com.risquanter.register.domain.data.{
-  AbsoluteReplacement, MitigationPrecedence, MitigationSpec, RelativeLikelihood, RelativeSeverity, ResultTransformSpec,
-  TransformPipeline
+  AbsoluteReplacement, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget, RelativeLikelihood,
+  RelativeSeverity, ResultTransformSpec, TargetingPredicate, TransformPipeline
 }
-import com.risquanter.register.domain.data.iron.ContentHash
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, SubmittedMitigations, ValidationError}
+import com.risquanter.register.domain.data.iron.{ContentHash, SafeName}
+import com.risquanter.register.domain.errors.{
+  ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationError
+}
 import com.risquanter.register.http.requests.RiskTreeRequests.ResolvedSpec
 import com.risquanter.register.testutil.TestHelpers.{
-  idStr, lognormalShape, nodeId, residualProbability, retentionFactor, safeId, unsafeGet
+  idStr, lognormalShape, mitigationId, nodeId, residualProbability, retentionFactor, safeId, unsafeGet
 }
 
 /** The submitted mitigation effects: each gate refines its fields at the
@@ -32,7 +34,14 @@ object MitigationRequestsSpec extends ZIOSpecDefault {
       case Validation.Failure(_, errors) => errors.toList.map(_.location)
       case Validation.Success(_, _)      => Nil
 
+  private def problemsOf(result: Validation[ValidationError, ?]): List[FieldProblem] =
+    result match
+      case Validation.Failure(_, errors) => errors.toList.map(_.problem)
+      case Validation.Success(_, _)      => Nil
+
   private def at(field: FieldName): ErrorLocation = ErrorLocation.Field(subject, field)
+
+  private def safeName(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
 
   private val resultStage: MitigationSpec =
     unsafeGet(
@@ -55,6 +64,10 @@ object MitigationRequestsSpec extends ZIOSpecDefault {
 
   private val relativeRequest: MitigationSpecRequest =
     MitigationSpecRequest.LeafRelative(RelativeLikelihoodRequest.Scale(0.3), RelativeSeverityRequest.ScaleSeverity(0.6))
+
+  private val absoluteRequest: MitigationSpecRequest =
+    MitigationSpecRequest.LeafAbsolute(
+      AbsoluteReplacementRequest.Likelihood(0.02), idStr("cyber"), BaseStampChoice.KeepIfUnchanged)
 
   private val mintId: RiskTreeRequests.IdGenerator = () => safeId("minted")
 
@@ -119,8 +132,8 @@ object MitigationRequestsSpec extends ZIOSpecDefault {
     },
 
     test("a new or kept mitigation named like a reserved query symbol is refused at that entry's Name") {
-      val newEntry  = MitigationDefinitionRequest("residual", "leaf(x)", relativeRequest, MitigationPrecedence.overrideFinal)
-      val keptEntry = MitigationUpdateRequest(idStr("kept"), "p95", "leaf(x)", relativeRequest, MitigationPrecedence.overrideFinal)
+      val newEntry  = MitigationDefinitionRequest("residual", Some("leaf(x)"), relativeRequest, MitigationPrecedence.overrideFinal)
+      val keptEntry = MitigationUpdateRequest(idStr("kept"), "p95", Some("leaf(x)"), relativeRequest, MitigationPrecedence.overrideFinal)
       val newSubject  = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
       val keptSubject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.Mitigations, 0)
       assertTrue(
@@ -132,9 +145,53 @@ object MitigationRequestsSpec extends ZIOSpecDefault {
     },
 
     test("a mitigation with an ordinary name refines") {
-      val entry = MitigationDefinitionRequest("Backup policy", "leaf(x)", relativeRequest, MitigationPrecedence.overrideFinal)
+      val entry = MitigationDefinitionRequest("Backup policy", Some("leaf(x)"), relativeRequest, MitigationPrecedence.overrideFinal)
       assertTrue(
         RiskTreeRequests.refineMitigationDefs(Seq(entry), mintId).toEither.isRight
+      )
+    },
+
+    test("an absolute statement sent with no target is given the target naming its anchor") {
+      val entry = MitigationDefinitionRequest("Pin", None, absoluteRequest, MitigationPrecedence.overrideFinal)
+      assertTrue(
+        RiskTreeRequests.refineMitigationDefs(Seq(entry), mintId).toEither.map(_.map(_.target)) ==
+          Right(Seq(MitigationTarget.Predicate(TargetingPredicate.ofNode(nodeId("cyber")))))
+      )
+    },
+
+    test("an absolute statement sent with a target is refused there, beside its other refusals") {
+      val badProbability = MitigationSpecRequest.LeafAbsolute(
+        AbsoluteReplacementRequest.Likelihood(1.5), idStr("cyber"), BaseStampChoice.KeepIfUnchanged)
+      val entry = MitigationDefinitionRequest("Pin", Some("leaf(x)"), badProbability, MitigationPrecedence.overrideFinal)
+      val entrySubject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
+      val result = RiskTreeRequests.refineMitigationDefs(Seq(entry), mintId)
+      assertTrue(
+        locationsOf(result).toSet == Set(
+          ErrorLocation.Field(entrySubject, FieldName.TargetingSource),
+          ErrorLocation.Field(entrySubject, FieldName.Probability)),
+        problemsOf(result).contains(FieldProblem.TargetingDerivedFromAnchor)
+      )
+    },
+
+    test("a relative statement sent with no target is refused as required at its target") {
+      val entry = MitigationDefinitionRequest("Backup policy", None, relativeRequest, MitigationPrecedence.overrideFinal)
+      val entrySubject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
+      val result = RiskTreeRequests.refineMitigationDefs(Seq(entry), mintId)
+      assertTrue(
+        locationsOf(result) == List(ErrorLocation.Field(entrySubject, FieldName.TargetingSource)),
+        problemsOf(result) == List(FieldProblem.Required)
+      )
+    },
+
+    test("fromMitigation sends no target for an absolute statement and the source for every other kind") {
+      val pinned  = unsafeGet(Mitigation.create(mitigationId("m-pin"), safeName("Pin"),
+        MitigationTarget.Predicate(TargetingPredicate.ofNode(absolute.anchor)), absolute, MitigationPrecedence.overrideFinal), "pinned")
+      val scaled  = unsafeGet(Mitigation.create(mitigationId("m-scale"), safeName("Scale"),
+        MitigationTarget.Predicate(unsafeGet(TargetingPredicate.create("leaf(x)", subject), "target")), relative,
+        MitigationPrecedence.overrideFinal), "scaled")
+      assertTrue(
+        MitigationUpdateRequest.fromMitigation(pinned).target.isEmpty,
+        MitigationUpdateRequest.fromMitigation(scaled).target == Some("leaf(x)")
       )
     },
 

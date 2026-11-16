@@ -3,15 +3,15 @@ package com.risquanter.register.domain.data
 import io.github.iltotore.iron.autoRefine
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
-import com.risquanter.register.domain.data.iron.ValidationMessages
+import com.risquanter.register.domain.data.iron.{NodeId, SafeId, ValidationMessages}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationErrorCode}
 import com.risquanter.register.http.errors.{LexProblem, NestingProblem, ParseProblem, Positioned, QueryPosition, QueryToken}
 
 /** Boundary validation for the targeting sublanguage: a bare single-free-variable
   * FOL formula, in the targeting fragment (no quantifiers, no function term
   * other than a node-returning function), with no mitigation-state predicate and
-  * no node name. `create` is the only constructor, so these rules also gate
-  * every decode.
+  * no node name. `create` is the validation boundary, so these rules also gate
+  * every decode, and `ofNode` passes its text through it.
   */
 object TargetingPredicateSpec extends ZIOSpecDefault:
 
@@ -44,6 +44,16 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       test("a source of exactly the length bound") {
         val source = "leaf(x)" + " " * (MaxSourceLength - "leaf(x)".length)
         assertTrue(source.length == MaxSourceLength, TargetingPredicate.create(source, ErrorSubject.Request).toEither.isRight)
+      }
+    ),
+    suite("ofNode")(
+      test("names exactly one node by its identifier, and create of its source gives it back") {
+        val id        = NodeId(SafeId.fromString(nodeId).toOption.get)
+        val predicate = TargetingPredicate.ofNode(id)
+        assertTrue(
+          (predicate.source: String) == s"""eq(x, node_id("$nodeId"))""",
+          TargetingPredicate.create(predicate.source, ErrorSubject.Request).toEither == Right(predicate)
+        )
       }
     ),
     suite("rejects")(

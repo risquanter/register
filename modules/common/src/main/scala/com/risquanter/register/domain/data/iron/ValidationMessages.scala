@@ -144,6 +144,8 @@ object ValidationMessages:
       "Targeting predicates may not reference mitigation state (mitigate, mitigated, unmitigated)"
     case FieldProblem.TargetingNodeNameReferenced    =>
       "A targeting predicate names a node by its identifier, node_id(\"…\"), never by its name"
+    case FieldProblem.TargetingDerivedFromAnchor =>
+      "An absolute statement targets its anchor, and the server writes that target; send no target"
 
     // Workspace limits and lookups
     case FieldProblem.SeedEntityIdInUse(seedEntityId) =>

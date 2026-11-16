@@ -418,3 +418,4 @@ PATCH bump; plan close = MINOR bump.
 - modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala
 - modules/app/src/test/scala/app/state/SelectionEditSpec.scala
 - modules/app/src/test/scala/app/state/MitigationReadoutSpec.scala
+- modules/common/src/test/scala/com/risquanter/register/http/requests/RiskTreeDefinitionRequestsSpec.scala

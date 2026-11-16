@@ -51,16 +51,13 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
 
   private def sname(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
 
-  private val pred: MitigationTarget =
-    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get)
-
   /** A fixed authoring-time base stamp; the round-trip cares that whatever stamp
     * was written survives, not its exact value. */
   private val stamp: ContentHash = ContentHash.fromString("a" * 64).toOption.get
 
   private def overrideMit(label: String, anchor: NodeId): Mitigation =
     Mitigation.create(
-      mitigationId(label), sname(label), pred,
+      mitigationId(label), sname(label), MitigationTarget.Predicate(TargetingPredicate.ofNode(anchor)),
       MitigationSpec.LeafAbsolute(
         AbsoluteReplacement.Likelihood(residualProbability(0.05)), anchor, stamp),
       MitigationPrecedence.overrideFinal
@@ -118,7 +115,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
   /** A new absolute statement that the leaf `anchor` occurs with probability 0.05. */
   private def pinRequest(anchor: NodeId): MitigationDefinitionRequest =
     MitigationDefinitionRequest(
-      name = "m-service", target = "leaf(x)",
+      name = "m-service", target = None,
       spec = MitigationSpecRequest.LeafAbsolute(
         AbsoluteReplacementRequest.Likelihood(0.05), anchor.value, BaseStampChoice.KeepIfUnchanged),
       precedence = MitigationPrecedence.overrideFinal
@@ -212,6 +209,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
                          false, BranchRef.Main, None, false, MitigationSelection.single(m.id))
         yield assertTrue(
           tree.mitigations.map(_.id) == List(m.id),
+          m.target == MitigationTarget.Predicate(TargetingPredicate.ofNode(cyber.id)),
           scopes.outcomes == Map(m.id -> ScopeOutcome.Resolved(Set(cyber.id))),
           stale == Set(m.id),
           curves(created.rootId).map(_.withMitigations) == List(Nil, List(m.id))

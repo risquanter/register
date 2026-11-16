@@ -568,6 +568,7 @@ enum FieldProblem:
   case TargetingSeveralFreeVariables
   case TargetingMitigationStateReferenced
   case TargetingNodeNameReferenced
+  case TargetingDerivedFromAnchor
 
   // Workspace limits and lookups the services report in a Rejected
   case SeedEntityIdInUse(seedEntityId: SeedEntityId.SeedEntityId)
@@ -665,6 +666,7 @@ object FieldProblem:
     case TargetingSeveralFreeVariables              => ValidationErrorCode.CONSTRAINT_VIOLATION
     case TargetingMitigationStateReferenced         => ValidationErrorCode.CONSTRAINT_VIOLATION
     case TargetingNodeNameReferenced                => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TargetingDerivedFromAnchor                 => ValidationErrorCode.CONSTRAINT_VIOLATION
     case SeedEntityIdInUse(_)                      => ValidationErrorCode.DUPLICATE_VALUE
     case MaxTreesReached(_)                         => ValidationErrorCode.CONSTRAINT_VIOLATION
     case NodeNotFound                               => ValidationErrorCode.NOT_FOUND

@@ -1122,7 +1122,8 @@ Appendix Option B is a second elevation, not part of this one.
 ## 9. Steps and their order
 
 The plan ships whole. Its work lands in three steps, each green before the next
-starts.
+starts, and a fourth step reviews a decision of another plan once step 3 has
+landed.
 
 1. **The compare-and-set save, server side.** `SaveStagingRef`, the `setTree`
    overload, `RiskTreeRepository.update` with `expectedVersion`,
@@ -1138,6 +1139,14 @@ starts.
    records step 1 amended.
 3. **The client token.** `ETag` on the reads, `If-Match` on the PUT, the browser
    changes. This closes W2. This step amends ADR-017 and ADR-038.
+4. **Revisit where the override edit popup saves.** `PLAN-RISKTRANSFORM.md`
+   §7.6.12 decision 21 placed the popup in the Design view while R1 was
+   unresolved. Its option A saves from the Analyze view, from the tree the card
+   loaded. Before this step, a save from a card loaded before a Design save
+   silently reverts that save. After step 3 the same save is refused with a
+   version conflict. This step judges whether option A then serves the user
+   better, and presents the answer as a decision. It writes no code unless that
+   decision is ruled.
 
 Step 1 precedes both others. Steps 2 and 3 do not depend on each other; step 2 is
 listed first because the user ruled on 2026-11-02 that the compare-and-set save

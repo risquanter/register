@@ -7,7 +7,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 
 import com.risquanter.register.common.FolSymbols.{NodeFunction, QueryPredicate, Signatures}
-import com.risquanter.register.domain.data.iron.{NonNegativeInt, TargetingSource}
+import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt, TargetingSource}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.errors.{ParseProblem, Positioned}
 
@@ -19,9 +19,10 @@ import vql.fragment.{Fragment, FragmentCheck, FragmentViolation}
   * that resolves, server-side, to the set of nodes the mitigation scopes.
   *
   * Only the source text is stored and serialized; the parsed formula is derived
-  * state. `create` is the sole constructor and the single validation boundary
-  * (decode == create), so no `TargetingPredicate` value exists whose source is
-  * not a well-formed member of the targeting fragment. It admits structural and
+  * state. `create` is the single validation boundary (decode == create), and
+  * `ofNode` builds its text and passes it through `create`, so no
+  * `TargetingPredicate` value exists whose source is not a well-formed member
+  * of the targeting fragment. It admits structural and
   * attribute predicates over one variable, and names a node by
   * `node_id("…")`. It rejects quantifiers, every function application other
   * than a node-returning function (the targeting fragment), a node named by
@@ -91,6 +92,20 @@ object TargetingPredicate:
         checked(requireNoNodeName(formula))
       )((_, _, _, _) => new TargetingPredicate(refined))
     }
+
+  /** The predicate naming exactly the node `id`: `eq(x, node_id("<id>"))`. It
+    * goes through `create`, so it is checked like every other predicate. A
+    * `NodeId` admits only the 26 characters of a ULID, so the text always
+    * parses and fits the length bound, and a refusal here is a defect that
+    * throws (ADR-033). */
+  def ofNode(id: NodeId): TargetingPredicate =
+    create(nodeSource(id), ErrorSubject.Request).toEither.fold(
+      errors => throw new IllegalStateException(s"The predicate naming one node was refused: ${errors.head.problem}"),
+      identity)
+
+  /** The source text of `ofNode`. */
+  private def nodeSource(id: NodeId): String =
+    s"""${QueryPredicate.Eq.symbol}(x, ${NodeFunction.ById.symbol}("${id.value}"))"""
 
   private def parseProblem(error: ParseError): Positioned[ParseProblem] =
     ParseProblem.fromFormulaError(error).fold(
