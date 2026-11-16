@@ -1818,8 +1818,9 @@ specs (targeting: no quantifiers/functions; screening: quantifier depth ≤ k),
 so targeting predicates and screening queries share one implementation (the
 F5 single-mechanism requirement). Ships as engine 0.11.x after 0.11.0.
 
-**Status:** open — part (a) length cap folds into the M3 sweep; part (b)
-mechanism is ruled (§8.4-3), built as the sibling engine's fragment-membership
+**Status:** part (a) resolved — `QueryRequest.query` is `QueryText`, at most
+2 048 characters, refined by the decoder (PLAN-RISKTRANSFORM §11). Part (b)
+open — its mechanism is ruled (§8.4-3), built as the sibling engine's fragment-membership
 API and consumed at register's write-path validation (M2/M3).
 
 ---
@@ -2786,8 +2787,12 @@ too.
   the codec refuses an over-long query with 422 before the handler runs,
   checked first for whether `QueryVariable` then needs a bound of its own.
 
-**Status.** Open. Left out of `PLAN-UES-UNIFIED-ERROR-SHAPE.md` by the user's
-ruling of 2026-11-11.
+**Status.** Resolved by PLAN-RISKTRANSFORM §11. The query text is `QueryText`,
+at most 2 048 characters, the targeting source's bound, refined by the decoder
+so an over-long query is refused with 400 before the handler runs. A variable
+is bounded by the text it is read from and needs no bound of its own. The
+largest refusal is bounded by the text and by the cut of a trailing-tokens
+refusal to its first eight tokens and a count.
 
 ## 66. The server does not exit on the stop signal, so every `docker compose down` waits ten seconds and then kills it — investigate
 

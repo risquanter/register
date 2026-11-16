@@ -9,6 +9,7 @@ import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.http.HttpTestHarness
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.configs.SimulationConfig
+import com.risquanter.register.domain.data.iron.QueryText
 import io.github.iltotore.iron.*
 
 /** Shared fixtures for DemoSimpleScriptSpec and DemoEnterpriseScriptSpec. */
@@ -34,10 +35,13 @@ object DemoSpecSupport:
     )
 
   def query(client: SttpClientFixture.Client, key: String, treeId: String)(q: String): Task[QueryResponse] =
-    basicRequest
-      .header("X-Branch", "main")
-      .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-      .body(QueryRequest(q))
-      .response(asJson[QueryResponse])
-      .send(client.backend)
-      .flatMap(r => ZIO.fromEither(r.body))
+    for
+      text     <- ZIO.fromEither(QueryText.fromString(q)).mapError(new IllegalArgumentException(_))
+      response <- basicRequest
+                    .header("X-Branch", "main")
+                    .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
+                    .body(QueryRequest(text))
+                    .response(asJson[QueryResponse])
+                    .send(client.backend)
+      body     <- ZIO.fromEither(response.body)
+    yield body

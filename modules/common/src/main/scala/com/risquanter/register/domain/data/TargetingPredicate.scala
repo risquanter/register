@@ -4,10 +4,9 @@ import zio.prelude.{Validation, Equal}
 import zio.json.JsonCodec
 import sttp.tapir.Schema
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 
 import com.risquanter.register.common.FolSymbols.{NodeFunction, QueryPredicate, Signatures}
-import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt, TargetingSource}
+import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt, TargetingSource, TargetingSourceConstraint}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.errors.{ParseProblem, Positioned}
 
@@ -38,7 +37,7 @@ object TargetingPredicate:
     * They mirror the type's `MinLength` and `MaxLength` literals, which cannot
     * be read back at runtime. */
   private val MinSourceLength: NonNegativeInt = 1
-  private val MaxSourceLength: NonNegativeInt = 4096
+  private val MaxSourceLength: NonNegativeInt = 2048
 
   /** Mitigation-state predicates a targeting predicate may not reference — a
     * mitigation targeting by its own effect would be self-referential. These
@@ -50,7 +49,7 @@ object TargetingPredicate:
 
   /** Boundary validation, cross-compiled (browser and server), in two phases:
     *  - a gate that short-circuits, because each step needs the prior's output:
-    *    1. length-refine into `TargetingSource` (1–4096) — also bounds the
+    *    1. length-refine into `TargetingSource` (1–2048) — also bounds the
     *       input the parser sees; 2. parse via the foundation `FOLParser`;
     *  - once parsed, four independent checks on the formula, whose errors
     *    accumulate so an authoring form reports every problem at once:
@@ -75,7 +74,7 @@ object TargetingPredicate:
     val gate: Either[FieldProblem, (TargetingSource, Formula[FOL])] =
       for
         refined <- source
-          .refineEither[MinLength[1] & MaxLength[4096]]
+          .refineEither[TargetingSourceConstraint]
           .left.map(_ => FieldProblem.LengthOutOfRange(MinSourceLength, MaxSourceLength))
         formula <- FOLParser.parse(refined)
           .left.map(error => FieldProblem.TargetingPredicateUnparseable(parseProblem(error)))

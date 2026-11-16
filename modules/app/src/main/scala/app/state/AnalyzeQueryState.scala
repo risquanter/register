@@ -5,9 +5,10 @@ import com.raquo.laminar.api.L.*
 import app.core.ZJS.*
 import app.core.{RequestFailure, ViewFailure}
 import app.views.ErrorMessages
-import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, QueryText, TreeId, UserId, ValidationMessages, WorkspaceKeySecret}
+import com.risquanter.register.domain.errors.FieldProblem
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
-import com.risquanter.register.http.errors.{QueryProblem, RejectionDetail, WireError}
+import com.risquanter.register.http.errors.{RejectionDetail, WireError}
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.http.responses.QueryResponse
 import vql.logic.ParsedQuery
@@ -40,35 +41,44 @@ final class AnalyzeQueryState(
 
   // ── Client-side parse validation ──────────────────────────────
   //
-  // QueryRequest.resolve runs in-browser (vql-engine cross-compiled to JS via
-  // common), the same boundary the server parses through. Validation is
-  // triggered by:
+  // QueryText's length bound and QueryRequest.resolve run in-browser
+  // (vql-engine cross-compiled to JS via common), the same boundary the server
+  // decodes and parses through. Validation is triggered by:
   //   - Blur (always) — textarea loses focus
   //   - Run / Ctrl+Enter — executeQuery() validates before submitting
   //   - Keystroke debounce (300ms) — only when instantValidate is on
   //
   // None when not yet validated or input is empty, Left(problem) on a refused
-  // query, Right(parsed) on a query the service can answer. The refusal is
-  // rendered through ErrorMessages.query, so the pane and the server show one
-  // sentence for one refusal.
+  // text, Right(parsed) on a query the service can answer. The refusal is
+  // rendered through ValidationMessages.render, so the pane and the server show
+  // one sentence for one refusal.
 
   /** When true, parse validation runs on every keystroke (debounced 300ms). */
   val instantValidate: Var[Boolean] = Var(false)
 
-  val parseResult: Var[Option[Either[QueryProblem, ParsedQuery]]] = Var(None)
+  val parseResult: Var[Option[Either[FieldProblem, ParsedQuery]]] = Var(None)
+
+  /** The request a text makes, and its parse, or why the text is refused: it
+    * is over the length bound, or the parser refuses it. */
+  private def checked(text: String): Either[FieldProblem, (QueryRequest, ParsedQuery)] =
+    QueryText.fromString(text) match
+      case Left(_) => Left(FieldProblem.TooLong(QueryText.MaxLength))
+      case Right(query) =>
+        val request = QueryRequest(query)
+        QueryRequest.resolve(request).map(parsed => (request, parsed)).left.map(FieldProblem.Query(_))
 
   /** Run the parser against the current input and update parseResult. */
   def validateNow(): Unit =
     val text = queryInput.now()
     parseResult.set(
       if text.trim.isEmpty then None
-      else Some(QueryRequest.resolve(QueryRequest(text)))
+      else Some(checked(text).map((_, parsed) => parsed))
     )
 
   /** The refusal's sentence for display, None when not yet validated or valid. */
   val parseError: Signal[Option[String]] =
     parseResult.signal.map {
-      case Some(Left(problem)) => Some(ErrorMessages.query(problem))
+      case Some(Left(problem)) => Some(ValidationMessages.render(problem))
       case _                   => None
     }
 
@@ -134,7 +144,7 @@ final class AnalyzeQueryState(
     */
   private enum Trigger:
     case Reset
-    case Run(key: WorkspaceKeySecret, treeId: TreeId, text: String, branch: BranchChoice)
+    case Run(key: WorkspaceKeySecret, treeId: TreeId, request: QueryRequest, branch: BranchChoice)
 
   /** Outcome of one trigger, folding `queryResult`/`queryServerError` into a
     * single value so both stay in lockstep as one thing switches to the
@@ -160,8 +170,8 @@ final class AnalyzeQueryState(
     requestPipeline[Either[RequestFailure, QueryResponse], Outcome](
       triggerBus.events.map {
         case Trigger.Reset => None
-        case Trigger.Run(key, treeId, text, branch) =>
-          Some(() => queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(text), branch)).toOutcomeEventStream)
+        case Trigger.Run(key, treeId, request, branch) =>
+          Some(() => queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, request, branch)).toOutcomeEventStream)
       },
       idle    = Outcome.Idle,
       loading = Outcome.Loading,
@@ -231,12 +241,12 @@ final class AnalyzeQueryState(
     if queryText.trim.isEmpty then ()
     else
       // Validate client-side first — update parseResult for UI feedback
-      val parsed = QueryRequest.resolve(QueryRequest(queryText))
-      parseResult.set(Some(parsed))
-      parsed match
-        case Left(_) => () // Parse error — displayed via parseResult, do not submit
-        case Right(_) =>
+      val result = checked(queryText)
+      parseResult.set(Some(result.map((_, parsed) => parsed)))
+      result match
+        case Left(_) => () // Refused text — displayed via parseResult, do not submit
+        case Right((request, _)) =>
           (keySignal.now(), selectedTreeId.now()) match
             case (Some(key), Some(treeId)) =>
-              triggerBus.emit(Trigger.Run(key, treeId, queryText, branchAccessor()))
+              triggerBus.emit(Trigger.Run(key, treeId, request, branchAccessor()))
             case _ => () // No workspace or tree selected

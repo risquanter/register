@@ -14,11 +14,13 @@ type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
 type SafeExtraShortStr = String :| (Not[Blank] & MaxLength[20])
 
 // Targeting predicate source text: a bare single-free-variable FOL formula.
-// The 4096 ceiling bounds parser work on stored and wire text, and holds about
-// 85 nodes picked by identifier. Full validity (parse, targeting-fragment
+// The 2048 ceiling keeps the argument list the engine's parser can be handed
+// below the depth that overflows the native image's stack, and holds about 42
+// nodes picked by identifier. Full validity (parse, targeting-fragment
 // membership, exactly one free variable, no mitigation-state predicate, no node
 // name) is enforced by TargetingPredicate.create.
-type TargetingSource = String :| (MinLength[1] & MaxLength[4096])
+type TargetingSourceConstraint = MinLength[1] & MaxLength[2048]
+type TargetingSource = String :| TargetingSourceConstraint
 
 // Email with format validation (whitelist regex: local-part, @, domain with TLD)
 type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$"])
@@ -545,6 +547,31 @@ object QueryLiteral:
 
   given JsonEncoder[QueryLiteral] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[QueryLiteral] = JsonDecoder[String].mapOrFail(fromString)
+
+// QueryText: a screening query's text. The 2048 ceiling is the targeting
+// source's, for the same reason: it bounds what the engine's parser is handed.
+// No minimum: the parser refuses an empty text with its own refusal.
+type QueryTextConstraint = MaxLength[2048]
+type QueryTextStr = String :| QueryTextConstraint
+
+object QueryText:
+  opaque type QueryText = QueryTextStr
+
+  /** The bound as the value a refusal carries. It mirrors the type's
+    * `MaxLength` literal, which cannot be read back at runtime. */
+  val MaxLength: NonNegativeInt = 2048
+
+  extension (t: QueryText)
+    def value: QueryTextStr = t
+
+  /** The query text a string is, or the reason it is not one. */
+  def fromString(s: String): Either[String, QueryText] =
+    s.refineEither[QueryTextConstraint]
+
+  // The body of a screening query, refined on decode so a text over the bound
+  // is refused before a handler runs.
+  given JsonEncoder[QueryText] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[QueryText] = JsonDecoder[String].mapOrFail(fromString)
 
 // Opaque type for emails
 object Email:

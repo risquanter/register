@@ -10,7 +10,7 @@ import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinit
 import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeStructureResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
 import com.risquanter.register.domain.data.{MitigationPrecedence, MitigationSelection, MitigationSpec, ResultTransformSpec, RiskLeaf}
-import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice, CommitHash}
+import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice, CommitHash, QueryText}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
 
@@ -358,7 +358,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
             onScenario.post(uri"$treeUri/nodes/${rootId.value}/prob-of-exceedance?threshold=1000")
               .body(ProbOfExceedanceRequest(MitigationSelection.Inherent)),
             onScenario.put(treeUri).body(update),
-            onScenario.post(uri"$treeUri/query").body(QueryRequest("Q[>=]^{1/2} x (leaf(x), true)"))
+            onScenario.post(uri"$treeUri/query").body(QueryRequest(QueryText.fromString("Q[>=]^{1/2} x (leaf(x), true)").toOption.get))
           ))(_.send(client.backend))
         yield assertTrue(
           answers.forall(_.code == StatusCode.NotFound),

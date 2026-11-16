@@ -184,6 +184,13 @@ a targeting predicate's. Both carry only the typed fields above, and this servic
 renders the sentence from them in `QueryProblem.describe` and
 `ParseProblem.describe`. The log line and the query pane read that one renderer.
 
+A refusal's size does not grow with the text. The text itself is bounded: a
+query's and a targeting predicate's at 2 048 characters, refined before the
+parser runs. The one refusal that lists tokens of the text, the text continuing
+after the formula's end, keeps the first token, at most seven more, and the
+count of the rest. So `p ,,,,…` of 2 048 characters answers with eight commas
+and "2038 more", where it would otherwise carry all 2 046.
+
 Three facts make this sound:
 
 - A query's vocabulary is resource names, which cross the client boundary in
@@ -198,8 +205,8 @@ Three facts make this sound:
 
 The log is the one unstructured sink: `logback.xml` writes `%msg%n`. The literal
 alphabet therefore excludes every control character, and `Failure`'s log line
-cuts a query refusal's sentence to 300 characters, because a word has no length
-bound.
+cuts the sentence of a query refusal and of a targeting predicate's refusal to
+300 characters, because one word may run to the text's whole 2 048 characters.
 
 Every query refusal carries a `QueryPosition`. `QueryPosition.Unknown()` is the
 case for a refusal the engine reports without one, and it renders as no

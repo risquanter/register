@@ -9,6 +9,7 @@ import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, Query
 import com.risquanter.register.http.errors.{BindProblem, QueryProblem, RejectionDetail, WireError}
 import zio.json.*
 import com.risquanter.register.http.support.SttpClientFixture
+import com.risquanter.register.domain.data.iron.QueryText
 import com.risquanter.register.testcontainers.IrminCompose
 
 /** Integration tests for POST /w/{key}/risk-trees/{treeId}/query
@@ -37,6 +38,10 @@ object QueryEndpointSpec extends ZIOSpecDefault:
     )
 
   /** The simple demo tree — two leaves under "IT Risk", two under "Third Party Risk". */
+  /** The request for a text within the length bound. */
+  private def request(text: String): QueryRequest =
+    QueryRequest(QueryText.fromString(text).fold(reason => throw new IllegalArgumentException(reason), identity))
+
   private val demoTreeRequest = RiskTreeDefinitionRequest(
     name = "Operational Risk Model",
     portfolios = Seq(
@@ -94,7 +99,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
 
           queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-            .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 1000))"""))
+            .body(request("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("IT Risk")), gt_loss(p95(x, "inherent"), 1000))"""))
             .response(asJson[QueryResponse])
             .send(client.backend)
           result <- ZIO.fromEither(queryResp.body)
@@ -117,7 +122,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
 
           queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-            .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, "unterminated), gt_loss(p95(x, "inherent"), 1000))"""))
+            .body(request("""Q[>=]^{1/2} x (leaf_descendant_of(x, "unterminated), gt_loss(p95(x, "inherent"), 1000))"""))
             .response(asStringAlways)
             .send(client.backend)
           rawBody    = queryResp.body
@@ -151,7 +156,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
 
           queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-            .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("NonExistentNode")), gt_loss(p95(x, "inherent"), 1000))"""))
+            .body(request("""Q[>=]^{1/2} x (leaf_descendant_of(x, node_named("NonExistentNode")), gt_loss(p95(x, "inherent"), 1000))"""))
             .response(asStringAlways)
             .send(client.backend)
           rawBody    = queryResp.body
@@ -183,7 +188,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
 
           queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-            .body(QueryRequest("""Q[>=]^{1/2} x (child_of(x, y), leaf(x)) (y)"""))
+            .body(request("""Q[>=]^{1/2} x (child_of(x, y), leaf(x)) (y)"""))
             .response(asStringAlways)
             .send(client.backend)
           rawBody    = queryResp.body
@@ -196,6 +201,27 @@ object QueryEndpointSpec extends ZIOSpecDefault:
             case RejectionDetail.Query(QueryProblem.AnswerVariablesNotSupported(variables)) =>
               variables.toList.map(_.problem.value) == List("y")
             case _ => false)
+      },
+      test("H5: a query over the length bound returns 400 before the handler runs") {
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(demoTreeRequest)
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+          treeId     = bootstrap.tree.id.value
+
+          queryResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
+            .contentType("application/json")
+            .body(s"""{"query":"${"x" * (QueryText.MaxLength + 1)}"}""")
+            .response(asStringAlways)
+            .send(client.backend)
+        yield assertTrue(queryResp.code.code == 400)
       }
     ).provideLayerShared(harnessLayer) @@
       TestAspect.withLiveClock @@

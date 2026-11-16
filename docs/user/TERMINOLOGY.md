@@ -535,7 +535,7 @@ former figures to record.
 An **absolute** statement says "after this control, this leaf *is* these
 figures" — the likelihood is 2%, the loss we bear is 1 to 5 million. Those
 figures were judged against one particular leaf as it stood when they were
-written.
+written. So an absolute statement applies to that one leaf and to no other.
 
 That difference creates a failure mode the relative kind does not have.
 

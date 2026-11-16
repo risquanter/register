@@ -5,17 +5,18 @@ import zio.prelude.NonEmptyList
 import vql.parser.VagueQueryParser
 import vql.logic.ParsedQuery
 
-import com.risquanter.register.domain.data.iron.QueryVariable
+import com.risquanter.register.domain.data.iron.{QueryText, QueryVariable}
 import com.risquanter.register.http.errors.{Positioned, QueryPosition, QueryProblem}
 
 /** Request body for vague-quantifier query evaluation.
   *
-  * Contains the raw query string in the FOL vague-quantifier syntax.
-  * Parsing and validation happen at the boundary via `resolve()`.
+  * Contains the query text in the FOL vague-quantifier syntax. Its length is
+  * bounded by the decoder, so a text over the bound is refused before a handler
+  * runs. Parsing happens at the boundary via `resolve()`.
   *
-  * @param query FOL query string, e.g. `Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))`
+  * @param query FOL query text, e.g. `Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))`
   */
-final case class QueryRequest(query: String)
+final case class QueryRequest(query: QueryText.QueryText)
 
 object QueryRequest:
   given JsonCodec[QueryRequest] = DeriveJsonCodec.gen
@@ -33,12 +34,12 @@ object QueryRequest:
     * are defects and throw.
     *
     * {{{
-    * resolve(QueryRequest("Q[>=]^{1/2} x (leaf(x), leaf(x)) (y)"))
+    * resolve(request)   // request.query is "Q[>=]^{1/2} x (leaf(x), leaf(x)) (y)"
     * // Left(AnswerVariablesNotSupported(NonEmptyList(Positioned(Unknown(), y))))
     * }}}
     */
   def resolve(req: QueryRequest): Either[QueryProblem, ParsedQuery] =
-    VagueQueryParser.parse(req.query) match
+    VagueQueryParser.parse(req.query.value) match
       case Left(err) =>
         Left(QueryProblem.fromQueryError(err).fold(
           reason => throw new IllegalStateException(s"The query parser returned an error that refuses no text: $reason"),

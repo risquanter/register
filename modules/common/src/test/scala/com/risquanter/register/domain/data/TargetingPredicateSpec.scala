@@ -28,7 +28,7 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
   private val nodeId: String = "01HQ8ZK3V4N5P6Q7R8S9T0W1X2"
 
   /** The source length bound, from `TargetingSource`. */
-  private val MaxSourceLength: Int = 4096
+  private val MaxSourceLength: Int = 2048
 
   def spec = suite("TargetingPredicateSpec")(
     suite("accepts")(
@@ -44,6 +44,10 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       test("a source of exactly the length bound") {
         val source = "leaf(x)" + " " * (MaxSourceLength - "leaf(x)".length)
         assertTrue(source.length == MaxSourceLength, TargetingPredicate.create(source, ErrorSubject.Request).toEither.isRight)
+      },
+      test("the longest argument list the length bound admits parses") {
+        val source = "p(" + List.fill(1023)("x").mkString(",") + ")"
+        assertTrue(source.length <= MaxSourceLength, TargetingPredicate.create(source, ErrorSubject.Request).toEither.isRight)
       }
     ),
     suite("ofNode")(

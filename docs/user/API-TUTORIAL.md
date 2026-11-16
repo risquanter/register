@@ -167,7 +167,7 @@ http POST localhost:18080/workspaces \
 
 A request that replaces a stored tree, `PUT /w/{key}/risk-trees/{treeId}`, carries mitigations in two lists, the way it carries nodes. `mitigations` lists each stored mitigation to keep, by its `id`. `newMitigations` lists each one to add, with no `id`, and the server assigns one. A stored mitigation that neither list names is deleted. So to keep a tree's mitigations, send back every one its structure read returned.
 
-An absolute statement is the one exception to sending it back as read. Its `target` is written by the server from its `anchor`, and the read shows it, but a request that sends a `target` with an absolute statement is refused with `400` at that entry. Send an absolute statement back without its `target`. Every other mitigation needs its `target`, and one sent without it is refused as required.
+An absolute statement is the one exception to sending it back as read. Its `target` is written by the server from its `anchor`, and the read shows it, but a request that sends a `target` with an absolute statement is refused with `400` at that entry. Send an absolute statement back without its `target`. Every other mitigation needs its `target`, and one sent without it is refused as required. A `target` holds at most 2 048 characters, a limit chosen by this project, and so does the `query` of a screening query sent to `POST /w/{key}/risk-trees/{treeId}/query`. A longer one is refused with `400`.
 
 An [absolute statement](TERMINOLOGY.md#36-relative-and-absolute-statements) names the stored leaf it was written against in its `anchor`. A tree being created has no stored leaf yet, so an absolute statement can be added only by a replacing request.
 

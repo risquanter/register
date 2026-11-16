@@ -5176,6 +5176,19 @@ the questions that elevation raised.
     - A: keep 256.
     - B: raise it.
 
+    > **Re-ruled (user, 2026-11-16): 2048, for the targeting source and for a
+    > screening query's text alike.** The security review of M4 measured the
+    > server's native image at 0.22.0, with vql-engine 0.20.0. A targeting source
+    > `p(x,x,…)` of 1 536 arguments parses. One of 1 792 arguments, which is
+    > 3 586 characters, throws `StackOverflowError` in the engine's `parseList`
+    > and ends the process. The engine's nesting bound does not count the
+    > arguments of a list. A text of 2 048 characters holds at most 1 023
+    > arguments. The bound stays at 2 048 after the engine bounds an argument
+    > list, which is vql-engine's T-015 in its `docs/TODOS.md`, so that each
+    > bound alone stops the overflow. 2 048 characters hold 42 hand-picked
+    > nodes, and 1 000 such sources are 2 MB of text. Narrowing refuses a stored
+    > source of 2 049 to 4 096 characters when its tree is read.
+
     The bound does not limit parse depth. vql-engine 0.19.0's formula parser has
     no depth bound and throws `StackOverflowError` on 260 nested parentheses
     around one atom, which is 524 characters, or on a chain of 200 atoms joined
@@ -12998,3 +13011,356 @@ sbt serverIt/test                   # green
 
 The BATS suites are due at the end of this section, because it changes a wire
 shape. The report carries their command block.
+
+## 11. Security review of M4: the length bounds, the trailing-tokens refusal and the log cuts (continuation, 2026-11-16)
+
+### 11.1 The defects
+
+1. **A targeting source crashes the native server.** The security review of M4
+   measured the server's native image at 0.22.0 with vql-engine 0.20.0. A
+   targeting source `p(x,x,…)` of 1 536 arguments parses. One of 1 792
+   arguments, which is 3 586 characters, throws `StackOverflowError` in the
+   engine's `parseList` and ends the process. `POST /workspaces` needs no key,
+   so anyone who reaches the server can send it. The engine's nesting bound does
+   not count the arguments of a list.
+2. **A screening query has no length bound.** `QueryRequest.query` is a
+   `String`, bounded only by the 8 MiB body cap (`REGISTER_MAX_REQUEST_BYTES`).
+   The project's API4 criterion in `.claude/skills/code-quality-review/SKILL.md`
+   says a size bound is "an Iron refinement carrying the maximum, so the bound
+   is enforced by the decoder before a handler runs".
+3. **A trailing-tokens refusal carries every remaining token.** The text
+   `p ,,,,…` of 2 048 characters answers with 2 046 tokens of about 43 bytes
+   each, roughly 88 KB for one targeting source. ADR-035 §5 says a refusal
+   "never carries the caller's whole input".
+4. **Two log lines are unbounded.** `Failure.logged` cuts only
+   `FieldProblem.Query` to 300 characters, and ADR-029 §3 and ADR-035 §5 state
+   the cut for `TargetingPredicateUnparseable` too.
+   `ResolvedScopes.logFailures` writes every failed mitigation's sentences, up
+   to 1 000 of them, on every read.
+
+### 11.2 Rulings
+
+- **Decision 20 re-ruled (user, 2026-11-16): 2048** for the targeting source
+  and for a screening query's text. The bound stays at 2 048 after the engine
+  bounds an argument list, which is vql-engine's T-015 in its `docs/TODOS.md`,
+  so that each bound alone stops the overflow. 2 048 characters hold at most
+  1 023 arguments, under the 1 536 measured to parse on the native image. They
+  hold 42 nodes picked by identifier.
+- **Query bound (user, 2026-11-16):** server-side, by OWASP's input-validation
+  guidance and the project's API4 criterion, which places it in the decoder.
+- **Trailing tokens (user, 2026-11-16): option A**, cap `rest` and carry the
+  count of tokens left out.
+- **Finding 7** (the ADR-029 §3 row for `TargetingPredicate.ofNode`) is
+  documentation only and was written on 2026-11-16 ahead of this section.
+
+### 11.3 Signatures
+
+**The targeting source bound.** `OpaqueTypes.scala`:
+
+```scala
+// Targeting predicate source text: a bare single-free-variable FOL formula.
+// The 2048 ceiling bounds the argument list the engine's parser can be handed
+// below the depth that overflows the native image's stack, and holds about 42
+// nodes picked by identifier. Full validity is enforced by
+// TargetingPredicate.create.
+type TargetingSourceConstraint = MinLength[1] & MaxLength[2048]
+type TargetingSource = String :| TargetingSourceConstraint
+```
+
+`TargetingPredicate.scala`: `MaxSourceLength: NonNegativeInt = 2048`, and
+`create` refines with `source.refineEither[TargetingSourceConstraint]`, so the
+literal is written in the type once and mirrored in the refusal's value once.
+
+Family: Iron refinement aliases in `OpaqueTypes.scala`. The member followed is
+`type QueryLiteralConstraint = Match["^[A-Za-z0-9 /_.+\\-]*$"]` with
+`type QueryLiteralStr = String :| QueryLiteralConstraint`: a named constraint
+beside the alias that uses it. No existing constraint holds this bound.
+
+**The query text.** `OpaqueTypes.scala`, beside `QueryLiteral`:
+
+```scala
+// A screening query's text. The 2048 ceiling is the targeting source's, for
+// the same reason: it bounds what the engine's parser is handed. No minimum:
+// the parser refuses an empty text with its own refusal.
+type QueryTextConstraint = MaxLength[2048]
+type QueryTextStr = String :| QueryTextConstraint
+
+object QueryText:
+  opaque type QueryText = QueryTextStr
+
+  /** The bound as the value a refusal carries. It mirrors the type's
+    * `MaxLength` literal, which cannot be read back at runtime. */
+  val MaxLength: NonNegativeInt = 2048
+
+  extension (t: QueryText)
+    def value: QueryTextStr = t
+
+  /** The query text a string is, or the reason it is not one. */
+  def fromString(s: String): Either[String, QueryText]
+
+  given JsonEncoder[QueryText] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[QueryText] = JsonDecoder[String].mapOrFail(fromString)
+```
+
+Family: opaque types over a query-language string in `OpaqueTypes.scala`. The
+member followed is `object QueryLiteral` with `opaque type QueryLiteral =
+QueryLiteralStr`, `fromString: Either[String, QueryLiteral]` and its two JSON
+givens. `TargetingSource` is not reused: it names a stored predicate and has a
+minimum of 1.
+
+`IronTapirCodecs.scala`, beside the `QueryLiteral` schema:
+
+```scala
+/** Schema for QueryText.QueryText, the body of a screening query. */
+given Schema[QueryText.QueryText] = Schema.string.map[QueryText.QueryText](
+  (s: String) => QueryText.fromString(s).toOption
+)(_.value)
+```
+
+`QueryRequest.scala`: the field changes type, and the codec stays derived, as
+`CreateScenarioRequest`'s does for its refined `name`:
+
+```scala
+final case class QueryRequest(query: QueryText.QueryText)
+
+def resolve(req: QueryRequest): Either[QueryProblem, ParsedQuery]   // unchanged; parses req.query.value
+```
+
+A body whose `query` exceeds 2 048 characters fails the JSON decoder, so
+`WireDecodeFailureHandler` answers 400 with `FieldProblem.Unreadable` at the
+body before the handler runs, as it does for every refused body.
+
+`AnalyzeQueryState.scala`: the browser refines before it parses, and holds the
+refusal as a `FieldProblem`, which `ValidationMessages.render` turns into one
+sentence. `FieldProblem.Query(problem)` renders `QueryProblem.describe(problem)`,
+the sentence shown today.
+
+```scala
+val parseResult: Var[Option[Either[FieldProblem, ParsedQuery]]]
+
+/** The request a text makes, and its parse, or why the text is refused. */
+private def checked(text: String): Either[FieldProblem, (QueryRequest, ParsedQuery)]
+// QueryText.fromString(text): Left → FieldProblem.TooLong(QueryText.MaxLength);
+// Right(t) → QueryRequest.resolve(QueryRequest(t)), its Left as FieldProblem.Query
+
+private enum Trigger:
+  case Reset
+  case Run(key: WorkspaceKeySecret, treeId: TreeId, request: QueryRequest, branch: BranchChoice)
+```
+
+`parseError` renders with `ValidationMessages.render`. `queryServerError` keeps
+`ErrorMessages.query`.
+
+**The trailing-tokens refusal.** `QueryProblem.scala`:
+
+```scala
+case TrailingTokens(first: QueryToken, rest: List[QueryToken], omitted: NonNegativeInt)
+
+object ParseProblem:
+  /** Tokens a trailing-tokens refusal keeps after the first. Chosen by this
+    * project, equal to the engine's own cut of a refused quantifier prefix. */
+  private val TrailingTokensKept: Int = 7
+```
+
+`trailing(first, rest)` keeps `rest.take(TrailingTokensKept)` and sets `omitted`
+to the count left out. The sentence appends ` and <omitted> more` when
+`omitted` is above zero:
+
+```
+leaf(x) extra stuff   →  The text continues after its end: 'extra' 'stuff'
+p ,,,,… (2 046 commas) →  The text continues after its end: ',' ',' ',' ',' ',' ',' ',' ',' and 2038 more
+```
+
+`omitted` reuses `NonNegativeInt`, as `FractionOutOfRange(numerator:
+NonNegativeInt, …)` does.
+
+**The log cuts.** `Failure.scala`:
+
+```scala
+private def logged(problem: FieldProblem): String = problem match
+  case FieldProblem.Query(_) | FieldProblem.TargetingPredicateUnparseable(_) => boundedForLog(ValidationMessages.render(problem))
+  case other                                                                 => ValidationMessages.render(other)
+
+/** A sentence of the caller's words for a log line, cut to `LoggedMessageLimit`. */
+private[register] def boundedForLog(message: String): String   // was private def bounded
+```
+
+`MitigationScopeResolver.scala`: `ResolvedScopes.logFailures` passes its whole
+message through `Failure.boundedForLog`. The message begins with the count of
+failed mitigations, so the cut keeps the count and the first entries.
+
+### 11.4 What the change does to stored and sent data
+
+- A stored targeting source of 2 049 to 4 096 characters no longer refines
+  when its tree is read. Whether any store holds one is a fact only the user
+  holds, asked in §11.9.
+- The query request body's schema states `query` as a string and publishes no
+  `maxLength`, as no other refined string's schema in `IronTapirCodecs` does.
+  The decoder enforces the bound.
+- `TrailingTokens` on the wire gains the field `omitted`. The browser and the
+  server compile the same codec.
+
+### 11.5 Inventory
+
+Every file is on `PLAN-RISKTRANSFORM-INVENTORY.md` except three, which this
+section needs and the user adds:
+
+- `modules/server/src/main/scala/com/risquanter/register/domain/errors/Failure.scala`
+- `modules/server/src/test/scala/com/risquanter/register/domain/errors/FailureSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/errors/ParseProblemSpec.scala`
+
+Already listed: `OpaqueTypes.scala`, `TargetingPredicate.scala`,
+`TargetingPredicateSpec.scala`, `IronTapirCodecs.scala`, `QueryRequest.scala`,
+`QueryRequestSpec.scala`, `QueryProblem.scala`, `AnalyzeQueryState.scala`,
+`MitigationScopeResolver.scala`, `MitigationScopeResolverSpec.scala`,
+`QueryEndpointSpec.scala`, `HttpApiIntegrationSpec.scala`,
+`DemoSpecSupport.scala`.
+
+### 11.6 Tests
+
+- `TargetingPredicateSpec`: `MaxSourceLength` becomes 2048. A source of 2 048
+  characters is accepted and one of 2 049 is refused with
+  `LengthOutOfRange(1, 2048)`. `p(x,x,…)` of 1 023 arguments, which is 2 047
+  characters, parses on the JVM.
+- `QueryRequestSpec`: a request body of 2 048 characters decodes, one of 2 049
+  is refused by the decoder, and a body of 50 000 commas is refused without
+  throwing. The existing cases build their request through a local helper,
+  `query(text)`, which refines through `QueryText.fromString`.
+- `ParseProblemSpec`: a trailing list of 1 token keeps it with `omitted` 0. A
+  list of 20 keeps 7 with `omitted` 13, and the sentence ends "and 13 more". The
+  existing cases gain `omitted` 0.
+- `FailureSpec`: a `TargetingPredicateUnparseable` sentence over 300 characters
+  is cut in the log line, as the `Query` case already is.
+- `MitigationScopeResolverSpec`: `logFailures` over 50 failed mitigations
+  writes one line of at most the cut length plus its marker.
+- `QueryEndpointSpec`: a 2 049-character query answers 400 before the
+  handler, and the existing cases use the helper.
+- `HttpApiIntegrationSpec` and `DemoSpecSupport`: the helper replaces the
+  `String` constructor.
+
+### 11.7 Documents
+
+- ADR-029 §3: the `TargetingPredicate.create` row says 1–2048, and the
+  `VagueQueryParser.parse` row states the 2 048 bound on query text, refined
+  in the decoder.
+- ADR-035 §5: a trailing-tokens refusal keeps the first token, at most 7 more
+  and the count left out. The log line cuts a query refusal's and a targeting
+  refusal's sentence to 300 characters. The reason "because a word has no
+  length bound" becomes "because a word may run to the text's 2 048
+  characters".
+- `docs/dev/TODO.md` items 41 and 65: the query length bound is ruled at
+  2 048 and lands here.
+- `docs/user/API-TUTORIAL.md`: states the 2 048-character bound on a query and
+  a target, where it describes each.
+
+### 11.8 ADR alignment
+
+- **ADR-001:** compliant. The query bound is in the decoder, and the
+  targeting bound in `create`, which is the decoder.
+- **ADR-017:** compliant. A request bound is an Iron literal.
+- **ADR-029:** amended in §11.7, and compliant after it.
+- **ADR-035 §5:** amended in §11.7. Its own text requires the amendment: "A
+  change to the literal alphabet or to a refusal's fields is a change to both
+  records."
+- **ADR-037:** compliant. `TrailingTokensKept`, `QueryText.MaxLength` and
+  `MaxSourceLength` are named, each with its origin.
+- **ADR-038:** compliant. The refusal's codec stays derived.
+- **ADR-039:** a stored source over 2 048 characters is refused on read,
+  which is the rule working. §11.9 asks whether one exists.
+
+### 11.9 Open decisions
+
+None. One fact is asked of the user: does any store hold a targeting source
+longer than 2 048 characters? If one does, it must be shortened before this
+section lands.
+
+### 11.10 Terminology impact
+
+None. No glossary term names a length bound or a refusal's fields.
+
+### 11.11 Verification
+
+```bash
+sbt 'commonJVM/test; server/test'   # green
+sbt app/test                        # green
+sbt serverIt/test                   # green, after the register_it_ cleanup
+```
+
+The BATS suites are due at the end of this section, because it changes a wire
+shape. The report carries their command block.
+
+### 11.12 A pinned commit must lie in the named branch's history (presented 2026-11-17)
+
+**The defect.** A read pinned with `at=<commit>` and a revert to `toCommit`
+read the commit as given. `RiskTreeServiceLive.revisionOf` drops the branch,
+and `RiskTreeRepositoryIrmin.resolveRevision` answers `Revision.At(commit)`
+with the commit unchecked. So with scenario A forked to B at `gggg`, and
+`hhhh` committed on A afterwards, `X-Branch: B` with `at=hhhh` answers A's
+tree, and a revert on B to `hhhh` writes A's tree onto B. Another workspace's
+content is not reachable, because every path read carries the caller's
+workspace prefix.
+
+**The rule (user, 2026-11-17, option B).** A commit the client names is read
+only when it lies in the named branch's history: it is the branch head or one
+of its ancestors, following every parent, so a merged branch's commits count.
+Otherwise the answer is the one a hash that was never issued gets: 404
+`TreeNotAtCommit` at `at`. A fork from a commit names no branch, so its check
+stays "on `main` or on one of this workspace's own scenarios".
+
+**Signatures.** `OpaqueTypes.scala`:
+
+```scala
+enum Revision:
+  case Head(branch: BranchRef)
+  /** A commit this service chose itself, read as given: a merge's staged commit. */
+  case At(commit: CommitHash)
+  /** A commit the client named, read only when it lies in `branch`'s history. */
+  case Pinned(branch: BranchRef, commit: CommitHash)
+```
+
+A client pin and an internal read are then two types, so no route can read a
+client's commit without the check. Family: `Revision`'s own cases; no other
+type pairs a branch with a commit.
+
+`IrminClient.scala`, in the companion, so no client stub changes:
+
+```scala
+extension (irmin: IrminClient)
+  /** Whether `commit` is `branch`'s head or one of its ancestors: the lowest
+    * common ancestor of the two is the commit itself exactly then. */
+  def isAncestor(branch: BranchRef, commit: CommitHash): IO[Failure, Boolean]
+```
+
+It is `ScenarioServiceLive.isAncestorOf` moved, with its
+`.orElseSucceed(false)`, and the fork check calls it.
+
+- `RiskTreeRepositoryIrmin.resolveRevision`: `Pinned(branch, commit)` resolves to
+  `Some(commit)` when `irmin.isAncestor(branch, commit)`, and to `None`
+  otherwise. `None` is already the path to `treeAbsent`.
+- `RiskTreeRepositoryIrmin.revert` checks `irmin.isAncestor(branch, toCommit)`
+  before `loadTreeAt`, and refuses as a hash that holds no tree.
+- `RiskTreeRepositoryInMemory`: `Pinned` answers `pinnedReadsUnavailable`, as
+  `At` does.
+- `RiskTreeRepository.treeAbsent`: `Pinned` answers as `At`.
+- `Diagnostic.revisionText`: `Pinned(branch, commit)` is
+  `"<commit> on <branch>"`.
+- `RiskTreeServiceLive.revisionOf` and the changed-nodes route in
+  `WorkspaceTreeController` build `Revision.Pinned(branch, commit)` from a
+  client's `at`.
+
+**Inventory.** One file is not listed:
+`modules/server/src/main/scala/com/risquanter/register/domain/errors/Diagnostic.scala`.
+
+**Tests.**
+- `PinnedReadAuthorizationItSpec`: with A forked to B at `gggg` and `hhhh` on A
+  afterwards, `B at gggg` reads, and `B at hhhh` answers 404 `TreeNotAtCommit`
+  at `at`. That is the answer a never-issued hash gets.
+- `RiskTreeRepositoryIrminSpec`: a revert on B to `hhhh` is refused, and one to
+  `gggg` succeeds.
+- The test stubs that match on `Revision` gain the `Pinned` case.
+
+**Unverified premise.** What Irmin's `lca` answers for a hash it does not
+hold. `.orElseSucceed(false)` turns that answer into "not in the history", and
+it also turns a store that does not answer into 404 rather than an outage. The
+integration test above settles the first. The second is today's behaviour of
+the fork check and is kept.

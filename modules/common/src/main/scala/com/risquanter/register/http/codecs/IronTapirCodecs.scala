@@ -3,7 +3,7 @@ package com.risquanter.register.http.codecs
 import sttp.tapir.*
 import sttp.tapir.ValidationError as TapirValidationError
 import zio.json.{DecoderOps, EncoderOps, JsonDecoder, JsonEncoder}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, QueryVariable, QueryWord, QueryDecimal, QueryLiteral, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, PositiveDouble, PositiveLong, SafeId, SafeName, QueryVariable, QueryWord, QueryDecimal, QueryLiteral, QueryText, DistributionType, OpenProbability, Probability, TreeId, NodeId, MitigationId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice, TraceId, MetalogTermCount, ContentHash, RetentionFactor, ResidualProbability}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldProblem, ValidationError}
 
 /**
@@ -297,6 +297,11 @@ object IronTapirCodecs {
   /** Schema for QueryLiteral.QueryLiteral, which a refused query's payload carries. */
   given Schema[QueryLiteral.QueryLiteral] = Schema.string.map[QueryLiteral.QueryLiteral](
     (s: String) => QueryLiteral.fromString(s).toOption
+  )(_.value)
+
+  /** Schema for QueryText.QueryText, the body of a screening query. */
+  given Schema[QueryText.QueryText] = Schema.string.map[QueryText.QueryText](
+    (s: String) => QueryText.fromString(s).toOption
   )(_.value)
 
   /** Schema for DistributionType for JSON body derivation. */
