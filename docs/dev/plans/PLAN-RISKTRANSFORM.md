@@ -6308,6 +6308,11 @@ tree no longer holds stays `Closed`. The popup is modal, so `OpenOn` while
 `TreeLoaded` never arrives for the linked tree. The next tree load then closes
 the pending request.
 
+A failed load of the linked tree also sends no `TreeLoaded`, so the request
+stays pending, and a second link to another statement of that tree is ignored
+while it does. The user ruled on 2026-11-17 that this stays: a failed load is
+shown as an error, and reloading the page clears the pending request.
+
 ```scala
 /** The popup's state, created once in `Main` and passed to both views. */
 final class OverrideEditState:

@@ -253,10 +253,14 @@ final class TreeViewState(
 
   /** Pin change (history slider): re-read the selected tree at the new pin and
     * re-fetch the current selection's curves there, preserving the selection.
-    * No-op when nothing is selected. */
+    * Under a non-empty selection the curves wait for the tree at the new pin,
+    * which the structure subscription above reads them for; the tree still
+    * loaded is the previous pin's. No-op when nothing is selected. */
   private def rewindReload(): Unit =
     selectedTreeId.now().foreach(emitStructureFetch)
-    chartState.reloadCurrentCurves()
+    selectionAccessor() match
+      case MitigationSelection.Inherent => chartState.reloadCurrentCurves()
+      case _                            => ()
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */
   def selectTree(id: TreeId): Unit =

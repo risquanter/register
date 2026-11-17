@@ -6,17 +6,12 @@ import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId}
   * proceed silently, ask for confirmation, or proceed and clear the draft
   * preview.
   *
-  * Pulled out of `DesignView` as a pure function so it is unit-testable
-  * without a Laminar/DOM harness (see `docs/dev/TODO.md` item 25).
+  * A pure function, so it is unit-testable without a Laminar/DOM harness.
   *
-  * Branch ID is included alongside tree ID (added 2026-07-21, milestone-2b
-  * Phase B follow-up): a scenario fork keeps the same [[TreeId]] as its
-  * source branch but can carry different node content, so tree ID alone is
-  * not enough to tell "the same submit response reloading" apart from
-  * "the user switched branches and the same tree now has different content".
-  * Before this, switching branches never re-fetched anything at all, so this
-  * distinction was never exercised — there was no code path that triggered
-  * it, so it went untested.
+  * The branch is compared alongside the tree id: a scenario fork keeps the
+  * same [[TreeId]] as its source branch but can carry different node content,
+  * so the tree id alone cannot tell a post-submit reload apart from a branch
+  * switch onto the same tree.
   */
 enum TreeLoadDecision:
   /** Same tree, same branch as what's already loaded — reload without
