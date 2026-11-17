@@ -5,7 +5,7 @@ import scala.scalajs.js
 import app.core.NumberFormat
 import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{NodeId, Probability}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** Client-side Vega-Lite v6 specification builder for LEC curves.
@@ -103,6 +103,10 @@ object LECSpecBuilder:
     * readings are two series. The mitigation-free series is the bare node id. */
   private val MitigatedSuffix = "~mitigated"
 
+  /** What a mitigated reading's legend text carries after the node's name,
+    * chosen by this project. */
+  private val MitigatedLabelSuffix = " (mitigated)"
+
   /** A marker's area in square pixels, chosen by this project to stay readable
     * on a 1.5-pixel line without hiding it. */
   private val MarkerSize: Int = 45
@@ -124,7 +128,7 @@ object LECSpecBuilder:
     * entries read apart. */
   def labelOf(curve: LECNodeCurve, variant: CurveVariant): String = variant match
     case CurveVariant.Inherent  => curve.name.value
-    case CurveVariant.Mitigated => s"${curve.name.value} (mitigated)"
+    case CurveVariant.Mitigated => s"${curve.name.value}$MitigatedLabelSuffix"
 
   /** Build a Vega-Lite spec from paired curve data and colours.
     *
@@ -271,7 +275,7 @@ object LECSpecBuilder:
     // at a fixed pixel position rather than a line.
     val noLossRows: Vector[(String, HexColor, String)] =
       withData.map { s =>
-        (s"${s.label} — no loss: ${formatProbability(s.curve.probabilityOfNoLoss)}", s.colour, s.seriesId)
+        (noLossRowText(s.label, s.curve.probabilityOfNoLoss), s.colour, s.seriesId)
       }
 
     // Fresh data values array — called per layer to avoid shared mutable state
@@ -457,7 +461,8 @@ object LECSpecBuilder:
     )
 
     // Assemble layers: annotation rule/label layers + no-loss rows + line
-    // layer + point layer (annotations under the lines, as before the fold)
+    // layer + marker layer + point layer, so the annotations draw under the
+    // lines
     val allLayers = js.Array[js.Any]()
     VegaSpecShared.verticalRuleLayers(annotationData, hoverParam = Some(HoverParamName)).foreach(allLayers.push(_))
     noLossLayer(noLossRows).foreach(allLayers.push(_))
@@ -508,6 +513,11 @@ object LECSpecBuilder:
     // Below $1M whole-M rounding would print "$0M" for genuinely nonzero
     // values (an AAL of 0.25 is $250k, not zero) — switch to thousands.
     else f"$$${math.round(value * 1000)}%,dK"
+
+  /** One series' "probability of no loss" row: its legend label, then the
+    * probability as a whole-number percentage. */
+  private def noLossRowText(label: String, probabilityOfNoLoss: Probability): String =
+    s"$label — no loss: ${formatProbability(probabilityOfNoLoss)}"
 
   /** Format a probability (0.0-1.0) as a whole-number percentage, for the
     * no-loss annotation label. */

@@ -26,10 +26,10 @@ import com.risquanter.register.http.responses.{LECNodeSeries, TreeStructureRespo
   *
   * @param keySignal          Read-only signal providing the active workspace key.
   * @param treeListState      The shared, branch-keyed tree-list owner (one per
-  *                           app, `Main`). This class no longer owns the list —
-  *                           it reads its own branch's slice and forwards
-  *                           refresh requests, so a mutation seen through any
-  *                           view refreshes the one list every view reads.
+  *                           app, `Main`). This class reads its own branch's
+  *                           slice and forwards refresh requests, so a
+  *                           mutation seen through any view refreshes the one
+  *                           list every view reads.
   * @param userIdAccessor     Returns the current user identity (None in capability-only mode).
   * @param activeBranchSignal This tab's active branch (BranchChoice) — BranchBar.
   *                           A signal, not just a pull accessor: this class owns the
