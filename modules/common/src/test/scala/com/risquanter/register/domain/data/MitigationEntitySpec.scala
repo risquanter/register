@@ -136,6 +136,32 @@ object MitigationEntitySpec extends ZIOSpecDefault {
       }
     ),
 
+    suite("applicationOrder")(
+      test("a lower precedence key applies first, whatever the identifiers") {
+        val early = mk("m-zebra", resultSpec, MitigationPrecedence.overrideBaseline).toEither.toOption.get
+        val late  = mk("m-alpha", resultSpec, MitigationPrecedence.overrideFinal).toEither.toOption.get
+        assertTrue(List(late, early).sorted == List(early, late))
+      },
+      test("the identifier breaks a tie in precedence") {
+        val a = mk("m-alpha", resultSpec).toEither.toOption.get
+        val z = mk("m-zebra", scaleLeafSpec).toEither.toOption.get
+        assertTrue(List(z, a).sorted == List(a, z))
+      },
+      test("the order is total: every permutation sorts to one list") {
+        val ms = List(
+          mk("m-b", resultSpec, MitigationPrecedence.default),
+          mk("m-a", scaleLeafSpec, MitigationPrecedence.default),
+          mk("m-c", resultSpec, MitigationPrecedence.overrideBaseline)
+        ).map(_.toEither.toOption.get)
+        assertTrue(ms.permutations.map(_.sorted).toSet.size == 1)
+      },
+      test("two distinct mitigations never compare equal") {
+        val a = mk("m-alpha", resultSpec).toEither.toOption.get
+        val z = mk("m-zebra", resultSpec).toEither.toOption.get
+        assertTrue(Mitigation.applicationOrder.compare(a, z) != 0)
+      }
+    ),
+
     suite("codec")(
       test("all three spec cases round-trip") {
         val ms = List(

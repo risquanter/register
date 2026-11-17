@@ -114,9 +114,10 @@ trait RiskTreeService {
     * probabilities share no tick domain and need no shared request.
     *
     * `branch` and `at` are taken separately rather than as a `Revision`
-    * because the scope resolver memoizes per (tree, branch) and `Revision.At`
-    * carries a commit with no branch. The method composes the `Revision` the
-    * repository reads at.
+    * because the scope resolver memoizes per (tree, branch), and the caller's
+    * `at` is a client pin that must be checked against `branch`. The method
+    * composes the `Revision` the repository reads at: `Revision.Head(branch)`
+    * when `at` is absent, `Revision.Pinned(branch, commit)` when it is set.
     */
   def probOfExceedance(
     wsId: WorkspaceId,

@@ -98,15 +98,19 @@ object DesignView:
       case _                      => Set.empty
 
     // The stale badge comes from the structure read of the tree the builder
-    // loaded, and an anchor is named as that tree names it.
-    val staleIds: Signal[Set[MitigationId]] = treeViewState.structure.map {
-      case LoadState.Loaded(response) => response.staleMitigationIds
-      case _                          => Set.empty
-    }
-    val nodeName: Signal[NodeId => Option[SafeName.SafeName]] = treeViewState.selectedTree.map {
-      case LoadState.Loaded(tree) => id => tree.index.nodes.get(id).map(_.name)
-      case _                      => _ => None
-    }
+    // loaded, and an anchor is named as that tree names it. A tree the tree
+    // view holds but the builder did not load, such as one whose load the user
+    // declined, gives no badge and no name.
+    val staleIds: Signal[Set[MitigationId]] =
+      treeViewState.structure.combineWith(builderState.editingTreeId.signal).map {
+        case (LoadState.Loaded(response), Some(loaded)) if response.tree.id == loaded => response.staleMitigationIds
+        case _                                                                        => Set.empty
+      }
+    val nodeName: Signal[NodeId => Option[SafeName.SafeName]] =
+      treeViewState.selectedTree.combineWith(builderState.editingTreeId.signal).map {
+        case (LoadState.Loaded(tree), Some(loaded)) if tree.id == loaded => id => tree.index.nodes.get(id).map(_.name)
+        case _                                                           => _ => None
+      }
 
     val previewPanel = div(
       cls := "design-preview-panel",

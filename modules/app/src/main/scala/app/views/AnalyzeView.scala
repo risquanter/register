@@ -406,16 +406,11 @@ object AnalyzeView:
       },
       compareSlots.map { slot =>
         scenarioState.scenarios.changes --> { list =>
-          slot.state.target.now() match
-            case CompareTarget.Target(coord) =>
-              val deleted = coord.branch match
-                case BranchChoice.Scenario(name) =>
-                  list match
-                    case LoadState.Loaded(l) => !l.exists(_.name == name)
-                    case _                   => false
-                case BranchChoice.Main => false
-              if deleted then slot.state.target.set(CompareTarget.NotChosen)
-            case CompareTarget.NotChosen => ()
+          (slot.state.target.now(), list) match
+            case (CompareTarget.Target(SlotCoordinate(BranchChoice.Scenario(name), _, _, _)), LoadState.Loaded(l))
+                if !l.exists(_.name == name) =>
+              slot.state.target.set(CompareTarget.NotChosen)
+            case _ => ()
         }
       },
       // Per slot: a slot PINNED to a tree that no longer exists on its branch
@@ -428,16 +423,11 @@ object AnalyzeView:
       // disengages reversibly rather than invalidating the choice.
       compareSlots.map { slot =>
         slot.treeViewState.availableTrees.changes --> { list =>
-          slot.state.target.now() match
-            case CompareTarget.Target(coord) =>
-              val pinnedGone = coord.treeOverride match
-                case Some(tid) =>
-                  list match
-                    case LoadState.Loaded(trees) => !trees.exists(_.id == tid)
-                    case _                       => false
-                case None => false
-              if pinnedGone then slot.state.target.set(CompareTarget.NotChosen)
-            case CompareTarget.NotChosen => ()
+          (slot.state.target.now(), list) match
+            case (CompareTarget.Target(SlotCoordinate(_, Some(tid), _, _)), LoadState.Loaded(trees))
+                if !trees.exists(_.id == tid) =>
+              slot.state.target.set(CompareTarget.NotChosen)
+            case _ => ()
         }
       },
       // Per slot: point the slot's tree view at its EFFECTIVE tree — the

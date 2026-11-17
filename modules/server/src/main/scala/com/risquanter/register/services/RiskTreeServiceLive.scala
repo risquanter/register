@@ -131,7 +131,7 @@ class RiskTreeServiceLive private (
     tree.index.descendants(nodeId).toList
       .flatMap(scoped.getOrElse(_, Nil))
       .distinct
-      .sortBy(m => (m.precedence.key, m.id.value))
+      .sorted
       .map(_.id)
 
   /** Key for the one shared tick-domain computation. Both valuations of a node

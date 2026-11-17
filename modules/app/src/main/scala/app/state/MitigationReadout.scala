@@ -18,10 +18,9 @@ enum CoverageBadge:
   */
 object MitigationReadout:
 
-  /** The tree's mitigations in the order application uses: ascending
-    * precedence key, the identifier breaking a tie. */
+  /** The tree's mitigations in the order application uses. */
   def mitigations(response: TreeStructureResponse): List[Mitigation] =
-    response.tree.mitigations.toList.sortBy(m => (m.precedence.key, m.id.value: String))
+    response.tree.mitigations.toList.sorted
 
   /** The nodes `id` resolved to in this tree version; empty for a predicate
     * that did not bind and for an identifier the read does not list. */

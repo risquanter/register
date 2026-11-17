@@ -13,7 +13,7 @@ import com.risquanter.register.simulation.TrialOutcomes
  * The monoid action `Mits × Tree → Tree`, decomposed:
  *
  * - `scoped` — the action's per-node decomposition: which mitigations apply to
- *   which node, in global precedence order (ascending key, id tiebreak).
+ *   which node, in `Mitigation.applicationOrder`.
  * - `effectiveTree` — the param-stage half: scoped leaves replaced by their
  *   transformed selves. Output is a normal `RiskTree` revalidated through
  *   `RiskTree.fromNodes` — closure by construction.
@@ -31,8 +31,7 @@ import com.risquanter.register.simulation.TrialOutcomes
  */
 object MitigationApplication {
 
-  /** Per-node applicable mitigations, ascending precedence key, MitigationId
-    * tiebreak. Each mitigation's node set comes from `resolvedScopes` (the
+  /** Per-node applicable mitigations, in `Mitigation.applicationOrder`. Each mitigation's node set comes from `resolvedScopes` (the
     * server-computed predicate resolution); a mitigation absent from the map
     * has an empty scope and applies nowhere. */
   def scoped(
@@ -60,7 +59,7 @@ object MitigationApplication {
       nodeId <- effective
     } yield nodeId -> m
 
-    pairs.groupMap(_._1)(_._2).view.mapValues(inPrecedenceOrder).toMap
+    pairs.groupMap(_._1)(_._2).view.mapValues(_.sorted).toMap
   }
 
   /** Applies every leaf-stage spec to its scoped leaves, in precedence order
@@ -151,8 +150,8 @@ object MitigationApplication {
     resolvedScopes: Map[MitigationId, Set[NodeId]]
   ): List[MitigationApplicationRecord] =
     resolvedScopeOf(scoped(tree, selection, resolvedScopes)).toList
+      .sortBy(_._1)
       .map { case (m, nodes) => MitigationApplicationRecord(m.id, m.spec, nodes, m.precedence) }
-      .sortBy(r => (r.precedence.key, r.mitigationId.value))
 
   /** Invert the per-node view: each mitigation paired with every node it
     * scopes. This is a record's `resolvedScope`. */
@@ -163,7 +162,4 @@ object MitigationApplication {
       .flatMap { case (nodeId, ms) => ms.map(_ -> nodeId) }
       .groupMap(_._1)(_._2)
       .view.mapValues(_.toSet).toMap
-
-  private def inPrecedenceOrder(ms: List[Mitigation]): List[Mitigation] =
-    ms.sortBy(m => (m.precedence.key, m.id.value))
 }

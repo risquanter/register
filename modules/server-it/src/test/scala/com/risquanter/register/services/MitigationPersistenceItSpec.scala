@@ -173,8 +173,8 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
       },
 
       test("multiple mitigations all round-trip intact, independent of stored order") {
-        // Resolution is precedence-driven (MitigationApplication.inPrecedenceOrder
-        // re-sorts by (precedence.key, id)), so the stored list order carries no
+        // Resolution is precedence-driven (MitigationApplication re-sorts by
+        // Mitigation.applicationOrder), so the stored list order carries no
         // semantics: the fidelity that matters is that every mitigation survives
         // with its fields intact. Compared in id-sorted canonical form so the
         // assertion does not depend on Irmin's child-listing order.

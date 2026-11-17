@@ -33,7 +33,7 @@ object MitigationTarget {
   given schema: Schema[MitigationTarget] = Schema.string[MitigationTarget]
 }
 
-/** Application order: ascending key, MitigationId tiebreak. Override presets sit at the extremes. */
+/** The key `Mitigation.applicationOrder` sorts by, ascending. Override presets sit at the extremes. */
 final case class MitigationPrecedence(key: Int)
 
 object MitigationPrecedence {
@@ -276,6 +276,11 @@ object Mitigation {
     )(using scala.math.Ordering.by(_.value))
 
   given Equal[Mitigation] = Equal.default
+
+  /** The order mitigations apply in at one node: ascending precedence key, the
+    * identifier breaking a tie, so the order is total and merge-stable. */
+  given applicationOrder: scala.math.Ordering[Mitigation] =
+    scala.math.Ordering.by(m => (m.precedence.key, m.id.value: String))
 
   private case class Raw(
     id: String,

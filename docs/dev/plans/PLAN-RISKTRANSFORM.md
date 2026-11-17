@@ -3249,7 +3249,7 @@ class RiskTreeServiceLive private (
     tree.index.descendants(nodeId).toList
       .flatMap(scoped.getOrElse(_, Nil))
       .distinct
-      .sortBy(m => (m.precedence.key, m.id.value))
+      .sorted
       .map(_.id)
 
   /** Key for the one shared tick-domain computation. Both valuations of a node
@@ -6501,6 +6501,59 @@ object OverridePopup:
 
 `OverridePopup.apply` takes the same `nodeName` the list takes, so the popup
 names the anchor as the list row does (approved by the user, 2026-11-17).
+
+**The helpers the implementation added.** The routine review of 2026-11-17
+found these in the code and in no block above. Each has a call site and serves
+behaviour this section specifies, and the user approved recording them:
+
+```scala
+// modules/app/src/main/scala/app/state/LECChartState.scala
+object LECChartState:
+  /** The curve request for `nodeIds` under `selection`, restricted to the
+    * mitigations in `held`. `None` while the tree's mitigations are not known
+    * and the selection names some: the request waits for the tree. */
+  def requestFor(
+    nodeIds: List[NodeId],
+    selection: MitigationSelection.Enumerated,
+    held: Option[Set[MitigationId]]
+  ): Option[Either[LocalProblem, LECCurvesMultiRequest]]
+
+// modules/app/src/main/scala/app/chart/LECSpecBuilder.scala
+object LECSpecBuilder:
+  def seriesIdOf(node: NodeId, variant: CurveVariant): String          // the node id, `~mitigated` appended for Mitigated
+  def labelOf(curve: LECNodeCurve, variant: CurveVariant): String      // the node's name, " (mitigated)" appended for Mitigated
+
+// modules/app/src/main/scala/app/state/TreeBuilderState.scala
+object TreeBuilderState:
+  /** A loaded mitigation as the save submits it: `Restamp` with the popup's
+    * figures where it was re-affirmed, as loaded otherwise. */
+  def submitted(mitigation: Mitigation, affirmed: Map[MitigationId, AbsoluteReplacement]): MitigationUpdateRequest
+  /** The absolute statements in precedence order, with the figures each will be saved with. */
+  def absoluteRows(mitigations: List[Mitigation], affirmed: Map[MitigationId, AbsoluteReplacement]): List[AbsoluteStatementRow]
+
+// modules/app/src/main/scala/app/views/TreeDetailView.scala
+object TreeDetailView:
+  /** One selection edit, as `SelectionEdit` builds them. */
+  type SelectionUpdate = MitigationSelection.Enumerated => Validation[ValidationError, MitigationSelection.Enumerated]
+
+// modules/app/src/main/scala/app/state/AbsoluteFiguresFormState.scala
+object AbsoluteFiguresField:
+  def label(field: AbsoluteFiguresField): String                 // the leaf form's labels; FormLevel is "This statement"
+  def inputId(field: AbsoluteFiguresField): String               // prefixed "figures", unique beside the leaf form
+  private[app] def inputsFor(location: ErrorLocation): Set[AbsoluteFiguresField]   // the leaf form's routing, kept to the popup's inputs
+```
+
+`TreeViewState` reads the current curves again when its structure load
+completes under a non-empty selection. That is the second half of
+`requestFor`'s wait: a request held back for the tree is sent once the tree is
+known.
+
+`seriesIdOf` returns `String` because a Vega series id is a string the chart
+library matches exactly. `labelOf` returns `String` because a legend entry is
+display text built from a `SafeName`, and no refined type holds display text
+with a suffix. `label` and `inputId` return `String` for the same reason as
+`RiskLeafField.label` and `RiskLeafField.inputId`: a label is display text and
+an id is a DOM attribute.
 
 Each list row shows the statement's name, its anchor's name in this tree or its
 identifier, its figures, the stale badge when the structure read lists it, a
@@ -13653,7 +13706,8 @@ It is `ScenarioServiceLive.isAncestorOf` moved, with its
   `Some(commit)` when `irmin.isAncestor(branch, commit)`, and to `None`
   otherwise. `None` is already the path to `treeAbsent`.
 - `RiskTreeRepositoryIrmin.revert` checks `irmin.isAncestor(branch, toCommit)`
-  before `loadTreeAt`, and refuses as a hash that holds no tree.
+  before `loadTreeAt`, and refuses as a hash that holds no tree: 404
+  `TreeNotAtCommit` at `toCommit`, the field the request named the commit in.
 - `RiskTreeRepositoryInMemory`: `Pinned` answers `pinnedReadsUnavailable`, as
   `At` does.
 - `RiskTreeRepository.treeAbsent`: `Pinned` answers as `At`.

@@ -658,7 +658,7 @@ object TreeBuilderState:
     affirmed: Map[MitigationId, AbsoluteReplacement]
   ): List[AbsoluteStatementRow] =
     mitigations
-      .sortBy(m => (m.precedence.key, m.id.value: String))
+      .sorted
       .flatMap { m =>
         m.spec match
           case MitigationSpec.LeafAbsolute(stored, anchor, _) =>
