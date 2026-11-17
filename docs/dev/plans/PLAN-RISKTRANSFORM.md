@@ -2490,6 +2490,7 @@ has landed green (G8).
 | 6 | The interface and the user documentation | §7.6.17 | Implemented, 2026-11-17 |
 | 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 | Landed |
 | 8 | Adopting vql-engine 0.20.0 and mapping its nesting-depth refusals. Lands before slice 2 | §7.6.16 | Landed, 0.20.5 |
+| 9 | Adopting vql-engine 0.22.0, taking up 0.21.0's ordered domains with it | §7.6.18 | Implemented, 2026-11-17; BATS pending |
 
 Slices 2 to 5 are specified below and carry no open decision. Slice 2's one
 decision, §7.6.12 decision 11, the submitted form of a leaf-stage mitigation, is
@@ -6725,6 +6726,117 @@ No existing entry changes meaning.
 
 Every path is listed in the block presented with this section.
 
+#### 7.6.18 M4 slice 9 — adopting vql-engine 0.22.0 (approved by the user, 2026-11-17)
+
+**Status:** approved and implemented on 2026-11-17. The unit and integration
+tiers are green, and no pinned figure moved. BATS suites C and A are pending.
+
+**Origin.** The user ruled on 2026-11-17 to adopt 0.22.0 at once and not to
+adopt 0.21.0 on its own. 0.21.0's changes therefore arrive in this slice.
+
+**What the two releases change, in plain terms.** The engine's `CHANGELOG.md`,
+in the `vague-quantifier-logic` repository, lists these breaking changes:
+
+- 0.21.0: "`RuntimeModel.domains` holds an `OrderedDomain` per sort. A domain
+  is built with `OrderedDomain.of(carriers)(using Ordering[A])`, which sorts
+  the carriers once. An ordering that ranks two distinct carriers equal is
+  refused with `IllegalArgumentException`."
+- 0.21.0: every sampling entry takes its population as `IndexedSeq[A]`, and
+  `estimateWithSampling`'s `sampler` has no default.
+- 0.21.0: "A dispatcher refusal fails a formula only when it could change the
+  result", under Kleene's strong three-valued logic.
+- 0.22.0: `TypeCatalogError` and `DeclarationSite` are declared in `vql.error`.
+
+**What reaches register.**
+
+1. **The domains.** `RiskTreeKnowledgeBase` builds its two domains as
+   `Set[Value]` today. Under 0.21.0 a domain holds the carriers themselves,
+   `NodeId` and `MitigationId`, and `RuntimeModel` wraps each in `Value`.
+   Building one needs an ordering on the carrier that ranks no two distinct
+   identifiers equal.
+2. **The sampling entries.** Register calls none of them directly. It reaches
+   sampling only through `VagueSemantics`, so the signature changes need no
+   edit.
+3. **A refusal that cannot change a result.** Register's dispatcher refuses in
+   two places: `resultsFor`, when no results exist for a selection, and
+   `lookupResult`, when no result exists for a node. Both arise only when a
+   query reaches a node `QueryServiceLive` did not simulate. Under 0.21.0 such a
+   query returns its result where the refusal cannot change it, and fails
+   otherwise, as before.
+4. **The order a sample is drawn in.** A vague quantifier samples by position in
+   the ordered domain, where it sampled in a `Set`'s iteration order. A figure a
+   test pinned from a sample may therefore change. If one does, work stops at
+   decision trigger 8, and the change is presented.
+5. **The moved types.** Register names neither `TypeCatalogError` nor
+   `DeclarationSite`, so the move needs no import change. `TypeCatalog.unsafe`
+   changed only the text it gives when it refuses a declaration, and register's
+   two catalogs are fixed and accepted.
+
+**`build.sbt`:** `vqlEngineVersion` goes from `"0.20.0"` to `"0.22.0"`. A
+first-party artifact is exempt from the cooldown (ADR-020 §10). 0.22.0 is
+published on Maven Central.
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`**,
+in the companions of `NodeId` and `MitigationId`:
+
+```scala
+  /** Identifier order: the ULID's text, which sorts by creation time. Two
+    * distinct identifiers never compare equal. */
+  given ordering: scala.math.Ordering[NodeId] = scala.math.Ordering.by(_.value)
+
+  /** Identifier order: the ULID's text, which sorts by creation time. Two
+    * distinct identifiers never compare equal. */
+  given ordering: scala.math.Ordering[MitigationId] = scala.math.Ordering.by(_.value)
+```
+
+Family search. The family is the type-class instances in the identifier
+wrappers' companions, such as `given JsonEncoder[NodeId]`. No identifier
+wrapper carries an `Ordering`. `Mitigation.requireDistinctIds` writes the
+`MitigationId` ordering inline as `(using scala.math.Ordering.by(_.value))`, and
+that inline copy is replaced by the given. The inline orderings for `SafeName`
+in `requireDistinctNames` and for `SeedVarId` in `SeedVarId.requireDistinct`
+order other types and stay. `Mitigation.applicationOrder` then reads
+`scala.math.Ordering.by(m => (m.precedence.key, m.id))`, which is the same
+order.
+
+The text order is chosen here. Any order that ranks no two identifiers equal
+meets the engine's requirement, and the text order needs no tree.
+
+**`modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`:**
+
+```scala
+  /** Domain elements: every node identifier, in identifier order. */
+  private val nodeDomain: OrderedDomain = OrderedDomain.of(tree.index.nodes.keys)
+
+  /** Domain elements: every mitigation identifier, in identifier order. This is
+    * what `∃m : mitigation …` ranges over; the `inherent`/`residual` constants
+    * are resolved separately and are not members. */
+  private val mitigationDomain: OrderedDomain = OrderedDomain.of(tree.mitigations.map(_.id))
+```
+
+`OrderedDomain` is imported from `vql.typed` beside `RuntimeModel`.
+
+**Tests.**
+
+- `RiskTreeKnowledgeBaseSpec`'s domain suite reads each domain's `carriers`.
+  It keeps its four assertions, and gains "the node domain lists the
+  identifiers in identifier order".
+- `OpaqueTypesSpec`: for each of the two orderings, a list and its reverse sort
+  to one list, and two distinct identifiers never compare equal.
+- The four tiers that need no image rebuild, then BATS suites C and A, because
+  the slice ends a phase.
+
+**Terminology impact.** None. No glossary entry describes a domain's order.
+
+**ADR alignment.** ADR-020 §10: compliant, first-party exemption. ADR-028:
+compliant, the model is still built per query from the tree. ADR-037: compliant,
+no constant is added. ADR-018: compliant, each wrapper stays a nominal
+`case class`.
+
+##### File inventory
+
+Every path is on `PLAN-RISKTRANSFORM-INVENTORY.md`.
+
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 
 Ruled on OD-4 (2026-08-08): this is the plan's **last deliverable**, to be
@@ -7200,6 +7312,18 @@ M4 elevation respectively).
    so rejection before typed bind preserves the reject-at-the-language
    security property in full. Ships as a small engine release after
    0.11.0 (0.11.x); sibling-repo work, see §8.5.
+
+   **Reach RULED (user, 2026-11-17): every inspection of a targeting
+   formula.** The rule above covers the three walks register writes over
+   `Formula` in `TargetingPredicate.scala`: `atomPredicates`,
+   `appliedFunctions` and `namedNodeLiterals`. They move behind an engine
+   API, and §7.6.15's and §7.6.17's signatures for them are superseded when
+   register adopts it. The forbidden predicates are named by the
+   `QueryPredicate` cases that are not allowed in a target, as §8.6.4's ruling
+   of 2026-08-14 asks. A formula's predicate name "is compared to the
+   forbidden names after lower-casing". The engine side is
+   `docs/PLAN-targeting-formula-inspection.md` in the `vague-quantifier-logic`
+   repository, and its open decisions are elevated there.
 
    **Quantifier exclusion RULED (user, 2026-08-10): excluded from the
    targeting fragment spec.** Targeting ranges over the node sort only and

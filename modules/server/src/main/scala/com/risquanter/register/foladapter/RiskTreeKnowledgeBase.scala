@@ -10,7 +10,7 @@ import com.risquanter.register.common.{FolSymbols, ValuationBasis}
 import com.risquanter.register.common.FolSymbols.{NodeFunction, QueryPredicate, QuerySort, Signatures, ValueFunction}
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given
 
-import vql.typed.{TypeCatalog, TypeId, SymbolName, RuntimeModel, Value}
+import vql.typed.{TypeCatalog, TypeId, SymbolName, RuntimeModel, OrderedDomain, Value}
 import vql.typed.{Extract, extract}
 import vql.typed.MapDispatcher
 
@@ -288,15 +288,13 @@ class RiskTreeKnowledgeBase(
 
   // ── RuntimeModel ───────────────────────────────────────────────────
 
-  /** Domain elements: one `Value(Node, nodeId)` per tree node. */
-  private val nodeDomain: Set[Value] =
-    tree.index.nodes.keys.map(id => Value(nodeSort, id)).toSet
+  /** Domain elements: every node identifier, in identifier order. */
+  private val nodeDomain: OrderedDomain = OrderedDomain.of(tree.index.nodes.keys)
 
-  /** Domain elements: one `Value(Mitigation, mitigationId)` per tree mitigation.
-    * This is what `∃m : mitigation …` ranges over; the `inherent`/`residual`
-    * constants are resolved separately and are not members. */
-  private val mitigationDomain: Set[Value] =
-    tree.mitigations.iterator.map(m => Value(mitigationSort, m.id)).toSet
+  /** Domain elements: every mitigation identifier, in identifier order. This is
+    * what `∃m : mitigation …` ranges over; the `inherent`/`residual` constants
+    * are resolved separately and are not members. */
+  private val mitigationDomain: OrderedDomain = OrderedDomain.of(tree.mitigations.map(_.id))
 
   val model: RuntimeModel = RuntimeModel(
     domains = Map(nodeSort -> nodeDomain, mitigationSort -> mitigationDomain),

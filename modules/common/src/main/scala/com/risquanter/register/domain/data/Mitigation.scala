@@ -260,7 +260,7 @@ object Mitigation {
       _.id,
       (id, group) =>
         ValidationError(location, FieldProblem.DuplicateMitigationId(id, NonNegativeInt.count(group.size)))
-    )(using scala.math.Ordering.by(_.value))
+    )
 
   /** Mitigation names are unique within one tree, so a user naming one in a
     * selection cannot mean two. */
@@ -280,7 +280,7 @@ object Mitigation {
   /** The order mitigations apply in at one node: ascending precedence key, the
     * identifier breaking a tie, so the order is total and merge-stable. */
   given applicationOrder: scala.math.Ordering[Mitigation] =
-    scala.math.Ordering.by(m => (m.precedence.key, m.id.value: String))
+    scala.math.Ordering.by(m => (m.precedence.key, m.id))
 
   private case class Raw(
     id: String,

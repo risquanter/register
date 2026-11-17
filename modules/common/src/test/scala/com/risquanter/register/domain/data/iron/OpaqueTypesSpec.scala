@@ -433,8 +433,31 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
       test("equality is case-sensitive, so differing case makes two distinct names") {
         assertTrue(SafeName.requireDistinct(names("Outage", "outage"), at).isSuccess)
       }
+    ),
+
+    suite("identifier ordering")(
+      test("node identifiers sort by their text, whatever order they arrive in") {
+        val ids = ulids.map(s => NodeId.fromString(s).toOption.get)
+        assertTrue(ids.sorted == ids.reverse.sorted, ids.sorted.map(_.value) == ulids.sorted)
+      },
+      test("two distinct node identifiers never compare equal") {
+        val List(a, b) = ulids.take(2).map(s => NodeId.fromString(s).toOption.get)
+        assertTrue(NodeId.ordering.compare(a, b) != 0)
+      },
+      test("mitigation identifiers sort by their text, whatever order they arrive in") {
+        val ids = ulids.map(s => MitigationId.fromString(s).toOption.get)
+        assertTrue(ids.sorted == ids.reverse.sorted, ids.sorted.map(_.value) == ulids.sorted)
+      },
+      test("two distinct mitigation identifiers never compare equal") {
+        val List(a, b) = ulids.take(2).map(s => MitigationId.fromString(s).toOption.get)
+        assertTrue(MitigationId.ordering.compare(a, b) != 0)
+      }
     )
   )
+
+  /** Three valid identifiers, not in text order. */
+  private val ulids: List[String] =
+    List("01BX5ZZKBKACTAV9WEVGEMMVRZ", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "01CAT0000000000000000000AA")
 
   /** The location these tests pass in, so each refusal can be compared whole. */
   private val at: ErrorLocation = ErrorLocation.Whole

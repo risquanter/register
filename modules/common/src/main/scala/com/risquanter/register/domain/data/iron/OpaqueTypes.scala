@@ -977,6 +977,10 @@ object NodeId:
   given JsonFieldDecoder[NodeId] = JsonFieldDecoder.string.mapOrFail(s =>
     NodeId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
+  /** Identifier order: the ULID's text, which sorts by creation time. Two
+    * distinct identifiers never compare equal. */
+  given ordering: scala.math.Ordering[NodeId] = scala.math.Ordering.by(_.value)
+
 // MitigationId: Nominal case class wrapper over SafeId for mitigation identity (ADR-018).
 // Compiler-distinct from TreeId/NodeId and raw SafeId. All validation delegates to SafeId.
 case class MitigationId(toSafeId: SafeId.SafeId):
@@ -997,6 +1001,10 @@ object MitigationId:
   given JsonFieldEncoder[MitigationId] = JsonFieldEncoder.string.contramap(_.value)
   given JsonFieldDecoder[MitigationId] = JsonFieldDecoder.string.mapOrFail(s =>
     MitigationId.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
+
+  /** Identifier order: the ULID's text, which sorts by creation time. Two
+    * distinct identifiers never compare equal. */
+  given ordering: scala.math.Ordering[MitigationId] = scala.math.Ordering.by(_.value)
 
 // WorkspaceKeySecret: 128-bit workspace capability key, base64url encoded (22 chars, no padding).
 // Used as capability URL token for workspace access. Standalone type — NOT a ULID wrapper.

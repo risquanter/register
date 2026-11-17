@@ -563,21 +563,28 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   // ── Domain element suite ───────────────────────────────────────────
 
+  /** The node domain's identifiers, in the domain's order. */
+  private def nodeIdsOf(base: RiskTreeKnowledgeBase): Vector[NodeId] =
+    base.model.domains(nodeSort).carriers.collect { case id: NodeId => id }
+
   private val domainSuite = suite("domain elements")(
     test("Node domain contains all node ids") {
-      val domain = kb.model.domains(nodeSort)
-      val ids    = domain.flatMap(v => v.raw match { case id: NodeId => Some(id); case _ => None })
+      val ids = nodeIdsOf(kb)
       assertTrue(
-        ids == Set(rootId, itId, cyberId, hardwareId)
+        ids.toSet == Set(rootId, itId, cyberId, hardwareId)
       )
     },
     test("Node domain has correct size") {
-      assertTrue(kb.model.domains(nodeSort).size == 4)
+      assertTrue(kb.model.domains(nodeSort).carriers.size == 4)
+    },
+    test("the node domain lists the identifiers in identifier order") {
+      val ids = nodeIdsOf(kb)
+      assertTrue(ids == ids.sorted, ids.nonEmpty)
     },
     test("Mitigation domain enumerates the tree's mitigations") {
-      val ids = mitKb.model.domains(mitigationSort)
-        .flatMap(v => v.raw match { case id: MitigationId => Some(id); case _ => None })
-      assertTrue(ids == Set(mCyberId, mHardwareId, mAbsentId))
+      val ids = mitKb.model.domains(mitigationSort).carriers
+        .collect { case id: MitigationId => id }
+      assertTrue(ids.toSet == Set(mCyberId, mHardwareId, mAbsentId))
     },
     test("no Loss or Probability domains are registered") {
       assertTrue(

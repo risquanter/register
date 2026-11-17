@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.24.3"
+ThisBuild / version      := "0.24.4"
 ThisBuild / scalaVersion := "3.8.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -37,7 +37,7 @@ val zioTelemetryVersion = "3.1.13"
 val openTelemetryVersion = "1.57.0"
 val metalogVersion    = "0.10.1"  // com.risquanter:metalog-distribution (Java)
 // First-party artifact (com.risquanter), exempt from the cooldown (ADR-020 §10).
-val vqlEngineVersion  = "0.20.0"  // com.risquanter:vql-engine (cross-compiled)
+val vqlEngineVersion  = "0.22.0"  // com.risquanter:vql-engine (cross-compiled)
 
 // Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(
