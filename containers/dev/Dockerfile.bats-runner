@@ -51,16 +51,23 @@ LABEL description="BATS test runner for container smoke/integration tests"
 #                       an error, and `COPY --from` on a daemon with
 #                       user-namespace remapping, which it fails outright.
 # --------------------------------------------------------------------------
-# Versions are exact (ADR-020 §1), from the Alpine 3.24 branch; `apk policy
-# <package>` reports the current revision when bumping. The Docker CLI, Compose
-# and buildx versions track the host daemon this runner drives.
+# Versions are exact (ADR-020 §1), from the Alpine 3.24 branch. The branch
+# repository keeps only the newest build of each package, so a pin stops
+# resolving when Alpine replaces that build; `apk policy <package>` reports the
+# current revision when bumping. The Docker CLI negotiates the API version down
+# to what the host daemon it drives accepts.
+#
+# docker-cli 29.9.3-r1 and docker-cli-compose 5.7.2-r0 were adopted inside the
+# 14-day cooldown (ADR-020 §10): the branch held no older build once the
+# previous pins were replaced. User-approved 2026-11-17, as a one-time waiver
+# for these two builds.
 RUN apk add --no-cache \
     bash=5.3.9-r1 \
-    curl=8.22.0-r0 \
+    curl=8.23.0-r0 \
     jq=1.8.2-r0 \
-    docker-cli=29.5.3-r1 \
-    docker-cli-compose=5.1.4-r1 \
-    docker-cli-buildx=0.34.1-r1 \
+    docker-cli=29.9.3-r1 \
+    docker-cli-compose=5.7.2-r0 \
+    docker-cli-buildx=0.38.1-r0 \
     httpie=3.2.4-r2
 
 # --------------------------------------------------------------------------
