@@ -3,7 +3,7 @@ package app.components
 import com.raquo.laminar.api.L.*
 
 import app.core.NumberFormat
-import app.state.AbsoluteStatementRow
+import app.state.{AbsoluteStatementRow, RiskLeafFormState}
 import com.risquanter.register.domain.data.{AbsoluteReplacement, DistributionShape}
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, SafeName}
 
@@ -49,12 +49,9 @@ object AbsoluteStatementList:
     case AbsoluteReplacement.Severity(s)   => shapeText(s)
     case AbsoluteReplacement.Both(p, s)    => s"${likelihoodText(p.toFraction)}, ${shapeText(s)}"
 
-  /** A probability's display precision, in decimal places of a percentage.
-    * Chosen by this project to match the leaf form's entry precision. */
-  private val PercentDecimals: Int = 2
-
+  /** The probability as a percentage, at the leaf form's entry precision. */
   private def likelihoodText(p: Double): String =
-    s"likelihood ${NumberFormat.percentValue(p, PercentDecimals)}%"
+    s"likelihood ${NumberFormat.percentValue(p, RiskLeafFormState.probabilityDecimals)}%"
 
   private def shapeText(shape: DistributionShape): String = shape match
     case DistributionShape.Lognormal(bounds) =>

@@ -1064,11 +1064,12 @@ object AnalyzeView:
 
   /** Slots taking part in the comparison right now, as (slot index, branch)
     * in slot order. A slot is engaged when it holds a chosen target whose
-    * (branch, effective tree, pin) triple differs from the tab's own — the tab
-    * at its current pin `activeAt` (`baselineAt`) — AND from every earlier
-    * engaged slot's triple. A duplicate is inert (earlier slot wins), exactly
-    * like a tab collision: the slot's target is untouched, so it re-engages as
-    * soon as a tree, branch, or pin change differentiates it. */
+    * (branch, effective tree, pin, selection) differs from the tab's own — the
+    * tab at its current pin `activeAt` (`baselineAt`) under `activeSelection`
+    * (`baselineSelection`) — AND from every earlier engaged slot's. A duplicate
+    * is inert (earlier slot wins), exactly like a tab collision: the slot's
+    * target is untouched, so it re-engages as soon as a tree, branch, pin or
+    * selection change differentiates it. */
   private[views] def engagedSlots(
     targets: Vector[CompareTarget],
     activeBranch: BranchChoice,
@@ -1142,7 +1143,7 @@ object AnalyzeView:
     activeRoot: Option[NodeId],
     compareTreeNodeIds: Set[NodeId],
     compareRoot: Option[NodeId],
-    cap: Int = 13
+    cap: Int = LECChartState.MaxUserSelections
   ): (Option[NodeId], List[NodeId]) =
     if baseline.nonEmpty then
       (None, baseline.toList.filter(compareTreeNodeIds.contains).sortBy(_.value).take(cap))

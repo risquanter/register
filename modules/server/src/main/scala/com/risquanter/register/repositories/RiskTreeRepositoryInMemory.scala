@@ -18,7 +18,7 @@ import com.risquanter.register.http.errors.Capability
   *
   * Branches and commit pins are an Irmin capability: this backend serves only
   * the main branch at its head. A non-main branch fails as `NotSupported` for
-  * scenarios, and a commit pin (`Revision.At`) or a revert fails as
+  * scenarios, and a commit read (`Revision.At` or `Revision.Pinned`) or a revert fails as
   * `NotSupported` for pinned reads, because this backend keeps no history.
   * Neither is reachable in normal operation: the scenario and history
   * interface is disabled on the in-memory backend.
