@@ -35,10 +35,14 @@
 #   also approve a download. Using one removes it and appends the command to
 #   the override log.
 #
-# Edit/Write/NotebookEdit — two categories.
+# Edit/Write/NotebookEdit — three categories.
 #
-#   Never writable by the agent, whatever the token says: the protocol
-#   machinery under .claude/ (the skills directory excepted, which is
+#   Writable by the agent: .claude/protocol/pending, the agent's proposal of an
+#   inventory amendment. It authorizes nothing. .claude/bin/approve-inventory
+#   reads it, shows it to the user and applies it only on the user's "y".
+#
+#   Never writable by the agent, whatever the token says: the rest of the
+#   protocol machinery under .claude/ (the skills directory excepted, which is
 #   documentation) and every file inventory. These files decide what the agent
 #   may write, and an agent that can edit its own authorization can authorize
 #   anything.
@@ -76,10 +80,11 @@
 #   (server-it integration tests included) still require an exact bullet entry.
 #
 #   Amending an inventory: the agent proposes, the user applies. The agent
-#   prints a block naming the plan and the paths; the user pastes it into
-#   .claude/protocol/pending, reads it, and runs .claude/bin/approve-inventory.
-#   Inventories are tracked by git, so an unauthorized change to one shows up
-#   in git status and in the commit diff.
+#   writes a block naming the plan and the paths to .claude/protocol/pending
+#   and shows the same block in the chat; the user runs
+#   .claude/bin/approve-inventory, which shows it again and applies it only on
+#   "y". Inventories are tracked by git, so an unauthorized change to one shows
+#   up in git status and in the commit diff.
 #
 # The user approves a plan from their own terminal through
 # .claude/bin/approve-inventory, which appends one repo-relative plan path per
@@ -177,7 +182,7 @@ if [ "$TOOL" = "Bash" ]; then
     *".claude/protocol"*|*".claude/bin"*|*".claude/hooks"*|*".claude/settings.json"*)
       deny "Blocked: the working-protocol machinery is user-owned — the approval token (.claude/protocol/), this hook (.claude/hooks/), the approval script (.claude/bin/), and the hook wiring (.claude/settings.json). Only the user creates, refreshes, runs, or removes any of it (working-protocol G7).
 
-To READ any of these files, use the Read tool — it is not gated. To have one of them run or changed, hand the user the exact command and stop."
+To READ any of these files, use the Read tool — it is not gated. To propose an inventory amendment, write .claude/protocol/pending with the Write tool, not through Bash. To have anything else run or changed, hand the user the exact command and stop."
       ;;
   esac
 
@@ -268,7 +273,7 @@ Do not retry, do not reshape the command, and do not look for another route to t
 
 Bash file writes never reach the file-inventory check that gates Edit/Write, so allowing them would make that check optional. Source edits there go through the Edit/Write tools.
 
-A file inventory is never written by the agent at all, by any route. To have paths added to one, print the amendment block and let the user run .claude/bin/approve-inventory. The one-shot exemption below does not cover inventories.
+A file inventory is never written by the agent at all, by any route. To have paths added to one, write the amendment block with the Write tool to .claude/protocol/pending, show the same block in the chat, and let the user run .claude/bin/approve-inventory. The one-shot exemption below does not cover inventories.
 
 If a batched script is genuinely the better tool — many mechanical edits at once — hand the command below back to the user verbatim, as a copy-pasteable block, together with what it does, the exact list of files it touches, and why it beats separate Edit calls. Then STOP and wait.
 
@@ -293,15 +298,19 @@ ABS="$(readlink -m -- "$ABS")" || gate_error "the edited path does not resolve"
 
 REL="${ABS#"$ROOT"/}"
 
-# Never writable, whatever the token says. These files decide what the agent
-# may write; an agent that can edit its own authorization can authorize
-# anything. .claude/skills/ and .claude/rules/ are excepted: both are
-# documentation, and the hook reads nothing from either.
+# Never writable, whatever the token says, except the agent's proposal
+# .claude/protocol/pending. These files decide what the agent may write; an
+# agent that can edit its own authorization can authorize anything.
+# .claude/skills/ and .claude/rules/ are excepted: both are documentation, and
+# the hook reads nothing from either.
 case "$REL" in
+  .claude/protocol/pending)
+    exit 0
+    ;;
   .claude/skills/*|.claude/rules/*)
     ;;
   .claude/*)
-    deny "Blocked: '$REL' is part of the working-protocol machinery, which the agent never writes. That covers the approval token (.claude/protocol/), the gate itself (.claude/hooks/), the approval script (.claude/bin/), and the hook wiring (.claude/settings.json).
+    deny "Blocked: '$REL' is part of the working-protocol machinery, which the agent never writes. That covers the approval token (.claude/protocol/), the gate itself (.claude/hooks/), the approval script (.claude/bin/), and the hook wiring (.claude/settings.json). The one exception is .claude/protocol/pending, the agent's proposal of an inventory amendment.
 
 Reading these files is fine — the Read tool is not gated. To change one, present the exact edit to the user and stop."
     ;;
@@ -309,12 +318,12 @@ Reading these files is fine — the Read tool is not gated. To change one, prese
     PLANMATE="${REL%-INVENTORY.md}.md"
     deny "Blocked: '$REL' is a file inventory. It is the list this gate reads to decide which files the agent may edit, so the agent never writes it — not to add a path, not to correct one, not to reformat it.
 
-To have paths added, print this block for the user, who pastes it into .claude/protocol/pending and runs .claude/bin/approve-inventory:
+To have paths added, write this block with the Write tool to .claude/protocol/pending and show the same block in the chat:
 
   $PLANMATE
-  <one repo-relative path per line>
+  <one repo-relative path per line; 'new: <path>' for a file the plan creates>
 
-Then stop and wait."
+Then stop. The user runs .claude/bin/approve-inventory, which shows the block again and applies it only when the user answers y."
     ;;
 esac
 
@@ -324,7 +333,7 @@ case "$ABS" in
 esac
 
 if [ ! -f "$TOKEN" ]; then
-  deny "Blocked (working-protocol G3): no approved plan (token absent). Present the quality-gated plan document and wait. The user approves by running .claude/bin/approve-inventory after pasting the plan path and its file list into .claude/protocol/pending."
+  deny "Blocked (working-protocol G3): no approved plan (token absent). Present the quality-gated plan document and wait. On approval, write the plan path and its file list with the Write tool to .claude/protocol/pending, show the same block in the chat, and stop; the user runs .claude/bin/approve-inventory, which shows it again and applies it only on y."
 fi
 
 MISSING=""

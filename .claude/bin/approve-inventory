@@ -7,7 +7,8 @@
 # (PLAN-<name>-INVENTORY.md), which the hook denies the agent from writing, so
 # the agent can propose an amendment but cannot apply one.
 #
-# Input is a plain text file, .claude/protocol/pending:
+# Input is a plain text file, .claude/protocol/pending. The agent writes it
+# and shows the same block in the chat:
 #
 #     docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md
 #     modules/server/src/main/scala/com/risquanter/register/cache/Registry.scala
@@ -16,12 +17,16 @@
 # The first line names the plan. Every line after it is one repo-relative path
 # to authorize.
 #
+# Before anything is written, the script prints what it read and asks
+# "apply? [y/N]". Only "y" or "yes" applies it; any other answer writes
+# nothing and leaves the pending file in place. That answer is the approval:
+# the pending file is the agent's proposal and authorizes nothing by itself.
+#
 # A path must already exist in the working tree, which catches a mistyped one.
 # A file the plan is going to CREATE cannot pass that check, so it carries the
 # marker "new:". The marker is the agent stating that the file does not exist
-# yet; the user reads that claim in the block before running this script, and
-# that reading is what authorizes it. An unmarked path that does not exist is
-# rejected as a typo.
+# yet; the user reads that claim at the prompt, and that reading is what
+# authorizes it. An unmarked path that does not exist is rejected as a typo.
 #
 # A "#" begins a comment anywhere in a line, and blank lines are ignored.
 #
@@ -149,6 +154,27 @@ while [ "$i" -lt "${#PATHS[@]}" ]; do
 done
 
 [ "$ERRORS" -eq 0 ] || { echo "" >&2; echo "$ERRORS problem(s); nothing written." >&2; exit 1; }
+
+# --- show the proposal and ask -----------------------------------------------
+# The pending file is the agent's proposal. Nothing is written until the user
+# has read it here and answered y.
+if [ "$DRY" -eq 0 ]; then
+  echo "plan: $PLAN"
+  if [ "$MODE" != "approve" ]; then
+    echo "paths for $SIDECAR:"
+    i=0
+    while [ "$i" -lt "${#PATHS[@]}" ]; do
+      if [ "${IS_NEW[$i]}" -eq 1 ]; then echo "  new: ${PATHS[$i]}"; else echo "  ${PATHS[$i]}"; fi
+      i=$((i + 1))
+    done
+  fi
+  if [ "$MODE" != "amend" ]; then echo "and add the plan to $TOKEN"; fi
+  read -r -p "apply? [y/N] " ANSWER
+  case "$ANSWER" in
+    y|Y|yes|YES) ;;
+    *) echo "nothing written; $PENDING left in place."; exit 1 ;;
+  esac
+fi
 
 # --- amend -------------------------------------------------------------------
 if [ "$MODE" = "amend" ] || [ "$MODE" = "both" ]; then
