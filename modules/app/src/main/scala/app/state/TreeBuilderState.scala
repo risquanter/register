@@ -427,6 +427,14 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   val absoluteStatements: Signal[List[AbsoluteStatementRow]] =
     loadedMitigationsVar.signal.combineWith(affirmedVar.signal).map(TreeBuilderState.absoluteRows)
 
+  /** The ids of the loaded absolute statements, read when the popup is asked to open. */
+  def absoluteStatementIds: Set[MitigationId] =
+    loadedMitigationsVar.now().flatMap { m =>
+      m.spec match
+        case _: MitigationSpec.LeafAbsolute                                 => Some(m.id)
+        case _: MitigationSpec.LeafRelative | _: MitigationSpec.ResultStage => None
+    }.toSet
+
   /** Record the popup's figures for `id`. A save then re-affirms it. */
   def affirm(id: MitigationId, figures: AbsoluteReplacement): Unit =
     affirmedVar.update(_.updated(id, figures))

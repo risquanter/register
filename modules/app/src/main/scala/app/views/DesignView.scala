@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 import app.components.{AbsoluteStatementList, BranchBar, MergeModal, SplitPane}
 import app.state.{AppConfigState, DistributionChartState, LoadState, OverrideEditEvent, OverrideEditState, ScenarioMergeState, ScenarioState, TreeBuilderState, TreeLoadDecision, TreeLoadPolicy, TreeViewState, WorkspaceState}
-import com.risquanter.register.domain.data.{MitigationSpec, RiskTree}
+import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{BranchChoice, MitigationId, NodeId, SafeName}
 
 /** Design view — tree creation and editing workflow.
@@ -25,14 +25,6 @@ import com.risquanter.register.domain.data.iron.{BranchChoice, MitigationId, Nod
   * Pure structural component — owns no state (ADR-019 Pattern 1).
   */
 object DesignView:
-
-  /** The absolute statements `tree` holds. */
-  private def absoluteIds(tree: RiskTree): Set[MitigationId] =
-    tree.mitigations.flatMap { m =>
-      m.spec match
-        case _: MitigationSpec.LeafAbsolute                                 => Some(m.id)
-        case _: MitigationSpec.LeafRelative | _: MitigationSpec.ResultStage => None
-    }.toSet
 
   def apply(
     builderState: TreeBuilderState,
@@ -64,7 +56,7 @@ object DesignView:
     def commitLoad(tree: RiskTree): Unit =
       builderState.loadFromTree(tree)
       loadedBranch.set(scenarioState.activeBranch.now())
-      val held = absoluteIds(tree)
+      val held = builderState.absoluteStatementIds
       overrideEditState.dispatch(OverrideEditEvent.TreeLoaded(tree.id, held), held)
 
     /** The builder starts a new, empty tree: nothing is held, so the popup
@@ -91,11 +83,9 @@ object DesignView:
         treeViewState.selectedTreeId.set(builderState.editingTreeId.now())
         revertBranch()
 
-    /** The absolute statements of the loaded tree, read when the popup is
-      * asked to open. */
-    def heldNow(): Set[MitigationId] = treeViewState.selectedTree.now() match
-      case LoadState.Loaded(tree) => absoluteIds(tree)
-      case _                      => Set.empty
+    /** The absolute statements of the tree the builder loaded, read when the
+      * popup is asked to open. */
+    def heldNow(): Set[MitigationId] = builderState.absoluteStatementIds
 
     // The stale badge comes from the structure read of the tree the builder
     // loaded, and an anchor is named as that tree names it. A tree the tree

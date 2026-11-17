@@ -2490,7 +2490,7 @@ has landed green (G8).
 | 6 | The interface and the user documentation | §7.6.17 | Implemented, 2026-11-17 |
 | 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 | Landed |
 | 8 | Adopting vql-engine 0.20.0 and mapping its nesting-depth refusals. Lands before slice 2 | §7.6.16 | Landed, 0.20.5 |
-| 9 | Adopting vql-engine 0.22.0, taking up 0.21.0's ordered domains with it | §7.6.18 | Implemented, 2026-11-17; BATS pending |
+| 9 | Adopting vql-engine 0.22.0, taking up 0.21.0's ordered domains with it | §7.6.18 | Landed, 0.24.4, all tiers green including BATS |
 
 Slices 2 to 5 are specified below and carry no open decision. Slice 2's one
 decision, §7.6.12 decision 11, the submitted form of a leaf-stage mitigation, is
@@ -6728,8 +6728,7 @@ Every path is listed in the block presented with this section.
 
 #### 7.6.18 M4 slice 9 — adopting vql-engine 0.22.0 (approved by the user, 2026-11-17)
 
-**Status:** approved and implemented on 2026-11-17. The unit and integration
-tiers are green, and no pinned figure moved. BATS suites C and A are pending.
+**Landed, 0.24.4, all tiers green including BATS.** No pinned figure moved.
 
 **Origin.** The user ruled on 2026-11-17 to adopt 0.22.0 at once and not to
 adopt 0.21.0 on its own. 0.21.0's changes therefore arrive in this slice.

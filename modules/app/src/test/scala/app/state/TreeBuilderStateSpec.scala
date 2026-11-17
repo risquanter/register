@@ -448,6 +448,16 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
     ),
 
+    suite("absoluteStatementIds")(
+      test("after loadFromTree it holds exactly the tree's absolute statements") {
+        val (state, statement) = loadedWithStatement()
+        assertTrue(state.absoluteStatementIds == Set(statement.id))
+      },
+      test("before any load it holds nothing") {
+        assertTrue(new TreeBuilderState().absoluteStatementIds.isEmpty)
+      }
+    ),
+
     suite("affirm")(
 
       test("an affirmed statement makes the builder dirty") {
