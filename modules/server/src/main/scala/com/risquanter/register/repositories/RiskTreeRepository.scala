@@ -56,15 +56,32 @@ object RiskTreeRepository:
     * }}}
     */
   def treeAbsent(wsId: WorkspaceId, treeId: TreeId, rev: Revision): IO[Failure, Nothing] =
-    val diagnostics = List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeId), Diagnostic.RevisionRead(rev))
-    def notFound(location: ErrorLocation, kind: NotFoundKind): IO[Failure, Nothing] =
-      ZIO.fail(Failure.NotFound(Core(TrustZone.Client, NonEmptyChunk(location -> kind), diagnostics)))
     rev match
       case Revision.Head(branch) =>
         BranchChoice.fromBranchRef(wsId, branch) match
-          case Right(choice) => notFound(ErrorLocation.Header(RequestHeaderName.Branch), NotFoundKind.TreeNotOnBranch(choice))
+          case Right(choice) =>
+            notFound(wsId, treeId, rev, ErrorLocation.Header(RequestHeaderName.Branch), NotFoundKind.TreeNotOnBranch(choice))
           case Left(errors)  => ZIO.die(new IllegalStateException(
             s"branch ${branch.toBranchRef} is not a branch of workspace ${wsId.value}: " +
             errors.map(ValidationError.describe).mkString("; ")))
-      case Revision.At(_) =>
-        notFound(ErrorLocation.QueryParameter(RequestQueryParam.At), NotFoundKind.TreeNotAtCommit())
+      case Revision.At(_) | Revision.Pinned(_, _) =>
+        commitAbsent(wsId, treeId, rev, ErrorLocation.QueryParameter(RequestQueryParam.At))
+
+  /** Fails with the caller's NotFound for a commit that holds no such tree, or
+    * that lies outside the named branch's history, located where the request
+    * named the commit: the `at` parameter of a read, the `toCommit` field of a
+    * revert.
+    *
+    * {{{
+    * commitAbsent(wsId, treeId, Revision.Pinned(branch, commit), ErrorLocation.requestField(FieldName.ToCommit))
+    * // fails with NotFound at Client: (request.ToCommit, TreeNotAtCommit)
+    * }}}
+    */
+  def commitAbsent(wsId: WorkspaceId, treeId: TreeId, rev: Revision, location: ErrorLocation): IO[Failure, Nothing] =
+    notFound(wsId, treeId, rev, location, NotFoundKind.TreeNotAtCommit())
+
+  private def notFound(
+    wsId: WorkspaceId, treeId: TreeId, rev: Revision, location: ErrorLocation, kind: NotFoundKind
+  ): IO[Failure, Nothing] =
+    val diagnostics = List(Diagnostic.WorkspaceRef(wsId), Diagnostic.TreeRef(treeId), Diagnostic.RevisionRead(rev))
+    ZIO.fail(Failure.NotFound(Core(TrustZone.Client, NonEmptyChunk(location -> kind), diagnostics)))

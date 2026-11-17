@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.*
 
 import com.risquanter.register.domain.data.iron.ValidationMessages
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
 import zio.prelude.Validation
 
 /**
@@ -88,16 +88,119 @@ trait FormState[Field]:
   // Parse Helpers
   // ============================================================
 
-  /** Helper to parse a string as a Double */
-  protected def parseDouble(s: String): Option[Double] =
+  /** The companion's `parseDouble`, for the form's own checks. */
+  protected def parseDouble(s: String): Option[Double] = FormState.parseDouble(s)
+
+  /** The companion's `parseLong`, for the form's own checks. */
+  protected def parseLong(s: String): Option[Long] = FormState.parseLong(s)
+
+  /** The companion's `parseDoubleList`, for the form's own checks. */
+  protected def parseDoubleList(s: String): List[Double] = FormState.parseDoubleList(s)
+
+  /** The companion's `parseRequired`, for the form's own checks. */
+  protected def parseRequired[A](
+    input:    Located[String],
+    parse:    String => Option[A],
+    expected: ExpectedInput
+  ): Validation[ValidationError, Located[A]] =
+    FormState.parseRequired(input, parse, expected)
+
+/** The five text inputs a loss distribution is entered in, each with the field
+  * its refusals name. */
+enum ShapeInput(val field: FieldName):
+  case Percentiles extends ShapeInput(FieldName.Percentiles)
+  case Quantiles   extends ShapeInput(FieldName.Quantiles)
+  case Terms       extends ShapeInput(FieldName.Terms)
+  case MinLoss     extends ShapeInput(FieldName.MinLoss)
+  case MaxLoss     extends ShapeInput(FieldName.MaxLoss)
+
+object ShapeInput:
+
+  /** The label an input carries, and the name a summary entry gives it. */
+  def label(input: ShapeInput): String = input match
+    case Percentiles => "Percentiles"
+    case Quantiles   => "Quantiles (loss in $M)"
+    case Terms       => "Terms (optional)"
+    case MinLoss     => "Minimum Loss"
+    case MaxLoss     => "Maximum Loss"
+
+  /** The example an empty input shows. */
+  def placeholder(input: ShapeInput): String = input match
+    case Percentiles => "e.g., 10, 50, 90"
+    case Quantiles   => "e.g., 50, 200, 1000 ($50M, $200M, $1B)"
+    case Terms       => "e.g. 3"
+    case MinLoss     => "e.g., 1000"
+    case MaxLoss     => "e.g., 50000"
+
+  /** The characters an input accepts as they are typed. Percentiles are whole
+    * numbers, by decision-analysis convention (Cooke, SHELF, Keelin 2016).
+    * Losses may carry a decimal point, and consecutive dots are refused as a
+    * typo; the decimal places are checked when the input is read, because the
+    * filter sees the whole comma-separated text. Terms and the lognormal bounds
+    * are whole numbers. */
+  def filter(input: ShapeInput): String => Boolean = input match
+    case Percentiles => _.forall(c => c.isDigit || c == ',' || c == ' ')
+    case Quantiles   => s => s.forall(c => c.isDigit || c == ',' || c == ' ' || c == '.') && !s.contains("..")
+    case Terms | MinLoss | MaxLoss => _.forall(_.isDigit)
+
+  /** The keyboard an input asks a touch device for: the HTML `inputmode`
+    * attribute's value. */
+  def inputMode(input: ShapeInput): String = input match
+    case Percentiles | Quantiles   => "decimal"
+    case Terms | MinLoss | MaxLoss => "numeric"
+
+/** A form holding a loss distribution's mode and its five shape inputs, with
+  * what each input shows. The members are named as the forms already name
+  * them, so a form holding them satisfies this as it stands. */
+trait ShapeFieldsForm:
+  def distributionModeVar: Var[DistributionMode]
+  def percentilesVar: Var[String]
+  def quantilesVar: Var[String]
+  def termsVar: Var[String]
+  def minLossVar: Var[String]
+  def maxLossVar: Var[String]
+  def percentilesError: Signal[List[String]]
+  def quantilesError: Signal[List[String]]
+  def termsError: Signal[List[String]]
+  def minLossError: Signal[List[String]]
+  def maxLossError: Signal[List[String]]
+  def impliedRatioWarning: Signal[Option[String]]
+
+  /** The element id of an input, unique on the page. */
+  def inputIdOf(input: ShapeInput): String
+
+  /** Record that the user left an input, so its refusals show. */
+  def markShapeTouched(input: ShapeInput): Unit
+
+  /** Write a shape's text into the mode and the five inputs. */
+  def fillShape(text: ShapeFieldText): Unit =
+    distributionModeVar.set(text.mode)
+    percentilesVar.set(text.percentiles)
+    quantilesVar.set(text.quantiles)
+    termsVar.set(text.terms)
+    minLossVar.set(text.minLoss)
+    maxLossVar.set(text.maxLoss)
+
+/** How a form reads its text inputs. Pure functions, so a reading shared by
+  * two forms is stated once and a form's companion can call it too. */
+object FormState:
+
+  /** Text read as a number, ignoring surrounding spaces. */
+  def parseDouble(s: String): Option[Double] =
     s.trim.toDoubleOption
 
-  /** Helper to parse a string as a Long */
-  protected def parseLong(s: String): Option[Long] =
+  /** Text read as a whole number, ignoring surrounding spaces. */
+  def parseLong(s: String): Option[Long] =
     s.trim.toLongOption
 
-  /** Helper to parse a comma-separated string as a list of Doubles */
-  protected def parseDoubleList(s: String): List[Double] =
+  /** Comma-separated text read as numbers. An entry that is not a number is
+    * dropped, and blank text reads as no numbers.
+    *
+    * {{{
+    * parseDoubleList("10, abc, 90")  // List(10.0, 90.0)
+    * }}}
+    */
+  def parseDoubleList(s: String): List[Double] =
     if s.isBlank then Nil
     else s.split(",").toList.flatMap(part => parseDouble(part.trim))
 
@@ -112,7 +215,7 @@ trait FormState[Field]:
     * parseRequired(Located("abc", at), parseLong, ExpectedInput.WholeNumber)   // Failure: Unreadable(WholeNumber) at `at`
     * }}}
     */
-  protected def parseRequired[A](
+  def parseRequired[A](
     input:    Located[String],
     parse:    String => Option[A],
     expected: ExpectedInput

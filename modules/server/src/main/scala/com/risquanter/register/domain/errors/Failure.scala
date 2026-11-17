@@ -187,28 +187,30 @@ object Failure:
   private def entries[Z, P](core: Core[Z, P], describe: P => String): NonEmptyChunk[String] =
     core.errors.map((location, problem) => s"[${ErrorLocation.describe(location)}] ${describe(problem)}")
 
-  /** How much of a refused query's sentence reaches the log line.
+  /** How much of a sentence repeating the caller's words reaches a log line.
     *
-    * A query refusal's sentence repeats the caller's words and literals, and a
-    * trailing-tokens refusal names every remaining token, so its length follows
-    * the submitted query, which is bounded only by the 8 MiB request-body cap.
-    * One line per failed request is written synchronously to standard output,
-    * so an unbounded sentence makes a request's log cost scale with its body.
-    * 300 characters is chosen here as enough to identify where a query was
-    * refused while keeping the line a fixed cost.
+    * A refusal of query or targeting text repeats the caller's words and
+    * literals, and one word may run to the text's whole 2 048 characters. One
+    * line per failed request is written synchronously to standard output, so a
+    * long sentence makes a request's log cost follow its text. 300 characters
+    * is chosen here as enough to identify where a text was refused while
+    * keeping the line a fixed cost.
     *
-    * The full refusal still crosses to the caller who sent the query, because
+    * The full refusal still crosses to the caller who sent the text, because
     * it is their own text coming back.
     */
   private val LoggedMessageLimit: Int = 300
 
-  /** A refused problem's sentence for the log line, with a query refusal's
-    * sentence cut to `LoggedMessageLimit`. */
+  /** A refused problem's sentence for the log line, with the sentence of a
+    * query refusal and of a targeting predicate's refusal cut to
+    * `LoggedMessageLimit`. */
   private def logged(problem: FieldProblem): String = problem match
-    case FieldProblem.Query(_) => bounded(ValidationMessages.render(problem))
-    case other                 => ValidationMessages.render(other)
+    case FieldProblem.Query(_) | FieldProblem.TargetingPredicateUnparseable(_) => boundedForLog(ValidationMessages.render(problem))
+    case other                                                                 => ValidationMessages.render(other)
 
-  private def bounded(message: String): String =
+  /** A sentence repeating the caller's words, cut for a log line to
+    * `LoggedMessageLimit` characters and marked when cut. */
+  private[register] def boundedForLog(message: String): String =
     if message.length <= LoggedMessageLimit then message
     else s"${message.take(LoggedMessageLimit)}… (message truncated)"
 

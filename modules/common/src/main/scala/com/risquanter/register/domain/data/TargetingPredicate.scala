@@ -106,6 +106,37 @@ object TargetingPredicate:
   private def nodeSource(id: NodeId): String =
     s"""${QueryPredicate.Eq.symbol}(x, ${NodeFunction.ById.symbol}("${id.value}"))"""
 
+  /** The nodes the predicate names by `node_id("…")`, in source order and with
+    * repeats kept. The source passed `create`, so it parses again. A literal
+    * that is not a node identifier names no node and is left out.
+    *
+    * {{{
+    * referencedNodes(leaf(x) /\ descendant_of(x, node_id("A")) \/ eq(x, node_id("B")))  // List(A, B)
+    * referencedNodes(leaf(x))                                                           // Nil
+    * }}}
+    */
+  def referencedNodes(predicate: TargetingPredicate): List[NodeId] =
+    FOLParser.parse(predicate.source).fold(_ => Nil, namedNodeLiterals)
+      .flatMap(literal => NodeId.fromString(literal).toOption)
+
+  /** The literal of every `node_id("…")` application in the formula, left to
+    * right. */
+  private def namedNodeLiterals(formula: Formula[FOL]): List[String] = formula match
+    case Formula.Atom(FOL(_, terms))  => terms.flatMap(termNodeLiterals)
+    case Formula.Not(p)               => namedNodeLiterals(p)
+    case Formula.And(p, q)            => namedNodeLiterals(p) ++ namedNodeLiterals(q)
+    case Formula.Or(p, q)             => namedNodeLiterals(p) ++ namedNodeLiterals(q)
+    case Formula.Imp(p, q)            => namedNodeLiterals(p) ++ namedNodeLiterals(q)
+    case Formula.Iff(p, q)            => namedNodeLiterals(p) ++ namedNodeLiterals(q)
+    case Formula.Forall(_, p)         => namedNodeLiterals(p)
+    case Formula.Exists(_, p)         => namedNodeLiterals(p)
+    case Formula.True | Formula.False => Nil
+
+  private def termNodeLiterals(term: Term): List[String] = term match
+    case Term.Fn(NodeFunction.ById.symbol, Term.Const(literal) :: Nil) => List(literal)
+    case Term.Fn(_, args)                                              => args.flatMap(termNodeLiterals)
+    case Term.Var(_) | Term.Const(_)                                   => Nil
+
   private def parseProblem(error: ParseError): Positioned[ParseProblem] =
     ParseProblem.fromFormulaError(error).fold(
       reason => throw new IllegalStateException(s"The formula parser returned a refusal that does not translate: $reason"),

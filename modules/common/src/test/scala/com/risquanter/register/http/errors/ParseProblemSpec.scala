@@ -47,7 +47,7 @@ object ParseProblemSpec extends ZIOSpecDefault:
             ParseProblem.fromRefusal(ParseRefusal.SymbolExpected(GrammarSymbol.RBrace, vql.error.ParseContext.ToleranceOrEnd, Found.Token(engineX))) ==
               Right(ParseProblem.SymbolExpected(QueryGrammarSymbol.RBrace, ParseContext.ToleranceOrEnd, foundX)),
             ParseProblem.fromRefusal(ParseRefusal.TrailingTokens(TokenKind.Symbol(GrammarSymbol.RParen), List(engineX))) ==
-              Right(ParseProblem.TrailingTokens(QueryToken.Symbol(QueryGrammarSymbol.RParen), List(x))),
+              Right(ParseProblem.TrailingTokens(QueryToken.Symbol(QueryGrammarSymbol.RParen), List(x), 0)),
             ParseProblem.fromRefusal(ParseRefusal.Formula(SyntaxFailure.ClosingBracketExpected(TokenKind.Symbol(GrammarSymbol.RParen), Found.EndOfInput))) ==
               Right(ParseProblem.Formula(SyntaxProblem.ClosingBracketExpected(QueryToken.Symbol(QueryGrammarSymbol.RParen), QueryFound.EndOfInput()))),
             ParseProblem.fromRefusal(ParseRefusal.Lexical(LexFailure.NewlineInLiteral)) ==
@@ -56,6 +56,13 @@ object ParseProblemSpec extends ZIOSpecDefault:
               Right(ParseProblem.Nesting(NestingProblem.ParenthesesTooDeep(64))),
             ParseProblem.fromRefusal(ParseRefusal.Nesting(NestingFailure.TooManyOperators(256))) ==
               Right(ParseProblem.Nesting(NestingProblem.TooManyOperators(256)))
+          )
+        },
+        test("a trailing list keeps its first token and seven more, and counts the rest") {
+          val rest = List.fill(20)(engineX)
+          assertTrue(
+            ParseProblem.fromRefusal(ParseRefusal.TrailingTokens(engineX, rest)) ==
+              Right(ParseProblem.TrailingTokens(x, List.fill(7)(x), 13))
           )
         },
         test("a negative integer the parser cannot produce is a defect") {
@@ -87,7 +94,9 @@ object ParseProblemSpec extends ZIOSpecDefault:
             ParseProblem.fromFormulaError(FormulaParseError.Syntax(SyntaxFailure.FormulaExpected, SourcePosition.At(3))) ==
               Right(Positioned(QueryPosition.At(3), ParseProblem.Formula(SyntaxProblem.FormulaExpected()))),
             ParseProblem.fromFormulaError(FormulaParseError.Trailing(engineX, Nil, SourcePosition.Unknown)) ==
-              Right(Positioned(QueryPosition.Unknown(), ParseProblem.TrailingTokens(x, Nil))),
+              Right(Positioned(QueryPosition.Unknown(), ParseProblem.TrailingTokens(x, Nil, 0))),
+            ParseProblem.fromFormulaError(FormulaParseError.Trailing(engineX, List.fill(8)(engineX), SourcePosition.Unknown)) ==
+              Right(Positioned(QueryPosition.Unknown(), ParseProblem.TrailingTokens(x, List.fill(7)(x), 1))),
             ParseProblem.fromFormulaError(FormulaParseError.Lex(LexFailure.RefusedLiteralCharacter, SourcePosition.At(12))) ==
               Right(Positioned(QueryPosition.At(12), ParseProblem.Lexical(LexProblem.RefusedLiteralCharacter))),
             ParseProblem.fromFormulaError(FormulaParseError.Nesting(NestingFailure.ParenthesesTooDeep(64), SourcePosition.Unknown)) ==
@@ -114,7 +123,8 @@ object ParseProblemSpec extends ZIOSpecDefault:
             Positioned(QueryPosition.Unknown(), ParseProblem.RangeVariablesNotAnswered(Set(wordVar("y")), Nil)),
             Positioned(QueryPosition.Unknown(), ParseProblem.Lexical(LexProblem.UnterminatedLiteral)),
             Positioned(QueryPosition.Unknown(), ParseProblem.ToleranceOutOfRange()),
-            Positioned(QueryPosition.Unknown(), ParseProblem.Nesting(NestingProblem.TooManyOperators(256)))
+            Positioned(QueryPosition.Unknown(), ParseProblem.Nesting(NestingProblem.TooManyOperators(256))),
+            Positioned(QueryPosition.Unknown(), ParseProblem.TrailingTokens(x, List(x), 13))
           )
           assertTrue(problems.forall(p => p.toJson.fromJson[Positioned[ParseProblem]] == Right(p)))
         },
@@ -149,8 +159,10 @@ object ParseProblemSpec extends ZIOSpecDefault:
               "The list of answer variables must hold variable names, and the query has \"a\"",
             at(ParseProblem.SymbolExpected(QueryGrammarSymbol.RBrace, ParseContext.ToleranceOrEnd, foundX)) ==
               "The query needs '}' before the tolerance or the end of the quantifier, and has 'x'",
-            at(ParseProblem.TrailingTokens(QueryToken.Symbol(QueryGrammarSymbol.RParen), List(x))) ==
+            at(ParseProblem.TrailingTokens(QueryToken.Symbol(QueryGrammarSymbol.RParen), List(x), 0)) ==
               "The text continues after its end: ')' 'x'",
+            at(ParseProblem.TrailingTokens(x, List(x), 13)) ==
+              "The text continues after its end: 'x' 'x' and 13 more",
             at(ParseProblem.Formula(SyntaxProblem.FormulaExpected())) ==
               "A formula is expected here",
             at(ParseProblem.Formula(SyntaxProblem.QuantifierBodyExpected(QueryFound.EndOfInput()))) ==

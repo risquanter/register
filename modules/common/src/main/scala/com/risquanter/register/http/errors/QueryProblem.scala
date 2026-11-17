@@ -252,7 +252,10 @@ enum ParseProblem:
   case VariableExpected(found: QueryFound)
   case AnswerVariableExpected(found: QueryFound)
   case SymbolExpected(expected: QueryGrammarSymbol, before: ParseContext, found: QueryFound)
-  case TrailingTokens(first: QueryToken, rest: List[QueryToken])
+  /** The text continues after the formula's end. Carries the first remaining
+    * token, at most `TrailingTokensKept` more, and the count of the rest, so
+    * the refusal's size does not grow with the text (ADR-035). */
+  case TrailingTokens(first: QueryToken, rest: List[QueryToken], omitted: NonNegativeInt)
   case Formula(failure: SyntaxProblem)
   case Lexical(failure: LexProblem)
   case Nesting(failure: NestingProblem)
@@ -260,6 +263,10 @@ enum ParseProblem:
   case RangeVariablesNotAnswered(rangeVariables: Set[QueryVariableName], answerVariables: List[QueryVariableName])
 
 object ParseProblem:
+  /** Tokens a trailing-tokens refusal keeps after the first. Chosen by this
+    * project, equal to the engine's own cut of a refused quantifier prefix. */
+  private val TrailingTokensKept: Int = 7
+
   given codec: JsonCodec[ParseProblem] = DeriveJsonCodec.gen[ParseProblem]
 
   given schema: Schema[ParseProblem] =
@@ -364,8 +371,8 @@ object ParseProblem:
       s"The list of answer variables must hold variable names, and the query has ${QueryFound.words(found)}"
     case SymbolExpected(expected, before, found) =>
       s"The query needs '${expected.text}' before the ${contextWord(before)}, and has ${QueryFound.words(found)}"
-    case TrailingTokens(first, rest) =>
-      s"The text continues after its end: ${(first :: rest).map(QueryToken.words).mkString(" ")}"
+    case TrailingTokens(first, rest, omitted) =>
+      s"The text continues after its end: ${(first :: rest).map(QueryToken.words).mkString(" ")}${omittedClause(omitted)}"
     case Formula(failure) =>
       syntaxSentence(failure)
     case Lexical(failure) =>
@@ -399,6 +406,16 @@ object ParseProblem:
     case LexProblem.NewlineInLiteral        => "A quoted literal holds a line break before its closing '\"'"
     case LexProblem.RefusedLiteralCharacter =>
       "A quoted literal holds a character other than letters, digits, spaces and / _ . + -"
+
+  /** The clause naming how many trailing tokens a refusal left out.
+    *
+    * {{{
+    * omittedClause(0)    // ""
+    * omittedClause(2038) // " and 2038 more"
+    * }}}
+    */
+  private def omittedClause(omitted: NonNegativeInt): String =
+    if omitted > 0 then s" and $omitted more" else ""
 
   private def tokensWords(tokens: List[QueryToken]): String = tokens match
     case Nil    => "nothing"
@@ -449,11 +466,13 @@ object ParseProblem:
     case NestingFailure.ParenthesesTooDeep(limit) => count(limit, "ParenthesesTooDeep").map(NestingProblem.ParenthesesTooDeep(_))
     case NestingFailure.TooManyOperators(limit)   => count(limit, "TooManyOperators").map(NestingProblem.TooManyOperators(_))
 
+  /** The trailing tokens refined, the list cut to `TrailingTokensKept`. */
   private def trailing(first: TokenKind, rest: List[TokenKind]): Either[String, ParseProblem] =
+    val (kept, left) = rest.splitAt(TrailingTokensKept)
     for
       first <- QueryToken.fromEngine(first)
-      rest  <- tokens(rest)
-    yield TrailingTokens(first, rest)
+      kept  <- tokens(kept)
+    yield TrailingTokens(first, kept, NonNegativeInt.count(left.size))
 
   private def tokens(kinds: List[TokenKind]): Either[String, List[QueryToken]] =
     traverse(kinds)(QueryToken.fromEngine)

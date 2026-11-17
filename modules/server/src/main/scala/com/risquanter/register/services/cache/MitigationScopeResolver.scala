@@ -3,6 +3,7 @@ package com.risquanter.register.services.cache
 import zio.{UIO, NonEmptyChunk, ZIO}
 import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, LeafStageSpec, ScopeOutcome, TargetingPredicate}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
+import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given   // Extract[NodeId]
 import com.risquanter.register.http.errors.BindProblem
@@ -47,14 +48,15 @@ final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
 object ResolvedScopes:
   /** Per-mitigation drift signals (ADR-002): a predicate that no longer binds
     * makes that one mitigation a no-op, never a request failure, so this only
-    * logs. */
+    * logs. The line repeats the predicates' words, so it is cut like a refused
+    * text's; it starts with the count, which the cut keeps. */
   def logFailures(resolved: ResolvedScopes): UIO[Unit] =
     ZIO.when(resolved.failures.nonEmpty)(
-      ZIO.logWarning(
+      ZIO.logWarning(Failure.boundedForLog(
         s"MitigationScopeResolver: ${resolved.failures.size} mitigation(s) did not " +
         s"resolve against this tree version: " +
         resolved.failures.map((id, errs) => s"${id.value} -> ${errs.map(BindProblem.describe).mkString("[", "; ", "]")}").mkString("; ")
-      )
+      ))
     ).unit
 
 trait MitigationScopeResolver:

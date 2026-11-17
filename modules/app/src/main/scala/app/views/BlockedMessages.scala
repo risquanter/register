@@ -38,6 +38,9 @@ object BlockedMessages:
 
   // ── Analyze ──
 
+  val DesignUnsavedWork: String =
+    "Save the Design view's open work first. This link then opens the statement there, on this branch."
+
   val QueryEvaluating: String = "Evaluating the query…"
 
   val QueryBlank: String = "Type a query first."

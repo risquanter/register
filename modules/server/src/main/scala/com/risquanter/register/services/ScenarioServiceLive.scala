@@ -105,26 +105,16 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     * fork point on every foreign path and the merge has nothing foreign to
     * apply.
     *
-    * `lca` answers the question directly. The lowest common ancestor of a
-    * branch and a commit is the commit itself exactly when the commit is an
-    * ancestor of that branch.
+    * The request names no branch, so the commit is accepted when
+    * `IrminClient.isAncestor` finds it in any of those histories.
     */
   private def reachableFromOwnHistory(wsId: WorkspaceId, commit: CommitHash): IO[Failure, Boolean] =
     for
       listed      <- irmin.branches
       ownNames     = listed.flatMap(scenarioNameOf(wsId, _))
       ownBranches <- ZIO.foreach(ownNames)(scenarioBranch(wsId, _))
-      reachable   <- ZIO.exists(BranchRef.Main :: ownBranches)(isAncestorOf(_, commit))
+      reachable   <- ZIO.exists(BranchRef.Main :: ownBranches)(irmin.isAncestor(_, commit))
     yield reachable
-
-  /** Whether `commit` is an ancestor of `branch`, read off the lowest common
-    * ancestors Irmin reports for the pair. A branch Irmin does not know is not
-    * a history this commit can be reached from, so a failure to read it is
-    * false rather than an error. */
-  private def isAncestorOf(branch: BranchRef, commit: CommitHash): IO[Failure, Boolean] =
-    irmin.lca(branch, commit)
-      .map(_.exists(_.hash == commit))
-      .orElseSucceed(false)
 
   private def summaryFor(wsId: WorkspaceId, name: ScenarioName.ScenarioName): IO[Failure, ScenarioSummary] =
     for

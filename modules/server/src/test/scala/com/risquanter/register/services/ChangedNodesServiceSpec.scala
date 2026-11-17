@@ -69,7 +69,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
       onDelete = (_, _) => ZIO.die(new UnsupportedOperationException),
       onGetById = (_, _, rev) => ZIO.succeed(rev match
         case Revision.Head(b) => byBranch.applyOrElse(b, (_: BranchRef) => None)
-        case Revision.At(_)   => None)
+        case Revision.At(_) | Revision.Pinned(_, _) => None)
     )
 
   /** Unwraps the happy-path `Ok` case; fails loudly (not silently) if a

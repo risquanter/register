@@ -814,6 +814,7 @@ body {
    same bordered square. One rule for all of them. */
 .eye-toggle,
 .mirror-toggle,
+.slot-card-copy,
 .slot-card-remove,
 .refresh-btn {
   flex-shrink: 0;
@@ -833,10 +834,41 @@ body {
 }
 .eye-toggle:hover,
 .mirror-toggle:hover,
+.slot-card-copy:hover:not(:disabled),
 .slot-card-remove:hover,
 .refresh-btn:hover {
   background: var(--surface-overlay-hover);
   color: var(--foreground);
+}
+.slot-card-copy:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Three-way Inherent / Mitigated / Both control in a card's action row. */
+.curve-display-toggle {
+  display: inline-flex;
+  height: var(--lt-control-h, 32px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-right: auto;
+}
+.curve-display-option {
+  padding: 0 var(--sp-2);
+  background: transparent;
+  border: none;
+  color: var(--foreground-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.curve-display-option:hover {
+  color: var(--foreground);
+}
+.curve-display-option--active {
+  background: var(--surface-overlay);
+  color: var(--foreground);
+  font-weight: var(--font-weight-medium);
 }
 
 .slot-card-remove {
@@ -2663,6 +2695,120 @@ button.summary-list-entry:hover {
   font-size: var(--text-sm);
   color: var(--foreground-variant);
   flex-shrink: 0;
+}
+
+/* ── Mitigations on a tree card ── */
+.mitigation-panel-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+.mitigation-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  min-width: 0;
+}
+.mitigation-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mitigation-stage {
+  color: var(--foreground-muted);
+  flex-shrink: 0;
+}
+.mitigation-warning {
+  color: var(--error);
+  flex-shrink: 0;
+}
+
+/* Stale absolute statement: the leaf it was written against has changed. The
+   link variant opens the override edit popup. */
+.stale-badge {
+  flex-shrink: 0;
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-sm);
+  color: var(--error);
+  background: transparent;
+  font-size: var(--text-xs);
+}
+.stale-badge--link {
+  cursor: pointer;
+  text-decoration: underline;
+}
+.stale-badge--link:hover {
+  background: var(--error-surface);
+}
+
+/* One mitigation scoped at a node, styled as a child row beneath it. */
+.tree-mitigation-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding-left: calc(var(--_depth, 0) * var(--tree-indent-unit, 16px));
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+  cursor: default;
+}
+.tree-mitigation-tick--on {
+  color: var(--accent);
+}
+
+/* Coverage badge on a node row: solid where a mitigation is scoped at the
+   node, faint where one is scoped only below it. */
+.coverage-badge {
+  margin-left: var(--sp-1);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.coverage-badge--below {
+  opacity: 0.4;
+}
+
+/* ── Absolute statements under the Design view's tree preview ── */
+.absolute-statement-list {
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+.absolute-statement-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  margin: var(--sp-2) 0;
+}
+.absolute-statement-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  padding: 2px 0;
+  min-width: 0;
+}
+.absolute-statement-anchor,
+.absolute-statement-figures {
+  color: var(--foreground-muted);
+}
+.absolute-statement-affirmed {
+  color: var(--accent);
+}
+.absolute-statement-edit {
+  margin-left: auto;
+}
+
+/* ── Override edit popup: the merge modal's frame, with room for a form ── */
+.override-popup {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.override-popup-anchor,
+.override-popup-current {
+  color: var(--foreground-muted);
+  margin: 0 0 var(--sp-2);
 }
 
 /* ── Colour-swatch trigger icon ── */

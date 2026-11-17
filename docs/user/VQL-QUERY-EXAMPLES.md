@@ -246,6 +246,56 @@ An identifier is accepted by `node_id` only, so `node_named("<node id>")` finds 
 
 ---
 
+## Targeting predicates
+
+A mitigation's `target` is written in this language too, as a [targeting predicate](TERMINOLOGY.md#38-targeting-predicate). It is a condition over one node, `x`, with no quantifier around it: the server finds every node it holds for, and that set is the mitigation's [resolved scope](TERMINOLOGY.md#39-resolved-scope). [API-TUTORIAL.md](API-TUTORIAL.md) section 4 shows where the target goes in a request.
+
+The examples below use the simple 4-leaf tree. Each was saved as a mitigation's target, and the scope shown is the one the structure read returned. `<IT Risk id>` and the like stand for the node identifiers the structure read gives.
+
+*"Every leaf under IT Risk"* resolves to Cyber Breach and Ransomware:
+
+```
+leaf(x) /\ descendant_of(x, node_id("<IT Risk id>"))
+```
+
+*"Every leaf of the tree outside Third Party Risk"* resolves to the same two leaves:
+
+```
+leaf_descendant_of(x, node_id("<Operations id>")) /\ ~descendant_of(x, node_id("<Third Party Risk id>"))
+```
+
+*"Cyber Breach and Regulatory Fine"*, a set picked by hand, resolves to those two leaves:
+
+```
+eq(x, node_id("<Cyber Breach id>")) \/ eq(x, node_id("<Regulatory Fine id>"))
+```
+
+*"The direct children of Operations"* resolves to IT Risk and Third Party Risk for a result-stage mitigation, such as a cap on each division's total:
+
+```
+child_of(x, node_id("<Operations id>"))
+```
+
+The same predicate on a `LeafRelative` mitigation resolves to no nodes. A scope keeps only the nodes the mitigation's stage applies to, and a `LeafRelative` mitigation changes leaves only.
+
+A leaf added later under IT Risk joins the scope of the first predicate, because the scope is worked out again for each version of the tree. A rename changes no scope, because a predicate names nodes by identifier.
+
+A deleted node leaves the scope, and the rest of the predicate still applies. Delete Regulatory Fine, and the hand-picked predicate above resolves to Cyber Breach alone. Nothing is reported, because a mitigation whose condition matches fewer nodes, or none, is still a valid mitigation.
+
+A targeting predicate is more restricted than a query. Each of the following is refused with `422` when the tree is saved, and the refusal's `problem.kind` says why:
+
+| Predicate | `problem.kind` | Why |
+|---|---|---|
+| `leaf(x) /\ descendant_of(x, node_named("IT Risk"))` | `TargetingNodeNameReferenced` | A name can be edited, so a renamed node would move the scope. Use `node_id`. |
+| `exists y . (child_of(y, x) /\ leaf(y))` | `TargetingQuantifierNotAllowed` | A target is a condition on `x` alone. |
+| `leaf(x) /\ gt_loss(p95(x, "inherent"), 1000000)` | `TargetingFunctionNotAllowed` | A target may use the tree's structure only, never a simulated figure. `node_id` is the one function it may apply. |
+| `leaf(x) /\ ~mitigated(x)` | `TargetingMitigationStateReferenced` | A mitigation cannot target by the state mitigations change. |
+| `leaf(x) /\ leaf(y)` | `TargetingSeveralFreeVariables` | A target has exactly one variable. |
+
+A target holds at most 2 048 characters, a limit chosen by this project.
+
+---
+
 ## Ready-to-run scripts
 
 Ready-to-run scripts for both the simple and enterprise trees — including coloured output, all FAIL / PASS contrast pairs, and `jq`-extracted results — are in the [`examples/`](../../examples/) directory:

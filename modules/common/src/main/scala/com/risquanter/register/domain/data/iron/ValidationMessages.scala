@@ -222,3 +222,5 @@ object ValidationMessages:
       "Mitigation factor must be greater than 0 and at most 1 — a mitigation reduces a figure, so it can neither increase it nor remove it entirely"
     case ValueRange.ResidualProbability =>
       "Mitigated probability must be greater than 0 and at most 1 — a mitigation reduces the chance a risk occurs, so it cannot remove the possibility entirely"
+    case ValueRange.ResidualPercent =>
+      "Mitigated probability must be greater than 0 and at most 100 — a mitigation reduces the chance a risk occurs, so it cannot remove the possibility entirely"

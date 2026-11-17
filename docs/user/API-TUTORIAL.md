@@ -167,7 +167,9 @@ http POST localhost:18080/workspaces \
 
 A request that replaces a stored tree, `PUT /w/{key}/risk-trees/{treeId}`, carries mitigations in two lists, the way it carries nodes. `mitigations` lists each stored mitigation to keep, by its `id`. `newMitigations` lists each one to add, with no `id`, and the server assigns one. A stored mitigation that neither list names is deleted. So to keep a tree's mitigations, send back every one its structure read returned.
 
-An absolute statement is the one exception to sending it back as read. Its `target` is written by the server from its `anchor`, and the read shows it, but a request that sends a `target` with an absolute statement is refused with `400` at that entry. Send an absolute statement back without its `target`. Every other mitigation needs its `target`, and one sent without it is refused as required. A `target` holds at most 2 048 characters, a limit chosen by this project, and so does the `query` of a screening query sent to `POST /w/{key}/risk-trees/{treeId}/query`. A longer one is refused with `400`.
+An absolute statement is the one exception to sending it back as read. Its `target` is written by the server from its `anchor`, and the read shows it, but a request that sends a `target` with an absolute statement is refused with `422` at that entry. Send an absolute statement back without its `target`. Every other mitigation needs its `target`, and one sent without it is refused with `422` as required. A `target` holds at most 2 048 characters, a limit chosen by this project, and a longer one is refused with `422` at that entry. The `query` of a screening query sent to `POST /w/{key}/risk-trees/{treeId}/query` has the same limit, and a longer one is refused with `400`, because the query is checked while the body is read.
+
+A `400` means the body could not be read at all. A `422` means the body was read and one or more of its entries was refused. A `422` body lists every refused entry together, each with its location in the request, so one answer reports all of them.
 
 An [absolute statement](TERMINOLOGY.md#36-relative-and-absolute-statements) names the stored leaf it was written against in its `anchor`. A tree being created has no stored leaf yet, so an absolute statement can be added only by a replacing request.
 
@@ -241,6 +243,156 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
 | `lec(x, 1000000, "inherent")` | Exceedance probability at \$1 M for node x (returns Probability) |
 | `gt_loss(p95(x, "inherent"), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |
 | `gt_prob(lec(x, 1000000, "inherent"), 0.05)` | Exceedance probability at \$1 M exceeds 5 % (Probability comparison) |
+
+## 4. Mitigations
+
+A [mitigation](TERMINOLOGY.md#31-mitigation) is a risk reduction measure stored on the tree and applied to the nodes it targets. The nodes keep their own figures. A reading then asks for the tree's figures with mitigations applied or without them.
+
+This section adds mitigations to the tree from step 1, reads which nodes each one reaches, and reads a node's figures under them. Every request and answer below was run against a server. Identifiers are shown as `<IT Risk id>` and similar, because each workspace gets its own.
+
+### What a mitigation holds
+
+Each entry in `newMitigations` has four fields:
+
+| Field | What it holds |
+|---|---|
+| `name` | A display name, unique within the tree. |
+| `target` | The [targeting predicate](TERMINOLOGY.md#38-targeting-predicate): a condition over one node, `x`, written in the query language. It names nodes by identifier only, with `node_id("…")`. |
+| `spec` | What the mitigation does, with `stage` naming one of three kinds (below). |
+| `precedence` | An integer fixing the order mitigations apply in at one node. Lower applies first. `-1000`, `0` and `1000` are the three values this project names. |
+
+The `spec` is one of three kinds, named by `stage`:
+
+- `LeafRelative` changes a leaf's figures by a fraction before it is simulated. `likelihood` is `{"op": "Keep"}` or `{"op": "Scale", "factor": f}`. `severity` is `{"op": "Keep"}` or `{"op": "ScaleSeverity", "factor": f}`. A factor is greater than 0 and at most 1, because a mitigation reduces a figure and cannot remove it.
+- `ResultStage` changes the losses already simulated, at any node. `pipeline` lists between one and ten steps, applied in order. Each step is one of `{"op": "CapLosses", "cap": n}`, `{"op": "ApplyDeductible", "deductible": n}`, `{"op": "ScaleLosses", "factor": f}`, `{"op": "FilterBelowThreshold", "threshold": n}` and `{"op": "InsurancePolicy", "deductible": n, "limit": n}`. What each step leaves you bearing is in [the five result-stage operations](TERMINOLOGY.md#34-the-five-result-stage-operations).
+- `LeafAbsolute` is an [absolute statement](TERMINOLOGY.md#36-relative-and-absolute-statements): it states one leaf's figures after the control. It is described under "Absolute statements" below.
+
+### Add two mitigations
+
+Send the tree back with `PUT`, keeping every node by its `id`, and list the new mitigations in `newMitigations`:
+
+```json
+"mitigations": [],
+"newMitigations": [
+  {
+    "name": "Endpoint hardening",
+    "target": "leaf(x) /\\ descendant_of(x, node_id(\"<IT Risk id>\"))",
+    "spec": {
+      "stage": "LeafRelative",
+      "likelihood": { "op": "Scale", "factor": 0.5 },
+      "severity": { "op": "Keep" }
+    },
+    "precedence": 0
+  },
+  {
+    "name": "Cyber policy",
+    "target": "eq(x, node_id(\"<IT Risk id>\"))",
+    "spec": {
+      "stage": "ResultStage",
+      "pipeline": [ { "op": "InsurancePolicy", "deductible": 250000, "limit": 2000000 } ]
+    },
+    "precedence": 0
+  }
+]
+```
+
+"Endpoint hardening" halves the likelihood of every leaf under IT Risk. "Cyber policy" is an insurance policy on the IT Risk portfolio's total: you bear the first 250 thousand of a loss, the policy covers the next 2 million, and anything beyond that is yours again.
+
+The server answers `200` with the tree's id and name, and gives each mitigation an `id`.
+
+### Read which nodes each mitigation reaches
+
+The structure read returns the stored mitigations under `tree.mitigations`, and beside the tree it returns `mitigationScopes`:
+
+```bash
+curl -s -H "X-Branch: main" "http://localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID/structure" | jq '.mitigationScopes'
+```
+
+```json
+[
+  {
+    "mitigationId": "<Endpoint hardening id>",
+    "outcome": { "kind": "Resolved", "scope": [ "<Ransomware id>", "<Cyber Breach id>" ] }
+  },
+  {
+    "mitigationId": "<Cyber policy id>",
+    "outcome": { "kind": "Resolved", "scope": [ "<IT Risk id>" ] }
+  }
+]
+```
+
+`scope` is the mitigation's [resolved scope](TERMINOLOGY.md#39-resolved-scope): the nodes its predicate holds for in this version of the tree, kept to leaves for a `LeafRelative` mitigation.
+
+The scope is worked out again for every version. Add a leaf "Phishing" under IT Risk in the next `PUT`, keeping both mitigations by sending each one back in `mitigations` as the read returned it. The structure read then lists three leaves in Endpoint hardening's scope, and nothing about the mitigation had to change.
+
+Two more changes show what the predicate depends on:
+
+- Rename IT Risk. Every scope stays the same, because the predicate names the portfolio by its identifier, and a rename keeps the identifier.
+- Delete a node a predicate names. The node leaves the scope, the rest of the predicate still applies, and nothing is reported. A mitigation targeting `leaf(x) /\ descendant_of(x, node_id("<Third Party Risk id>"))` reaches no node once Third Party Risk and its leaves are deleted. Its scope is `[]`, and it stays stored.
+
+### Read figures under a selection
+
+A [selection](TERMINOLOGY.md#45-selection) says which mitigations a reading applies. Both analysis reads take it in the body, as `selection`. `fullScope` lists mitigations applied across their whole scope. `nodesOnly` lists single ticks, each applying one mitigation at one node. An empty selection, `{}`, is the [inherent](TERMINOLOGY.md#44-inherent-risk-and-residual-risk) reading.
+
+```bash
+curl -s -X POST -H "X-Branch: main" -H 'Content-Type: application/json' \
+  "http://localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID/nodes/<IT Risk id>/prob-of-exceedance?threshold=1000000" \
+  -d '{"selection": {"fullScope": ["<Endpoint hardening id>", "<Cyber policy id>"]}}' | jq .
+```
+
+Three readings of IT Risk's chance of a loss of at least 1 million, after Phishing was added:
+
+| `selection` | Answer |
+|---|---|
+| `{}` | `{"probability": 0.204, "withMitigations": []}` |
+| `{"fullScope": ["<Endpoint hardening id>", "<Cyber policy id>"]}` | `{"probability": 0.0354, "withMitigations": ["<Endpoint hardening id>", "<Cyber policy id>"]}` |
+| `{"nodesOnly": [{"node": "<Cyber Breach id>", "mitigation": "<Endpoint hardening id>"}]}` | `{"probability": 0.1276, "withMitigations": ["<Endpoint hardening id>"]}` |
+
+`withMitigations` lists the mitigations that changed this node's figure. The exact probabilities depend on the workspace's [seed entity id](TERMINOLOGY.md#16-random-stream), so another workspace gives other figures for the same tree.
+
+The curve read, `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi`, takes the same field beside the nodes to draw:
+
+```json
+{ "nodeIds": ["<IT Risk id>"], "selection": { "fullScope": ["<Cyber policy id>"] } }
+```
+
+A request with no `selection` field reads the inherent figures.
+
+### Absolute statements
+
+An absolute statement says "after this control, this leaf *is* these figures". It is written against one stored leaf, named in `anchor`, and it carries no `target`. The server writes the target from the anchor:
+
+```json
+"newMitigations": [
+  {
+    "name": "Cyber Breach after the policy",
+    "spec": {
+      "stage": "LeafAbsolute",
+      "replacement": {
+        "replaces": "Severity",
+        "shape": { "distributionType": "Lognormal", "minLoss": 100000, "maxLoss": 1000000 }
+      },
+      "anchor": "<Cyber Breach id>",
+      "stamp": { "kind": "KeepIfUnchanged" }
+    },
+    "precedence": 1000
+  }
+]
+```
+
+`replacement` replaces the likelihood, the loss distribution, or both, named by `replaces`:
+
+- `{"replaces": "Likelihood", "probability": p}`, where `p` is greater than 0 and at most 1;
+- `{"replaces": "Severity", "shape": { … }}`, with a shape as a leaf's `distributionShape`;
+- `{"replaces": "Both", "probability": p, "shape": { … }}`.
+
+The structure read shows the statement with the target the server wrote, `eq(x, node_id("<Cyber Breach id>"))`, and with a `baseStamp`. The base stamp is the fingerprint of the leaf as it stood when the statement was written.
+
+Now re-estimate Cyber Breach to a loss range of 2 to 30 million and save the tree, sending the statement back unchanged. The structure read then lists the statement's id in `staleMitigationIds`. Its figures were stated for a leaf that no longer has those figures, and it is [stale](TERMINOLOGY.md#36-relative-and-absolute-statements) until its author re-affirms it.
+
+To re-affirm it, send it back with `"stamp": {"kind": "Restamp"}`. The server records the leaf's current fingerprint, and `staleMitigationIds` is empty again. `KeepIfUnchanged` keeps the stored stamp while the replacement and the anchor are unchanged, which is what a save that does not touch the statement sends.
+
+Deleting the anchor leaf leaves the statement stored with an empty scope. It is not reported as stale, because there is no leaf left for its figures to disagree with.
 
 ---
 

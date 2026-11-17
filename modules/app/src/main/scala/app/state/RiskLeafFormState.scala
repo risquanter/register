@@ -11,7 +11,10 @@ import app.state.RiskLeafField.*
 
 /** Type-safe field identifiers for the risk leaf form. */
 enum RiskLeafField:
-  case Name, Parent, Probability, Percentiles, Quantiles, MinLoss, MaxLoss, Terms
+  case Name, Parent, Probability
+
+  /** One of the loss distribution's inputs. */
+  case Shape(input: ShapeInput)
 
   /** The form's own line, for a refusal about a combination of its inputs
     * rather than about one of them. */
@@ -20,18 +23,19 @@ enum RiskLeafField:
 object RiskLeafField:
   /** The label an input carries, and the name a summary entry gives it. */
   def label(field: RiskLeafField): String = field match
-    case Name        => "Name"
-    case Parent      => ParentSelection.Label
-    case Probability => "Probability"
-    case Percentiles => "Percentiles"
-    case Quantiles   => "Quantiles (loss in $M)"
-    case MinLoss     => "Minimum Loss"
-    case MaxLoss     => "Maximum Loss"
-    case Terms       => "Terms (optional)"
-    case FormLevel   => "This leaf"
+    case Name         => "Name"
+    case Parent       => ParentSelection.Label
+    case Probability  => "Probability"
+    case Shape(input) => ShapeInput.label(input)
+    case FormLevel    => "This leaf"
 
   /** The element id of the input, unique on the page. */
-  def inputId(field: RiskLeafField): String = s"leaf-${field.toString.toLowerCase}"
+  def inputId(field: RiskLeafField): String = field match
+    case Shape(input) => s"$IdPrefix-${input.toString.toLowerCase}"
+    case other        => s"$IdPrefix-${other.toString.toLowerCase}"
+
+  /** What every input id of this form starts with. */
+  private val IdPrefix = "leaf"
 
 /**
  * Reactive form state for creating a RiskLeaf.
@@ -51,7 +55,7 @@ object RiskLeafField:
  * field its value came from and the subject `subjectVar` holds. The two
  * cross-field checks locate their refusal at the pair they constrain.
  */
-final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
+final class RiskLeafFormState extends SubmitRefusals[RiskLeafField], ShapeFieldsForm:
 
   // ============================================================
   // Form Field Vars (mutable reactive state)
@@ -110,35 +114,8 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   /** Filter for name field: any printable characters */
   val nameFilter: String => Boolean = _ => true
 
-  /** Filter for probability field: digits and single decimal point, max 2 dp.
-    * Enforced at the character level so the user cannot type a third decimal place. */
-  val probabilityFilter: String => Boolean = { s =>
-    val hasSingleDot = s.count(_ == '.') <= 1
-    val allValidChars = s.forall(c => c.isDigit || c == '.')
-    val maxTwoDp = s.indexOf('.') match
-      case -1  => true
-      case idx => s.length - idx - 1 <= RiskLeafFormState.probabilityDecimals
-    hasSingleDot && allValidChars && maxTwoDp
-  }
-
-  /** Filter for percentile field: digits, commas, and spaces only.
-    * Percentiles are entered as integers (0 dp); decimal points are rejected
-    * per decision-analysis convention (Cooke, SHELF, Keelin 2016). */
-  val percentilesFilter: String => Boolean =
-    _.forall(c => c.isDigit || c == ',' || c == ' ')
-
-  /** Filter for quantiles field: digits, commas, spaces, and decimal points.
-    * Prevents consecutive dots (guards against "1..2" typos). Max 2 dp is
-    * enforced at validation time, not at the filter level, because the filter
-    * operates on the whole comma-separated string. */
-  val quantilesFilter: String => Boolean = { s =>
-    val validChars = s.forall(c => c.isDigit || c == ',' || c == ' ' || c == '.')
-    val noConsecutiveDots = !s.contains("..")
-    validChars && noConsecutiveDots
-  }
-
-  /** Filter for loss values: digits only */
-  val lossFilter: String => Boolean = _.forall(_.isDigit)
+  /** Filter for the probability field: the companion's. */
+  val probabilityFilter: String => Boolean = RiskLeafFormState.probabilityFilter
 
   // ============================================================
   // Located Accessors
@@ -150,11 +127,11 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
   private val nameField: FieldName        = FieldName.Name
   private val parentField: FieldName      = FieldName.ParentName
   private val probabilityField: FieldName = FieldName.Probability
-  private val percentilesField: FieldName = FieldName.Percentiles
-  private val quantilesField: FieldName   = FieldName.Quantiles
-  private val minLossField: FieldName     = FieldName.MinLoss
-  private val maxLossField: FieldName     = FieldName.MaxLoss
-  private val termsField: FieldName       = FieldName.Terms
+  private val percentilesField: FieldName = ShapeInput.Percentiles.field
+  private val quantilesField: FieldName   = ShapeInput.Quantiles.field
+  private val minLossField: FieldName     = ShapeInput.MinLoss.field
+  private val maxLossField: FieldName     = ShapeInput.MaxLoss.field
+  private val termsField: FieldName       = ShapeInput.Terms.field
   private val pairingField: FieldName     = FieldName.PercentileQuantilePairing
   private val lossRangeField: FieldName   = FieldName.LossRange
 
@@ -190,6 +167,10 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
 
   override protected def formLine: RiskLeafField = FormLevel
 
+  override def inputIdOf(input: ShapeInput): String = RiskLeafField.inputId(Shape(input))
+
+  override def markShapeTouched(input: ShapeInput): Unit = markTouched(Shape(input))
+
   // ============================================================
   // Raw Validation Signals (using ValidationUtil from common)
   // ============================================================
@@ -211,14 +192,13 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     * and the submit both call it, so they refuse the same input with the same
     * sentence. */
   private def refineProbabilityInput(input: Located[String]): Validation[ValidationError, Probability] =
-    parseRequired(input, parseDouble, ExpectedInput.Number)
-      .flatMap { pct =>
-        Validation.fromEither(
-          pct.map(RiskLeafFormState.pctToDomain)
-            .refine(ValidationUtil.refineProbability)
-            .left.map(_ => pct.reject(FieldProblem.OutOfRange(ValueRange.Percent)))
-        )
-      }
+    RiskLeafFormState.percentInput(input).flatMap { pct =>
+      Validation.fromEither(
+        pct.map(RiskLeafFormState.pctToDomain)
+          .refine(ValidationUtil.refineProbability)
+          .left.map(_ => pct.reject(FieldProblem.OutOfRange(ValueRange.Percent)))
+      )
+    }
 
   private val probabilityErrorRaw: Signal[Option[ValidationError]] =
     located(probabilityVar, probabilityField).map(input => firstRefusal(refineProbabilityInput(input)))
@@ -299,17 +279,6 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
         .flatMap(bound => ValidationUtil.toValidation(bound.refine(ValidationUtil.refinePositiveLong)))
     )
 
-  /** The terms input read as a count. Blank text means one term per anchor and
-    * reads as no count; text that is not a whole number is refused as
-    * unreadable. The live check and the shape builder both read terms through
-    * this, so they refuse the same text with the same problem. */
-  private def readTerms(input: Located[String]): Validation[ValidationError, Option[Int]] =
-    if input.value.isBlank then Validation.succeed(None)
-    else
-      input.value.toIntOption.fold[Validation[ValidationError, Option[Int]]](
-        Validation.fail(input.reject(FieldProblem.Unreadable(ExpectedInput.WholeNumber)))
-      )(t => Validation.succeed(Some(t)))
-
   /** A stated term count checked as the shape's own gate checks it: first the
     * fit's range, by the shared refinement, then against the anchor count, with
     * the same codes and sentences. `anchors` is empty while the percentile and
@@ -332,7 +301,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
         case (DistributionMode.Metalog, input, pStr, qStr) =>
           val percentiles = parseDoubleList(pStr).length
           val anchors     = Option.when(percentiles == parseDoubleList(qStr).length)(percentiles)
-          firstRefusal(readTerms(input).flatMap(_.fold(Validation.unit)(t => termsWithinFit(input, t, anchors))))
+          firstRefusal(RiskLeafFormState.readTerms(input).flatMap(_.fold(Validation.unit)(t => termsWithinFit(input, t, anchors))))
         case _ => None
       }
 
@@ -428,16 +397,16 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
       .map { (show, err) => err.filter(_ => show) }
 
   private val metalogCrossFieldGated_Pct: Signal[Option[ValidationError]] =
-    crossFieldGated(Percentiles, percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited)
+    crossFieldGated(Shape(ShapeInput.Percentiles), percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited)
 
   private val metalogCrossFieldGated_Qt: Signal[Option[ValidationError]] =
-    crossFieldGated(Quantiles, percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited.map(!_))
+    crossFieldGated(Shape(ShapeInput.Quantiles), percentilesVar, quantilesVar, metalogCrossFieldErrorRaw, lastMetalogEdited.map(!_))
 
   private val lognormalCrossFieldGated_Min: Signal[Option[ValidationError]] =
-    crossFieldGated(MinLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited)
+    crossFieldGated(Shape(ShapeInput.MinLoss), minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited)
 
   private val lognormalCrossFieldGated_Max: Signal[Option[ValidationError]] =
-    crossFieldGated(MaxLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited.map(!_))
+    crossFieldGated(Shape(ShapeInput.MaxLoss), minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited.map(!_))
 
   /** An input's own and stored refusals, or the pair rule's refusal when the
     * input shows none of its own. */
@@ -452,25 +421,25 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
 
   /** Percentiles: own refusals (touch-gated) ∪ metalog cross-field (last-edited-gated) */
   private val percentilesRefusals: Signal[List[ValidationError]] =
-    withCrossField(errorsFor(Percentiles, percentilesErrorRaw), metalogCrossFieldGated_Pct)
+    withCrossField(errorsFor(Shape(ShapeInput.Percentiles), percentilesErrorRaw), metalogCrossFieldGated_Pct)
   val percentilesError: Signal[List[String]] = messagesOf(percentilesRefusals)
 
   /** Quantiles: own refusals (touch-gated) ∪ metalog cross-field (last-edited-gated) */
   private val quantilesRefusals: Signal[List[ValidationError]] =
-    withCrossField(errorsFor(Quantiles, quantilesErrorRaw), metalogCrossFieldGated_Qt)
+    withCrossField(errorsFor(Shape(ShapeInput.Quantiles), quantilesErrorRaw), metalogCrossFieldGated_Qt)
   val quantilesError: Signal[List[String]] = messagesOf(quantilesRefusals)
 
   /** Min loss: own refusals (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
   private val minLossRefusals: Signal[List[ValidationError]] =
-    withCrossField(errorsFor(MinLoss, minLossErrorRaw), lognormalCrossFieldGated_Min)
+    withCrossField(errorsFor(Shape(ShapeInput.MinLoss), minLossErrorRaw), lognormalCrossFieldGated_Min)
   val minLossError: Signal[List[String]] = messagesOf(minLossRefusals)
 
   /** Max loss: own refusals (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
   private val maxLossRefusals: Signal[List[ValidationError]] =
-    withCrossField(errorsFor(MaxLoss, maxLossErrorRaw), lognormalCrossFieldGated_Max)
+    withCrossField(errorsFor(Shape(ShapeInput.MaxLoss), maxLossErrorRaw), lognormalCrossFieldGated_Max)
   val maxLossError: Signal[List[String]] = messagesOf(maxLossRefusals)
 
-  private val termsRefusals: Signal[List[ValidationError]] = errorsFor(Terms, termsErrorRaw)
+  private val termsRefusals: Signal[List[ValidationError]] = errorsFor(Shape(ShapeInput.Terms), termsErrorRaw)
   val termsError: Signal[List[String]] = messagesOf(termsRefusals)
 
   // ============================================================
@@ -501,67 +470,20 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     Name        -> nameRefusals,
     Probability -> probabilityRefusals,
     Parent      -> parentRefusals,
-    Percentiles -> percentilesRefusals,
-    Quantiles   -> quantilesRefusals,
-    Terms       -> termsRefusals,
-    MinLoss     -> minLossRefusals,
-    MaxLoss     -> maxLossRefusals
+    Shape(ShapeInput.Percentiles) -> percentilesRefusals,
+    Shape(ShapeInput.Quantiles)   -> quantilesRefusals,
+    Shape(ShapeInput.Terms)       -> termsRefusals,
+    Shape(ShapeInput.MinLoss)     -> minLossRefusals,
+    Shape(ShapeInput.MaxLoss)     -> maxLossRefusals
   )
 
   // ============================================================
   // Form Submission
   // ============================================================
 
-  /** The form's text fields parsed, zipped and gated into one shape. A pure
-    * function of its arguments, so the live preview and the submit build the
-    * shape the same way from where each reads its values.
-    *
-    * The mode selects which case is built, so the fields of the other mode are
-    * not read at all and cannot reach the shape. For metalog mode the zip is
-    * where a percentile count unequal to the loss count is refused, which is the
-    * only place in the browser that rule can be stated.
-    *
-    * Percentiles from the form are on the 0–100 scale and are converted to 0–1
-    * before gating.
-    *
-    * An entry that is not a number is dropped rather than refused, so only the
-    * surviving entries reach the gate and only their count is checked. A field
-    * of `0.1, abc, 0.9` therefore arrives as two percentiles, and pairs
-    * successfully with a two-entry loss field.
-    */
-  private def shapeFrom(
-    mode:        DistributionMode,
-    percentiles: String,
-    quantiles:   String,
-    terms:       Located[String],
-    minLoss:     Located[String],
-    maxLoss:     Located[String],
-    subject:     ErrorSubject
-  ): Validation[ValidationError, DistributionShape] =
-    mode match
-      case DistributionMode.Metalog =>
-        readTerms(terms).flatMap { count =>
-          DistributionShape.Metalog.fromPrimitives(
-            parseDoubleList(percentiles).map(RiskLeafFormState.pctToDomain).toVector,
-            parseDoubleList(quantiles).toVector,
-            count,
-            subject
-          )
-        }
-
-      case DistributionMode.Lognormal =>
-        Validation
-          .validateWith(
-            parseRequired(minLoss, parseLong, ExpectedInput.WholeNumber),
-            parseRequired(maxLoss, parseLong, ExpectedInput.WholeNumber)
-          )((min, max) => (min.value, max.value))
-          .flatMap { case (min, max) =>
-            DistributionShape.Lognormal.fromPrimitives(min, max, subject)
-          }
-
   /** The shape the fields currently hold, read as a snapshot for the submit. */
   def currentShapeValidation(): Validation[ValidationError, DistributionShape] =
-    shapeFrom(
+    RiskLeafFormState.shapeFrom(
       distributionModeVar.now(),
       percentilesVar.now(),
       quantilesVar.now(),
@@ -603,7 +525,7 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
       .combineWith(percentilesVar.signal, quantilesVar.signal, located(termsVar, termsField))
       .combineWith(located(minLossVar, minLossField), located(maxLossVar, maxLossField), subject)
       .map { (mode, percentiles, quantiles, terms, minLoss, maxLoss, s) =>
-        shapeFrom(mode, percentiles, quantiles, terms, minLoss, maxLoss, s).toOption
+        RiskLeafFormState.shapeFrom(mode, percentiles, quantiles, terms, minLoss, maxLoss, s).toOption
       }
       .distinct
 
@@ -614,17 +536,8 @@ final class RiskLeafFormState extends SubmitRefusals[RiskLeafField]:
     * the ratio.
     */
   val impliedRatioWarning: Signal[Option[String]] =
-    distributionModeVar.signal.combineWith(quantilesVar.signal, percentilesVar.signal).map {
-      case (DistributionMode.Metalog, qStr, pStr) =>
-        val qs = parseDoubleList(qStr)
-        val ps = parseDoubleList(pStr)
-        (ps.indexWhere(_ <= RiskLeafFormState.lowerTailPercentile), ps.lastIndexWhere(_ >= RiskLeafFormState.upperTailPercentile)) match
-          case (p10, p90) if qs.length == ps.length && p10 >= 0 && p90 >= 0 && p10 != p90 && qs(p10) > 0 =>
-            val ratio = qs(p90) / qs(p10)
-            Option.when(ratio > RiskLeafFormState.impliedRatioLimit)(RiskLeafFormState.impliedRatioTooHigh(ratio))
-          case _ => None
-      case _ => None
-    }
+    distributionModeVar.signal.combineWith(percentilesVar.signal, quantilesVar.signal)
+      .map(RiskLeafFormState.impliedRatioAdvisory)
 
 
 object RiskLeafFormState:
@@ -635,6 +548,22 @@ object RiskLeafFormState:
   /** The most decimal places the probability field accepts. Chosen by this
     * project: a likelihood is stated to a hundredth of a percent at most. */
   val probabilityDecimals: Int = 2
+
+  /** Filter for a probability entered on the 0–100 scale: digits and one
+    * decimal point, at most `probabilityDecimals` places. Enforced as the user
+    * types, so a further decimal place cannot be entered. */
+  val probabilityFilter: String => Boolean = { s =>
+    val hasSingleDot = s.count(_ == '.') <= 1
+    val allValidChars = s.forall(c => c.isDigit || c == '.')
+    val withinDecimals = s.indexOf('.') match
+      case -1  => true
+      case idx => s.length - idx - 1 <= probabilityDecimals
+    hasSingleDot && allValidChars && withinDecimals
+  }
+
+  /** The decimal places a percentile is shown with: none, because percentiles
+    * are entered as whole numbers (see `ShapeInput.filter`). */
+  val percentileDecimals: Int = 0
 
   /** The anchors the implied-ratio advisory compares, on the form's percent
     * scale: the lowest at or below P10 against the highest at or above P90. */
@@ -668,9 +597,97 @@ object RiskLeafFormState:
   def impliedRatioTooHigh(ratio: Double): String =
     f"P90/P10 ratio is $ratio%.0f× — very high. Review whether this reflects expert judgment."
 
+  /** The implied-ratio advisory for a form's shape text: in metalog mode, the
+    * loss at the highest percentile at or above P90 against the loss at the
+    * lowest at or below P10. None in lognormal mode, or while the two lists
+    * differ in length or hold no such pair.
+    *
+    * {{{
+    * impliedRatioAdvisory(DistributionMode.Metalog, "10, 90", "1, 250")  // Some(impliedRatioTooHigh(250.0))
+    * impliedRatioAdvisory(DistributionMode.Metalog, "10, 90", "1, 50")   // None
+    * }}}
+    */
+  def impliedRatioAdvisory(mode: DistributionMode, percentiles: String, quantiles: String): Option[String] =
+    mode match
+      case DistributionMode.Metalog =>
+        val qs = FormState.parseDoubleList(quantiles)
+        val ps = FormState.parseDoubleList(percentiles)
+        (ps.indexWhere(_ <= lowerTailPercentile), ps.lastIndexWhere(_ >= upperTailPercentile)) match
+          case (p10, p90) if qs.length == ps.length && p10 >= 0 && p90 >= 0 && p10 != p90 && qs(p10) > 0 =>
+            val ratio = qs(p90) / qs(p10)
+            Option.when(ratio > impliedRatioLimit)(impliedRatioTooHigh(ratio))
+          case _ => None
+      case DistributionMode.Lognormal => None
+
+  /** A required input entered on the 0–100 scale, read as a number on that
+    * scale. Each form then refines it into the probability type it holds and
+    * words a range refusal on the entered scale. */
+  def percentInput(input: Located[String]): Validation[ValidationError, Located[Double]] =
+    FormState.parseRequired(input, FormState.parseDouble, ExpectedInput.Number)
+
+  /** The terms input read as a count. Blank text means one term per anchor and
+    * reads as no count; text that is not a whole number is refused as
+    * unreadable. The live check and the shape builder both read terms through
+    * this, so they refuse the same text with the same problem. */
+  private[state] def readTerms(input: Located[String]): Validation[ValidationError, Option[Int]] =
+    if input.value.isBlank then Validation.succeed(None)
+    else
+      input.value.toIntOption.fold[Validation[ValidationError, Option[Int]]](
+        Validation.fail(input.reject(FieldProblem.Unreadable(ExpectedInput.WholeNumber)))
+      )(t => Validation.succeed(Some(t)))
+
+  /** A form's shape fields parsed, zipped and gated into one shape. A pure
+    * function of its arguments, so every form with shape fields builds the
+    * shape the same way, and a form's live preview and its submit agree.
+    *
+    * The mode selects which case is built, so the fields of the other mode are
+    * not read at all and cannot reach the shape. For metalog mode the zip is
+    * where a percentile count unequal to the loss count is refused, which is the
+    * only place in the browser that rule can be stated.
+    *
+    * Percentiles from the form are on the 0–100 scale and are converted to 0–1
+    * before gating.
+    *
+    * An entry that is not a number is dropped rather than refused, so only the
+    * surviving entries reach the gate and only their count is checked. A field
+    * of `0.1, abc, 0.9` therefore arrives as two percentiles, and pairs
+    * successfully with a two-entry loss field.
+    */
+  def shapeFrom(
+    mode:        DistributionMode,
+    percentiles: String,
+    quantiles:   String,
+    terms:       Located[String],
+    minLoss:     Located[String],
+    maxLoss:     Located[String],
+    subject:     ErrorSubject
+  ): Validation[ValidationError, DistributionShape] =
+    mode match
+      case DistributionMode.Metalog =>
+        readTerms(terms).flatMap { count =>
+          DistributionShape.Metalog.fromPrimitives(
+            FormState.parseDoubleList(percentiles).map(pctToDomain).toVector,
+            FormState.parseDoubleList(quantiles).toVector,
+            count,
+            subject
+          )
+        }
+
+      case DistributionMode.Lognormal =>
+        Validation
+          .validateWith(
+            FormState.parseRequired(minLoss, FormState.parseLong, ExpectedInput.WholeNumber),
+            FormState.parseRequired(maxLoss, FormState.parseLong, ExpectedInput.WholeNumber)
+          )((min, max) => (min.value, max.value))
+          .flatMap { case (min, max) =>
+            DistributionShape.Lognormal.fromPrimitives(min, max, subject)
+          }
+
   /** No display target of this form. A refusal at such a location is shown on
     * the form's own line, through `unclaimed`. */
   private val noTarget: Set[RiskLeafField] = Set.empty
+
+  private def shape(input: ShapeInput): RiskLeafField = RiskLeafField.Shape(input)
 
   /** The targets a refusal belongs under. One mapping for every location, so
     * every case is assigned by name and a location added later fails the
@@ -692,13 +709,13 @@ object RiskLeafFormState:
           case FieldName.Name                                  => Set(RiskLeafField.Name)
           case FieldName.ParentName                            => Set(RiskLeafField.Parent)
           case FieldName.Probability                           => Set(RiskLeafField.Probability)
-          case FieldName.Percentiles | FieldName.PercentileAt(_) => Set(RiskLeafField.Percentiles)
-          case FieldName.Quantiles | FieldName.QuantileAt(_)   => Set(RiskLeafField.Quantiles)
-          case FieldName.MinLoss                               => Set(RiskLeafField.MinLoss)
-          case FieldName.MaxLoss                               => Set(RiskLeafField.MaxLoss)
-          case FieldName.Terms                                 => Set(RiskLeafField.Terms)
-          case FieldName.LossRange                             => Set(RiskLeafField.MinLoss, RiskLeafField.MaxLoss)
-          case FieldName.PercentileQuantilePairing             => Set(RiskLeafField.Percentiles, RiskLeafField.Quantiles)
+          case FieldName.Percentiles | FieldName.PercentileAt(_) => Set(shape(ShapeInput.Percentiles))
+          case FieldName.Quantiles | FieldName.QuantileAt(_)   => Set(shape(ShapeInput.Quantiles))
+          case FieldName.MinLoss                               => Set(shape(ShapeInput.MinLoss))
+          case FieldName.MaxLoss                               => Set(shape(ShapeInput.MaxLoss))
+          case FieldName.Terms                                 => Set(shape(ShapeInput.Terms))
+          case FieldName.LossRange                             => Set(shape(ShapeInput.MinLoss), shape(ShapeInput.MaxLoss))
+          case FieldName.PercentileQuantilePairing             => Set(shape(ShapeInput.Percentiles), shape(ShapeInput.Quantiles))
           case FieldName.DistributionType                      => Set(RiskLeafField.FormLevel)
           case FieldName.Id | FieldName.ParentId | FieldName.ChildIds | FieldName.RootId |
                FieldName.Nodes | FieldName.Trees | FieldName.SeedVarHighWater |

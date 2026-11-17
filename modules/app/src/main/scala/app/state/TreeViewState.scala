@@ -4,14 +4,13 @@ import com.raquo.laminar.api.L.*
 
 import scala.scalajs.js
 
-import app.chart.PaletteData
 import app.core.ZJS.*
 import app.core.RequestFailure
-import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, MitigationId, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
-import com.risquanter.register.http.responses.TreeSummaryResponse
+import com.risquanter.register.http.responses.{LECNodeSeries, TreeStructureResponse, TreeSummaryResponse}
 
 /** Reactive state for viewing server-persisted risk trees.
   *
@@ -39,6 +38,10 @@ import com.risquanter.register.http.responses.TreeSummaryResponse
   *                           internal `unsafeWindowOwner` subscription) so every consumer
   *                           of this state gets current data on a branch switch without
   *                           having to remember to wire that reload themselves.
+  * @param atSignal           The commit the reads are pinned to; `None` is the head.
+  * @param selectionSignal    The mitigations this view's curves are valued under.
+  *                           A change re-reads the current curves at the same pin.
+  * @param display            Which of each node's readings this view's chart draws.
   * @param userPalette        Palette family for user-selected (Ctrl+click) nodes,
   *                           passed through to `LECChartState`. A signal so the
   *                           family follows this slot's own palette
@@ -54,15 +57,18 @@ import com.risquanter.register.http.responses.TreeSummaryResponse
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   treeListState: TreeListState,
-  userIdAccessor: () => Option[UserId.Authenticated] = () => None,
-  activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
-  atSignal: StrictSignal[Option[CommitHash]] = Val(None),
-  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua),
+  userIdAccessor: () => Option[UserId.Authenticated],
+  activeBranchSignal: StrictSignal[BranchChoice],
+  atSignal: StrictSignal[Option[CommitHash]],
+  selectionSignal: StrictSignal[MitigationSelection.Enumerated],
+  display: Signal[CurveDisplay],
+  userPalette: Signal[Vector[HexColor]],
   branchDisplay: Option[BranchChoice => String]
 ) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()
   private def atAccessor(): Option[CommitHash] = atSignal.now()
+  private def selectionAccessor(): MitigationSelection.Enumerated = selectionSignal.now()
 
   // A rewind (pin change) re-reads the selected tree at the new pin and
   // re-fetches the current selection's curves there, WITHOUT clearing the
@@ -70,6 +76,10 @@ final class TreeViewState(
   // (nodes absent at the pin drop via the `droppedSelections` notice and return on moving
   // forward). Distinct from a branch/tree switch, which resets the chart.
   atSignal.changes.foreach(_ => rewindReload())(using unsafeWindowOwner)
+
+  // A selection change re-reads the current curves at the same pin, keeping
+  // the node selection, as a rewind does.
+  selectionSignal.changes.foreach(_ => chartState.reloadCurrentCurves())(using unsafeWindowOwner)
 
   // Set by a caller (DesignView) immediately before it reverts the active branch
   // itself (a declined confirm dialog) — suppresses exactly that one echo so the
@@ -109,7 +119,16 @@ final class TreeViewState(
 
   // ── Selected tree (full structure with nodes) ─────────────────
   val selectedTreeId: Var[Option[TreeId]] = Var(None)
-  val selectedTree: Var[LoadState[RiskTree]] = Var(LoadState.Idle)
+
+  private val structureVar: Var[LoadState[TreeStructureResponse]] = Var(LoadState.Idle)
+  private val selectedTreeVar: Var[LoadState[RiskTree]] = Var(LoadState.Idle)
+
+  /** The structure read as answered: the tree, each mitigation's resolved
+    * scope and the stale overrides. The fetch pipeline writes it. */
+  val structure: StrictSignal[LoadState[TreeStructureResponse]] = structureVar.signal
+
+  /** The tree of `structure`. */
+  val selectedTree: StrictSignal[LoadState[RiskTree]] = selectedTreeVar.signal
 
   // Not written directly by `loadTreeStructure`/`deselectTree`: driven from
   // the EventBus-fed `flatMapSwitch` pipeline below. A newer load or a
@@ -117,13 +136,36 @@ final class TreeViewState(
   // still doing, so a stale response can never land after a newer request
   // has started, regardless of which round trip finishes first.
   private val treeTrigger =
-    new EventBus[Option[() => EventStream[Either[RequestFailure, RiskTree]]]]
+    new EventBus[Option[() => EventStream[Either[RequestFailure, TreeStructureResponse]]]]
 
   // Idempotency guard: `Var.set` doesn't dedupe by value, and consumers of
-  // `selectedTree` recompute on every set; only write on a real change.
+  // `selectedTree` recompute on every set; only write on a real change. The
+  // tree is written before the structure, so a reader of the structure finds
+  // its tree already current.
   loadStatePipeline(treeTrigger.events).foreach { v =>
-    if selectedTree.now() != v then selectedTree.set(v)
+    val tree = v.map(_.tree)
+    if selectedTreeVar.now() != tree then selectedTreeVar.set(tree)
+    if structureVar.now() != v then structureVar.set(v)
   }(using unsafeWindowOwner)
+
+  // A curve read under a non-empty selection waits for the tree, because the
+  // request may name only the mitigations the tree holds. Once the tree is
+  // loaded the current curves are read.
+  structure.changes.foreach {
+    case LoadState.Loaded(_) =>
+      selectionAccessor() match
+        case MitigationSelection.Inherent => ()
+        case _                            => chartState.reloadCurrentCurves()
+    case _ => ()
+  }(using unsafeWindowOwner)
+
+  /** Selected mitigations the tree at this revision does not hold. */
+  val absentSelected: Signal[Set[MitigationId]] =
+    selectionSignal.combineWith(selectedTree).map {
+      case (selection, LoadState.Loaded(tree)) =>
+        SelectionEdit.present(selection, tree.mitigations.map(_.id).toSet).toOption.fold(Set.empty)(_._2)
+      case _ => Set.empty
+    }.distinct
 
   // ── UI state (uses NodeId per ADR-001 §3) ─────────────────────
   val expandedNodes: Var[Set[NodeId]] = Var(Set.empty)
@@ -140,7 +182,7 @@ final class TreeViewState(
     branchDisplay match
       case None => Val(None)
       case Some(display) =>
-        activeBranchSignal.combineWith(selectedTree.signal).map { (b, t) =>
+        activeBranchSignal.combineWith(selectedTree).map { (b, t) =>
           val branch = display(b)
           Some(t match
             case LoadState.Loaded(tree) => s"$branch · ${tree.name.value}"
@@ -148,15 +190,17 @@ final class TreeViewState(
         }
 
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, userIdAccessor, branchAccessor, atAccessor, userPalette, chartOrigin)
+  val chartState: LECChartState = LECChartState(
+    keySignal, selectedTreeId.signal, selectedTree, userIdAccessor, branchAccessor, atAccessor,
+    selectionAccessor, display, userPalette, chartOrigin)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
   // Mutations go through userSelectionToggle bus (ADR-019: events up).
   /** Node IDs manually Ctrl+clicked for LEC chart overlay (read-only). */
   def userSelectedNodeIds: StrictSignal[Set[NodeId]] = chartState.userSelectedNodeIds.signal
-  /** Structured curve data (read-only). Vega-Lite spec built client-side. */
-  def curveCache: Signal[LoadState[Map[NodeId, LECNodeCurve]]] = chartState.curveCache.signal
+  /** Each node's readings as answered (read-only). Vega-Lite spec built client-side. */
+  def curveCache: Signal[LoadState[Map[NodeId, List[LECNodeSeries]]]] = chartState.curveCache.signal
   /** Node → hex colour map for chart curves and tree highlights (read-only). */
   def nodeColorMap: Signal[Map[NodeId, HexColor]] = chartState.nodeColorMap
   /** Vega-Lite spec lifecycle for the LEC chart (read-only). */
@@ -194,7 +238,7 @@ final class TreeViewState(
       case Some(key) =>
         treeTrigger.emit(Some(() =>
           getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), atAccessor()))
-            .map(_.tree).toOutcomeEventStream
+            .toOutcomeEventStream
         ))
       case None => ()
 

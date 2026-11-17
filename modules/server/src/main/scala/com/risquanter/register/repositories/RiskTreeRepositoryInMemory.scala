@@ -45,7 +45,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
   private def requireMainRevision[A](rev: Revision)(effect: => IO[Failure, A]): IO[Failure, A] =
     rev match
       case Revision.Head(branch) => requireMain(branch)(effect)
-      case Revision.At(_) =>
+      case Revision.At(_) | Revision.Pinned(_, _) =>
         ZIO.fail(RiskTreeRepositoryInMemory.pinnedReadsUnavailable(ErrorLocation.QueryParameter(RequestQueryParam.At)))
 
   override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): IO[Failure, RiskTree] =

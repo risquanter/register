@@ -94,8 +94,14 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       },
       test("text after a whole formula is a trailing-tokens refusal naming the first token") {
         assertTrue(firstProblem("leaf(x) leaf(y)") match
-          case Some(FieldProblem.TargetingPredicateUnparseable(Positioned(_, ParseProblem.TrailingTokens(QueryToken.Word(word), _)))) =>
+          case Some(FieldProblem.TargetingPredicateUnparseable(Positioned(_, ParseProblem.TrailingTokens(QueryToken.Word(word), _, _)))) =>
             word.value == "leaf"
+          case _ => false)
+      },
+      test("a source of 2 046 trailing commas is refused with eight tokens and the count of the rest") {
+        assertTrue(firstProblem("p " + "," * 2046) match
+          case Some(FieldProblem.TargetingPredicateUnparseable(Positioned(_, ParseProblem.TrailingTokens(_, rest, omitted)))) =>
+            rest.size == 7 && omitted == 2038
           case _ => false)
       },
       test("a literal holding a character outside its alphabet is a lexical refusal, with no text") {
@@ -153,6 +159,18 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
       val errs    = TargetingPredicate.create("forall x . mitigated(y)", subject).toEither.swap.toOption.get
       assertTrue(errs.forall(_.location == ErrorLocation.Field(subject, FieldName.TargetingSource)))
     },
+    suite("referencedNodes")(
+      test("lists the named nodes in source order, repeats kept") {
+        val other  = "01HQ8ZK3V4N5P6Q7R8S9T0W1X3"
+        val source = s"""descendant_of(x, node_id("$other")) \\/ eq(x, node_id("$nodeId")) \\/ child_of(x, node_id("$other"))"""
+        val p      = TargetingPredicate.create(source, ErrorSubject.Request).toEither.toOption.get
+        assertTrue(TargetingPredicate.referencedNodes(p).map(_.value) == List(other, nodeId, other))
+      },
+      test("is empty for a predicate naming no node") {
+        val p = TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get
+        assertTrue(TargetingPredicate.referencedNodes(p).isEmpty)
+      }
+    ),
     test("round-trips through its JSON codec") {
       val p = TargetingPredicate.create("leaf(x)", ErrorSubject.Request).toEither.toOption.get
       assertTrue(p.toJson.fromJson[TargetingPredicate] == Right(p))

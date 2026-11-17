@@ -906,12 +906,15 @@ object CommitHash:
     CommitHash.fromString(s).left.map(_.map(ValidationError.describe).mkString(", ")))
 
 // Revision: the read coordinate for a tree. `Head` names a branch, resolved to
-// its head commit exactly once inside the Irmin repository; `At` pins a
-// specific commit directly. Co-located with BranchRef/CommitHash — the two
+// its head commit exactly once inside the Irmin repository. `At` is a commit
+// this service chose itself, such as a merge's staged commit, read as given.
+// `Pinned` is a commit the client named, read only when it is the branch's
+// head or one of its ancestors. Co-located with BranchRef/CommitHash — the two
 // coordinates it composes.
 enum Revision:
   case Head(branch: BranchRef)
   case At(commit: CommitHash)
+  case Pinned(branch: BranchRef, commit: CommitHash)
 
 // SafeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
 // Accepts input case-insensitively, normalizes to uppercase canonical string.

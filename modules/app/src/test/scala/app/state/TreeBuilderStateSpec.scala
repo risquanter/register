@@ -7,16 +7,16 @@ import com.raquo.airstream.ownership.ManualOwner
 
 import app.core.LocalProblem
 import com.risquanter.register.domain.data.{
-  DistributionShape, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget, RelativeLikelihood,
-  RelativeSeverity, RiskLeaf, RiskNode, RiskPortfolio, RiskTree, TargetingPredicate
+  AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget,
+  RelativeLikelihood, RelativeSeverity, RiskLeaf, RiskNode, RiskPortfolio, RiskTree, TargetingPredicate
 }
-import com.risquanter.register.http.requests.MitigationUpdateRequest
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, Probability, SeedVarId, ValidationMessages}
+import com.risquanter.register.http.requests.{AbsoluteReplacementRequest, BaseStampChoice, MitigationSpecRequest, MitigationUpdateRequest}
+import com.risquanter.register.domain.data.iron.{ContentHash, NodeId, TreeId, SafeName, Probability, SeedVarId, ValidationMessages}
 import io.github.iltotore.iron.*
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.http.responses.TreeSummaryResponse
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
-import com.risquanter.register.testutil.TestHelpers.{lognormalShape, metalogShape, mitigationId, retentionFactor, unsafeGet}
+import com.risquanter.register.testutil.TestHelpers.{lognormalShape, metalogShape, mitigationId, residualProbability, retentionFactor, unsafeGet}
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
 
@@ -57,6 +57,50 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       SeedVarId.fromLong(1L).toOption.get
     )
     RiskTree.fromNodesUnsafe(treeId, safeName, nodes, rootId, Some(highWater), mitigations = Nil)
+
+  // ── Fixture mitigations ──────────────────────────────────────────────
+
+  private val relativeMitigation: Mitigation = unsafeGet(Mitigation.create(
+    mitigationId("mfa"),
+    n("MFA"),
+    MitigationTarget.Predicate(unsafeGet(TargetingPredicate.create("leaf(x)", ErrorSubject.Request), "target")),
+    MitigationSpec.LeafRelative(RelativeLikelihood.Scale(retentionFactor(0.3)), RelativeSeverity.Keep),
+    MitigationPrecedence.default
+  ), "relative mitigation")
+
+  /** An absolute statement about the lognormal leaf, stamped with a fixed hash. */
+  private val absoluteStatement: Mitigation = unsafeGet(Mitigation.create(
+    mitigationId("policy"),
+    n("Policy"),
+    MitigationTarget.Predicate(TargetingPredicate.ofNode(NodeId.fromString(leafUlid).toOption.get)),
+    MitigationSpec.LeafAbsolute(
+      AbsoluteReplacement.Likelihood(residualProbability(0.02)),
+      NodeId.fromString(leafUlid).toOption.get,
+      ContentHash.fromString("a" * 64).toOption.get),
+    MitigationPrecedence.default
+  ), "absolute statement")
+
+  /** The leaf the statement is about, under the root portfolio. */
+  private def statementLeaf: RiskLeaf = unsafeGet(RiskLeaf.create(subject = ErrorSubject.Request,
+    id          = leafUlid,
+    name        = "Cyber Risk",
+    probability = 0.3,
+    shape       = lognormalShape(1000L, 50000L),
+    parentId    = Some(rootId),
+    seedVarId   = 9L
+  ), "leaf")
+
+  private def treeWithStatement(statement: Mitigation): RiskTree =
+    RiskTree.fromNodesUnsafe(
+      TreeId.fromString(treeUlid).toOption.get, n("Mitigated"), Seq(rootPortfolio, statementLeaf), rootId,
+      Some(statementLeaf.seedVarId), mitigations = Seq(relativeMitigation, statement))
+
+  /** A builder that loaded a tree holding one relative mitigation and one
+    * absolute statement. */
+  private def loadedWithStatement(): (TreeBuilderState, Mitigation) =
+    val state = new TreeBuilderState()
+    state.loadFromTree(treeWithStatement(absoluteStatement))
+    (state, absoluteStatement)
 
   // ── Fixture nodes ────────────────────────────────────────────────────
 
@@ -263,6 +307,32 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       }
     ),
 
+    // Unsaved work is a whole-tree change or a node form mid-edit; the
+    // signal gives the answer the method gives.
+    suite("hasUnsavedWork")(
+
+      test("false after loadFromTree, true after a tree edit, in both readings") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val beforeEdit = (currentOf(state.hasUnsavedWorkSignal), state.hasUnsavedWork)
+        state.treeNameVar.set("Renamed Tree")
+        val afterEdit = (currentOf(state.hasUnsavedWorkSignal), state.hasUnsavedWork)
+        assertTrue(beforeEdit == (false, false), afterEdit == (true, true))
+      },
+
+      test("true while a node form is mid-edit and the tree itself is unchanged") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        state.leafFormDirtyVar.set(true)
+        val midEdit = (currentOf(state.hasUnsavedWorkSignal), state.hasUnsavedWork, state.isDirty)
+        state.leafFormDirtyVar.set(false)
+        val cleared = (currentOf(state.hasUnsavedWorkSignal), state.hasUnsavedWork)
+        assertTrue(midEdit == (true, true, false), cleared == (false, false))
+      }
+    ),
+
     suite("toUpdateRequest — node identity preservation")(
 
       test("loaded nodes route to the existing buckets carrying their original ids; new buckets empty") {
@@ -376,6 +446,59 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
             assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
       }
 
+    ),
+
+    suite("affirm")(
+
+      test("an affirmed statement makes the builder dirty") {
+        val (state, statement) = loadedWithStatement()
+        val before = state.isDirty
+        state.affirm(statement.id, AbsoluteReplacement.Likelihood(residualProbability(0.05)))
+        assertTrue(!before, state.isDirty, currentOf(state.isDirtySignal))
+      },
+
+      test("an affirmed statement is sent with its new figures and Restamp, every other one unchanged") {
+        val (state, statement) = loadedWithStatement()
+        val figures = AbsoluteReplacement.Likelihood(residualProbability(0.05))
+        state.affirm(statement.id, figures)
+        state.toUpdateRequest() match
+          case Validation.Success(_, req) =>
+            val sent = req.mitigations.find(_.id == statement.id.value).map(_.spec)
+            assertTrue(
+              sent.contains(MitigationSpecRequest.LeafAbsolute(
+                AbsoluteReplacementRequest.fromReplacement(figures), leafUlid, BaseStampChoice.Restamp)),
+              req.mitigations.filterNot(_.id == statement.id.value) == List(MitigationUpdateRequest.fromMitigation(relativeMitigation))
+            )
+          case Validation.Failure(_, errors) =>
+            assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
+      },
+
+      test("an unaffirmed statement keeps its stored stamp") {
+        val (state, statement) = loadedWithStatement()
+        state.toUpdateRequest() match
+          case Validation.Success(_, req) =>
+            assertTrue(req.mitigations.find(_.id == statement.id.value).map(_.spec).exists {
+              case MitigationSpecRequest.LeafAbsolute(_, _, BaseStampChoice.KeepIfUnchanged) => true
+              case _                                                                         => false
+            })
+          case Validation.Failure(_, errors) =>
+            assertTrue(false).label(errors.map(ValidationError.describe).mkString("; "))
+      },
+
+      test("loadFromTree clears the affirmed statements") {
+        val (state, statement) = loadedWithStatement()
+        state.affirm(statement.id, AbsoluteReplacement.Likelihood(residualProbability(0.05)))
+        state.loadFromTree(treeWithStatement(statement))
+        assertTrue(!state.isDirty, currentOf(state.absoluteStatements).forall(!_.affirmed))
+      },
+
+      test("absoluteStatements lists the statements with the figures they will be saved with") {
+        val (state, statement) = loadedWithStatement()
+        val figures = AbsoluteReplacement.Likelihood(residualProbability(0.05))
+        state.affirm(statement.id, figures)
+        assertTrue(currentOf(state.absoluteStatements) == List(
+          AbsoluteStatementRow(statement, NodeId.fromString(leafUlid).toOption.get, figures, affirmed = true)))
+      }
     ),
 
     suite("updateLeaf")(

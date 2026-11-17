@@ -19,6 +19,14 @@ import com.risquanter.register.domain.data.LECNodeCurve
   */
 object ColorAssigner:
 
+  /** Deterministic hash-rotation shade pick — same node always gets the same
+    * shade within a palette. Shared with `CompareColorAssigner`, which keys
+    * by branch identity instead of query/user/overlap classification but
+    * uses the same per-node rotation mechanism.
+    */
+  def shade(palette: Vector[HexColor], nodeId: NodeId): HexColor =
+    palette((nodeId.value.hashCode & 0x7fffffff) % palette.size)
+
   /** Classify nodes and assign hex colours.
     *
     * @param queryNodes    Node IDs matched by the current query
@@ -29,14 +37,6 @@ object ColorAssigner:
     * @param purplePalette Shades for overlap nodes
     * @return Map from node ID to HexColor for every node in queryNodes ∪ userNodes
     */
-  /** Deterministic hash-rotation shade pick — same node always gets the same
-    * shade within a palette. Shared with `CompareColorAssigner`, which keys
-    * by branch identity instead of query/user/overlap classification but
-    * uses the same per-node rotation mechanism.
-    */
-  def shade(palette: Vector[HexColor], nodeId: NodeId): HexColor =
-    palette((nodeId.value.hashCode & 0x7fffffff) % palette.size)
-
   def assign(
     queryNodes: Set[NodeId],
     userNodes: Set[NodeId],
@@ -56,28 +56,29 @@ object ColorAssigner:
 
     automatic ++ overrides.view.filterKeys(automatic.contains)
 
-  /** Select visible curves from cache and pair each with its assigned colour.
+  /** Select the visible nodes' readings and pair each with the node's colour.
     *
-    * Pure function bridging the cache + colour map into the
-    * `Vector[(LECNodeCurve, HexColor)]` that `LECSpecBuilder.build` expects.
-    * Nodes missing from either the cache or the colour map are silently
-    * dropped (defensive against mid-update signal races in Laminar).
+    * Pure function bridging the readings + colour map into the triples
+    * `LECSpecBuilder.build` expects. A node's readings share its colour, and
+    * the variant tells them apart. Nodes missing from either the readings or
+    * the colour map are silently dropped (defensive against mid-update signal
+    * races in Laminar).
     *
-    * @param allCurves Fetched curve data keyed by NodeId
-    * @param visible   Set of node IDs that should appear in the chart
-    * @param colorMap  Colour assignments (output of `assign`)
-    * @return Paired curves sorted by NodeId for deterministic legend order
+    * @param readings Each node's readings to draw, each with its variant
+    * @param visible  Set of node IDs that should appear in the chart
+    * @param colorMap Colour assignments (output of `assign`)
+    * @return The readings sorted by NodeId for deterministic legend order
     */
   def pairWithColors(
-    allCurves: Map[NodeId, LECNodeCurve],
+    readings: Map[NodeId, List[(CurveVariant, LECNodeCurve)]],
     visible: Set[NodeId],
     colorMap: Map[NodeId, HexColor]
-  ): Vector[(LECNodeCurve, HexColor)] =
+  ): Vector[(LECNodeCurve, CurveVariant, HexColor)] =
     visible.toVector
       .sortBy(_.value)
       .flatMap { nid =>
         for
-          curve <- allCurves.get(nid)
-          color <- colorMap.get(nid)
-        yield (curve, color)
+          color            <- colorMap.get(nid).toVector
+          (variant, curve) <- readings.getOrElse(nid, Nil)
+        yield (curve, variant, color)
       }

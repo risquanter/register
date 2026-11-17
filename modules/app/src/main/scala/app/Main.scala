@@ -1,13 +1,16 @@
 package app
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import org.scalajs.dom
 
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, CompareState, CompareSlot, ChangedNodesState, TreeHistoryState}
+import app.chart.PaletteData
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, CompareState, CompareSlot, ChangedNodesState, CurveDisplay, OverrideEditEvent, OverrideEditState, Section, TreeHistoryState}
 import app.views.{DesignView, AnalyzeView, ErrorMessages}
 import app.core.ZJS
 import app.core.RequestFailure
+import com.risquanter.register.domain.data.MitigationSelection
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, MitigationId, TreeId}
 
 object Main:
 
@@ -50,16 +53,24 @@ object Main:
     )
 
     val builderState = new TreeBuilderState
+    // The Design view reads the head of its branch, mitigation-free.
     val designTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, () => wsState.currentUserId, designScenarioState.activeBranch.signal,
+      atSignal = Val(Option.empty[CommitHash]),
+      selectionSignal = Val(MitigationSelection.Inherent),
+      display = Val(CurveDisplay.Inherent),
+      userPalette = Val(PaletteData.Aqua),
       branchDisplay = Some(BranchBar.branchDisplayName)
     )
     // Compare state is built before the baseline tree view so the baseline
-    // slider's pin (`baselineAt`) can feed the baseline's own `atSignal`.
+    // slider's pin (`baselineAt`), selection and display feed the baseline's
+    // own tree view.
     val analyzeCompareState = new CompareState
     val analyzeTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal,
       atSignal = analyzeCompareState.baselineAt.signal,
+      selectionSignal = analyzeCompareState.baselineSelection.signal,
+      display = analyzeCompareState.baselineDisplay.signal,
       userPalette = analyzeCompareState.baselinePalette.signal,
       branchDisplay = Some(BranchBar.branchDisplayName)
     )
@@ -76,11 +87,15 @@ object Main:
         state = slotState,
         treeViewState = new TreeViewState(
           wsState.keySignal, treeListState, () => wsState.currentUserId,
-          // The slot's branch and pin derive from its target; TreeViewState needs
-          // StrictSignals (it reads .now()), so observe the derived signals for
-          // the app's lifetime instead of keeping hand-synced Vars.
+          // The slot's branch, pin and selection derive from its target;
+          // TreeViewState needs StrictSignals (it reads .now()), so observe the
+          // derived signals for the app's lifetime instead of keeping
+          // hand-synced Vars.
           slotState.branchSignal.observe(using unsafeWindowOwner),
-          slotState.atSignal.observe(using unsafeWindowOwner), userPalette = slotState.palette.signal,
+          atSignal = slotState.atSignal.observe(using unsafeWindowOwner),
+          selectionSignal = slotState.selectionSignal.observe(using unsafeWindowOwner),
+          display = slotState.display.signal,
+          userPalette = slotState.palette.signal,
           branchDisplay = Some(BranchBar.branchDisplayName)
         ),
         diffState = new ChangedNodesState(wsState.keySignal, () => wsState.currentUserId),
@@ -121,6 +136,20 @@ object Main:
     // ── Navigation state ────────────────────────────────────────
     val navState = new NavigationState
 
+    // The override edit popup, shared by both views: the Design view opens it
+    // from its statement list, and the Analyze view's stale badge links to it.
+    val overrideEditState = new OverrideEditState
+
+    // The Analyze link opens the popup on a statement of the tree at the head
+    // of the Analyze view's branch. The Design view edits the head of its own
+    // branch, so it is moved onto that branch and that tree, and the popup
+    // waits for that tree to load there.
+    def openOverride(branch: BranchChoice, tree: TreeId, id: MitigationId): Unit =
+      overrideEditState.dispatch(OverrideEditEvent.Requested(tree, id), Set.empty)
+      designScenarioState.switchTo(branch)
+      designTreeViewState.selectTree(tree)
+      navState.navigate(Section.Design)
+
     // Workspace badge — indicates whether a workspace session is active
     val workspaceBadge: Signal[String] = wsState.keySignal.map:
       case Some(_) => "workspace active"
@@ -148,7 +177,8 @@ object Main:
         ),
         designScenarioState,
         designMergeState,
-        appConfigState
+        appConfigState,
+        overrideEditState
       ),
       analyzeView = AnalyzeView(
         analyzeTreeViewState,
@@ -157,7 +187,9 @@ object Main:
         appConfigState,
         analyzeCompareState,
         analyzeCompareSlots,
-        analyzeBaselineHistoryState
+        analyzeBaselineHistoryState,
+        openOverride,
+        builderState.hasUnsavedWorkSignal
       )
     )
 

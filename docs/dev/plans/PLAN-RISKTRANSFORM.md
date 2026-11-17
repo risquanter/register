@@ -9,7 +9,7 @@ consumer; the trait was later renamed `ResultTransformSpec` — §7 OD-2 ruling
 2026-08-08, `TransformPipeline` unchanged). D4 was decided on 2026-09-14 (§4 D4,
 §8.16). D5 is ruled by §7.6.2 Decision 2: the client-facing mitigation contract is
 split by surface, and ADR-040 and the ADR-017 amendment state it. M4 slices 1, 2,
-3, 4, 5, 7 and 8 have landed; slice 6 (§7.6.17) is elevated and awaits approval.
+3, 4, 5, 7 and 8 have landed; slice 6 (§7.6.17) is approved and implemented.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
 `docs/archive/plans/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
@@ -2487,7 +2487,7 @@ has landed green (G8).
 | 3 | The tree structure read: resolved scopes, resolution failures and stale-override ids beside the tree | §7.6.7 | Landed |
 | 4 | Change notification: the mitigation-collection diff, and the scope memo's capacity-2 amendment | §7.6.8 | Landed |
 | 5 | The two decision records: the ADR-017 amendment and the new ADR-040 | §7.6.9 | Landed |
-| 6 | The interface and the user documentation | §7.6.17 | Awaiting approval; the popup's signatures are not yet written |
+| 6 | The interface and the user documentation | §7.6.17 | Implemented, 2026-11-17 |
 | 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 | Landed |
 | 8 | Adopting vql-engine 0.20.0 and mapping its nesting-depth refusals. Lands before slice 2 | §7.6.16 | Landed, 0.20.5 |
 
@@ -5856,9 +5856,8 @@ caller's.
 
 #### 7.6.17 M4 slice 6 — the selection interface and the user documentation
 
-**Status: written 2026-11-15, awaiting approval.** No decision is open.
-§7.6.12 decision 21 placed the override edit popup in the Design view on
-2026-11-16, and its signatures are not yet written below. Everything else below
+**Status: approved by the user on 2026-11-17, the override edit popup's
+signatures included, and implemented on 2026-11-17.** No decision is open. §7.6.12 decision 21 placed the popup in the Design view on 2026-11-16. Everything else below
 is derived from rulings already given, and each derivation names the ruling it
 rests on.
 
@@ -5940,9 +5939,11 @@ final case class SideSnapshot(coordinate: SlotCoordinate, nodeSelection: Set[Nod
 `removeRow` also resets `display` and `pendingSeed`. `at` loses its `= None`
 default under the boyscout rule, and every call site passes it.
 `excludedBranchValues` and `excludedTreeOverrideValues` build their candidate
-with the slot's own pin and selection, which `samePairAs` now compares. Before,
-they passed no pin, so a candidate compared as live head whatever the slot's
-own pin was.
+as the coordinate the pick produces, because `samePairAs` now compares the pin
+and the selection. A branch pick reads the head under no mitigation. A tree
+pick keeps the slot's pin and resets its selection, by the tree-switch rule
+below. Before, the tree-override candidate passed no pin, so it compared as
+live head whatever the slot's own pin was.
 
 **Why the two display defaults differ.** OD-3 rules that "comparand slots with
 a selection display their variant curves only (baseline shows raw)", and §7.4
@@ -6256,8 +6257,323 @@ existing absolute statement's figures and re-affirms it, so its save sends
 - The popup edits the builder's loaded mitigations. Design's existing save
   writes them, so its unsaved-edit tracking and confirm guards cover the edit.
 
-The signatures of the list, the link and the popup's state machine are not yet
-written.
+**Where the link appears.** The Design view edits the head of the active
+branch. So the link appears only where the stale row shows that head: on the
+baseline card while `baselineAt` is `None`. A comparand slot and a rewound
+baseline show the badge without the link. They are read-only views of another
+branch or an earlier commit, and opening the popup there would edit something
+other than what the row shows.
+
+**The state machine.** `modules/app/src/main/scala/app/state/OverrideEdit.scala`
+(new), following `FormMode` (ADR-019 Pattern 6):
+
+```scala
+/** The override edit popup's state: closed, waiting for the Design view to
+  * load the tree a link named, or open on one absolute statement. */
+enum OverrideEdit:
+  case Closed
+  case Pending(tree: TreeId, id: MitigationId)
+  case Open(id: MitigationId)
+
+/** What moves the popup. */
+enum OverrideEditEvent:
+  /** The Design list's edit button, on the loaded tree. */
+  case OpenOn(id: MitigationId)
+  /** An Analyze link: open `id` once the Design view has loaded `tree`. */
+  case Requested(tree: TreeId, id: MitigationId)
+  /** The builder loaded `tree`, holding the absolute statements `held`. */
+  case TreeLoaded(tree: TreeId, held: Set[MitigationId])
+  /** The builder started a new tree. */
+  case TreeCleared
+  case Applied, Cancelled
+
+object OverrideEdit:
+  /** The one transition function. */
+  def next(state: OverrideEdit, event: OverrideEditEvent, held: Set[MitigationId]): OverrideEdit
+```
+
+| From | Event | To |
+|---|---|---|
+| `Closed` | `OpenOn(id)`, `id` held | `Open(id)` |
+| `Closed` | `Requested(t, id)` | `Pending(t, id)` |
+| `Pending(t, id)` | `TreeLoaded(t, held)`, `id` in `held` | `Open(id)` |
+| `Pending(t, id)` | `TreeLoaded` of another tree, or without `id`; `TreeCleared` | `Closed` |
+| `Open(id)` | `Applied`, `Cancelled`, `TreeLoaded`, `TreeCleared` | `Closed` |
+| any | any other event | unchanged |
+
+`held` is the loaded tree's absolute statements, so an `OpenOn` naming one the
+tree no longer holds stays `Closed`. The popup is modal, so `OpenOn` while
+`Open` changes nothing. Declining the Design view's unsaved-draft confirm means
+`TreeLoaded` never arrives for the linked tree. The next tree load then closes
+the pending request.
+
+```scala
+/** The popup's state, created once in `Main` and passed to both views. */
+final class OverrideEditState:
+  val edit: Var[OverrideEdit] = Var(OverrideEdit.Closed)
+  def dispatch(event: OverrideEditEvent, held: Set[MitigationId]): Unit
+```
+
+Family: the app's state machines. `FormMode` in `FormMode.scala` is the member
+followed: an enum of states with pure transitions. No existing machine has a
+case waiting for another view to load.
+
+**The builder's edits.** `TreeBuilderState.scala`:
+
+```scala
+/** One absolute statement of the loaded tree, with the figures it will be saved with. */
+final case class AbsoluteStatementRow(
+  mitigation: Mitigation,
+  anchor:     NodeId,
+  figures:    AbsoluteReplacement,
+  affirmed:   Boolean
+)
+
+  /** Statements re-affirmed in the popup since the load, with their figures. */
+  private val affirmedVar: Var[Map[MitigationId, AbsoluteReplacement]]
+
+  /** The loaded absolute statements, in precedence order. */
+  val absoluteStatements: Signal[List[AbsoluteStatementRow]]
+
+  /** Record the popup's figures for `id`. A save then re-affirms it. */
+  def affirm(id: MitigationId, figures: AbsoluteReplacement): Unit
+```
+
+`toUpdateRequest` sends an affirmed statement as
+`MitigationSpecRequest.LeafAbsolute(fromReplacement(figures), anchor.value,
+BaseStampChoice.Restamp)`, and every other loaded mitigation through
+`MitigationUpdateRequest.fromMitigation` as today. `isDirty`, `isDirtySignal`
+and `differsFromLoaded` count a non-empty `affirmedVar` as a change, so the
+existing confirm guards cover an applied but unsaved edit. `loadFromTree`,
+`startNewTree` and `markJustSaved` clear it. The popup changes which parts a
+statement replaces never: the figures keep the stored case, `Likelihood`,
+`Severity` or `Both`.
+
+Family: `AbsoluteStatementRow` sits beside `LeafDraft` and `PortfolioDraft`,
+the builder's row types. No existing type pairs a mitigation with the figures
+it will be saved with.
+
+**The popup's form.** `OverridePopup.scala` creates one form state per
+opening, as `RiskLeafFormView` creates its `RiskLeafFormState`. The class lives
+in `modules/app/src/main/scala/app/state/AbsoluteFiguresFormState.scala` (new),
+beside `RiskLeafFormState.scala` and `PortfolioFormState.scala`, the other form
+states:
+
+```scala
+/** The figures of one absolute statement, as the popup's fields hold them. */
+final class AbsoluteFiguresFormState(initial: AbsoluteReplacement, subject: ErrorSubject):
+  val probabilityVar: Var[String]          // shown for Likelihood and Both
+  val distributionModeVar: Var[DistributionMode]
+  // percentiles, quantiles, terms, minLoss, maxLoss: as RiskLeafFormState, shown for Severity and Both
+  /** The figures, every field's refusal accumulated, keeping `initial`'s case. */
+  def toReplacement: Validation[ValidationError, AbsoluteReplacement]
+```
+
+The shape is read by the function `RiskLeafFormState` reads its own with, moved
+unchanged to its companion so both forms call it:
+
+```scala
+object RiskLeafFormState:
+  def shapeFrom(
+    mode: DistributionMode, percentiles: String, quantiles: String,
+    terms: Located[String], minLoss: Located[String], maxLoss: Located[String],
+    subject: ErrorSubject
+  ): Validation[ValidationError, DistributionShape]
+```
+
+The likelihood is refined by `ValidationUtil.refineResidualProbability`, the
+rule `AbsoluteReplacementRequest.Likelihood` applies, after the percent-scale
+reading the leaf form uses. A range refusal is re-worded on the entered scale,
+as the leaf form re-words its own to `ValueRange.Percent`. That needs a case
+of its own, because the residual range refuses 0 and `Percent` admits it, so
+`ValueRange` in `ErrorLocation.scala` gains `ResidualPercent`, with the
+sentence "Mitigated probability must be greater than 0 and at most 100 — a
+mitigation reduces the chance a risk occurs, so it cannot remove the
+possibility entirely" (ruled by the user, 2026-11-17, option A of two: a new
+case, against entering the popup's likelihood as a fraction). The server never
+sends it, and the published refusal schema gains the case.
+
+The popup draws its shape inputs with the leaf form's own code, moved out of
+`RiskLeafFormView` into a component both forms call (ruled by the user,
+2026-11-17, option A of two: a shared component, against five input calls
+written again in the popup). The leaf form's field enum nests the same set
+(ruled by the user, 2026-11-17, option A of two: nest, against keeping
+`RiskLeafField` flat with a mapping). The shapes, approved with the family
+search's four findings folded in:
+
+```scala
+// modules/app/src/main/scala/app/state/FormState.scala
+/** The five text inputs a loss distribution is entered in, each with the field
+  * its refusals name. */
+enum ShapeInput(val field: FieldName):
+  case Percentiles, Quantiles, Terms, MinLoss, MaxLoss   // each extends ShapeInput(FieldName.<same>)
+object ShapeInput:
+  def label(input: ShapeInput): String
+  def placeholder(input: ShapeInput): String
+  def filter(input: ShapeInput): String => Boolean
+  def inputMode(input: ShapeInput): String
+
+/** A form holding a loss distribution's mode and its five shape inputs. The
+  * members are named as the forms already name them. */
+trait ShapeFieldsForm:
+  def distributionModeVar: Var[DistributionMode]
+  def percentilesVar: Var[String]      // and quantilesVar, termsVar, minLossVar, maxLossVar
+  def percentilesError: Signal[List[String]]   // and the other four
+  def impliedRatioWarning: Signal[Option[String]]
+  def inputIdOf(input: ShapeInput): String
+  def markShapeTouched(input: ShapeInput): Unit
+  def fillShape(text: ShapeFieldText): Unit    // concrete: writes the mode and the five inputs
+
+object FormState:   // the trait's parse helpers as plain functions
+  def parseDouble(s: String): Option[Double]
+  def parseLong(s: String): Option[Long]
+  def parseDoubleList(s: String): List[Double]
+  def parseRequired[A](input: Located[String], parse: String => Option[A], expected: ExpectedInput): Validation[ValidationError, Located[A]]
+
+// modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+enum RiskLeafField:
+  case Name, Parent, Probability
+  case Shape(input: ShapeInput)
+  case FormLevel
+object RiskLeafFormState:
+  def shapeFrom(...): Validation[ValidationError, DistributionShape]   // moved unchanged
+  private[state] def readTerms(input: Located[String]): Validation[ValidationError, Option[Int]]
+  def percentInput(input: Located[String]): Validation[ValidationError, Located[Double]]
+  def impliedRatioAdvisory(mode: DistributionMode, percentiles: String, quantiles: String): Option[String]
+  val probabilityFilter: String => Boolean
+  val percentileDecimals: Int          // 0: percentiles are whole numbers
+
+// modules/app/src/main/scala/app/state/FormMode.scala
+final case class ShapeFieldText(mode: DistributionMode, percentiles: String, quantiles: String,
+                                terms: String, minLoss: String, maxLoss: String):
+  def hasText: Boolean
+// FieldSnapshot.LeafFields(name, parent, probability, shape: ShapeFieldText)
+object FormMode:
+  def shapeToFieldText(shape: DistributionShape): ShapeFieldText
+
+// modules/app/src/main/scala/app/state/DistributionMode.scala
+object DistributionMode:
+  def label(mode: DistributionMode): String
+  val options: List[(DistributionMode, String)]
+
+// modules/app/src/main/scala/app/components/ShapeFields.scala (new)
+object ShapeFields:
+  def metalog(form: ShapeFieldsForm, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement
+  def lognormal(form: ShapeFieldsForm, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement
+
+// modules/app/src/main/scala/app/state/AbsoluteFiguresFormState.scala (new)
+enum AbsoluteFiguresField:
+  case Probability
+  case Shape(input: ShapeInput)
+  case FormLevel
+final class AbsoluteFiguresFormState(val initial: AbsoluteReplacement, subject: ErrorSubject)
+    extends SubmitRefusals[AbsoluteFiguresField], ShapeFieldsForm
+```
+
+`AbsoluteStatementList.figuresText` is `private[app]`, so the popup shows the
+current figures in the list's own words. The popup's refusals name
+`ErrorSubject.Mitigation(id)`, and it closes by Cancel only, since a click
+outside it would drop typed figures.
+
+**The components.**
+
+```scala
+// modules/app/src/main/scala/app/components/AbsoluteStatementList.scala (new), stateless (Pattern 5)
+object AbsoluteStatementList:
+  def apply(
+    rows:     Signal[List[AbsoluteStatementRow]],
+    stale:    Signal[Set[MitigationId]],
+    nodeName: Signal[NodeId => Option[SafeName.SafeName]],
+    onEdit:   MitigationId => Unit,
+    locked:   Signal[Boolean]
+  ): HtmlElement
+
+// modules/app/src/main/scala/app/views/OverridePopup.scala (new)
+object OverridePopup:
+  def apply(
+    edit:     Signal[OverrideEdit],
+    rows:     Signal[List[AbsoluteStatementRow]],
+    nodeName: Signal[NodeId => Option[SafeName.SafeName]],
+    onApply:  (MitigationId, AbsoluteReplacement) => Unit,
+    onCancel: () => Unit
+  ): HtmlElement
+```
+
+`OverridePopup.apply` takes the same `nodeName` the list takes, so the popup
+names the anchor as the list row does (approved by the user, 2026-11-17).
+
+Each list row shows the statement's name, its anchor's name in this tree or its
+identifier, its figures, the stale badge when the structure read lists it, a
+mark when it is affirmed and unsaved, and an edit button. The list is locked
+while a node form is mid-edit, as the forms lock each other. The popup shows
+the anchor's name in this tree or its identifier, the current figures, the form, and Apply and Cancel. Apply runs
+`toReplacement`, shows the refusals in place on failure, and on success calls
+`onApply` then dispatches `Applied`.
+
+**The wiring.**
+- `DesignView.apply` gains `overrideEditState: OverrideEditState`. It renders
+  `AbsoluteStatementList` under the tree preview and `OverridePopup` beside the
+  merge modal. Its load subscription dispatches `TreeLoaded` after
+  `commitLoad`, and its new-tree paths dispatch `TreeCleared`. `onApply` calls
+  `builderState.affirm`.
+- The stale badge comes from the Design view's `TreeViewState.structure`.
+- `MitigationPanel.apply` and `TreeDetailView` gain
+  `staleAction: MitigationPanel.StaleBadgeAction`, one value per card (ruled by
+  the user, 2026-11-17):
+
+  ```scala
+  /** What the stale badge offers where it is shown. */
+  enum StaleBadgeAction:
+    /** Opens the popup, disabled while `blockedBy` holds a reason. */
+    case OpensPopup(open: MitigationId => Unit, blockedBy: Signal[List[String]])
+    /** A comparand slot or a rewound baseline: nothing to open here. */
+    case ReadOnly
+    /** A Design list row, whose Edit button opens the popup. */
+    case EditInPlace
+
+  def staleBadge(id: MitigationId, action: StaleBadgeAction): HtmlElement
+  ```
+
+  `AnalyzeView` passes `OpensPopup` on the baseline card while `baselineAt` is
+  `None`, and `ReadOnly` elsewhere. `AbsoluteStatementList` passes
+  `EditInPlace`. The badge's label is "stale" in every view, and its tooltip
+  names what can be done about it there. `OpensPopup` wraps the link in
+  `FormInputs.blockable`, because a browser shows no tooltip on a disabled
+  button.
+- The link is disabled while the Design view holds unsaved work, so following
+  it never discards a draft. `AnalyzeView.apply` gains
+  `designUnsaved: Signal[Boolean]` and blocks the link with
+  `BlockedMessages.DesignUnsavedWork`. `TreeBuilderState` gains
+  `def hasUnsavedWork: Boolean` and `val hasUnsavedWorkSignal: Signal[Boolean]`,
+  one rule read both ways, and `DesignView`'s confirm guards call the method.
+- `Main` creates the `OverrideEditState`. The Analyze link dispatches
+  `Requested(tree, id)`, switches the Design view's `ScenarioState` to the
+  Analyze view's branch, selects the tree in the Design view's `TreeViewState`,
+  and calls `navState.navigate(Section.Design)`. The two views keep separate
+  branches, and the link opens the statement on the branch its row shows
+  (ruled by the user, 2026-11-17). `AnalyzeView.apply` gains
+  `openOverride: (BranchChoice, TreeId, MitigationId) => Unit` to hand the
+  request to `Main`.
+
+**Tests.**
+- `OverrideEditSpec` (new) covers every row of the transition table.
+- `TreeBuilderStateSpec` covers:
+  - `affirm` making the builder dirty;
+  - `toUpdateRequest` sending `Restamp` for an affirmed statement and
+    `KeepIfUnchanged` for the rest;
+  - `loadFromTree` clearing the affirmed statements;
+  - `hasUnsavedWork` and `hasUnsavedWorkSignal` agreeing, true after a tree
+    edit and while a node form is mid-edit on an unchanged tree.
+- `RiskLeafFormStateSpec` keeps its shape cases through the moved `shapeFrom`,
+  and covers `impliedRatioAdvisory` as a function of its arguments.
+- `FormModeSpec` covers `shapeToFieldText` for each mode.
+- `OverrideEditSpec` also covers `OverrideEditState.dispatch`.
+- `AbsoluteFiguresFormStateSpec` (new) covers:
+  - `toReplacement` keeping `initial`'s case for each of `Likelihood`,
+    `Severity` and `Both`;
+  - a likelihood outside `refineResidualProbability`'s range refused at its
+    field;
+  - a refused likelihood and a refused shape reported together under `Both`.
 
 ##### The user documentation
 
@@ -13270,9 +13586,8 @@ Already listed: `OpaqueTypes.scala`, `TargetingPredicate.scala`,
 
 ### 11.9 Open decisions
 
-None. One fact is asked of the user: does any store hold a targeting source
-longer than 2 048 characters? If one does, it must be shortened before this
-section lands.
+None. The user stated on 2026-11-17 that there are no production stores and
+every store is throwaway, so no stored targeting source needs shortening.
 
 ### 11.10 Terminology impact
 
@@ -13364,3 +13679,11 @@ hold. `.orElseSucceed(false)` turns that answer into "not in the history", and
 it also turns a store that does not answer into 404 rather than an outage. The
 integration test above settles the first. The second is today's behaviour of
 the fork check and is kept.
+
+**Ruled and landed (user, 2026-11-17).** Option B, with the revert checked the
+same way and the fork keeping its check through the shared
+`IrminClient.isAncestor`. The unverified premise is settled: a pinned read of
+a hash the store does not hold answers as not in the history
+(`PinnedReadAuthorizationItSpec`). The test went into that spec rather than
+`RiskTreeRepositoryIrminSpec`, because the spec already reads the repository
+against Irmin.

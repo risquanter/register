@@ -5,6 +5,7 @@ import scala.scalajs.js
 import app.core.NumberFormat
 import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
+import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** Client-side Vega-Lite v6 specification builder for LEC curves.
@@ -52,13 +53,22 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   */
 final case class PinnedAxes(lossMax: Double, probabilityMax: Double)
 
-/** One chart series: a node's curve, its assigned colour, the series
-  * identity (`seriesId` — the data/colour-scale/legend key), and the legend
-  * text — `label` (the node name) stacked over `origin` ("branch · tree",
-  * when given) as two legend lines. A named type because the string fields
-  * are same-typed — as positional tuple members a swap would compile
-  * silently and render a legend of internal ids. */
-final case class ChartSeries(curve: LECNodeCurve, colour: HexColor, seriesId: String, label: String, origin: Option[String])
+/** Which valuation a drawn curve is. `markerShape` is the Vega-Lite shape name,
+  * a contract with Vega rather than a serialised spelling. */
+enum CurveVariant(val markerShape: String):
+  case Inherent  extends CurveVariant("circle")
+  case Mitigated extends CurveVariant("triangle-up")
+
+/** One chart series: a node's curve, which valuation it is, its assigned
+  * colour, the series identity (`seriesId` — the data/colour-scale/legend
+  * key), and the legend text — `label` (the node name) stacked over `origin`
+  * ("branch · tree", when given) as two legend lines. A named type because
+  * the string fields are same-typed — as positional tuple members a swap
+  * would compile silently and render a legend of internal ids. */
+final case class ChartSeries(
+  curve: LECNodeCurve, variant: CurveVariant, colour: HexColor,
+  seriesId: String, label: String, origin: Option[String]
+)
 
 object PinnedAxes:
   /** Shared extents over every given curve — the same headroom rule the
@@ -85,6 +95,37 @@ object PinnedAxes:
 
 object LECSpecBuilder:
 
+  /** One marker every this many loss ticks, chosen by this project: ten
+    * markers on a curve of 100 ticks. */
+  val MarkerStride: Int = 10
+
+  /** What a mitigated series' id carries after its node id, so a node's two
+    * readings are two series. The mitigation-free series is the bare node id. */
+  private val MitigatedSuffix = "~mitigated"
+
+  /** A marker's area in square pixels, chosen by this project to stay readable
+    * on a 1.5-pixel line without hiding it. */
+  private val MarkerSize: Int = 45
+
+  /** The series id of `node`'s reading under `variant`. The result is a Vega
+    * data key, which is text.
+    *
+    * {{{
+    * seriesIdOf(node, CurveVariant.Inherent)    // 01HX…
+    * seriesIdOf(node, CurveVariant.Mitigated)   // 01HX…~mitigated
+    * }}}
+    */
+  def seriesIdOf(node: NodeId, variant: CurveVariant): String = variant match
+    case CurveVariant.Inherent  => node.value
+    case CurveVariant.Mitigated => s"${node.value}$MitigatedSuffix"
+
+  /** The legend text of `curve`'s reading under `variant`: the node's name,
+    * marked when the reading is the mitigated one, so a node's two legend
+    * entries read apart. */
+  def labelOf(curve: LECNodeCurve, variant: CurveVariant): String = variant match
+    case CurveVariant.Inherent  => curve.name.value
+    case CurveVariant.Mitigated => s"${curve.name.value} (mitigated)"
+
   /** Build a Vega-Lite spec from paired curve data and colours.
     *
     * The interpolation mode and annotation-toggle visibility are driven live
@@ -92,7 +133,8 @@ object LECSpecBuilder:
     * declares those signals at their defaults (`Interpolation.default` /
     * `LecAnnotation.defaultOn`), so no initial-value parameter is taken here.
     *
-    * @param curves        Ordered pairs of (curve data, assigned colour)
+    * @param curves        Ordered triples of (curve data, which valuation it
+    *                      is, assigned colour)
     * @param origin        Second legend line for every series ("branch ·
     *                      tree") — the legend format is the same in every
     *                      mode, so single-tree and compare read alike
@@ -109,7 +151,7 @@ object LECSpecBuilder:
     * @return Vega-Lite spec as `js.Dynamic`, ready for `vegaEmbed`
     */
   def build(
-    curves: Vector[(LECNodeCurve, HexColor)],
+    curves: Vector[(LECNodeCurve, CurveVariant, HexColor)],
     origin: Option[String],
     width: Int = 950,
     height: Int = 400,
@@ -117,7 +159,11 @@ object LECSpecBuilder:
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
-    buildFromSeries(curves.map { case (nc, color) => ChartSeries(nc, color, nc.id.value, nc.name.value, origin) }, width, height, pinned, responsive, zoomable)
+    buildFromSeries(
+      curves.map { case (nc, variant, color) =>
+        ChartSeries(nc, variant, color, seriesIdOf(nc.id, variant), labelOf(nc, variant), origin)
+      },
+      width, height, pinned, responsive, zoomable)
 
   /** Same as `build`, but each curve's series identity (`seriesId` — the
     * data points, colour-scale domain, and legend match) AND its legend
@@ -225,7 +271,7 @@ object LECSpecBuilder:
     // at a fixed pixel position rather than a line.
     val noLossRows: Vector[(String, HexColor, String)] =
       withData.map { s =>
-        (s"${s.curve.name.value} — no loss: ${formatProbability(s.curve.probabilityOfNoLoss)}", s.colour, s.seriesId)
+        (s"${s.label} — no loss: ${formatProbability(s.curve.probabilityOfNoLoss)}", s.colour, s.seriesId)
       }
 
     // Fresh data values array — called per layer to avoid shared mutable state
@@ -266,6 +312,48 @@ object LECSpecBuilder:
           "labelLimit" -> 220
         )
       )
+
+    // Marker layer: every `MarkerStride`-th tick of each series drawn as a
+    // point whose shape names the series' valuation. Colour stays the node's,
+    // so a node's two readings share a colour and differ in marker. The shape
+    // scale lists both variants, so its legend names them on every chart.
+    def makeMarkerValues(): js.Array[js.Any] =
+      val arr = js.Array[js.Any]()
+      ordered.foreach { s =>
+        s.curve.curve.zipWithIndex.collect { case (pt, i) if i % MarkerStride == 0 => pt }.foreach { pt =>
+          arr.push(js.Dynamic.literal(
+            "curveId"    -> s.seriesId,
+            "variant"    -> s.variant.toString,
+            "loss"       -> pt.loss.toDouble,
+            "exceedance" -> (pt.exceedanceProbability: Double)
+          ))
+        }
+      }
+      arr
+
+    val shapeDomain = js.Array[js.Any]()
+    val shapeRange  = js.Array[js.Any]()
+    CurveVariant.values.foreach { v =>
+      shapeDomain.push(v.toString)
+      shapeRange.push(v.markerShape)
+    }
+
+    val markerLayer = js.Dynamic.literal(
+      "data" -> js.Dynamic.literal("values" -> makeMarkerValues()),
+      "mark" -> js.Dynamic.literal("type" -> "point", "filled" -> true, "size" -> MarkerSize, "tooltip" -> false),
+      "encoding" -> js.Dynamic.literal(
+        "x"     -> js.Dynamic.literal("field" -> "loss", "type" -> "quantitative"),
+        "y"     -> js.Dynamic.literal("field" -> "exceedance", "type" -> "quantitative"),
+        "color" -> makeColorEncoding(),
+        "shape" -> js.Dynamic.literal(
+          "field" -> "variant",
+          "type"  -> "nominal",
+          "title" -> "Valuation",
+          "scale" -> js.Dynamic.literal("domain" -> shapeDomain, "range" -> shapeRange)
+        ),
+        "opacity" -> VegaSpecShared.hoverOpacityConditions("false", HoverParamName)
+      )
+    )
 
     // Main line layer with opacity condition for hover
     val lineLayer = js.Dynamic.literal(
@@ -374,6 +462,7 @@ object LECSpecBuilder:
     VegaSpecShared.verticalRuleLayers(annotationData, hoverParam = Some(HoverParamName)).foreach(allLayers.push(_))
     noLossLayer(noLossRows).foreach(allLayers.push(_))
     allLayers.push(lineLayer)
+    allLayers.push(markerLayer)
     allLayers.push(pointLayer)
 
     // Responsive sizing: "container" lets vega-embed's ResizeObserver size the

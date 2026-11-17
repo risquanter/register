@@ -53,10 +53,10 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
   private def stubRepo: RiskTreeRepository = new RiskTreeRepository:
     private val db = collection.mutable.Map[(WorkspaceId, BranchRef, TreeId), RiskTree]()
     // Reads take a Revision; these branch-scoped tests only ever read a head,
-    // so a commit pin (`At`) resolves to nothing here.
+    // so a commit read (`At` or `Pinned`) resolves to nothing here.
     private def branchOf(rev: Revision): Option[BranchRef] = rev match
-      case Revision.Head(b) => Some(b)
-      case Revision.At(_)   => None
+      case Revision.Head(b)                       => Some(b)
+      case Revision.At(_) | Revision.Pinned(_, _) => None
     override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): IO[Failure,RiskTree] =
       com.risquanter.register.util.IdGenerators.nextTreeId.orDie.map { id =>
         val tree = RiskTree.fromNodesUnsafe(id, t.name, t.nodes, t.rootId, Some(t.seedVarHighWater), t.mitigations); db += ((wsId, branch, id) -> tree); tree

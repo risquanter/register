@@ -1,11 +1,11 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 import org.scalajs.dom
-import app.components.{BranchBar, MergeModal, SplitPane}
-import app.state.{AppConfigState, DistributionChartState, LoadState, ScenarioMergeState, ScenarioState, TreeBuilderState, TreeLoadDecision, TreeLoadPolicy, TreeViewState, WorkspaceState}
-import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.BranchChoice
+import app.components.{AbsoluteStatementList, BranchBar, MergeModal, SplitPane}
+import app.state.{AppConfigState, DistributionChartState, LoadState, OverrideEditEvent, OverrideEditState, ScenarioMergeState, ScenarioState, TreeBuilderState, TreeLoadDecision, TreeLoadPolicy, TreeViewState, WorkspaceState}
+import com.risquanter.register.domain.data.{MitigationSpec, RiskTree}
+import com.risquanter.register.domain.data.iron.{BranchChoice, MitigationId, NodeId, SafeName}
 
 /** Design view — tree creation and editing workflow.
   *
@@ -15,12 +15,24 @@ import com.risquanter.register.domain.data.iron.BranchChoice
   *   SplitPane.horizontal(40% | 60%)
   *   ├── LEFT:  TreeBuilderView (forms)
   *   └── RIGHT: SplitPane.vertical(60% | 40%)
-  *       ├── TOP:    TreeListView (dropdown selector) + TreePreview (live ASCII preview)
+  *       ├── TOP:    TreeListView (dropdown selector) + TreePreview (live ASCII
+  *       │           preview) + the loaded tree's absolute statements
   *       └── BOTTOM: Placeholder panel for future distribution modelling chart
+  *
+  * The override edit popup opens over the view on one absolute statement; its
+  * state is `overrideEditState`, which the Analyze view's link also moves.
   *
   * Pure structural component — owns no state (ADR-019 Pattern 1).
   */
 object DesignView:
+
+  /** The absolute statements `tree` holds. */
+  private def absoluteIds(tree: RiskTree): Set[MitigationId] =
+    tree.mitigations.flatMap { m =>
+      m.spec match
+        case _: MitigationSpec.LeafAbsolute                                 => Some(m.id)
+        case _: MitigationSpec.LeafRelative | _: MitigationSpec.ResultStage => None
+    }.toSet
 
   def apply(
     builderState: TreeBuilderState,
@@ -29,7 +41,8 @@ object DesignView:
     distributionChartState: DistributionChartState,
     scenarioState: ScenarioState,
     mergeState: ScenarioMergeState,
-    appConfigState: AppConfigState
+    appConfigState: AppConfigState,
+    overrideEditState: OverrideEditState
   ): HtmlElement =
     val scenarioMenuOpen: Var[Boolean] = Var(false)
 
@@ -51,39 +64,61 @@ object DesignView:
     def commitLoad(tree: RiskTree): Unit =
       builderState.loadFromTree(tree)
       loadedBranch.set(scenarioState.activeBranch.now())
+      val held = absoluteIds(tree)
+      overrideEditState.dispatch(OverrideEditEvent.TreeLoaded(tree.id, held), held)
 
-    // Whole-tree changes (isDirty) plus an in-progress, uncommitted node edit
-    // (isEditDirtyVar — an Editing/Templating form, or a filled-in Blank one,
-    // that never touched leavesVar/portfoliosVar). Same "is it safe to discard
-    // the builder" question every guard below is asking; one definition, reused.
-    def hasUnsavedWork: Boolean = builderState.isDirty || builderState.isEditDirtyVar.now()
+    /** The builder starts a new, empty tree: nothing is held, so the popup
+      * closes and a pending request is dropped. */
+    def clearForNewTree(): Unit =
+      builderState.startNewTree()
+      treeViewState.selectedTreeId.set(None)
+      loadedBranch.set(scenarioState.activeBranch.now())
+      overrideEditState.dispatch(OverrideEditEvent.TreeCleared, Set.empty)
 
     def onNewTree(): Unit =
-      val proceed = !hasUnsavedWork || dom.window.confirm("Starting a new tree will clear your current draft. Continue?")
-      if proceed then
-        builderState.startNewTree()
-        treeViewState.selectedTreeId.set(None)
-        loadedBranch.set(scenarioState.activeBranch.now())
+      val proceed = !builderState.hasUnsavedWork || dom.window.confirm("Starting a new tree will clear your current draft. Continue?")
+      if proceed then clearForNewTree()
 
     // The previously-selected tree doesn't exist on the branch just switched to
     // (e.g. it was created after the fork point, or on a sibling branch). There's
     // nothing valid left to show — offer the same start-fresh flow as "+ New Tree",
     // or revert the branch switch if the user declines to lose a real draft.
     def handleTreeUnavailableOnBranch(): Unit =
-      val proceed = !hasUnsavedWork ||
+      val proceed = !builderState.hasUnsavedWork ||
         dom.window.confirm("This tree doesn't exist on the new branch. Starting a new tree will clear your current draft. Continue?")
-      if proceed then
-        builderState.startNewTree()
-        treeViewState.selectedTreeId.set(None)
-        loadedBranch.set(scenarioState.activeBranch.now())
+      if proceed then clearForNewTree()
       else
         treeViewState.selectedTreeId.set(builderState.editingTreeId.now())
         revertBranch()
 
+    /** The absolute statements of the loaded tree, read when the popup is
+      * asked to open. */
+    def heldNow(): Set[MitigationId] = treeViewState.selectedTree.now() match
+      case LoadState.Loaded(tree) => absoluteIds(tree)
+      case _                      => Set.empty
+
+    // The stale badge comes from the structure read of the tree the builder
+    // loaded, and an anchor is named as that tree names it.
+    val staleIds: Signal[Set[MitigationId]] = treeViewState.structure.map {
+      case LoadState.Loaded(response) => response.staleMitigationIds
+      case _                          => Set.empty
+    }
+    val nodeName: Signal[NodeId => Option[SafeName.SafeName]] = treeViewState.selectedTree.map {
+      case LoadState.Loaded(tree) => id => tree.index.nodes.get(id).map(_.name)
+      case _                      => _ => None
+    }
+
     val previewPanel = div(
       cls := "design-preview-panel",
       TreeListView(treeViewState, Some(onNewTree), leadingControl = None),
-      TreePreview(builderState)
+      TreePreview(builderState),
+      AbsoluteStatementList(
+        builderState.absoluteStatements,
+        staleIds,
+        nodeName,
+        id => overrideEditState.dispatch(OverrideEditEvent.OpenOn(id), heldNow()),
+        builderState.isEditDirtyVar.signal
+      )
     )
 
     val scenarioLeftPanel = div(
@@ -108,6 +143,17 @@ object DesignView:
     div(
       cls := "design-view",
       MergeModal(mergeState, onMerged),
+      // Applying records the figures in the builder, so the tree's save
+      // re-affirms the statement; the popup then closes.
+      OverridePopup(
+        overrideEditState.edit.signal,
+        builderState.absoluteStatements,
+        nodeName,
+        (id, figures) =>
+          builderState.affirm(id, figures)
+          overrideEditState.dispatch(OverrideEditEvent.Applied, heldNow()),
+        () => overrideEditState.dispatch(OverrideEditEvent.Cancelled, heldNow())
+      ),
       // ── Load subscription: propagate selected tree → builder state ──
       // Bound to element lifetime (ADR-019: side effects in callbacks, not in .map).
 
@@ -121,10 +167,10 @@ object DesignView:
       // in Main.scala) — not wired here, so every TreeViewState consumer gets it,
       // not just this view. This subscription only decides what the *resulting*
       // fetch should do to the builder.
-      treeViewState.selectedTree.signal.changes --> {
+      treeViewState.selectedTree.changes --> {
         case LoadState.Loaded(tree) =>
           val previousId = builderState.editingTreeId.now()
-          TreeLoadPolicy.decide(previousId, loadedBranch.now(), tree.id, scenarioState.activeBranch.now(), hasUnsavedWork) match
+          TreeLoadPolicy.decide(previousId, loadedBranch.now(), tree.id, scenarioState.activeBranch.now(), builderState.hasUnsavedWork) match
             case TreeLoadDecision.SameContext =>
               // Same tree, same branch, reloaded after successful submit — do not
               // clear currentDraftVar so that the preview checkbox works immediately

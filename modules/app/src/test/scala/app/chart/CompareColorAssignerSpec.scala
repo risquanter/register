@@ -4,6 +4,7 @@ import zio.test.*
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.iron.{NodeId, SafeName}
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.domain.data.LECNodeCurve
 
 /** Pure tests for `CompareColorAssigner.pairForOverlay`. Series ids are
@@ -25,14 +26,17 @@ object CompareColorAssignerSpec extends ZIOSpecDefault:
       probabilityOfNoLoss = 1.0
     )
 
+  /** A side drawing each node's mitigation-free reading only. */
   private def side(
     curves: Map[NodeId, LECNodeCurve],
     visible: Set[NodeId],
-    palette: Vector[com.risquanter.register.domain.data.iron.HexColor.HexColor],
+    palette: Vector[HexColor],
     slotLabel: String,
     displayLabel: String = "main · Demo Tree",
-    overrides: Map[NodeId, com.risquanter.register.domain.data.iron.HexColor.HexColor] = Map.empty
-  ) = CompareColorAssigner.OverlaySide(curves, visible, palette, slotLabel, displayLabel, overrides)
+    overrides: Map[NodeId, HexColor] = Map.empty
+  ) = CompareColorAssigner.OverlaySide(
+    curves.view.mapValues(c => List(CurveVariant.Inherent -> c)).toMap,
+    visible, palette, slotLabel, displayLabel, overrides)
 
   def spec = suite("CompareColorAssigner.pairForOverlay")(
 
@@ -150,6 +154,22 @@ object CompareColorAssignerSpec extends ZIOSpecDefault:
         side(Map(leaf1 -> curve(leaf1)), Set(leaf1), PaletteData.Purple, "s1", overrides = Map(leaf1 -> picked))
       ))
       assertTrue(paired.head.colour == picked)
+    },
+
+    test("a node's two readings on one side are two series in one colour, the mitigated one marked") {
+      val inherent  = curve(leaf1)
+      val mitigated = curve(leaf1).copy(averageAnnualLoss = 1.0)
+      val paired = CompareColorAssigner.pairForOverlay(Vector(
+        CompareColorAssigner.OverlaySide(
+          Map(leaf1 -> List(CurveVariant.Inherent -> inherent, CurveVariant.Mitigated -> mitigated)),
+          Set(leaf1), PaletteData.Purple, "s1", "main · Demo Tree", Map.empty)
+      ))
+      assertTrue(
+        paired.map(_.seriesId).toSet == Set(s"${leaf1.value}@s1", s"${leaf1.value}~mitigated@s1"),
+        paired.map(_.variant) == Vector(CurveVariant.Inherent, CurveVariant.Mitigated),
+        paired.map(_.colour).distinct.size == 1,
+        paired.find(_.variant == CurveVariant.Mitigated).get.label == s"Leaf ${leaf1.value} (mitigated)"
+      )
     },
 
     test("a non-overridden node on the same side keeps its family shade") {

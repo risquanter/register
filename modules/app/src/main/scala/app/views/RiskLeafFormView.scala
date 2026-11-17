@@ -2,9 +2,9 @@ package app.views
 
 import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
-import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forLeaf, name}
+import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, ShapeFieldText, ShapeInput, forLeaf, name}
 import app.components.FormInputs.*
-import app.components.FormCard
+import app.components.{FormCard, ShapeFields}
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.errors.ErrorSubject
@@ -65,12 +65,7 @@ object RiskLeafFormView:
             name        = name,
             parent      = parent,
             probability = probability,
-            mode        = mode,
-            percentiles = percentiles,
-            quantiles   = quantiles,
-            terms       = terms,
-            minLoss     = minLoss,
-            maxLoss     = maxLoss
+            shape       = ShapeFieldText(mode, percentiles, quantiles, terms, minLoss, maxLoss)
           )
         }
     val isDirty: Signal[Boolean] =
@@ -243,11 +238,11 @@ object RiskLeafFormView:
       // edits no single input, so it drops only the line's.
       state.nameVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Name)),
       state.probabilityVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Probability)),
-      state.percentilesVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Percentiles)),
-      state.quantilesVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Quantiles)),
-      state.minLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.MinLoss)),
-      state.maxLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.MaxLoss)),
-      state.termsVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Terms)),
+      state.percentilesVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Shape(ShapeInput.Percentiles))),
+      state.quantilesVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Shape(ShapeInput.Quantiles))),
+      state.minLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Shape(ShapeInput.MinLoss))),
+      state.maxLossVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Shape(ShapeInput.MaxLoss))),
+      state.termsVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Shape(ShapeInput.Terms))),
       state.distributionModeVar.signal.changes --> (_ => state.clearFor(RiskLeafField.FormLevel)),
       state.parentVar.signal.changes --> (_ => state.clearFor(RiskLeafField.Parent)),
 
@@ -295,10 +290,7 @@ object RiskLeafFormView:
       // Distribution Mode Toggle
       radioGroup(
         labelText = "Distribution Type",
-        options = List(
-          (DistributionMode.Metalog, "Metalog (expert estimate)"),
-          (DistributionMode.Lognormal, "Lognormal (BCG)")
-        ),
+        options = DistributionMode.options,
         selectedVar = state.distributionModeVar,
         disabledSignal = isDisabled,
         lockedSignal = showLockIcon
@@ -312,8 +304,8 @@ object RiskLeafFormView:
       // as Signals so locking/unlocking toggles the `disabled` attribute on the
       // already-mounted inputs instead of rebuilding them (Signal granularity, ADR-019).
       child <-- state.distributionModeVar.signal.map {
-        case DistributionMode.Metalog   => metalogFields(state, isDisabled, showLockIcon)
-        case DistributionMode.Lognormal => lognormalFields(state, isDisabled, showLockIcon)
+        case DistributionMode.Metalog   => ShapeFields.metalog(state, isDisabled, showLockIcon)
+        case DistributionMode.Lognormal => ShapeFields.lognormal(state, isDisabled, showLockIcon)
       },
 
       // Add/Submit, Edit/Save, Clear Form — right-aligned as a group, Clear Form
@@ -357,90 +349,6 @@ object RiskLeafFormView:
       )
     )
 
-  /** Metalog mode specific fields */
-  private def metalogFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
-    div(
-      cls := "mode-fields",
-      div(cls := "mode-fields-title", "Metalog Parameters"),
-
-      textInput(
-        labelText = RiskLeafField.label(RiskLeafField.Percentiles),
-        inputId = RiskLeafField.inputId(RiskLeafField.Percentiles),
-        valueVar = state.percentilesVar,
-        errorSignal = state.percentilesError,
-        filter = state.percentilesFilter,
-        onBlurCallback = () => state.markTouched(RiskLeafField.Percentiles),
-        placeholderText = "e.g., 10, 50, 90",
-        inputModeAttr = "decimal",
-        disabledSignal = isDisabled,
-        lockedSignal = showLockIcon
-      ),
-
-      textInput(
-        labelText = RiskLeafField.label(RiskLeafField.Quantiles),
-        inputId = RiskLeafField.inputId(RiskLeafField.Quantiles),
-        valueVar = state.quantilesVar,
-        errorSignal = state.quantilesError,
-        filter = state.quantilesFilter,
-        onBlurCallback = () => state.markTouched(RiskLeafField.Quantiles),
-        placeholderText = "e.g., 50, 200, 1000 ($50M, $200M, $1B)",
-        inputModeAttr = "decimal",
-        disabledSignal = isDisabled,
-        lockedSignal = showLockIcon
-      ),
-
-      // Implied ratio warning: shown when P90/P10 ratio exceeds 100×
-      child.maybe <-- state.impliedRatioWarning.map(_.map { msg =>
-        div(cls := "form-warning", msg)
-      }),
-
-      textInput(
-        labelText = RiskLeafField.label(RiskLeafField.Terms),
-        inputId = RiskLeafField.inputId(RiskLeafField.Terms),
-        valueVar = state.termsVar,
-        errorSignal = state.termsError,
-        filter = state.lossFilter,
-        onBlurCallback = () => state.markTouched(RiskLeafField.Terms),
-        placeholderText = "e.g. 3",
-        inputModeAttr = "numeric",
-        disabledSignal = isDisabled,
-        lockedSignal = showLockIcon
-      )
-    )
-
-  /** Lognormal mode specific fields */
-  private def lognormalFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
-    div(
-      cls := "mode-fields",
-      div(cls := "mode-fields-title", "Lognormal Parameters (90% CI)"),
-
-      textInput(
-        labelText = RiskLeafField.label(RiskLeafField.MinLoss),
-        inputId = RiskLeafField.inputId(RiskLeafField.MinLoss),
-        valueVar = state.minLossVar,
-        errorSignal = state.minLossError,
-        filter = state.lossFilter,
-        onBlurCallback = () => state.markTouched(RiskLeafField.MinLoss),
-        placeholderText = "e.g., 1000",
-        inputModeAttr = "numeric",
-        disabledSignal = isDisabled,
-        lockedSignal = showLockIcon
-      ),
-
-      textInput(
-        labelText = RiskLeafField.label(RiskLeafField.MaxLoss),
-        inputId = RiskLeafField.inputId(RiskLeafField.MaxLoss),
-        valueVar = state.maxLossVar,
-        errorSignal = state.maxLossError,
-        filter = state.lossFilter,
-        onBlurCallback = () => state.markTouched(RiskLeafField.MaxLoss),
-        placeholderText = "e.g., 50000",
-        inputModeAttr = "numeric",
-        disabledSignal = isDisabled,
-        lockedSignal = showLockIcon
-      )
-    )
-  
   /** Handle add-leaf submission. Every refusal is stored at once, whichever
     * check produced it — this form's own field refinement or the tree-wide
     * topology rules — and each input selects its own. */

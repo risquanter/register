@@ -67,16 +67,21 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       _        <- irmin.setTree(basePath, Nil, treeWriteMessage(wsId, id, TreeWriteKind.Delete), branch)
     yield existing.tree
 
-  /** Revert a tree to `toCommit`. Loads the tree state at
-    * that commit — absent (commit or path) → NotFound — then writes it forward
-    * as ONE `set_tree` commit with a `:revert` message. Loading at the commit
-    * preserves the tree's original `createdAt` and handles reverting a tree
-    * that was deleted at head (no head-meta dependency). */
+  /** Revert a tree to `toCommit`. Loads the tree state at that commit — a
+    * commit outside `branch`'s history, or absent (commit or path) → NotFound —
+    * then writes it forward as ONE `set_tree` commit with a `:revert` message.
+    * Loading at the commit preserves the tree's original `createdAt` and
+    * handles reverting a tree that was deleted at head (no head-meta
+    * dependency). */
   override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): IO[Failure,RiskTree] =
     val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
-    loadTreeAt(wsId, id, toCommit).flatMap {
+    val pinned   = Revision.Pinned(branch, toCommit)
+    resolveRevision(pinned).flatMap {
+      case None         => ZIO.none
+      case Some(commit) => loadTreeAt(wsId, id, commit)
+    }.flatMap {
       case None =>
-        RiskTreeRepository.treeAbsent(wsId, id, Revision.At(toCommit))
+        RiskTreeRepository.commitAbsent(wsId, id, pinned, ErrorLocation.requestField(FieldName.ToCommit))
       case Some(existing) =>
         for
           now         <- Clock.instant
@@ -222,11 +227,18 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
   /** Resolve a read `Revision` to the commit to read at: `Head` resolves the
     * branch head once (None if the branch is absent/empty, preserving today's
-    * empty-read semantics); `At` uses the pinned commit directly. */
+    * empty-read semantics); `At` uses the commit directly; `Pinned` uses the
+    * client's commit only when it lies in the branch's history, and is None
+    * otherwise, so it answers as a commit that holds no tree. */
   private def resolveRevision(rev: Revision): IO[Failure,Option[CommitHash]] =
     rev match
-      case Revision.Head(branch) => resolveHead(branch)
-      case Revision.At(commit)   => ZIO.succeed(Some(commit))
+      case Revision.Head(branch)           => resolveHead(branch)
+      case Revision.At(commit)             => ZIO.succeed(Some(commit))
+      case Revision.Pinned(branch, commit) => onBranch(branch, commit)
+
+  /** The commit, when it is `branch`'s head or one of its ancestors. */
+  private def onBranch(branch: BranchRef, commit: CommitHash): IO[Failure, Option[CommitHash]] =
+    irmin.isAncestor(branch, commit).map(Option.when(_)(commit))
 
   private def resolveHead(branch: BranchRef): IO[Failure,Option[CommitHash]] =
     // None = branch absent OR branch exists with no commits; both read as empty.

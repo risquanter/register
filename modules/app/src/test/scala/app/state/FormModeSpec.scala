@@ -4,7 +4,7 @@ import zio.test.*
 
 import com.risquanter.register.domain.data.iron.{SafeName, Probability}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
-import com.risquanter.register.testutil.TestHelpers.lognormalShape
+import com.risquanter.register.testutil.TestHelpers.{lognormalShape, metalogShape}
 import io.github.iltotore.iron.*
 
 object FormModeSpec extends ZIOSpecDefault:
@@ -27,12 +27,7 @@ object FormModeSpec extends ZIOSpecDefault:
     name        = "",
     parent      = ParentSelection.Unset,
     probability = "",
-    mode        = DistributionMode.Lognormal,
-    percentiles = "",
-    quantiles   = "",
-    terms       = "",
-    minLoss     = "",
-    maxLoss     = ""
+    shape       = ShapeFieldText(DistributionMode.Lognormal, "", "", "", "", "")
   )
   private val emptyPortfolioSnapshot: FieldSnapshot.PortfolioFields = FieldSnapshot.PortfolioFields("", ParentSelection.Unset)
 
@@ -65,12 +60,7 @@ object FormModeSpec extends ZIOSpecDefault:
       test("round-trips a saved leaf's raw display values") {
         assertTrue(
           savedLeafSnapshot.name == "Cyber Risk",
-          savedLeafSnapshot.mode == DistributionMode.Lognormal,
-          savedLeafSnapshot.minLoss == "1000",
-          savedLeafSnapshot.maxLoss == "50000",
-          savedLeafSnapshot.percentiles == "",
-          savedLeafSnapshot.quantiles == "",
-          savedLeafSnapshot.terms == ""
+          savedLeafSnapshot.shape == ShapeFieldText(DistributionMode.Lognormal, "", "", "", "1000", "50000")
         )
       },
       test("round-trips a saved portfolio's raw display values") {
@@ -78,6 +68,24 @@ object FormModeSpec extends ZIOSpecDefault:
           savedPortfolioSnapshot.name == "Operational Risk",
           savedPortfolioSnapshot.parent == ParentSelection.Root
         )
+      }
+    ),
+
+    suite("shapeToFieldText")(
+      test("a lognormal shape fills the two bounds and leaves the metalog inputs blank") {
+        assertTrue(FormMode.shapeToFieldText(lognormalDistribution) ==
+          ShapeFieldText(DistributionMode.Lognormal, "", "", "", "1000", "50000"))
+      },
+      test("a metalog shape fills percentiles on the 0–100 scale, losses and terms, and leaves the bounds blank") {
+        // A whole loss prints without a decimal point in the browser, so the
+        // text reads back as the number it came from.
+        val shape = metalogShape(Vector(0.1, 0.5, 0.9), Vector(1000.0, 5000.0, 25000.0), Some(3))
+        assertTrue(FormMode.shapeToFieldText(shape) ==
+          ShapeFieldText(DistributionMode.Metalog, "10, 50, 90", "1000, 5000, 25000", "3", "", ""))
+      },
+      test("a metalog shape with no stated term count leaves terms blank") {
+        val shape = metalogShape(Vector(0.1, 0.9), Vector(1000.0, 25000.0), None)
+        assertTrue(FormMode.shapeToFieldText(shape).terms == "")
       }
     ),
 

@@ -6,7 +6,7 @@ import zio.prelude.Validation
 import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
-import app.state.{DistributionMode, ParentSelection, PortfolioField, PortfolioFormState, RiskLeafField, RiskLeafFormState, SubmitRefusals, SummaryEntry}
+import app.state.{DistributionMode, ParentSelection, PortfolioField, PortfolioFormState, RiskLeafField, RiskLeafFormState, ShapeInput, SubmitRefusals, SummaryEntry}
 import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
 import com.risquanter.register.domain.errors.{
   ErrorLocation, ErrorSubject, FieldName, FieldProblem, RequestHeaderName, RequestQueryParam, SubmittedCollection, ValidationError
@@ -76,15 +76,15 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
     FieldName.Name                      -> Set(RiskLeafField.Name),
     FieldName.ParentName                -> Set(RiskLeafField.Parent),
     FieldName.Probability               -> Set(RiskLeafField.Probability),
-    FieldName.Percentiles               -> Set(RiskLeafField.Percentiles),
-    FieldName.percentileAt(0)           -> Set(RiskLeafField.Percentiles),
-    FieldName.Quantiles                 -> Set(RiskLeafField.Quantiles),
-    FieldName.quantileAt(0)             -> Set(RiskLeafField.Quantiles),
-    FieldName.MinLoss                   -> Set(RiskLeafField.MinLoss),
-    FieldName.MaxLoss                   -> Set(RiskLeafField.MaxLoss),
-    FieldName.Terms                     -> Set(RiskLeafField.Terms),
-    FieldName.LossRange                 -> Set(RiskLeafField.MinLoss, RiskLeafField.MaxLoss),
-    FieldName.PercentileQuantilePairing -> Set(RiskLeafField.Percentiles, RiskLeafField.Quantiles),
+    FieldName.Percentiles               -> Set(RiskLeafField.Shape(ShapeInput.Percentiles)),
+    FieldName.percentileAt(0)           -> Set(RiskLeafField.Shape(ShapeInput.Percentiles)),
+    FieldName.Quantiles                 -> Set(RiskLeafField.Shape(ShapeInput.Quantiles)),
+    FieldName.quantileAt(0)             -> Set(RiskLeafField.Shape(ShapeInput.Quantiles)),
+    FieldName.MinLoss                   -> Set(RiskLeafField.Shape(ShapeInput.MinLoss)),
+    FieldName.MaxLoss                   -> Set(RiskLeafField.Shape(ShapeInput.MaxLoss)),
+    FieldName.Terms                     -> Set(RiskLeafField.Shape(ShapeInput.Terms)),
+    FieldName.LossRange                 -> Set(RiskLeafField.Shape(ShapeInput.MinLoss), RiskLeafField.Shape(ShapeInput.MaxLoss)),
+    FieldName.PercentileQuantilePairing -> Set(RiskLeafField.Shape(ShapeInput.Percentiles), RiskLeafField.Shape(ShapeInput.Quantiles)),
     FieldName.DistributionType          -> Set(RiskLeafField.FormLevel)
   )
 
@@ -130,28 +130,28 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.Probability)) == Set(RiskLeafField.Probability))
       },
       test("the five distribution inputs") {
-        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.Percentiles)) == Set(RiskLeafField.Percentiles)) &&
-        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.Quantiles)) == Set(RiskLeafField.Quantiles)) &&
-        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.MinLoss)) == Set(RiskLeafField.MinLoss)) &&
-        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.MaxLoss)) == Set(RiskLeafField.MaxLoss)) &&
-        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.Terms)) == Set(RiskLeafField.Terms))
+        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.Percentiles)) == Set(RiskLeafField.Shape(ShapeInput.Percentiles))) &&
+        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.Quantiles)) == Set(RiskLeafField.Shape(ShapeInput.Quantiles))) &&
+        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.MinLoss)) == Set(RiskLeafField.Shape(ShapeInput.MinLoss))) &&
+        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.MaxLoss)) == Set(RiskLeafField.Shape(ShapeInput.MaxLoss))) &&
+        assertTrue(RiskLeafFormState.inputsFor(draft(FieldName.Terms)) == Set(RiskLeafField.Shape(ShapeInput.Terms)))
       },
       test("an element failure shares its collection's input") {
         // The form edits all percentiles as one comma-separated value, so the
         // third percentile being out of range lights the same input as the
         // collection not being strictly increasing.
         assertTrue(
-          RiskLeafFormState.inputsFor(draft(FieldName.percentileAt(2))) == Set(RiskLeafField.Percentiles)
+          RiskLeafFormState.inputsFor(draft(FieldName.percentileAt(2))) == Set(RiskLeafField.Shape(ShapeInput.Percentiles))
         ) &&
         assertTrue(
-          RiskLeafFormState.inputsFor(draft(FieldName.quantileAt(2))) == Set(RiskLeafField.Quantiles)
+          RiskLeafFormState.inputsFor(draft(FieldName.quantileAt(2))) == Set(RiskLeafField.Shape(ShapeInput.Quantiles))
         )
       },
       test("a rule over a pair of inputs goes under both") {
         assertTrue(
-          RiskLeafFormState.inputsFor(draft(FieldName.LossRange)) == Set(RiskLeafField.MinLoss, RiskLeafField.MaxLoss),
+          RiskLeafFormState.inputsFor(draft(FieldName.LossRange)) == Set(RiskLeafField.Shape(ShapeInput.MinLoss), RiskLeafField.Shape(ShapeInput.MaxLoss)),
           RiskLeafFormState.inputsFor(draft(FieldName.PercentileQuantilePairing)) ==
-            Set(RiskLeafField.Percentiles, RiskLeafField.Quantiles)
+            Set(RiskLeafField.Shape(ShapeInput.Percentiles), RiskLeafField.Shape(ShapeInput.Quantiles))
         )
       },
       test("a fit the mode's parameters do not admit goes on the form's own line") {
@@ -173,7 +173,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
       test("an existing node's field routes by field, not by subject") {
         val nodeId = NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get
         assertTrue(
-          RiskLeafFormState.inputsFor(ErrorLocation.nodeField(nodeId, FieldName.MinLoss)) == Set(RiskLeafField.MinLoss)
+          RiskLeafFormState.inputsFor(ErrorLocation.nodeField(nodeId, FieldName.MinLoss)) == Set(RiskLeafField.Shape(ShapeInput.MinLoss))
         )
       },
       test("every field is assigned as stated") {
@@ -295,7 +295,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.clearFor(RiskLeafField.Name)
         val afterName = (current(state.nameError), current(state.minLossError), current(state.maxLossError))
         // Editing either bound can satisfy the pair rule, so it drops from both.
-        state.clearFor(RiskLeafField.MinLoss)
+        state.clearFor(RiskLeafField.Shape(ShapeInput.MinLoss))
         assertTrue(
           afterName == (Nil, List(sentence(rangeRefused)), List(sentence(rangeRefused))),
           current(state.minLossError).isEmpty,
@@ -311,7 +311,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
         state.triggerValidation()
         state.setSubmitErrors(List(refusal(draft(FieldName.Terms), termsOutOfRange)))
         val before = current(state.termsError)
-        state.clearFor(RiskLeafField.Terms)
+        state.clearFor(RiskLeafField.Shape(ShapeInput.Terms))
         assertTrue(before == List(sentence(termsOutOfRange)), current(state.termsError).isEmpty)
       },
       test("an edit of any input drops the form's own line") {
@@ -377,10 +377,10 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
       test("lists a pair refusal once, under the first of its inputs") {
         val pair    = refusal(draft(FieldName.LossRange), rangeRefused)
         val summary = SubmitRefusals.summaryOf(
-          List(RiskLeafField.MinLoss -> List(pair), RiskLeafField.MaxLoss -> List(pair)),
+          List(RiskLeafField.Shape(ShapeInput.MinLoss) -> List(pair), RiskLeafField.Shape(ShapeInput.MaxLoss) -> List(pair)),
           Nil
         )
-        assertTrue(summary == List(SummaryEntry(Some(RiskLeafField.MinLoss), sentence(rangeRefused))))
+        assertTrue(summary == List(SummaryEntry(Some(RiskLeafField.Shape(ShapeInput.MinLoss)), sentence(rangeRefused))))
       },
       test("lists two inputs' refusals both, even when their sentences read the same") {
         val summary = SubmitRefusals.summaryOf(
@@ -431,7 +431,7 @@ object FormErrorRoutingSpec extends ZIOSpecDefault:
           current(state.nameError).map(SummaryEntry(Some(RiskLeafField.Name), _)) ++
           current(state.probabilityError).map(SummaryEntry(Some(RiskLeafField.Probability), _)) ++
           List(
-            SummaryEntry(Some(RiskLeafField.MinLoss), sentence(rangeRefused)),
+            SummaryEntry(Some(RiskLeafField.Shape(ShapeInput.MinLoss)), sentence(rangeRefused)),
             SummaryEntry(None, sentence(twoRoots))
           )
         assertTrue(current(state.summary) == expected, current(state.nameError).nonEmpty)

@@ -440,13 +440,14 @@ object ValueFormat:
     Schema.derived[ValueFormat]
 
 /** The range a value had to fall in, for a refusal of a value outside it. Each
-  * case is one of the refinements in `ValidationUtil`, so the sentence states
-  * the bound the refinement enforces. */
+  * case is the bound one of the refinements in `ValidationUtil` enforces,
+  * stated on the scale the value is entered on: `Percent` and `ResidualPercent`
+  * are the probability bounds as a form reads them, on 0–100. */
 @jsonDiscriminator(TagField)
 enum ValueRange:
   case NonNegative, Positive, SeedEntityId, SeedVarId
   case OpenUnitInterval, ClosedUnitInterval, Percent, Percentile
-  case PositiveLoss, LossCap, Deductible, MetalogTerms, RetentionFactor, ResidualProbability
+  case PositiveLoss, LossCap, Deductible, MetalogTerms, RetentionFactor, ResidualProbability, ResidualPercent
 
 object ValueRange:
   given codec: JsonCodec[ValueRange] = DeriveJsonCodec.gen[ValueRange]

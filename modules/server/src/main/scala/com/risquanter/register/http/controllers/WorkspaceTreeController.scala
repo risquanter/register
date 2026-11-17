@@ -75,8 +75,8 @@ class WorkspaceTreeController private (
         ws      <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branchA <- ActiveBranch.resolve(ws.id, a)
         branchB <- ActiveBranch.resolve(ws.id, b)
-        revA     = aAt.fold[Revision](Revision.Head(branchA))(Revision.At(_))
-        revB     = bAt.fold[Revision](Revision.Head(branchB))(Revision.At(_))
+        revA     = aAt.fold[Revision](Revision.Head(branchA))(Revision.Pinned(branchA, _))
+        revB     = bAt.fold[Revision](Revision.Head(branchB))(Revision.Pinned(branchB, _))
         result  <- changedNodesService.changedNodes(ws.id, treeId, revA, revB)
       yield ChangedNodesResponse(result)).wireEither(TreeScope.InTree(treeId))
   }

@@ -226,6 +226,21 @@ object FailureSpec extends ZIOSpecDefault:
           failure.toWire(trace, TreeScope.NoTree) == WireError.InternalFault(trace)
         )
       },
+      test("a refused targeting predicate's sentence reaches the log line cut to 300 characters") {
+        val problem = Positioned(QueryPosition.At(2),
+          ParseProblem.QuantifiedVariableNotInRange(QueryVariableName.Word(word("x" * 400)), Set.empty))
+        val sentence = ValidationMessages.render(FieldProblem.TargetingPredicateUnparseable(problem))
+        val failure = Failure.rejected(
+          TrustZone.Client,
+          NonEmptyChunk(ValidationError(ErrorLocation.Whole, FieldProblem.TargetingPredicateUnparseable(problem))),
+          Nil
+        )
+        assertTrue(
+          sentence.length > 300,
+          failure.logMessage ==
+            s"Rejected: [${ErrorLocation.describe(ErrorLocation.Whole)}] ${sentence.take(300)}… (message truncated)"
+        )
+      },
       test("a refused query is classified by its case, and a bind refusal by what its problems name") {
         assertTrue(
           FieldProblem.code(FieldProblem.Query(unparseable)) == ValidationErrorCode.PARSE_ERROR,

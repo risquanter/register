@@ -93,5 +93,6 @@ object Diagnostic:
     case KeyUnresolved           => List("event_type" -> "workspace.resolve_failed", "reason" -> "not_found")
 
   private def revision(rev: Revision): String = rev match
-    case Revision.Head(branch) => s"head of ${branch.toBranchRef}"
-    case Revision.At(commit)   => commit.value
+    case Revision.Head(branch)           => s"head of ${branch.toBranchRef}"
+    case Revision.At(commit)             => commit.value
+    case Revision.Pinned(branch, commit) => s"${commit.value} on ${branch.toBranchRef}"

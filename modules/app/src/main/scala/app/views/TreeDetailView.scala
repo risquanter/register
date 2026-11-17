@@ -2,12 +2,15 @@ package app.views
 
 import com.raquo.laminar.api.L.*
 
-import app.state.{TreeViewState, LoadState, ChartHoverBridge, LECChartState}
-import app.components.{Icons, ColorSwatchPicker, FailureNotice, TreeNodeRow}
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
+import zio.prelude.Validation
+
+import app.state.{TreeViewState, LoadState, ChartHoverBridge, CoverageBadge, LECChartState, MitigationReadout, SelectionEdit}
+import app.components.{Icons, ColorSwatchPicker, FailureNotice, MitigationPanel, TreeNodeRow}
+import com.risquanter.register.domain.data.{Mitigation, MitigationSelection, MitigationSpec, RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
-import com.risquanter.register.http.responses.TreeHistoryEntry
+import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.http.responses.{TreeHistoryEntry, TreeStructureResponse}
 
 /** Expandable hierarchical view of a server-persisted risk tree.
   *
@@ -30,8 +33,19 @@ import com.risquanter.register.http.responses.TreeHistoryEntry
   * @param selectionLocked   When true (the row mirrors the baseline), Ctrl+click
   *                          selection is disabled and shows a transient notice;
   *                          a persistent header hint marks the mirrored state.
+  *                          The mitigation panel and rows are locked with it.
+  * @param structure         The structure read the tree is rendered from, with
+  *                          each mitigation's resolved scope and the stale ids.
+  * @param selection         The mitigations this card's valuation applies.
+  * @param onSelectionEdit   Applies an edit to the owner's current selection.
+  *                          It takes the edit rather than its result, so two
+  *                          edits in one tick cannot overwrite each other.
+  * @param staleAction       What a stale statement's badge offers on this card.
   */
 object TreeDetailView:
+
+  /** One selection edit, as `SelectionEdit` builds them. */
+  type SelectionUpdate = MitigationSelection.Enumerated => Validation[ValidationError, MitigationSelection.Enumerated]
 
   /** How long a transient notice beside the tree stays up, in milliseconds.
     * Chosen by this project: long enough to read one sentence. */
@@ -98,7 +112,11 @@ object TreeDetailView:
     hoverBridge: ChartHoverBridge = new ChartHoverBridge(),
     changedNodeIds: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
     selectionLocked: Signal[Boolean] = Val(false),
-    pinnedAt: Signal[Option[TreeHistoryEntry]] = Val(None)
+    pinnedAt: Signal[Option[TreeHistoryEntry]] = Val(None),
+    structure: Signal[LoadState[TreeStructureResponse]],
+    selection: Signal[MitigationSelection.Enumerated],
+    onSelectionEdit: SelectionUpdate => Unit,
+    staleAction: MitigationPanel.StaleBadgeAction
   ): HtmlElement =
     // Local state: which node's picker popover is open (if any)
     val pickerOpenFor: Var[Option[NodeId]] = Var(None)
@@ -150,9 +168,16 @@ object TreeDetailView:
       // telling the user to disable an already-disabled toggle.
       lockedNow.signal.changes.filter(!_) --> { _ => if lockedNoticeVisible.now() then lockedNoticeVisible.set(false) },
       child.maybe <-- lockedNoticeVisible.signal.map { visible =>
-        Option.when(visible)(div(cls := "selection-locked-notice", "Selection mirrors the baseline — turn Mirror off to select manually."))
+        Option.when(visible)(div(cls := "selection-locked-notice", NoticeMessages.SelectionMirrored))
       },
-      child <-- state.selectedTree.signal.map {
+      MitigationPanel(
+        structure,
+        selection,
+        id => onSelectionEdit(SelectionEdit.toggleWhole(_, id)),
+        lockedNow.signal,
+        staleAction
+      ),
+      child <-- structure.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
         // The selected tree is held but absent at the branch or commit read.
@@ -160,15 +185,34 @@ object TreeDetailView:
         // composed from the kind of absence the server's answer names.
         case LoadState.TreeAbsent(failure) => renderPlaceholder(ErrorMessages.viewFailed(failure))
         case LoadState.Failed(failure) => FailureNotice(failure, None)
-        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, lockedNow.signal, lockedNoticeVisible)
+        case LoadState.Loaded(response) =>
+          val view = NodeView(state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds,
+            lockedNow.signal, lockedNoticeVisible, response, selection, onSelectionEdit, staleAction)
+          renderTree(response.tree, view)
       }
     )
+
+  /** What every node row of one rendered tree reads: the tree view's state, the
+    * card's signals and callbacks, and the structure read the tree came from. */
+  private final case class NodeView(
+    state:               TreeViewState,
+    queryMatchedNodes:   Signal[Set[NodeId]],
+    hoverBridge:         ChartHoverBridge,
+    pickerOpenFor:       Var[Option[NodeId]],
+    changedNodeIds:      Signal[Set[NodeId]],
+    selectionLocked:     StrictSignal[Boolean],
+    lockedNoticeVisible: Var[Boolean],
+    response:            TreeStructureResponse,
+    selection:           Signal[MitigationSelection.Enumerated],
+    onSelectionEdit:     SelectionUpdate => Unit,
+    staleAction:         MitigationPanel.StaleBadgeAction
+  )
 
   private def renderPlaceholder(message: String): HtmlElement =
     div(cls := "tree-detail-placeholder", p(message))
 
   /** Render the full tree from a RiskTree domain object. */
-  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]], changedNodeIds: Signal[Set[NodeId]], selectionLocked: StrictSignal[Boolean], lockedNoticeVisible: Var[Boolean]): HtmlElement =
+  private def renderTree(tree: RiskTree, view: NodeView): HtmlElement =
     // Build children lookup: parentId → child nodes
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
@@ -181,7 +225,7 @@ object TreeDetailView:
         cls := "tree-detail-header",
         Icons.treeRoot("tree-root-icon"),
         span(cls := "tree-name", tree.name.value.toString),
-        child.maybe <-- selectionLocked.map { locked =>
+        child.maybe <-- view.selectionLocked.map { locked =>
           Option.when(locked)(span(cls := "selection-lock-hint", "mirroring baseline"))
         }
       ),
@@ -189,7 +233,7 @@ object TreeDetailView:
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, selectionLocked, lockedNoticeVisible, depth = 0)
+            renderNode(root, childrenOf, view, depth = 0)
           )
         case None =>
           FailureNotice.lines(List(ErrorMessages.RootNodeMissing), None)
@@ -197,17 +241,13 @@ object TreeDetailView:
 
   /** Recursively render a node and its children. */
   private def renderNode(
-    node:                RiskNode,
-    childrenOf:          Map[Option[NodeId], Seq[RiskNode]],
-    state:               TreeViewState,
-    queryMatchedNodes:   Signal[Set[NodeId]],
-    hoverBridge:         ChartHoverBridge,
-    pickerOpenFor:       Var[Option[NodeId]],
-    changedNodeIds:      Signal[Set[NodeId]],
-    selectionLocked:     StrictSignal[Boolean],
-    lockedNoticeVisible: Var[Boolean],
-    depth:               Int
+    node:       RiskNode,
+    childrenOf: Map[Option[NodeId], Seq[RiskNode]],
+    view:       NodeView,
+    depth:      Int
   ): HtmlElement =
+    val NodeView(state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds,
+      selectionLocked, lockedNoticeVisible, response, _, _, _) = view
     val nodeId      = node.id
     val children    = childrenOf.getOrElse(Some(nodeId), Seq.empty)
     val hasChildren = isPortfolio(node) && children.nonEmpty
@@ -278,6 +318,7 @@ object TreeDetailView:
       isSelected    = isSelected,
       prefixContent = List(toggleSpan),
       suffixContent = List(
+        MitigationReadout.badgeAt(response, nodeId).map(renderCoverageBadge),
         child.maybe <-- isChanged.map(renderChangedMarker),
         child.maybe <-- isCharted.combineWith(currentColor).map(renderSwatchTrigger(nodeId, pickerOpenFor, _, _)),
         child.maybe <-- pickerOpen.combineWith(currentColor).map(renderPickerPopover(nodeId, state, pickerOpenFor, _, _))
@@ -293,16 +334,58 @@ object TreeDetailView:
     div(
       cls := "tree-detail-node",
       row,
+      MitigationReadout.scopingAt(response, nodeId).map(renderMitigationRow(nodeId, _, view, depth + 1)),
       if hasChildren then
         div(
           cls := "node-children",
           display <-- isExpanded.map(if _ then "block" else "none"),
           children.toList.map { c =>
-            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, selectionLocked, lockedNoticeVisible, depth + 1)
+            renderNode(c, childrenOf, view, depth + 1)
           }
         )
       else
         emptyNode
+    )
+
+  /** One mitigation scoped at `node`, as a child-styled row under it: a tick
+    * when the selection applies the mitigation at this node, its name, and the
+    * stale badge on an absolute statement whose leaf has changed. Ctrl+Click
+    * flips the mitigation at this node alone; while the card mirrors the
+    * baseline the gesture is blocked and pulses the locked notice. */
+  private def renderMitigationRow(node: NodeId, mitigation: Mitigation, view: NodeView, depth: Int): HtmlElement =
+    val id    = mitigation.id
+    val scope = MitigationReadout.scopeOf(view.response, id)
+    val stale = mitigation.spec match
+      case _: MitigationSpec.LeafAbsolute                                 => view.response.staleMitigationIds.contains(id)
+      case _: MitigationSpec.LeafRelative | _: MitigationSpec.ResultStage => false
+    div(
+      cls := "tree-mitigation-row",
+      styleAttr := s"--_depth: $depth",
+      span(
+        cls := "tree-mitigation-tick",
+        cls("tree-mitigation-tick--on") <-- view.selection.map(SelectionEdit.appliesAt(_, id, node)),
+        child.text <-- view.selection.map(s => if SelectionEdit.appliesAt(s, id, node) then "☑" else "☐")
+      ),
+      span(cls := "tree-mitigation-name", mitigation.name.value),
+      Option.when(stale)(MitigationPanel.staleBadge(id, view.staleAction)),
+      onClick --> { ev =>
+        if ev.ctrlKey || ev.metaKey then
+          ev.preventDefault()
+          if view.selectionLocked.now() then view.lockedNoticeVisible.set(true)
+          else view.onSelectionEdit(SelectionEdit.toggleAt(_, id, node, scope))
+      }
+    )
+
+  /** The node's coverage badge: solid where a mitigation is scoped at the node,
+    * faint where one is scoped only below it. Its tooltip lists them. */
+  private def renderCoverageBadge(badge: CoverageBadge): HtmlElement =
+    val (modifier, mitigations, heading) = badge match
+      case CoverageBadge.Scoped(ms)    => ("coverage-badge--scoped", ms, "Mitigations scoped here")
+      case CoverageBadge.BelowOnly(ms) => ("coverage-badge--below", ms, "Mitigations scoped below")
+    span(
+      cls := s"coverage-badge $modifier",
+      title := (heading :: mitigations.toList.map(_.name.value)).mkString("\n"),
+      "◆"
     )
 
   // ── View helpers ──

@@ -157,7 +157,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
       test("a loss bound that is not a whole number gives one sentence on both paths") {
         val st = validLognormalForm()
         st.minLossVar.set("abc")
-        st.markTouched(RiskLeafField.MinLoss)
+        st.markTouched(RiskLeafField.Shape(ShapeInput.MinLoss))
         val live = current(st.minLossError).toList
         assertTrue(live.nonEmpty, live == submittedAt(st, FieldName.MinLoss))
       },
@@ -179,7 +179,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         val cases = List("1", "5", "abc").map { entered =>
           val st = validMetalogForm()
           st.termsVar.set(entered)
-          st.markTouched(RiskLeafField.Terms)
+          st.markTouched(RiskLeafField.Shape(ShapeInput.Terms))
           (current(st.termsError).toList, submittedAt(st, FieldName.Terms))
         }
         assertTrue(cases.forall((live, submitted) => live.nonEmpty && live == submitted))
@@ -191,7 +191,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         st.percentilesVar.set("10, 50")
         st.quantilesVar.set("1000, 5000, 25000")
         st.termsVar.set("3")
-        st.markTouched(RiskLeafField.Terms)
+        st.markTouched(RiskLeafField.Shape(ShapeInput.Terms))
         assertTrue(
           current(st.termsError).isEmpty,
           submittedAt(st, FieldName.Terms).isEmpty,
@@ -205,7 +205,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         st.percentilesVar.set("10, abc, 90")
         st.quantilesVar.set("1000, 25000")
         st.termsVar.set("3")
-        st.markTouched(RiskLeafField.Terms)
+        st.markTouched(RiskLeafField.Shape(ShapeInput.Terms))
         assertTrue(
           current(st.termsError).nonEmpty,
           refusalLocations(st).contains(at(FieldName.Terms))
@@ -252,13 +252,75 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
 
     ),
 
+    // The advisory is a function of the mode and the two list inputs, so every
+    // form with shape inputs shows the same warning for the same text.
+    suite("impliedRatioAdvisory")(
+
+      test("warns in metalog mode when the P90 loss is more than the limit times the P10 loss") {
+        assertTrue(
+          RiskLeafFormState.impliedRatioAdvisory(DistributionMode.Metalog, "10, 90", "1, 250")
+            .contains(RiskLeafFormState.impliedRatioTooHigh(250.0)),
+          RiskLeafFormState.impliedRatioAdvisory(DistributionMode.Metalog, "10, 90", "1, 50").isEmpty
+        )
+      },
+
+      test("says nothing in lognormal mode, or while the lists differ in length") {
+        assertTrue(
+          RiskLeafFormState.impliedRatioAdvisory(DistributionMode.Lognormal, "10, 90", "1, 250").isEmpty,
+          RiskLeafFormState.impliedRatioAdvisory(DistributionMode.Metalog, "10, 50, 90", "1, 250").isEmpty
+        )
+      },
+
+      test("the form's warning is the advisory for its current text") {
+        val st = validMetalogForm()
+        st.percentilesVar.set("10, 90")
+        st.quantilesVar.set("1, 250")
+        assertTrue(current(st.impliedRatioWarning) ==
+          RiskLeafFormState.impliedRatioAdvisory(DistributionMode.Metalog, "10, 90", "1, 250"))
+      }
+    ),
+
+    // The companion's shapeFrom is what every form with shape fields reads its
+    // shape through, so it is pinned here on its own arguments.
+    suite("shapeFrom")(
+
+      test("builds the shape the leaf form's submit builds, in each mode") {
+        val metalog   = validMetalogForm()
+        val lognormal = validLognormalForm()
+        def fromForm(st: RiskLeafFormState) = RiskLeafFormState.shapeFrom(
+          st.distributionModeVar.now(), st.percentilesVar.now(), st.quantilesVar.now(),
+          Located(st.termsVar.now(), ErrorLocation.Field(editedSubject, FieldName.Terms)),
+          Located(st.minLossVar.now(), ErrorLocation.Field(editedSubject, FieldName.MinLoss)),
+          Located(st.maxLossVar.now(), ErrorLocation.Field(editedSubject, FieldName.MaxLoss)),
+          editedSubject
+        ).toOption
+        assertTrue(
+          fromForm(metalog).isDefined,
+          fromForm(metalog) == metalog.currentShapeValidation().toOption,
+          fromForm(lognormal).isDefined,
+          fromForm(lognormal) == lognormal.currentShapeValidation().toOption
+        )
+      },
+
+      test("a blank lognormal bound is refused at its own field, and the fields of the other mode are not read") {
+        val at = (field: FieldName) => ErrorLocation.Field(editedSubject, field)
+        val result = RiskLeafFormState.shapeFrom(
+          DistributionMode.Lognormal, "not, read", "at all",
+          Located("x", at(FieldName.Terms)), Located("", at(FieldName.MinLoss)), Located("5000", at(FieldName.MaxLoss)),
+          editedSubject
+        )
+        assertTrue(result.toEither.left.toOption.exists(errs =>
+          errs.map(e => (e.location, e.problem)).toList == List((at(FieldName.MinLoss), FieldProblem.Required))))
+      }
+    ),
+
     suite("lognormal bound positivity")(
 
       test("a minLoss of 0 shows the positivity error") {
         val st = new RiskLeafFormState
         st.distributionModeVar.set(DistributionMode.Lognormal)
         st.minLossVar.set("0")
-        st.markTouched(RiskLeafField.MinLoss)
+        st.markTouched(RiskLeafField.Shape(ShapeInput.MinLoss))
         assertTrue(current(st.minLossError) == List("Value must be greater than zero"))
       },
 
@@ -266,7 +328,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         val st = new RiskLeafFormState
         st.distributionModeVar.set(DistributionMode.Lognormal)
         st.maxLossVar.set("0")
-        st.markTouched(RiskLeafField.MaxLoss)
+        st.markTouched(RiskLeafField.Shape(ShapeInput.MaxLoss))
         assertTrue(current(st.maxLossError) == List("Value must be greater than zero"))
       },
 
@@ -274,7 +336,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         val st = new RiskLeafFormState
         st.distributionModeVar.set(DistributionMode.Lognormal)
         st.minLossVar.set("1")
-        st.markTouched(RiskLeafField.MinLoss)
+        st.markTouched(RiskLeafField.Shape(ShapeInput.MinLoss))
         assertTrue(current(st.minLossError).isEmpty)
       },
 
@@ -282,7 +344,7 @@ object RiskLeafFormStateSpec extends ZIOSpecDefault:
         val st = new RiskLeafFormState
         st.distributionModeVar.set(DistributionMode.Metalog)
         st.quantilesVar.set("0, 5000, 20000")
-        st.markTouched(RiskLeafField.Quantiles)
+        st.markTouched(RiskLeafField.Shape(ShapeInput.Quantiles))
         assertTrue(
           current(st.quantilesError)
             .exists(_.contains("Quantile loss amounts must be greater than zero"))

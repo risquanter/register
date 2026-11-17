@@ -116,6 +116,21 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         yield assertTrue(out.outcomes(m.id) == ScopeOutcome.Resolved(Set(webId, dbId)))
       },
 
+      test("logFailures writes one line of fixed length, beginning with the count, however many mitigations failed") {
+        val stale = (1 to 50).map(i => mit(s"m-stale-$i", staleSource, leafSpec))
+        for
+          r     <- newResolver
+          out   <- r.resolve(ctx(rev1), mkTree(stale*))
+          _     <- ResolvedScopes.logFailures(out)
+          lines <- ZTestLogger.logOutput
+          line   = lines.map(_.message()).filter(_.startsWith("MitigationScopeResolver:"))
+        yield assertTrue(
+          line.size == 1,
+          line.head.startsWith("MitigationScopeResolver: 50 mitigation(s)"),
+          line.head.length <= 300 + "… (message truncated)".length
+        )
+      },
+
       test("stage-domain restriction — ResultStage keeps portfolios, LeafStage drops them") {
         // portfolio(x) satisfies {Servers, AppTier}. ResultStage domain = all
         // nodes → kept; LeafStage domain = leaves → intersection empty.

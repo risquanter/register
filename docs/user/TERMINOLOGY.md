@@ -580,6 +580,27 @@ Precedence only changes an answer where two mitigations interact. Two whose
 target sets do not overlap commute, and so do two that cover the same node but
 change different parts of it.
 
+### 3.8 Targeting predicate
+
+A **targeting predicate** is the condition a mitigation's target is written in:
+a formula of the query language over one node, such as
+`leaf(x) /\ descendant_of(x, node_id("…"))`. It may use only the tree's
+structure: whether a node is a leaf or a portfolio, which node it is, and which
+nodes it sits under. It names a node by identifier, so renaming a node changes
+nothing it selects. An absolute statement's targeting predicate is written by
+the server and names the leaf the statement was asserted against, and no other
+node.
+
+### 3.9 Resolved scope
+
+The **resolved scope** of a mitigation is the set of nodes its targeting
+predicate holds for in one version of the tree, kept to the nodes its stage
+applies to: leaves only for a parameter-stage mitigation, any node for a
+result-stage one. It is worked out again for every version, so a leaf added
+under a targeted portfolio joins the scope. A predicate that no longer fits the
+tree's vocabulary resolves to no nodes and is reported, and the mitigation then
+changes nothing.
+
 ---
 
 ## Part 4 — Valuing a tree with and without mitigation

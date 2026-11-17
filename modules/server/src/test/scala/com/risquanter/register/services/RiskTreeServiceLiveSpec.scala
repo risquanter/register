@@ -89,12 +89,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): IO[Failure,Option[(RiskTree, CommitHash)]] =
       rev match
         case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CascadeTestStubs.stubCommit)))
-        case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
+        case Revision.At(_) | Revision.Pinned(_, _) => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): IO[Failure,List[RiskTree]] =
       rev match
         case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => tree }.toList)
-        case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
+        case Revision.At(_) | Revision.Pinned(_, _) => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
   }
   
   private val stubWsId: WorkspaceId = WorkspaceId(safeId("test-workspace-live"))

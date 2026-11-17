@@ -300,6 +300,18 @@ object IrminClient:
   def lca(branch: BranchRef, commit: CommitHash): ZIO[IrminClient, Failure, List[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.lca(branch, commit))
 
+  extension (irmin: IrminClient)
+    /** Whether `commit` is `branch`'s head or one of its ancestors, following
+      * every parent. The lowest common ancestor of a branch and a commit is the
+      * commit itself exactly when the commit is an ancestor of that branch. A
+      * branch or commit Irmin does not know is not a history this commit can
+      * be reached from, so a failure to read it is false rather than an error.
+      */
+    def isAncestor(branch: BranchRef, commit: CommitHash): IO[Failure, Boolean] =
+      irmin.lca(branch, commit)
+        .map(_.exists(_.hash == commit))
+        .orElseSucceed(false)
+
   def healthCheck: ZIO[IrminClient, Failure, Unit] =
     ZIO.serviceWithZIO[IrminClient](_.healthCheck)
 

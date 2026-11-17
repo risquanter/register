@@ -58,9 +58,10 @@ class RiskTreeServiceLive private (
   private def nodeAbsent(nodeId: NodeId): ValidationError =
     ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Id), FieldProblem.NodeNotFound)
 
-  /** The read coordinate for a (branch, pin) pair. */
+  /** The read coordinate for a (branch, pin) pair. A pin is the client's
+    * commit, read only when it lies in the branch's history. */
   private def revisionOf(branch: BranchRef, at: Option[CommitHash]): Revision =
-    at.fold[Revision](Revision.Head(branch))(Revision.At(_))
+    at.fold[Revision](Revision.Head(branch))(Revision.Pinned(branch, _))
 
   /** The refusal of a mitigation the tree does not hold. */
   private def mitigationAbsent(id: MitigationId): ValidationError =

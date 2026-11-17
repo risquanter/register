@@ -3,10 +3,10 @@ package app.state
 import com.raquo.laminar.api.L.*
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
-import com.risquanter.register.domain.data.{DistributionShape, Mitigation, RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil, TreeId, SafeName, NodeId, Probability}
+import com.risquanter.register.domain.data.{AbsoluteReplacement, DistributionShape, Mitigation, MitigationSpec, RiskTree, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.iron.{ValidationMessages, ValidationUtil, TreeId, SafeName, NodeId, MitigationId, Probability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest, MitigationUpdateRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest, MitigationUpdateRequest, MitigationSpecRequest, AbsoluteReplacementRequest, BaseStampChoice}
 import com.risquanter.register.http.requests.RiskTreeRequests.ParentRef
 import com.risquanter.register.frontend.TreeBuilderLogic
 import app.state.TreeBuilderField.*
@@ -22,6 +22,14 @@ final case class LeafDraft(
   shape:       DistributionShape,
   probability: Probability,
   id:          Option[NodeId]
+)
+
+/** One absolute statement of the loaded tree, with the figures it will be saved with. */
+final case class AbsoluteStatementRow(
+  mitigation: Mitigation,
+  anchor:     NodeId,
+  figures:    AbsoluteReplacement,
+  affirmed:   Boolean
 )
 
 /** Type-safe field identifiers for the tree builder form. */
@@ -259,15 +267,10 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   def populateLeafForm(state: RiskLeafFormState, leaf: LeafDraft): Unit =
     val snapshot = FormMode.leafDraftToFieldSnapshot(leaf)
     state.subjectVar.set(subjectOf(leaf.id))
-    state.distributionModeVar.set(snapshot.mode)
     state.nameVar.set(snapshot.name)
     state.probabilityVar.set(snapshot.probability)
     state.parentVar.set(snapshot.parent)
-    state.percentilesVar.set(snapshot.percentiles)
-    state.quantilesVar.set(snapshot.quantiles)
-    state.termsVar.set(snapshot.terms)
-    state.minLossVar.set(snapshot.minLoss)
-    state.maxLossVar.set(snapshot.maxLoss)
+    state.fillShape(snapshot.shape)
 
   /** Populate a [[PortfolioFormState]] from a loaded [[PortfolioDraft]], via
     * the shared mapping also used by `isFormDirty`.
@@ -371,8 +374,11 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   /** Build update request — the whole tree, with each loaded node submitted
     * under its own identifier and each node added this session submitted as
     * new. The tree ID is preserved. Every mitigation the loaded tree carried is
-    * submitted unchanged, because the request enumerates the mitigations and
-    * one it omits is deleted; the builder authors none of its own.
+    * submitted, because the request enumerates the mitigations and one it
+    * omits is deleted; the builder authors none of its own. An absolute
+    * statement re-affirmed in the override popup is submitted with its new
+    * figures and asks to be stamped against its leaf now; every other is
+    * submitted unchanged.
     */
   def toUpdateRequest(): Validation[ValidationError, RiskTreeUpdateRequest] =
     val portfolios = portfoliosVar.now()
@@ -406,13 +412,24 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
           leaves = existLeaves,
           newPortfolios = newPorts,
           newLeaves = newLeaves,
-          mitigations = loadedMitigationsVar.now().map(MitigationUpdateRequest.fromMitigation),
+          mitigations = loadedMitigationsVar.now().map(TreeBuilderState.submitted(_, affirmedVar.now())),
           newMitigations = Nil
         )
     }
 
   /** The mitigations of the tree last loaded, which an update submits back. */
   private val loadedMitigationsVar: Var[List[Mitigation]] = Var(Nil)
+
+  /** Statements re-affirmed in the popup since the load, with their figures. */
+  private val affirmedVar: Var[Map[MitigationId, AbsoluteReplacement]] = Var(Map.empty)
+
+  /** The loaded absolute statements, in precedence order. */
+  val absoluteStatements: Signal[List[AbsoluteStatementRow]] =
+    loadedMitigationsVar.signal.combineWith(affirmedVar.signal).map(TreeBuilderState.absoluteRows)
+
+  /** Record the popup's figures for `id`. A save then re-affirms it. */
+  def affirm(id: MitigationId, figures: AbsoluteReplacement): Unit =
+    affirmedVar.update(_.updated(id, figures))
 
   /** Snapshot of (name, portfolios, leaves) taken right after `loadFromTree` —
     * the baseline `isDirty` compares against. `None` in create-mode (no tree
@@ -426,10 +443,11 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * content at all counts as dirty. Once a tree is loaded, dirty means the
     * fields have changed *since that load* — merely having loaded a
     * non-empty tree does not count, otherwise every switch away from any
-    * loaded tree would look "dirty" even with zero edits.
+    * loaded tree would look "dirty" even with zero edits. A statement
+    * re-affirmed in the override popup and not yet saved counts as a change.
     */
   def isDirty: Boolean =
-    differsFromLoaded(treeNameVar.now(), portfoliosVar.now(), leavesVar.now(), loadedSnapshotVar.now())
+    differsFromLoaded(treeNameVar.now(), portfoliosVar.now(), leavesVar.now(), loadedSnapshotVar.now(), affirmedVar.now())
 
   /** The rule `isDirty` and `isDirtySignal` both apply, as a function of the
     * values it compares. */
@@ -437,11 +455,12 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     name:       String,
     portfolios: List[PortfolioDraft],
     leaves:     List[LeafDraft],
-    loaded:     Option[(String, List[PortfolioDraft], List[LeafDraft])]
+    loaded:     Option[(String, List[PortfolioDraft], List[LeafDraft])],
+    affirmed:   Map[MitigationId, AbsoluteReplacement]
   ): Boolean =
-    loaded match
+    affirmed.nonEmpty || (loaded match
       case Some(baseline) => (name, portfolios, leaves) != baseline
-      case None           => name.trim.nonEmpty || portfolios.nonEmpty || leaves.nonEmpty
+      case None           => name.trim.nonEmpty || portfolios.nonEmpty || leaves.nonEmpty)
 
   /** Reactive mirror of `isDirty`, for live debugging (`TreeBuilderView`'s
     * debug bar). It recomputes on any change to the tracked fields or to
@@ -449,8 +468,16 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * those signals carry.
     */
   val isDirtySignal: Signal[Boolean] =
-    treeNameVar.signal.combineWith(portfoliosVar.signal, leavesVar.signal, loadedSnapshotVar.signal)
-      .map((name, portfolios, leaves, loaded) => differsFromLoaded(name, portfolios, leaves, loaded))
+    treeNameVar.signal.combineWith(portfoliosVar.signal, leavesVar.signal, loadedSnapshotVar.signal, affirmedVar.signal)
+      .map((name, portfolios, leaves, loaded, affirmed) => differsFromLoaded(name, portfolios, leaves, loaded, affirmed))
+
+  /** True while the builder holds work a save has not written: a whole-tree
+    * change, or a node form mid-edit that has not reached the tree yet. */
+  def hasUnsavedWork: Boolean = isDirty || isEditDirtyVar.now()
+
+  /** Reactive mirror of `hasUnsavedWork`. */
+  val hasUnsavedWorkSignal: Signal[Boolean] =
+    isDirtySignal.combineWith(isEditDirtyVar.signal).map(_ || _)
 
   /** Mark the current draft as matching what the server just confirmed
     * saving — call this right after a create/update submission succeeds.
@@ -470,6 +497,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     */
   def markJustSaved(): Unit =
     loadedSnapshotVar.set(Some((treeNameVar.now(), portfoliosVar.now(), leavesVar.now())))
+    affirmedVar.set(Map.empty)
 
   /** Reset the builder to a blank, create-mode draft. The only way to leave
     * update mode — `editingTreeId` is otherwise only ever set, never cleared,
@@ -486,6 +514,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     currentDraftVar.set(None)
     loadedSnapshotVar.set(None)
     loadedMitigationsVar.set(Nil)
+    affirmedVar.set(Map.empty)
     resetTouched()
 
   /** Populate builder vars from a server-loaded tree.
@@ -524,6 +553,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     editingTreeId.set(Some(tree.id))
     loadedSnapshotVar.set(Some((tree.name.value, portfolios, leaves)))
     loadedMitigationsVar.set(tree.mitigations.toList)
+    affirmedVar.set(Map.empty)
     activeForm.set(FormMode.Blank)
     resetFormFieldsBus.emit(())
     resetTouched()
@@ -599,4 +629,40 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       distributionShape = DistributionShapeRequest.fromShape(draft.shape),
       seedVarId         = None
     )
+
+object TreeBuilderState:
+
+  /** A loaded mitigation as an update submits it. A statement in `affirmed`
+    * carries the popup's figures and asks to be stamped now; the popup keeps
+    * the stored case, so the parts the statement replaces do not change.
+    * Every other mitigation is submitted as it was loaded. An absolute
+    * statement's target is derived from its anchor, so none is sent. */
+  def submitted(mitigation: Mitigation, affirmed: Map[MitigationId, AbsoluteReplacement]): MitigationUpdateRequest =
+    (mitigation.spec, affirmed.get(mitigation.id)) match
+      case (MitigationSpec.LeafAbsolute(_, anchor, _), Some(figures)) =>
+        MitigationUpdateRequest(
+          mitigation.id.value,
+          mitigation.name.value,
+          None,
+          MitigationSpecRequest.LeafAbsolute(
+            AbsoluteReplacementRequest.fromReplacement(figures), anchor.value, BaseStampChoice.Restamp),
+          mitigation.precedence
+        )
+      case _ => MitigationUpdateRequest.fromMitigation(mitigation)
+
+  /** The absolute statements among `mitigations`, in precedence order, each
+    * with the figures it will be saved with: the popup's where it was
+    * re-affirmed, the stored ones otherwise. */
+  def absoluteRows(
+    mitigations: List[Mitigation],
+    affirmed: Map[MitigationId, AbsoluteReplacement]
+  ): List[AbsoluteStatementRow] =
+    mitigations
+      .sortBy(m => (m.precedence.key, m.id.value: String))
+      .flatMap { m =>
+        m.spec match
+          case MitigationSpec.LeafAbsolute(stored, anchor, _) =>
+            List(AbsoluteStatementRow(m, anchor, affirmed.getOrElse(m.id, stored), affirmed.contains(m.id)))
+          case _: MitigationSpec.LeafRelative | _: MitigationSpec.ResultStage => Nil
+      }
 

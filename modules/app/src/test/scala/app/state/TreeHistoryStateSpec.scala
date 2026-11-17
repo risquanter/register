@@ -6,7 +6,7 @@ import io.github.iltotore.iron.autoRefine
 import app.core.LocalProblem
 import com.risquanter.register.domain.data.iron.{NodeId, CommitHash, SafeName}
 import com.risquanter.register.domain.data.LECNodeCurve
-import com.risquanter.register.http.responses.{TreeHistoryResponse, TreeHistoryEntry, HistoryOperation, TreeWriteKind}
+import com.risquanter.register.http.responses.{LECNodeSeries, TreeHistoryResponse, TreeHistoryEntry, HistoryOperation, TreeWriteKind}
 
 /** Pure tests for the history derivations — no Laminar Var/Signal harness,
   * since both are plain functions of `LoadState`.
@@ -18,8 +18,9 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
   private val n1 = NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get
   private val n2 = NodeId.fromString("01HX9ABCDE0000000000000002").toOption.get
 
-  private def curve(id: NodeId): LECNodeCurve =
-    LECNodeCurve(id, SafeName.fromString("n").toOption.get, Vector.empty, Map.empty, 0.0, 0.0)
+  /** A node's mitigation-free reading, the one every present node has. */
+  private def curve(id: NodeId): List[LECNodeSeries] =
+    List(LECNodeSeries(LECNodeCurve(id, SafeName.fromString("n").toOption.get, Vector.empty, Map.empty, 0.0, 0.0), Nil))
 
   def spec = suite("History pure derivations")(
 

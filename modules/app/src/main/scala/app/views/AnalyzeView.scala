@@ -4,12 +4,13 @@ import com.raquo.laminar.api.L.*
 
 import scala.scalajs.js
 
-import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalettePicker, Icons, HistorySlider, LecChartControls, FailureNotice}
-import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
-import app.state.{TreeViewState, TreeHistoryState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareLayout, CompareState, CompareSlot, CompareSlotState, CompareTarget, SlotCoordinate, toCoordinate}
-import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
-import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, ScenarioName}
+import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalettePicker, Icons, HistorySlider, LecChartControls, FailureNotice, MitigationPanel}
+import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, CurveVariant, PaletteData, PinnedAxes}
+import app.state.{TreeViewState, TreeHistoryState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareLayout, CompareState, CompareSlot, CompareSlotState, CompareTarget, CurveDisplay, LECChartState, SideSnapshot, SlotCoordinate, toCoordinate}
+import com.risquanter.register.domain.data.{LECNodeCurve, MitigationSelection, RiskNode, RiskTree}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, MitigationId, NodeId, TreeId, ScenarioName}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
+import com.risquanter.register.http.responses.LECNodeSeries
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
   *
@@ -38,15 +39,16 @@ object AnalyzeView:
 
   /** One comparand slot's Overlay-chart inputs, combined per emission: the
     * slot's curve cache, its card's own Ctrl+click selection, its chosen
-    * target, its palette family, its legend origin ("branch · tree"), and
-    * its explicit per-node colour picks. */
+    * target, its palette family, its legend origin ("branch · tree"), its
+    * explicit per-node colour picks, and which readings it draws. */
   private final case class SlotOverlayInput(
-    curves:         LoadState[Map[NodeId, LECNodeCurve]],
+    curves:         LoadState[Map[NodeId, List[LECNodeSeries]]],
     visible:        Set[NodeId],
     target:         CompareTarget,
     palette:        Vector[HexColor],
     origin:         Option[String],
-    explicitColors: Map[NodeId, HexColor]
+    explicitColors: Map[NodeId, HexColor],
+    display:        CurveDisplay
   )
 
   /** @param compareSlots One bundle per comparand pool slot (cap:
@@ -57,6 +59,12 @@ object AnalyzeView:
     *                     pool slot is live only while its index is in
     *                     `compareState.rows`. Selection identity across
     *                     branches is the pair (branch, node).
+    * @param openOverride Opens the Design view's override edit popup on one
+    *                     absolute statement of the tree at the head of the
+    *                     branch given. Offered from the baseline card while it
+    *                     shows the head.
+    * @param designUnsaved True while the Design view holds unsaved work, which
+    *                     disables that link until the work is saved.
     */
   def apply(
     treeViewState: TreeViewState,
@@ -65,7 +73,9 @@ object AnalyzeView:
     appConfigState: AppConfigState,
     compareState: CompareState,
     compareSlots: Vector[CompareSlot],
-    baselineHistoryState: TreeHistoryState
+    baselineHistoryState: TreeHistoryState,
+    openOverride: (BranchChoice, TreeId, MitigationId) => Unit,
+    designUnsaved: Signal[Boolean]
   ): HtmlElement =
 
     /** The baseline slot's colour family (default Aqua). Slot-keyed, not
@@ -122,10 +132,17 @@ object AnalyzeView:
       rowTs: Vector[(Int, CompareTarget)],
       activeBranch: BranchChoice,
       activeTid: Option[TreeId],
-      activeAt: Option[CommitHash]
+      activeAt: Option[CommitHash],
+      activeSelection: MitigationSelection.Enumerated
     ): Vector[(Int, BranchChoice)] =
-      engagedSlots(rowTs.map(_._2), activeBranch, activeTid, activeAt)
+      engagedSlots(rowTs.map(_._2), activeBranch, activeTid, activeAt, activeSelection)
         .map { (rowPos, branch) => (rowTs(rowPos)._1, branch) }
+
+    /** The baseline tab's place and selection, as every engagement check reads
+      * them. */
+    val activeTabSignal: Signal[(BranchChoice, Option[TreeId], Option[CommitHash], MitigationSelection.Enumerated)] =
+      scenarioState.activeBranch.signal.combineWith(
+        treeViewState.selectedTreeId.signal, compareState.baselineAt.signal, compareState.baselineSelection.signal)
 
     /** Per-slot Overlay inputs (`SlotOverlayInput`): the slot's curve cache
       * (deduplicated for the same reason as below), its card's own selection
@@ -138,7 +155,7 @@ object AnalyzeView:
         slot.treeViewState.curveCache.distinct
           .combineWithFn(slot.treeViewState.chartState.visibleCurves, slot.state.target.signal, slot.state.palette.signal,
             slot.treeViewState.chartOrigin,
-            slot.treeViewState.chartState.explicitColors)(SlotOverlayInput.apply)
+            slot.treeViewState.chartState.explicitColors, slot.state.display.signal)(SlotOverlayInput.apply)
       }).map(_.toVector)
 
     /** The single chart surface (used for both layouts whenever the panel
@@ -167,20 +184,20 @@ object AnalyzeView:
           treeViewState.chartState.specSignal
             .combineWith(treeViewState.curveCache.distinct, visibleNodeIds, activePalette,
               treeViewState.chartOrigin,
-              treeViewState.chartState.explicitColors),
+              treeViewState.chartState.explicitColors, compareState.baselineDisplay.signal),
           compareState.rowTargets
             .combineWith(compareState.hiddenFlags, compareState.baselineHidden.signal)
-            .combineWith(slotOverlayInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
+            .combineWith(slotOverlayInputs, activeTabSignal)
         )
         .map {
-          case (layout, (singleSpec, thisCurves, thisVisible, thisPalette, thisOrigin, thisExplicitColors),
-                (rowTs, hidden, baselineHidden, slotInputs, activeBranch, activeTid, baselineAt)) =>
+          case (layout, (singleSpec, thisCurves, thisVisible, thisPalette, thisOrigin, thisExplicitColors, thisDisplay),
+                (rowTs, hidden, baselineHidden, slotInputs, (activeBranch, activeTid, baselineAt, baselineSelection))) =>
             // Visible comparand sides: engaged (tab-collision + duplicate-pair
             // dedup) minus the eye-hidden ones. Hide is a display filter only —
             // a hidden earlier slot still wins the dedup, so its duplicate
             // stays inert regardless.
             val visibleComparands =
-              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }
+              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt, baselineSelection).collect { case (pi, _) if !hidden(pi) => pi }
             (layout, visibleComparands.isEmpty) match
               case (_, true) =>
                 if baselineHidden then LoadState.Idle else singleSpec
@@ -189,7 +206,7 @@ object AnalyzeView:
                 if baselineHidden then LoadState.Idle else singleSpec
               case (CompareLayout.Overlay, false) =>
                 val baselineSide =
-                  Option.unless(baselineHidden)(CompareColorAssigner.OverlaySide(loadedOrEmpty(thisCurves), thisVisible, thisPalette, "active",
+                  Option.unless(baselineHidden)(CompareColorAssigner.OverlaySide(readingsOf(thisCurves, thisDisplay), thisVisible, thisPalette, "active",
                     thisOrigin.getOrElse(BranchBar.branchDisplayName(activeBranch)) + " (active)",
                     thisExplicitColors))
                 val comparandSides = visibleComparands.map(pi => (pi, slotInputs(pi)))
@@ -200,7 +217,7 @@ object AnalyzeView:
                   case None =>
                     val sides = baselineSide.toVector ++ comparandSides.map { (pi, input) =>
                       val branchName = input.target.toCoordinate.map(c => BranchBar.branchDisplayName(c.branch)).getOrElse("")
-                      CompareColorAssigner.OverlaySide(loadedOrEmpty(input.curves), input.visible, input.palette, s"s${pi + 1}",
+                      CompareColorAssigner.OverlaySide(readingsOf(input.curves, input.display), input.visible, input.palette, s"s${pi + 1}",
                         input.origin.getOrElse(branchName), input.explicitColors)
                     }
                     val paired = CompareColorAssigner.pairForOverlay(sides)
@@ -212,10 +229,10 @@ object AnalyzeView:
     /** Per-slot Side-by-side inputs — as `slotOverlayInputs` plus the slot's
       * own node colour map, since each panel keeps its normal single-branch
       * node colours. */
-    val slotPanelInputs: Signal[Vector[(LoadState[Map[NodeId, LECNodeCurve]], Set[NodeId], Map[NodeId, HexColor], CompareTarget, Option[String])]] =
+    val slotPanelInputs: Signal[Vector[(LoadState[Map[NodeId, List[LECNodeSeries]]], Set[NodeId], Map[NodeId, HexColor], CurveDisplay, Option[String])]] =
       Signal.combineSeq(compareSlots.map { slot =>
         slot.treeViewState.curveCache.distinct
-          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.treeViewState.nodeColorMap, slot.state.target.signal,
+          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.treeViewState.nodeColorMap, slot.state.display.signal,
             slot.treeViewState.chartOrigin)
       }).map(_.toVector)
 
@@ -229,22 +246,22 @@ object AnalyzeView:
       compareState.baselineHidden.signal
         .combineWith(
           treeViewState.curveCache.distinct
-            .combineWith(visibleNodeIds, treeViewState.nodeColorMap, treeViewState.chartOrigin),
+            .combineWith(visibleNodeIds, treeViewState.nodeColorMap, treeViewState.chartOrigin, compareState.baselineDisplay.signal),
           compareState.rowTargets
-            .combineWith(compareState.hiddenFlags, slotPanelInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
+            .combineWith(compareState.hiddenFlags, slotPanelInputs, activeTabSignal)
         )
         .map {
-          case (baselineHidden, (thisCurves, thisVisible, thisColors, thisOrigin),
-                (rowTs, hidden, slotInputs, activeBranch, activeTid, baselineAt)) =>
+          case (baselineHidden, (thisCurves, thisVisible, thisColors, thisOrigin, thisDisplay),
+                (rowTs, hidden, slotInputs, (activeBranch, activeTid, baselineAt, baselineSelection))) =>
             // Panels shown = engaged (tab collision + duplicate-pair dedup)
             // minus the eye-hidden ones — so the panel grid always agrees with
             // the overlay and the card stack on which sides show. Hidden panels
             // also drop out of the shared pinned-axis extents.
             val visiblePool =
-              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }.toSet
-            val thisPairs = ColorAssigner.pairWithColors(loadedOrEmpty(thisCurves), thisVisible, thisColors)
-            val slotPairs = slotInputs.zipWithIndex.map { case ((curves, visible, colors, _, _), pi) =>
-              Option.when(visiblePool.contains(pi))(ColorAssigner.pairWithColors(loadedOrEmpty(curves), visible, colors))
+              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt, baselineSelection).collect { case (pi, _) if !hidden(pi) => pi }.toSet
+            val thisPairs = ColorAssigner.pairWithColors(readingsOf(thisCurves, thisDisplay), thisVisible, thisColors)
+            val slotPairs = slotInputs.zipWithIndex.map { case ((curves, visible, colors, display, _), pi) =>
+              Option.when(visiblePool.contains(pi))(ColorAssigner.pairWithColors(readingsOf(curves, display), visible, colors))
             }
             val baselinePairsForPin = if baselineHidden then Vector.empty else thisPairs
             val pinned = PinnedAxes.fromCurves((baselinePairsForPin ++ slotPairs.flatten.flatten).map(_._1))
@@ -257,7 +274,7 @@ object AnalyzeView:
 
     // ── Node lookup for name resolution in QueryResultCard ───────
     val nodeLookup: Signal[Map[NodeId, RiskNode]] =
-      treeViewState.selectedTree.signal.map {
+      treeViewState.selectedTree.map {
         case LoadState.Loaded(tree) => tree.nodes.map(n => n.id -> n).toMap
         case _                      => Map.empty
       }
@@ -280,13 +297,27 @@ object AnalyzeView:
       // so a stale query's matched nodes can't leak into the newly
       // selected tree's chart / Compare curve fetch.
       treeViewState.selectedTreeId.signal.changes --> { _ => queryState.resetResult() },
+      // A tree switch resets the baseline's selection, as it resets its node
+      // selection: the other tree holds other mitigations. A slot following
+      // the active tree switched tree with it, and is reset the same way. A
+      // rewind keeps every selection.
+      treeViewState.selectedTreeId.signal.changes --> { _ =>
+        compareState.baselineSelection.set(MitigationSelection.Inherent)
+        compareSlots.foreach { slot =>
+          slot.state.target.now().toCoordinate.foreach { c =>
+            c.treeOverride match
+              case None    => slot.state.setSelection(MitigationSelection.Inherent)
+              case Some(_) => ()
+          }
+        }
+      },
       // The selected tree is held but absent at the branch or commit read —
       // nothing valid left to point at. Clears the tree picker back to "nothing
       // selected", giving a genuine "back to the initial state" result rather than
       // a picker still showing a tree that no longer resolves to anything. Unlike
       // DesignView's handling of the same event, this never needs to confirm
       // first — Analyze has no in-progress draft that this could discard.
-      treeViewState.selectedTree.signal.changes
+      treeViewState.selectedTree.changes
         .collect { case LoadState.TreeAbsent(_) => () } --> { _ =>
           treeViewState.selectedTreeId.set(None)
         },
@@ -302,25 +333,26 @@ object AnalyzeView:
           treeViewState.chartState.clearCurves()
         },
       // Per slot: reload the diff whenever the selected tree, the tab's own
-      // active branch, or the slot's target changes. Slot empty → reset to
-      // Idle. Debounced in
+      // active branch, or the slot's place changes. Slot empty → reset to
+      // Idle. A selection change alone reads the same tree versions, so it
+      // reloads nothing here. Debounced in
       // step with the curve-fetch subscription below — both read the slot's
       // target, so an undebounced diff fetch racing ahead of the (still-
       // debounced) curve fetch would briefly label stale curve data with
       // the newly-chosen branch's name.
       compareSlots.map { slot =>
         treeViewState.selectedTreeId.signal
-          .combineWith(slot.state.target.signal, scenarioState.activeBranch.signal, compareState.baselineAt.signal)
+          .combineWith(slot.state.placeSignal, scenarioState.activeBranch.signal, compareState.baselineAt.signal)
           .changes.debounce(100) --> {
-            case (Some(activeTid), CompareTarget.Target(coord), activeBranch, baselineAt)
-                if coord.treeOverride.forall(_ == activeTid) &&
-                   (coord.branch != activeBranch || coord.at != baselineAt) =>
+            case (Some(activeTid), Some((branch, treeOverride, at)), activeBranch, baselineAt)
+                if treeOverride.forall(_ == activeTid) &&
+                   (branch != activeBranch || at != baselineAt) =>
               // Same-tree only (shared node lineage), and the two sides differ in
               // branch or in point-in-time — cross-branch diff, or past-vs-current
               // on one branch when a history stop is rewound. A cross-tree slot
               // (override names a different tree) has no lineage; two sides at the
               // same (branch, pin) have nothing to diff. Both get no diff.
-              slot.diffState.loadDiff(activeTid, activeBranch, baselineAt, coord.branch, coord.at)
+              slot.diffState.loadDiff(activeTid, activeBranch, baselineAt, branch, at)
             case _ =>
               slot.diffState.reset()
           }
@@ -329,9 +361,9 @@ object AnalyzeView:
       // branch); reset when the slot holds no tree.
       compareSlots.map { slot =>
         treeViewState.selectedTreeId.signal
-          .combineWith(slot.state.target.signal)
-          .changes.debounce(100) --> { (activeTid, target) =>
-            comparandHistory(activeTid, target) match
+          .combineWith(slot.state.placeSignal)
+          .changes.debounce(100) --> { (activeTid, place) =>
+            comparandHistory(activeTid, place) match
               case Some((treeId, branch)) => slot.historyState.loadHistory(treeId, branch)
               case None                   => slot.historyState.reset()
           }
@@ -366,7 +398,8 @@ object AnalyzeView:
             // Reads the baseline pin via now() but is NOT triggered by it — a
             // rewind must never clear a comparand's chosen target.
             case CompareTarget.Target(coord)
-                if coord.collidesWith(active, treeViewState.selectedTreeId.now(), compareState.baselineAt.now()) =>
+                if coord.collidesWith(active, treeViewState.selectedTreeId.now(), compareState.baselineAt.now(),
+                     compareState.baselineSelection.now()) =>
               slot.state.target.set(CompareTarget.NotChosen)
             case _ => ()
         }
@@ -410,28 +443,25 @@ object AnalyzeView:
       // Per slot: point the slot's tree view at its EFFECTIVE tree — the
       // slot's tree override if it pins one (cross-tree compare), otherwise
       // the tab's own selected tree (the default: the slot follows the active
-      // tree). Drop its state when the row is torn down (target cleared),
-      // there is no effective tree, or the coordinate collides with the tab's
-      // own (branch, tree) pair — a colliding slot is inert and must not load
-      // a duplicate of the active card, seed, or mutate the active card's
-      // selection through the empty-baseline root fallback in seedCompareCard.
+      // tree). Drop its state when the row is torn down (target cleared) or
+      // there is no effective tree. A slot sharing the tab's place loads its
+      // tree too, so a copy shows its card and can be given another selection;
+      // it stays out of the chart until its coordinate differs (engagement),
+      // and `seedCompareCard` seeds it only from a copy's pending seed.
       // No "wait for the branch to catch up" guard is needed: the slot's
       // branch is derived from the same `target`, so it never lags the tree
       // across a transaction (the slot's own branch subscription refetches on
       // a branch change independently).
       compareSlots.map { slot =>
-        // baselineAt joins the combine so a rewind re-evaluates the collision:
-        // a slot that was a same-head duplicate re-engages (and loads its tree)
-        // once the baseline moves off head, and vice versa.
         treeViewState.selectedTreeId.signal
-          .combineWith(slot.state.target.signal, scenarioState.activeBranch.signal, compareState.baselineAt.signal)
+          .combineWith(slot.state.target.signal)
           .changes --> {
-            case (activeTid, CompareTarget.Target(coord), activeBranch, baselineAt) =>
+            case (activeTid, CompareTarget.Target(coord)) =>
               coord.effectiveTree(activeTid) match
-                case Some(tid) if !coord.collidesWith(activeBranch, activeTid, baselineAt) =>
+                case Some(tid) =>
                   if !slot.treeViewState.selectedTreeId.now().contains(tid) then
                     slot.treeViewState.selectTree(tid)
-                case _ =>
+                case None =>
                   slot.treeViewState.deselectTree()
             case _ =>
               slot.treeViewState.deselectTree()
@@ -449,17 +479,17 @@ object AnalyzeView:
       // active card. The active tree's own Loaded transition triggers the
       // same check for the case where its (re)load settles after a card's.
       compareSlots.map { slot =>
-        slot.treeViewState.selectedTree.signal.changes
+        slot.treeViewState.selectedTree.changes
           .collect { case LoadState.Loaded(compareTree) => compareTree } --> { compareTree =>
-            seedCompareCard(treeViewState, slot, compareState, compareTree)
+            seedCompareCard(treeViewState, slot, compareState, scenarioState, compareTree)
           }
       },
-      treeViewState.selectedTree.signal.changes
+      treeViewState.selectedTree.changes
         .collect { case LoadState.Loaded(_) => () } --> { _ =>
           compareSlots.foreach { slot =>
             slot.treeViewState.selectedTree.now() match
               case LoadState.Loaded(compareTree) =>
-                seedCompareCard(treeViewState, slot, compareState, compareTree)
+                seedCompareCard(treeViewState, slot, compareState, scenarioState, compareTree)
               case _ => ()
           }
         },
@@ -488,7 +518,7 @@ object AnalyzeView:
       // selection frozen and re-enables manual gestures.
       compareSlots.map { slot =>
         slot.state.mirror.signal
-          .combineWith(treeViewState.chartState.visibleCurves, slot.treeViewState.selectedTree.signal)
+          .combineWith(treeViewState.chartState.visibleCurves, slot.treeViewState.selectedTree)
           .changes --> {
             case (true, baselineVisible, LoadState.Loaded(tree)) =>
               slot.treeViewState.chartState.setUserSelection(
@@ -592,10 +622,11 @@ object AnalyzeView:
         div(
           cls := "analyze-lec-chart-area",
           child <-- compareState.layout.signal
-            .combineWith(compareState.rowTargets, compareState.hiddenFlags, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
-            .map { (layout, rowTs, hidden, activeBranch, activeTid, baselineAt) =>
+            .combineWith(compareState.rowTargets, compareState.hiddenFlags, activeTabSignal)
+            .map { (layout, rowTs, hidden, activeTab) =>
+              val (activeBranch, activeTid, baselineAt, baselineSelection) = activeTab
               val visibleComparands =
-                engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }
+                engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt, baselineSelection).collect { case (pi, _) if !hidden(pi) => pi }
               (layout, visibleComparands)
             }
             .distinct
@@ -631,7 +662,13 @@ object AnalyzeView:
                   // chart; the notice names them so a vanished curve is explained.
                   child.maybe <-- treeViewState.chartState.droppedSelections.map { dropped =>
                     Option.when(dropped.nonEmpty)(div(cls := "dropped-selections-notice",
-                      s"${dropped.size} selected node(s) not present at this point in time"))
+                      NoticeMessages.droppedSelections(dropped.size)))
+                  },
+                  // Selected mitigations absent at a rewound commit are left out
+                  // of the request; the notice names how many.
+                  child.maybe <-- treeViewState.absentSelected.map { absent =>
+                    Option.when(absent.nonEmpty)(div(cls := "dropped-selections-notice",
+                      NoticeMessages.absentMitigations(absent.size)))
                   },
                   LECChartView(combinedSpecSignal, hoverBridge, chartParams)
                 )
@@ -659,18 +696,36 @@ object AnalyzeView:
             // cleared whenever its row is torn down), so it's safe to pass ungated.
             onRefreshExtra = () => compareSlots.foreach(_.treeViewState.refreshSelectedTree())
           ),
-          body = TreeDetailView(
-                   treeViewState, queryState.satisfyingNodeIds, hoverBridge,
-                   // Rewinding the baseline does NOT lock selection — the pin is
-                   // a read dimension; Ctrl+click still charts through history.
-                   pinnedAt = compareState.baselineAt.signal
-                     .combineWith(baselineHistoryState.commits)
-                     .map { (at, commits) => at.flatMap(h => commits.find(_.commitHash == h)) }
-                 ).amend(cls := "tree-detail-view--in-card"),
+          // The override link edits the head of the active branch, so it is
+          // offered only while the baseline shows the head; the body is built
+          // again when the baseline moves on or off it.
+          body = div(
+            child <-- compareState.baselineAt.signal.map(_.isEmpty).distinct.map { atHead =>
+              TreeDetailView(
+                treeViewState, queryState.satisfyingNodeIds, hoverBridge,
+                // Rewinding the baseline does NOT lock selection — the pin is
+                // a read dimension; Ctrl+click still charts through history.
+                pinnedAt = compareState.baselineAt.signal
+                  .combineWith(baselineHistoryState.commits)
+                  .map { (at, commits) => at.flatMap(h => commits.find(_.commitHash == h)) },
+                structure = treeViewState.structure,
+                selection = compareState.baselineSelection.signal,
+                onSelectionEdit = edit =>
+                  edit(compareState.baselineSelection.now()).toOption.foreach(compareState.baselineSelection.set),
+                staleAction = if atHead then
+                  MitigationPanel.StaleBadgeAction.OpensPopup(
+                    id => treeViewState.selectedTreeId.now().foreach(tree =>
+                      openOverride(scenarioState.activeBranch.now(), tree, id)),
+                    designUnsaved.map(if _ then List(BlockedMessages.DesignUnsavedWork) else Nil)
+                  )
+                else MitigationPanel.StaleBadgeAction.ReadOnly
+              ).amend(cls := "tree-detail-view--in-card")
+            }
+          ),
           // Same as a comparand card: starts collapsed (header only), expands to
           // host the tree when one loads.
           initiallyOpen = false,
-          expandOn = treeViewState.selectedTree.signal.changes
+          expandOn = treeViewState.selectedTree.changes
                        .collect { case LoadState.Loaded(t) => t.id }.distinct.mapToUnit
         ),
         children <-- compareState.rows.signal.split(identity) { (poolIdx, _, _) =>
@@ -690,10 +745,18 @@ object AnalyzeView:
                      selectionLocked = slot.state.mirror.signal,
                      pinnedAt = slot.state.atSignal
                        .combineWith(slot.historyState.commits)
-                       .map { (at, commits) => at.flatMap(h => commits.find(_.commitHash == h)) }
+                       .map { (at, commits) => at.flatMap(h => commits.find(_.commitHash == h)) },
+                     structure = slot.treeViewState.structure,
+                     selection = slot.state.selectionSignal,
+                     onSelectionEdit = edit =>
+                       slot.state.target.now().toCoordinate.foreach(c =>
+                         edit(c.selection).toOption.foreach(slot.state.setSelection)),
+                     // A comparand shows another branch or an earlier commit,
+                     // which the Design view does not edit.
+                     staleAction = MitigationPanel.StaleBadgeAction.ReadOnly
                    ).amend(cls := "tree-detail-view--in-card"),
             initiallyOpen = false,
-            expandOn = slot.treeViewState.selectedTree.signal.changes
+            expandOn = slot.treeViewState.selectedTree.changes
                          .collect { case LoadState.Loaded(t) => t.id }.distinct.mapToUnit
           )
         }
@@ -725,17 +788,65 @@ object AnalyzeView:
       )
     )
 
-  private def loadedOrEmpty(s: LoadState[Map[NodeId, LECNodeCurve]]): Map[NodeId, LECNodeCurve] = s match
-    case LoadState.Loaded(m) => m
+  /** The readings a side draws under `display`, or none while its curves have
+    * not loaded. */
+  private def readingsOf(
+    s: LoadState[Map[NodeId, List[LECNodeSeries]]],
+    display: CurveDisplay
+  ): Map[NodeId, List[(CurveVariant, LECNodeCurve)]] = s match
+    case LoadState.Loaded(m) => LECChartState.readings(m, display)
     case _                   => Map.empty
 
   /** The (tree, branch) whose history a comparand's slider shows: the slot's
     * own tree override, else the tab's tree, on the slot's branch. None while
     * the tab holds no tree or the slot no target. */
-  private def comparandHistory(activeTid: Option[TreeId], target: CompareTarget): Option[(TreeId, BranchChoice)] =
-    (activeTid, target) match
-      case (Some(tid), CompareTarget.Target(coord)) => Some((coord.treeOverride.getOrElse(tid), coord.branch))
-      case _                                        => None
+  private def comparandHistory(
+    activeTid: Option[TreeId],
+    place: Option[(BranchChoice, Option[TreeId], Option[CommitHash])]
+  ): Option[(TreeId, BranchChoice)] =
+    (activeTid, place) match
+      case (Some(tid), Some((branch, treeOverride, _))) => Some((treeOverride.getOrElse(tid), branch))
+      case _                                            => None
+
+  /** The three-way control choosing which readings a card's chart draws. */
+  private def renderDisplayToggle(display: Var[CurveDisplay]): HtmlElement =
+    div(
+      cls := "curve-display-toggle",
+      title := "Which readings the chart draws",
+      CurveDisplay.values.toList.map { mode =>
+        button(
+          cls := "curve-display-option",
+          cls("curve-display-option--active") <-- display.signal.map(_ == mode),
+          tpe := "button",
+          displayLabel(mode),
+          onClick --> (_ => display.set(mode))
+        )
+      }
+    )
+
+  /** A display mode's button text. */
+  private def displayLabel(mode: CurveDisplay): String = mode match
+    case CurveDisplay.Inherent  => "Inherent"
+    case CurveDisplay.Mitigated => "Mitigated"
+    case CurveDisplay.Both      => "Both"
+
+  /** Copy-for-compare: duplicate this side into the next free comparand slot.
+    * Blocked when every slot is in use. `snapshot` reads the side when
+    * clicked, and is empty for a slot with nothing chosen. */
+  private def renderCopyButton(compareState: CompareState, snapshot: () => Option[SideSnapshot]): HtmlElement =
+    FormInputs.blockable(
+      button(
+        cls := "slot-card-copy",
+        tpe := "button",
+        title := "Copy into a new comparison",
+        "⧉",
+        onClick --> (_ => snapshot().foreach(compareState.copyToNextFree))
+      ),
+      compareState.rows.signal.map { rows =>
+        if rows.size >= CompareState.ComparedSlotCount then List(BlockedMessages.compareFull(CompareState.ComparedSlotCount))
+        else Nil
+      }
+    )
 
   /** A slot's failed load, shown in the slot's card where its result would
     * be, with a retry when one is offered. */
@@ -753,9 +864,9 @@ object AnalyzeView:
     * own lifecycle carried over the built spec), plus the shared pinned
     * axes every panel agrees on. */
   private def panelSpec(
-    cacheState: LoadState[Map[NodeId, LECNodeCurve]],
+    cacheState: LoadState[Map[NodeId, List[LECNodeSeries]]],
     visible: Set[NodeId],
-    pairs: Vector[(LECNodeCurve, HexColor)],
+    pairs: Vector[(LECNodeCurve, CurveVariant, HexColor)],
     pinned: Option[PinnedAxes],
     origin: Option[String]
   ): LoadState[js.Dynamic] =
@@ -820,10 +931,21 @@ object AnalyzeView:
           }
         )
       ),
-      // Actions row — the eye alone, right-aligned, stacking under the refresh
-      // and lining up with the comparand rows' rightmost button.
+      // Actions row — the display control, copy-for-compare and the eye,
+      // right-aligned, the eye lining up with the comparand rows' rightmost
+      // button.
       div(
         cls := "slot-card-actions",
+        renderDisplayToggle(compareState.baselineDisplay),
+        renderCopyButton(compareState, () =>
+          val chart = treeViewState.chartState
+          Some(SideSnapshot(
+            SlotCoordinate.activeTab(scenarioState.activeBranch.now(), compareState.baselineAt.now(),
+              compareState.baselineSelection.now()),
+            chart.userSelectedNodeIds.now() ++ chart.satisfyingNodeIds.now(),
+            compareState.baselineDisplay.now()
+          ))
+        ),
         renderEyeToggle(compareState.baselineHidden)
       )
     )
@@ -858,8 +980,8 @@ object AnalyzeView:
         HistorySlider(slot.historyState.commits, slot.state.atSignal, slot.state.setAt(_)),
         slotFailure(
           slot.historyState.history.signal,
-          activeTreeId.combineWith(slot.state.target.signal).map { (tid, target) =>
-            comparandHistory(tid, target).map((treeId, branch) => () => slot.historyState.loadHistory(treeId, branch))
+          activeTreeId.combineWith(slot.state.placeSignal).map { (tid, place) =>
+            comparandHistory(tid, place).map((treeId, branch) => () => slot.historyState.loadHistory(treeId, branch))
           }
         ),
         // The changed-node markers of this slot's tree come from the diff.
@@ -867,6 +989,11 @@ object AnalyzeView:
       ),
       div(
         cls := "slot-card-actions",
+        renderDisplayToggle(slot.state.display),
+        renderCopyButton(compareState, () =>
+          slot.state.target.now().toCoordinate.map(c =>
+            SideSnapshot(c, slot.treeViewState.chartState.userSelectedNodeIds.now(), slot.state.display.now()))
+        ),
         renderMirrorToggle(slot.state.mirror),
         renderEyeToggle(slot.state.hidden),
         button(
@@ -946,49 +1073,53 @@ object AnalyzeView:
     targets: Vector[CompareTarget],
     activeBranch: BranchChoice,
     activeTreeId: Option[TreeId],
-    activeAt: Option[CommitHash]
+    activeAt: Option[CommitHash],
+    activeSelection: MitigationSelection.Enumerated
   ): Vector[(Int, BranchChoice)] =
     targets.zipWithIndex
       .foldLeft((Vector.empty[SlotCoordinate], Vector.empty[(Int, BranchChoice)])) {
         case ((engaged, acc), (t, i)) =>
           t.toCoordinate match
             case Some(c)
-                if !c.collidesWith(activeBranch, activeTreeId, activeAt) &&
+                if !c.collidesWith(activeBranch, activeTreeId, activeAt, activeSelection) &&
                    !engaged.exists(e => c.samePairAs(e, activeTreeId)) =>
               (engaged :+ c, acc :+ (i, c.branch))
             case _ => (engaged, acc)
       }
       ._2
 
-  /** Branch-select values to hide: a branch is excluded when picking it (with
-    * this slot's existing tree override) would duplicate another slot's current
-    * (branch, effective tree) pair. */
+  /** Branch-select values to hide: a branch is excluded when picking it would
+    * duplicate another slot's current coordinate. Picking a branch keeps the
+    * slot's tree override and reads the head under no mitigation, so that is
+    * the coordinate compared. */
   private[views] def excludedBranchValues(
     ownOverride: Option[TreeId],
     otherCoords: Vector[SlotCoordinate],
     activeTid: Option[TreeId]
   ): Set[String] =
     otherCoords
-      .filter(c => SlotCoordinate(c.branch, ownOverride).samePairAs(c, activeTid))
+      .filter(c => SlotCoordinate(c.branch, ownOverride, None, MitigationSelection.Inherent).samePairAs(c, activeTid))
       .map(c => BranchBar.branchOptionValue(c.branch))
       .toSet
 
   /** Tree-override values to hide (including "" = follow-active): a value is
-    * excluded when choosing it would make this slot's (branch, effective tree)
-    * pair equal another slot's current pair. The same-branch restriction falls
-    * out of `samePairAs` (a different-branch other can never match). An
-    * unparseable non-empty value yields no candidate and so excludes nothing —
-    * it is never treated as follow-active. */
+    * excluded when choosing it would make this slot's coordinate equal another
+    * slot's current one. Choosing a tree keeps the slot's pin and resets its
+    * selection, so that is the coordinate compared. The same-branch
+    * restriction falls out of `samePairAs` (a different-branch other can never
+    * match). An unparseable non-empty value yields no candidate and so
+    * excludes nothing — it is never treated as follow-active. */
   private[views] def excludedTreeOverrideValues(
     ownBranch: BranchChoice,
+    ownAt: Option[CommitHash],
     overrideValues: List[String],   // "" plus each available tree id string
     otherCoords: Vector[SlotCoordinate],
     activeTid: Option[TreeId]
   ): Set[String] =
     overrideValues.filter { v =>
       val candidate = v match
-        case "" => Some(SlotCoordinate(ownBranch, None))
-        case id => TreeId.fromString(id).toOption.map(t => SlotCoordinate(ownBranch, Some(t)))
+        case "" => Some(SlotCoordinate(ownBranch, None, ownAt, MitigationSelection.Inherent))
+        case id => TreeId.fromString(id).toOption.map(t => SlotCoordinate(ownBranch, Some(t), ownAt, MitigationSelection.Inherent))
       candidate.exists(cand => otherCoords.exists(c => cand.samePairAs(c, activeTid)))
     }.toSet
 
@@ -1018,12 +1149,21 @@ object AnalyzeView:
     else
       (activeRoot, activeRoot.filter(compareTreeNodeIds.contains).orElse(compareRoot).toList)
 
+  /** The seed a copied slot takes: the source's node selection, kept to the
+    * nodes the slot's tree holds, in deterministic id order. It replaces the
+    * seed `computeSeed` would derive. */
+  private[views] def copySeed(pending: Set[NodeId], compareTreeNodeIds: Set[NodeId]): List[NodeId] =
+    pending.filter(compareTreeNodeIds.contains).toList.sortBy(_.value)
+
   /** One entry-time seeding pass for a slot's card. No-op unless the slot
     * holds a chosen target and the card's selection is empty — an entry event
     * always resets it first, and a preserved or deliberately emptied selection
-    * is respected. A mirroring row is skipped: its selection is driven by the
+    * is respected. A copy's pending seed wins over the derived seed and is
+    * cleared once used, keeping only the nodes the slot's tree holds. A
+    * mirroring row is skipped: its selection is driven by the
     * baseline sync, which supersedes entry seeding (and must not select the
-    * active root on the baseline through the empty-baseline fallback). Emits
+    * active root on the baseline through the empty-baseline fallback). So is a
+    * slot whose coordinate equals the tab's, which charts nothing. Emits
     * through the selection buses so the normal toggle and cap handling applies;
     * the baseline read includes the active card's current selection, so a root
     * selected by an earlier pass (another slot's, or the same tree settling
@@ -1034,18 +1174,25 @@ object AnalyzeView:
     treeViewState: TreeViewState,
     slot: CompareSlot,
     compareState: CompareState,
+    scenarioState: ScenarioState,
     compareTree: RiskTree
   ): Unit =
-    slot.state.target.now() match
-      case CompareTarget.Target(_)
-          if !slot.state.mirror.now() && slot.treeViewState.chartState.userSelectedNodeIds.now().isEmpty =>
+    val compareIds = compareTree.nodes.map(_.id).toSet
+    (slot.state.target.now(), slot.state.pendingSeed.now()) match
+      case (CompareTarget.Target(_), Some(seed)) if slot.treeViewState.chartState.userSelectedNodeIds.now().isEmpty =>
+        slot.state.pendingSeed.set(None)
+        copySeed(seed, compareIds).foreach(slot.treeViewState.chartState.userSelectionToggle.onNext)
+      case (CompareTarget.Target(coord), None)
+          if !slot.state.mirror.now() && slot.treeViewState.chartState.userSelectedNodeIds.now().isEmpty &&
+             !coord.collidesWith(scenarioState.activeBranch.now(), treeViewState.selectedTreeId.now(),
+               compareState.baselineAt.now(), compareState.baselineSelection.now()) =>
         val active = treeViewState.chartState
         val baseline = active.satisfyingNodeIds.now() ++ active.userSelectedNodeIds.now()
         val activeRoot = treeViewState.selectedTree.now() match
           case LoadState.Loaded(activeTree) => Some(activeTree.rootId)
           case _                            => None
         val (rootToSelect, seeds) =
-          computeSeed(baseline, activeRoot, compareTree.nodes.map(_.id).toSet, Some(compareTree.rootId))
+          computeSeed(baseline, activeRoot, compareIds, Some(compareTree.rootId))
         rootToSelect.foreach(active.userSelectionToggle.onNext)
         seeds.foreach(slot.treeViewState.chartState.userSelectionToggle.onNext)
       case _ => ()
@@ -1072,25 +1219,31 @@ object AnalyzeView:
     activeTreeId: Signal[Option[TreeId]]
   ): HtmlElement =
     // Branch select sets the coordinate's branch, preserving any tree
-    // override already chosen; clearing it clears the whole slot.
+    // override already chosen; clearing it clears the whole slot. Another
+    // branch is read at its head, under no mitigation: the pin and the
+    // selection named a version and mitigations of the branch left behind.
     def parseBranch(raw: String): CompareTarget =
       val existingOverride = slot.state.target.now().toCoordinate.flatMap(_.treeOverride)
+      def onBranch(branch: BranchChoice): CompareTarget =
+        CompareTarget.Target(SlotCoordinate(branch, existingOverride, None, MitigationSelection.Inherent))
       raw match
         case ""                     => CompareTarget.NotChosen
-        case BranchBar.mainSentinel => CompareTarget.Target(SlotCoordinate(BranchChoice.Main, existingOverride))
+        case BranchBar.mainSentinel => onBranch(BranchChoice.Main)
         case name =>
           ScenarioName.fromString(name).toOption
-            .map(n => CompareTarget.Target(SlotCoordinate(BranchChoice.Scenario(n), existingOverride)))
+            .map(n => onBranch(BranchChoice.Scenario(n)))
             .getOrElse(CompareTarget.NotChosen)
 
     // Tree select sets the coordinate's tree override: "" = follow the tab's
     // active tree (default); a tree id = pin this slot to that tree
-    // (cross-tree compare). Only meaningful once a branch is chosen.
+    // (cross-tree compare). Only meaningful once a branch is chosen. A tree
+    // switch resets the slot's selection, as it resets its node selection.
     def applyTreeOverride(raw: String): Unit =
       slot.state.target.now() match
         case CompareTarget.Target(coord) =>
           val over = if raw.isEmpty then None else TreeId.fromString(raw).toOption
-          slot.state.target.set(CompareTarget.Target(coord.copy(treeOverride = over)))
+          slot.state.target.set(CompareTarget.Target(
+            coord.copy(treeOverride = over, selection = MitigationSelection.Inherent)))
         case CompareTarget.NotChosen => ()
 
     // The full branch list is always offered; a branch that would duplicate
@@ -1134,11 +1287,12 @@ object AnalyzeView:
       slot.state.target.signal
         .combineWith(activeTreeId, treeOptions, Signal.combineSeq(otherSlots.map(_.target.signal)))
         .map { (own, activeTid, trees, otherTargets) =>
-          own.toCoordinate.map(_.branch) match
+          own.toCoordinate match
             case None => Set.empty
-            case Some(ownBranch) =>
+            case Some(ownCoord) =>
               excludedTreeOverrideValues(
-                ownBranch,
+                ownCoord.branch,
+                ownCoord.at,
                 "" :: trees.map(_._1),
                 otherTargets.flatMap(_.toCoordinate).toVector,
                 activeTid

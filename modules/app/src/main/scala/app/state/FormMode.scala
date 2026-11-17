@@ -118,14 +118,24 @@ enum FieldSnapshot:
     name:        String,
     parent:      ParentSelection,
     probability: String,
-    mode:        DistributionMode,
-    percentiles: String,
-    quantiles:   String,
-    terms:       String,
-    minLoss:     String,
-    maxLoss:     String
+    shape:       ShapeFieldText
   )
   case PortfolioFields(name: String, parent: ParentSelection)
+
+/** A loss distribution as the text its form inputs hold: the mode, and the
+  * five shape inputs, the other mode's left blank. Not refined, for the same
+  * reason as [[FieldSnapshot]]. */
+final case class ShapeFieldText(
+  mode:        DistributionMode,
+  percentiles: String,
+  quantiles:   String,
+  terms:       String,
+  minLoss:     String,
+  maxLoss:     String
+):
+  /** Whether any shape input holds text. The mode alone is not content. */
+  def hasText: Boolean =
+    List(percentiles, quantiles, terms, minLoss, maxLoss).exists(_.nonEmpty)
 
 object FormMode:
 
@@ -135,34 +145,45 @@ object FormMode:
     * exactly one domain-to-display mapping, not two.
     */
   def leafDraftToFieldSnapshot(leaf: LeafDraft): FieldSnapshot.LeafFields =
-    val name        = leaf.name.value
-    val parent      = ParentSelection.fromSaved(leaf.parent)
-    val probability = RiskLeafFormState.domainToDisplayPct(leaf.probability, 2)
-    leaf.shape match
-      case DistributionShape.Metalog(anchors, terms) =>
-        FieldSnapshot.LeafFields(
-          name        = name,
-          parent      = parent,
-          probability = probability,
-          mode        = DistributionMode.Metalog,
-          percentiles = anchors.values.map(a => RiskLeafFormState.domainToDisplayPct(a.percentile, 0)).mkString(", "),
-          quantiles   = anchors.values.map(a => (a.loss: Double).toString).mkString(", "),
-          terms       = terms.fold("")(_.toString),
-          minLoss     = "",
-          maxLoss     = ""
-        )
-      case DistributionShape.Lognormal(bounds) =>
-        FieldSnapshot.LeafFields(
-          name        = name,
-          parent      = parent,
-          probability = probability,
-          mode        = DistributionMode.Lognormal,
-          percentiles = "",
-          quantiles   = "",
-          terms       = "",
-          minLoss     = (bounds.min: Long).toString,
-          maxLoss     = (bounds.max: Long).toString
-        )
+    FieldSnapshot.LeafFields(
+      name        = leaf.name.value,
+      parent      = ParentSelection.fromSaved(leaf.parent),
+      probability = RiskLeafFormState.domainToDisplayPct(leaf.probability, RiskLeafFormState.probabilityDecimals),
+      shape       = shapeToFieldText(leaf.shape)
+    )
+
+  /** The one place a stored shape is converted to the text its inputs hold,
+    * for every form with shape inputs. Percentiles show on the form's 0–100
+    * scale as whole numbers.
+    *
+    * {{{
+    * shapeToFieldText(lognormal(1000, 50000))
+    * // ShapeFieldText(Lognormal, "", "", "", "1000", "50000")
+    * }}}
+    */
+  def shapeToFieldText(shape: DistributionShape): ShapeFieldText = shape match
+    case DistributionShape.Metalog(anchors, terms) =>
+      ShapeFieldText(
+        mode        = DistributionMode.Metalog,
+        percentiles = anchors.values.map(a => RiskLeafFormState.domainToDisplayPct(a.percentile, RiskLeafFormState.percentileDecimals)).mkString(ListSeparator),
+        quantiles   = anchors.values.map(a => (a.loss: Double).toString).mkString(ListSeparator),
+        terms       = terms.fold("")(_.toString),
+        minLoss     = "",
+        maxLoss     = ""
+      )
+    case DistributionShape.Lognormal(bounds) =>
+      ShapeFieldText(
+        mode        = DistributionMode.Lognormal,
+        percentiles = "",
+        quantiles   = "",
+        terms       = "",
+        minLoss     = (bounds.min: Long).toString,
+        maxLoss     = (bounds.max: Long).toString
+      )
+
+  /** How a list input's entries are joined for display; `FormState.parseDoubleList`
+    * reads them back. */
+  private val ListSeparator = ", "
 
   /** The one place a saved [[PortfolioDraft]] is converted to raw display-field
     * values — reused by both `populatePortfolioForm` and `isFormDirty`.
@@ -189,9 +210,8 @@ object FormMode:
         // is real content to lose, so a plain equality check against `Unset`
         // is both correct and sufficient — no computed default needed.
         current match
-          case FieldSnapshot.LeafFields(name, parent, probability, _, percentiles, quantiles, terms, minLoss, maxLoss) =>
-            name.nonEmpty || parent != ParentSelection.Unset || probability.nonEmpty ||
-              percentiles.nonEmpty || quantiles.nonEmpty || terms.nonEmpty || minLoss.nonEmpty || maxLoss.nonEmpty
+          case FieldSnapshot.LeafFields(name, parent, probability, shape) =>
+            name.nonEmpty || parent != ParentSelection.Unset || probability.nonEmpty || shape.hasText
           case FieldSnapshot.PortfolioFields(name, parent) =>
             name.nonEmpty || parent != ParentSelection.Unset
       case FormMode.Inactive =>
