@@ -439,3 +439,4 @@ PATCH bump; plan close = MINOR bump.
 - modules/app/src/test/scala/app/state/FormModeSpec.scala
 - modules/app/src/main/scala/app/state/DistributionMode.scala
 - modules/common/src/test/scala/com/risquanter/register/domain/data/iron/OpaqueTypesSpec.scala
+- modules/app/src/main/scala/app/state/TreeLoadPolicy.scala

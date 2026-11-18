@@ -2958,8 +2958,9 @@ Envoy Gateway at the edge and Cilium between pods. Its record is
 - §3 places OPA at "the mesh layer (Istio `ext_authz`)".
 - §4 makes retries, circuit breaking, timeouts and rate limiting "the mesh's
   concern" and names `infra/k8s/istio/ingress-gateway.yaml`. After the change,
-  no proxy sits between register and Irmin, SpiceDB or PostgreSQL. Only the
-  edge proxy remains, in front of the frontend.
+  no proxy sits between register and Irmin or PostgreSQL. The edge proxy sits
+  in front of the frontend and the register server, and `register-infra`'s
+  PLAN-TLS puts one in front of SpiceDB.
 - §5 and §6 name `outputClaimToHeaders`, the waypoint and `EnvoyFilter`.
 - §7's invariants T1–T3 name the Istio waypoint. T1 links `./THREAT-CATALOG.md`,
   which does not exist in `docs/dev/decision-records/`.
@@ -2967,10 +2968,33 @@ Envoy Gateway at the edge and Cilium between pods. Its record is
 **EGC-D-4.** `register-infra` retired ADR-INFRA-015's SpiceDB write gate, which
 was keyed on mesh identity. Each caller keeps its own key, and Cilium admits
 SpiceDB only from the register pod and the runner. Accepted residual: a
-compromised register server may write any relation type. The ruling says the
-L2.0 exit criterion in `docs/dev/plans/IMPLEMENTATION-PLAN.md` is reworded to
-stop claiming scoping by credential. Neither that file nor
-`docs/dev/plans/AUTHORIZATION-PLAN.md` §L2.0 was found to state such a criterion
-on 2026-11-15; whether a passage elsewhere does is open.
+compromised register server may write any relation type. Nothing in register
+needs rewording for this: the L2.0 exit criteria in
+`docs/dev/plans/AUTHORIZATION-PLAN.md` do not claim scoping by credential.
+
+**The edge routes API calls straight to the register server (EGC-D-9).** In the
+cluster, the edge proxy sends `/w/…` without `text/html` in `Accept`,
+`/workspaces`, `/distribution`, `/health` and `/docs` to register on 8090, and
+everything else to the frontend. Cilium admits register's 8090 from the edge
+proxy pods only, so the frontend cannot reach register in the cluster. The
+frontend image runs unchanged. Its proxy rules serve Docker Compose, which has
+no edge proxy. The list of API paths therefore exists twice: in
+`containers/prod/Dockerfile.frontend-prod` and in `register-infra`'s routes. A
+path added to nginx alone fails in the cluster with an error from nginx, and
+`register-infra`'s `tests/bats/edge-routing.bats` reports the difference. A new
+API path is told to `register-infra`.
+
+**The SpiceDB calls register makes are listed in register-infra.** A proxy in
+each SpiceDB pod (`register-infra`'s PLAN-TLS §4.6) admits register to
+`POST /v1/permissions/check` and `POST /v1/relationships/write` only, the two
+calls at `AuthorizationServiceSpiceDB.scala:121` and
+`BootstrapProvisionerSpiceDB.scala:56`. A new SpiceDB call is refused with 403
+until it is added there, and register reads that as a denied permission.
+
+**The cluster stores workspace records in PostgreSQL (EGC-D-8).** The cluster
+sets `REGISTER_WORKSPACE_STORE_BACKEND=postgres` with the `REGISTER_DB_*` and
+`REGISTER_FLYWAY_URL` variables, as `.env.irmin.example` does for Compose. The
+database is `register` and its owner is `register_app`, so Flyway's migrations
+run as the owner at start.
 
 **Status.** Open. The amendment of ADR-012 is register's to rule.

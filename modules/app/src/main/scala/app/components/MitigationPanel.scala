@@ -70,7 +70,7 @@ object MitigationPanel:
     val source: String = mitigation.target match
       case MitigationTarget.Predicate(predicate) => predicate.source
     val named = MitigationReadout.namedNodes(response, mitigation.id).distinct.map { (id, name) =>
-      s"${id.value} = ${name.fold("(not in this tree)")(_.value)}"
+      s"${id.value} = ${name.fold(NotInThisTree)(_.value)}"
     }
     (source :: named).mkString("\n")
 
@@ -98,12 +98,14 @@ object MitigationPanel:
         checked <-- toggle.map(_ == MitigationToggle.On),
         indeterminate <-- toggle.map(_ == MitigationToggle.Partial),
         disabled <-- locked,
-        onClick.preventDefault --> (_ => onToggleWhole(id))
+        // The browser flips the box on the click, and the two bindings above
+        // then write the state the new selection gives it.
+        onClick --> (_ => onToggleWhole(id))
       ),
       span(cls := "mitigation-name", mitigation.name.value),
       span(cls := "mitigation-stage", stageLabel(mitigation)),
       MitigationReadout.failuresOf(response, id).map { problems =>
-        span(cls := "mitigation-warning", title := bindTooltip(problems), "⚠")
+        span(cls := "mitigation-warning", title := bindTooltip(problems), WarningMark)
       },
       Option.when(stale)(staleBadge(id, staleAction))
     )
@@ -128,6 +130,12 @@ object MitigationPanel:
         span(cls := "stale-badge", title := StaleReadOnly, StaleLabel)
       case StaleBadgeAction.EditInPlace =>
         span(cls := "stale-badge", title := StaleEditInPlace, StaleLabel)
+
+  /** What the predicate tooltip shows for a named node the tree does not hold. */
+  private val NotInThisTree = "(not in this tree)"
+
+  /** The mark on a line whose predicate does not bind. */
+  private val WarningMark = "⚠"
 
   /** The badge's text. */
   private val StaleLabel = "stale"

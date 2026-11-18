@@ -182,7 +182,7 @@ if [ "$TOOL" = "Bash" ]; then
     *".claude/protocol"*|*".claude/bin"*|*".claude/hooks"*|*".claude/settings.json"*)
       deny "Blocked: the working-protocol machinery is user-owned — the approval token (.claude/protocol/), this hook (.claude/hooks/), the approval script (.claude/bin/), and the hook wiring (.claude/settings.json). Only the user creates, refreshes, runs, or removes any of it (working-protocol G7).
 
-To READ any of these files, use the Read tool — it is not gated. To propose an inventory amendment, write .claude/protocol/pending with the Write tool, not through Bash. To have anything else run or changed, hand the user the exact command and stop."
+This refusal is final for its effect. Hand the user the exact command and stop, and do not reach the same effect with another tool. For later calls, chosen before the call: these files are read with the Read tool, and an inventory amendment is written to .claude/protocol/pending with the Write tool."
       ;;
   esac
 
@@ -271,7 +271,7 @@ Do not retry, do not reshape the command, and do not look for another route to t
 
   deny "Blocked: this Bash command would write into the gated region (modules/, build.sbt) or into a file inventory (*-INVENTORY.md). Detected $WRITE.
 
-Bash file writes never reach the file-inventory check that gates Edit/Write, so allowing them would make that check optional. Source edits there go through the Edit/Write tools.
+Bash file writes never reach the file-inventory check that gates Edit/Write, so allowing them would make that check optional. This refusal is final for its effect: do not now make the same change with Edit or Write. A gated source file is changed with Edit or Write only when that tool is chosen before the call.
 
 A file inventory is never written by the agent at all, by any route. To have paths added to one, write the amendment block with the Write tool to .claude/protocol/pending, show the same block in the chat, and let the user run .claude/bin/approve-inventory. The one-shot exemption below does not cover inventories.
 
