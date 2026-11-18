@@ -2487,7 +2487,7 @@ has landed green (G8).
 | 3 | The tree structure read: resolved scopes, resolution failures and stale-override ids beside the tree | §7.6.7 | Landed |
 | 4 | Change notification: the mitigation-collection diff, and the scope memo's capacity-2 amendment | §7.6.8 | Landed |
 | 5 | The two decision records: the ADR-017 amendment and the new ADR-040 | §7.6.9 | Landed |
-| 6 | The interface and the user documentation | §7.6.17 | Implemented, 2026-11-17 |
+| 6 | The interface and the user documentation | §7.6.17 | Landed, 0.24.7, routine and complex review fixes in, all tiers green including BATS |
 | 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 | Landed |
 | 8 | Adopting vql-engine 0.20.0 and mapping its nesting-depth refusals. Lands before slice 2 | §7.6.16 | Landed, 0.20.5 |
 | 9 | Adopting vql-engine 0.22.0, taking up 0.21.0's ordered domains with it | §7.6.18 | Landed, 0.24.4, all tiers green including BATS |
