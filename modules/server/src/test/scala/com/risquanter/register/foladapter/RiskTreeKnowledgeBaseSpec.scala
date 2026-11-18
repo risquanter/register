@@ -85,7 +85,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   private val tree = RiskTree.fromNodesUnsafe(
     id     = treeId("test-tree"),
-    name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
+    name   = SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
     seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
@@ -630,7 +630,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private def bypassTree(nodes: Seq[RiskNode]): RiskTree =
     RiskTree.fromNodesUnsafe(
       id     = treeId("bypass-tree"),
-      name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Bypass Tree").toOption.get,
+      name   = SafeName.fromString("Bypass Tree").toOption.get,
       nodes  = nodes,
       rootId = nodes.head.id,
       seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),

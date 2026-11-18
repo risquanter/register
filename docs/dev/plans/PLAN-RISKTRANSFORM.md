@@ -7081,8 +7081,9 @@ predicate map in `Signatures` read it. `RiskTreeKnowledgeBase.scala` is not in
 this slice and keeps its spellings.
 
 `.value` is called on `LiteralText` to hand the text to `NodeId.fromString`,
-which refines it back into the domain. `QueryPredicate` and `Term` leave the
-imports. The scaladoc of `create`
+which refines it back into the domain. `Term` leaves the imports.
+`QueryPredicate` stays, because `nodeSource` reads `QueryPredicate.Eq`. The
+scaladoc of `create`
 lists two formula checks, where it now lists four.
 
 **Superseded here.** The signatures of `requireNoNodeName` and

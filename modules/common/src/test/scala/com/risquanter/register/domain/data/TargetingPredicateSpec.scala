@@ -8,10 +8,10 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, Field
 import com.risquanter.register.http.errors.{LexProblem, NestingProblem, ParseProblem, Positioned, QueryPosition, QueryToken}
 
 /** Boundary validation for the targeting sublanguage: a bare single-free-variable
-  * FOL formula, in the targeting fragment (no quantifiers, no function term
-  * other than a node-returning function), with no mitigation-state predicate and
-  * no node name. `create` is the validation boundary, so these rules also gate
-  * every decode, and `ofNode` passes its text through it.
+  * FOL formula in the targeting fragment, which admits no quantifier, no
+  * function term other than `node_id`, and no mitigation-state predicate.
+  * `create` is the validation boundary, so these rules also gate every decode,
+  * and `ofNode` passes its text through it.
   */
 object TargetingPredicateSpec extends ZIOSpecDefault:
 
@@ -143,8 +143,8 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
         )
       },
       test("accumulates every independent formula-level violation at once") {
-        // A quantifier (fragment) and a reserved predicate (mitigation state)
-        // are independent checks on the parsed formula; both must be reported.
+        // A quantifier and a mitigation-state predicate are two refusals of the
+        // targeting fragment, and both must be reported.
         val errs     = TargetingPredicate.create("forall x . mitigated(y)", ErrorSubject.Request).toEither.swap.toOption.get
         val problems = errs.map(_.problem).toList
         assertTrue(
