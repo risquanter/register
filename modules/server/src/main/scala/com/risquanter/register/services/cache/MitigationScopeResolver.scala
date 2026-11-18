@@ -1,6 +1,7 @@
 package com.risquanter.register.services.cache
 
 import zio.{UIO, NonEmptyChunk, ZIO}
+import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, LeafStageSpec, ScopeOutcome, TargetingPredicate}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
 import com.risquanter.register.domain.errors.Failure
@@ -10,7 +11,8 @@ import com.risquanter.register.http.errors.BindProblem
 import com.risquanter.register.http.responses.MitigationScopeEntry
 
 import vql.typed.{QueryBinder, TypedSemantics, extract}
-import vql.error.TypeCheckError
+import vql.error.{MismatchSite, TypeCheckError}
+import _root_.lexer.VariableText
 import _root_.parser.FOLParser
 import _root_.logic.FOLUtil
 
@@ -20,8 +22,8 @@ import _root_.logic.FOLUtil
   * workspace is the instance. Inside it the memo is keyed by (treeId, branch);
   * `revision` is stored in the entry and checked on read, not part of the key.
   * `revision` is the byte-level Irmin commit hash, never the domain content hash
-  * — predicates reference node names, which the content hash omits, so a rename
-  * changes resolution but not the content hash.
+  * — predicates resolve over the tree's structure, which the content hash omits,
+  * so a move changes resolution but not the content hash.
   */
 final case class ScopeResolutionContext(treeId: TreeId, branch: BranchRef, revision: CommitHash)
 
@@ -76,7 +78,7 @@ object MitigationScopeResolver:
     * evaluation per mitigation.
     *
     * The knowledge base is results-free and scopes-free: the targeting
-    * sublanguage admits no simulation symbol and no mitigation predicate, so an
+    * sublanguage admits no simulation symbol and no mitigation-state predicate, so an
     * empty result map and empty resolved scopes are correct and make the
     * resolved scopes a pure function of the tree version. */
   def resolveUncached(tree: RiskTree): ResolvedScopes =
@@ -93,10 +95,12 @@ object MitigationScopeResolver:
       case Left(failures) => ScopeOutcome.Failed(failures)
 
   /** Re-parse (source is the only stored form) → bind against this tree version's
-    * catalog → evaluate to the exact satisfying set → lift each `Value` to its
-    * `NodeId`. A stored predicate names a node by identifier, so a renamed node
-    * still binds and a deleted node's identifier binds and matches nothing. Bind
-    * fails only when the catalog changed under a stored predicate, and that
+    * catalog → require the bound variable to be a node → evaluate to the exact
+    * satisfying set → lift each `Value` to its `NodeId`. A stored predicate names
+    * a node by identifier, so a renamed node still binds and a deleted node's
+    * identifier binds and matches nothing. Bind fails when the catalog changed
+    * under a stored predicate, and a variable of another sort, such as the
+    * mitigation in `mitigation_named(x, "Backups")`, is a sort mismatch. Either
     * failure is the outcome. A predicate `TargetingPredicate.create`
     * accepted re-parses, has one free variable and evaluates once bound, so a
     * failure there, and a bind error that does not translate, is a defect and
@@ -116,9 +120,14 @@ object MitigationScopeResolver:
               case Left(head :: tail) =>
                 Left(NonEmptyChunk(bindProblem(head), tail.map(bindProblem)*))
               case Right((bound, boundVar)) =>
-                TypedSemantics.satisfyingSet(bound, boundVar, kb.model) match
-                  case Left(qe)      => defect(s"a bound targeting predicate failed to evaluate: ${qe.getClass.getSimpleName}")
-                  case Right(values) => Right(values.flatMap(_.extract[NodeId].toOption))
+                QuerySort.fromSymbol(boundVar.sort.value) match
+                  case Some(QuerySort.Node) =>
+                    TypedSemantics.satisfyingSet(bound, boundVar, kb.model) match
+                      case Left(qe)      => defect(s"a bound targeting predicate failed to evaluate: ${qe.getClass.getSimpleName}")
+                      case Right(values) => Right(values.flatMap(_.extract[NodeId].toOption))
+                  case Some(_) | None =>
+                    Left(NonEmptyChunk(bindProblem(TypeCheckError.TypeMismatch(
+                      QuerySort.Node.typeId, boundVar.sort, MismatchSite.Variable(VariableText.of(boundVar.name))))))
           case _ =>
             defect("a stored targeting predicate does not have exactly one free variable")
 

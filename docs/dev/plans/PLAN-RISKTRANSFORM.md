@@ -6851,6 +6851,17 @@ Every path is on `PLAN-RISKTRANSFORM-INVENTORY.md`.
 **Status: approved by the user and implemented, 2026-11-18.** The four tiers
 without an image rebuild are green. BATS suites C and A are due.
 
+**Complex-review fix, approved 2026-11-18.** `mitigation_named` and
+`mitigation_id` are admitted in a target, and each gives the free variable the
+Mitigation sort. Such a target bound, evaluated to mitigations, and lost them
+all when each value was lifted to a `NodeId`, so the scope resolved empty and
+was not reported. Under ruling D1 the typed bind at resolution catches the
+sort. `MitigationScopeResolver.satisfyingIds` now requires the bound variable
+to be a Node and otherwise returns `Failed` with a `SortMismatch` from Node to
+the variable's sort. That is the report TERMINOLOGY 3.9 states for a predicate
+that does not fit. `MitigationScopeResolverSpec` pins it with
+`mitigation_named(x, "m-mitsort")`.
+
 **Origin.** §8.4-3's reach ruling of 2026-11-17 moves every inspection of a
 targeting formula behind an engine API. The engine's plan for that API, in the
 `vague-quantifier-logic` repository at

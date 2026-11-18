@@ -168,6 +168,20 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         )
       },
 
+      test("a target whose variable is a mitigation fails with a sort mismatch") {
+        // The literal names the tree's own mitigation, so the bind succeeds and
+        // the sort of `x` is what refuses the target.
+        val m = mit("m-mitsort", """mitigation_named(x, "m-mitsort")""", resultSpec)
+        for
+          r   <- newResolver
+          out <- r.resolve(ctx(rev1), mkTree(m))
+        yield assertTrue(out.outcomes(m.id) match
+          case ScopeOutcome.Failed(errs) => errs.toList match
+            case BindProblem.SortMismatch(_, QuerySort.Node, QuerySort.Mitigation) :: Nil => true
+            case _                                                                        => false
+          case _ => false)
+      },
+
       test("a deleted node's identifier binds and matches nothing") {
         val gone = idStr("gone")
         val m    = mit("m-gone", s"""eq(x, node_id("$gone")) \\/ eq(x, node_id("${webId.value}"))""", resultSpec)
