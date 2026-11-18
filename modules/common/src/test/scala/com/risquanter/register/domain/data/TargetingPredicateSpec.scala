@@ -152,6 +152,21 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
           problems.contains(FieldProblem.TargetingQuantifierNotAllowed),
           problems.contains(FieldProblem.TargetingMitigationStateReferenced)
         )
+      },
+      test("a quantifier and a function that is not admitted report both") {
+        assertTrue(problems("""leaf(x) /\ forall y . p95(y, "inherent") < 5""") ==
+          List(FieldProblem.TargetingQuantifierNotAllowed, FieldProblem.TargetingFunctionNotAllowed))
+      },
+      test("a refusal that occurs twice is reported once") {
+        assertTrue(problems("forall y . forall z . leaf(x)") == List(FieldProblem.TargetingQuantifierNotAllowed))
+      },
+      test("the refusals follow the formula's order") {
+        assertTrue(problems("""eq(x, node_named("A")) /\ mitigated(x)""") ==
+          List(FieldProblem.TargetingNodeNameReferenced, FieldProblem.TargetingMitigationStateReferenced))
+      },
+      test("a node function nested in a value function reports both") {
+        assertTrue(problems("""leaf(x) /\ p95(node_named("A"), "inherent") < 5""") ==
+          List(FieldProblem.TargetingFunctionNotAllowed, FieldProblem.TargetingNodeNameReferenced))
       }
     ),
     test("every refusal is located at the given subject's TargetingSource") {

@@ -2491,6 +2491,7 @@ has landed green (G8).
 | 7 | Adopting vql-engine 0.19.0: the node-returning functions, the removal of `named_risk`, `risk_id` and the bare quoted node name, the rename of `named_mitigation` to `mitigation_named`, the refusal of a name in a stored predicate, and the 4096-character source bound. Lands before slice 2 | §7.6.15 | Landed |
 | 8 | Adopting vql-engine 0.20.0 and mapping its nesting-depth refusals. Lands before slice 2 | §7.6.16 | Landed, 0.20.5 |
 | 9 | Adopting vql-engine 0.22.0, taking up 0.21.0's ordered domains with it | §7.6.18 | Landed, 0.24.4, all tiers green including BATS |
+| 10 | Adopting vql-engine 0.23.0: the engine inspects a targeting formula, and register's five walks over `Formula` are deleted | §7.6.19 | Implemented, 2026-11-18; the four tiers without an image rebuild green, BATS due |
 
 Slices 2 to 5 are specified below and carry no open decision. Slice 2's one
 decision, §7.6.12 decision 11, the submitted form of a leaf-stage mitigation, is
@@ -5591,6 +5592,10 @@ The fragment check admits the node functions, and a sixth check refuses a name:
   private def appliedFunctions(formula: Formula[FOL]): Set[String]
 ```
 
+**Superseded by §7.6.19:** `requireNoNodeName` and `appliedFunctions` are
+deleted. The engine refuses `node_named` as a function the targeting fragment
+does not admit. Do not implement the two signatures above.
+
 `requireNoNodeName` joins the three accumulated checks in `create`, so a
 predicate breaking two rules reports both. It looks for `node_named` alone. A
 quoted literal in a node position binds nowhere after decision 19, so it needs no
@@ -6840,6 +6845,299 @@ no constant is added. ADR-018: compliant, each wrapper stays a nominal
 ##### File inventory
 
 Every path is on `PLAN-RISKTRANSFORM-INVENTORY.md`.
+
+#### 7.6.19 M4 slice 10 — adopting vql-engine 0.23.0, the engine's inspection of a targeting formula
+
+**Status: approved by the user and implemented, 2026-11-18.** The four tiers
+without an image rebuild are green. BATS suites C and A are due.
+
+**Origin.** §8.4-3's reach ruling of 2026-11-17 moves every inspection of a
+targeting formula behind an engine API. The engine's plan for that API, in the
+`vague-quantifier-logic` repository at
+`docs/archive/plans/DONE_PLAN-targeting-formula-inspection.md`, is implemented
+and released as vql-engine 0.23.0. Its §10, "What register must do, named
+once", lists the four steps this slice takes. The slice is part of M4, so the
+plan closes only after it lands.
+
+**What 0.23.0 changes, in plain terms.** The engine's `CHANGELOG.md` lists:
+
+- "`Fragment.Targeting` takes a second parameter, `forbiddenPredicates:
+  Set[SymbolName]`. An atom whose predicate name equals a forbidden name, after
+  both are lower-cased, is refused."
+- "`FragmentViolation` has a new case, `PredicateNotAllowed(predicate:
+  SymbolText)`."
+- "`FragmentCheck.violations(formula, fragment)`: every violation, in
+  pre-order, left-to-right traversal, one per occurrence. It walks below a
+  quantifier and into a refused application's arguments."
+- "`FragmentCheck.literalArguments(formula, function)`: the literal argument of
+  every application of `function` whose only argument is a literal, as
+  `LiteralText`, left to right with repeats kept."
+- "`FragmentCheck.check` returns the first element of `violations`."
+
+**What reaches register.** `TargetingPredicate.scala` holds five functions that
+walk `Formula` by hand: `atomPredicates`, `appliedFunctions`, `termFunctions`,
+`namedNodeLiterals` and `termNodeLiterals`. All five are deleted, along with
+`reservedPredicates`, `requireNoMitigationPredicate` and `requireNoNodeName`.
+`checkFragment` keeps its name and now returns every fragment refusal. Each
+check the deleted functions made is now one case of a fragment violation:
+
+| Formula | Engine violation | Register refusal, unchanged |
+|---|---|---|
+| `forall y . leaf(y)` | `QuantifierNotAllowed` | `TargetingQuantifierNotAllowed` |
+| `p95(x, "inherent") < 5` | `FunctionApplicationNotAllowed("p95")` | `TargetingFunctionNotAllowed` |
+| `eq(x, node_named("Web"))` | `FunctionApplicationNotAllowed("node_named")` | `TargetingNodeNameReferenced` |
+| `Mitigated(x)` | `PredicateNotAllowed("Mitigated")` | `TargetingMitigationStateReferenced` |
+
+`node_named` produces the third row because the admitted functions no longer
+include it.
+
+##### The widened refusal — design
+
+**What widens.** Today a formula is checked by four separate functions, and the
+fragment function, `checkFragment`, calls `FragmentCheck.check`, which stops at
+the first fragment violation. After this slice one call to
+`FragmentCheck.violations` returns every violation, and all of them are
+reported. §7.6.15 asked for this: "a predicate breaking two rules reports
+both".
+
+**Today and after, on one formula.**
+
+```
+leaf(x) /\ forall y . p95(y, "inherent") < 5
+today:  TargetingQuantifierNotAllowed                  // check stops at the quantifier
+after:  TargetingQuantifierNotAllowed, TargetingFunctionNotAllowed
+```
+
+A formula whose violations fall into two of today's four checks is already
+refused with both today. For `forall x . mitigated(y)` the fragment check and
+the mitigation-state check each report one. What widens is the case of two
+violations inside the fragment check.
+
+**The steps, in order.**
+
+1. `FragmentCheck.violations(formula, targetingFragment)` returns one
+   `FragmentViolation` per occurrence, in pre-order, left to right. It walks
+   below a quantifier and into the arguments of a refused application.
+2. `fragmentProblem` maps each violation to register's `FieldProblem`, by the
+   table above.
+3. `.distinct` keeps the first occurrence of each `FieldProblem`. Two
+   quantifiers give one `TargetingQuantifierNotAllowed`.
+4. Each remaining problem becomes a `ValidationError` at the mitigation's
+   `TargetingSource` field. `Validation.validateAll` accumulates them, so none
+   is dropped.
+5. `Validation.validateWith` joins that result with the free-variable check,
+   which is independent. Its refusal comes after the fragment refusals.
+
+**Why the list is made distinct, and why that bounds the response.** A source
+is at most 2048 characters (`TargetingSource`). Without step 3, one source
+could carry several hundred refused applications. `p95(p95(p95(…)))` gives
+one violation per `p95`, and the refusal would repeat the same entry several
+hundred times. After step 3 a refusal holds at most one entry per
+`FieldProblem` case the mapping produces: the four in the table above.
+`QuantifierDepthExceeded` arises only under `Fragment.Screening`, so it never
+reaches here. The free-variable check adds at most one more. So one
+mitigation's target is refused with at most five entries. The bound is chosen
+here, and it is what keeps the response size independent of the source's
+length (code-quality-review, API4:2023).
+
+**The order.** The refusals follow the formula, then the free-variable check.
+For `eq(x, node_named("A")) /\ mitigated(x)`:
+
+```
+today:  TargetingMitigationStateReferenced, TargetingNodeNameReferenced   // check order
+after:  TargetingNodeNameReferenced, TargetingMitigationStateReferenced   // formula order
+```
+
+The set of refusals is the same in both orders.
+
+**Where the refusals go.** `TargetingPredicate.create` has two callers. Neither
+needs a change.
+
+- **The tree write.** `RiskTreeRequests.refineTargetField` calls `create` for
+  each submitted mitigation. Its refusals join the request's accumulated
+  `ValidationError`s, and the response lists them. The wire shape is unchanged:
+  each entry has the same location, the same `CONSTRAINT_VIOLATION` code, and
+  this service's own sentence. Only the number of entries can grow, within the
+  bound above. The HTTP status is unchanged.
+- **The stored-mitigation decoder.** `Mitigation`'s codec re-runs `create` and
+  joins the refusals' sentences with "; ". A stored predicate passed `create`
+  when it was written, so this path refuses only if the stored text has
+  changed. Then the store's answer is refused. The joined text is at most five
+  of this service's own fixed sentences, by the bound above, so its length does
+  not depend on the stored source.
+
+The browser compiles `create` as well. No form in the interface authors a
+targeting predicate, so no interface code reads these refusals.
+
+**No caller text in a refusal.** `PredicateNotAllowed` and
+`FunctionApplicationNotAllowed` carry the name the formula wrote. The mapping
+reads that name only to recognise `node_named`, and the four `FieldProblem`
+cases carry no text. So no word of the caller's formula reaches a refusal
+(ADR-035 §5).
+
+**`build.sbt`:** `vqlEngineVersion` goes from `"0.22.0"` to `"0.23.0"`. A
+first-party artifact is exempt from the cooldown (ADR-020 §10). The engine's
+`README.md` names 0.23.0 as the published version.
+
+**`modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`**,
+in `enum QueryPredicate`:
+
+```scala
+    /** Whether a targeting predicate may name this predicate. A mitigation
+      * must not target by the state it changes, so the three mitigation-state
+      * predicates are refused. Every case is listed, so a new predicate is
+      * classified where it is declared. */
+    def admittedInTarget: Boolean = this match
+      case Mitigate | Mitigated | Unmitigated => false
+      case Leaf | Portfolio | ChildOf | DescendantOf | LeafDescendantOf | GtLoss | GtProb | Eq |
+           MitigationNamed | MitigationIdOf => true
+```
+
+In `object Signatures`, `targetingFunctions` changes and one value is added:
+
+```scala
+    /** The functions a targeting predicate admits: those returning a node,
+      * except `node_named`, so a rename cannot move a scope onto another node.
+      *
+      * {{{
+      * targetingFunctions  // Set(SymbolName("node_id"))
+      * }}}
+      */
+    val targetingFunctions: Set[SymbolName] =
+      catalog.domainReturningFunctions - NodeFunction.ByName.symbolName
+
+    /** The predicates a targeting predicate may not name.
+      *
+      * {{{
+      * targetingForbiddenPredicates  // Set(SymbolName("mitigate"), SymbolName("mitigated"), SymbolName("unmitigated"))
+      * }}}
+      */
+    val targetingForbiddenPredicates: Set[SymbolName] =
+      QueryPredicate.values.filterNot(_.admittedInTarget).map(_.symbolName).toSet
+```
+
+Family search. `admittedInTarget` joins the methods on `FolSymbols`'s enums.
+The quoted member is `QuerySort.typeId` (`FolSymbols.scala`, `def typeId:
+TypeId = TypeId(symbol)`). No existing method or set says which predicates a
+target may use. The one existing statement of it is `reservedPredicates` in
+`TargetingPredicate.scala`, which this slice deletes. `targetingForbiddenPredicates`
+joins the targeting sets in `Signatures`, whose one member is
+`targetingFunctions`. It is typed `Set[SymbolName]` because that is the type
+`Fragment.Targeting` takes. A raw `String` set is what it replaces.
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/TargetingPredicate.scala`.**
+In `create`, the four accumulated checks become two:
+
+```scala
+      Validation.validateWith(
+        checkFragment(formula, location),
+        checked(requireSingleFreeVariable(formula))
+      )((_, _) => new TargetingPredicate(refined))
+```
+
+```scala
+  /** Every targeting-fragment refusal of the formula, once each, in the order
+    * the formula holds them. */
+  private def checkFragment(formula: Formula[FOL], location: ErrorLocation): Validation[ValidationError, Unit] =
+    Validation.validateAll(
+      FragmentCheck.violations(formula, targetingFragment)
+        .map(fragmentProblem)
+        .distinct
+        .map(problem => Validation.fail(ValidationError(location, problem)))
+    ).as(())
+
+  /** The fragment a targeting predicate belongs to. */
+  private val targetingFragment: Fragment =
+    Fragment.Targeting(Signatures.targetingFunctions, Signatures.targetingForbiddenPredicates)
+
+  private def fragmentProblem(v: FragmentViolation): FieldProblem = v match
+    case FragmentViolation.QuantifierNotAllowed => FieldProblem.TargetingQuantifierNotAllowed
+    case FragmentViolation.FunctionApplicationNotAllowed(function) if function.value == NodeFunction.ByName.symbol =>
+      FieldProblem.TargetingNodeNameReferenced
+    case FragmentViolation.FunctionApplicationNotAllowed(_) => FieldProblem.TargetingFunctionNotAllowed
+    case FragmentViolation.PredicateNotAllowed(_)           => FieldProblem.TargetingMitigationStateReferenced
+    case FragmentViolation.QuantifierDepthExceeded(limit, found) =>
+      FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(limit), NonNegativeInt.count(found))
+```
+
+`referencedNodes` keeps its signature (§7.6.17) and its order and repeats:
+
+```scala
+  def referencedNodes(predicate: TargetingPredicate): List[NodeId] =
+    FOLParser.parse(predicate.source).fold(_ => Nil, FragmentCheck.literalArguments(_, NodeFunction.ById.symbolName))
+      .flatMap(literal => NodeId.fromString(literal.value).toOption)
+```
+
+`NodeFunction` and `QueryPredicate` each gain the method `QuerySort` has as
+`typeId` (user-approved, 2026-11-18):
+
+```scala
+    /** The name the engine's catalog declares for this symbol. */
+    def symbolName: SymbolName = SymbolName(symbol)
+```
+
+`targetingFunctions`, `targetingForbiddenPredicates`, the function map and the
+predicate map in `Signatures` read it. `RiskTreeKnowledgeBase.scala` is not in
+this slice and keeps its spellings.
+
+`.value` is called on `LiteralText` to hand the text to `NodeId.fromString`,
+which refines it back into the domain. `QueryPredicate` and `Term` leave the
+imports. The scaladoc of `create`
+lists two formula checks, where it now lists four.
+
+**Superseded here.** The signatures of `requireNoNodeName` and
+`appliedFunctions` in §7.6.15 are marked superseded by this section where they
+sit.
+
+**Tests.**
+
+- `TargetingPredicateSpec`. Its present cases stay as written, and they pin the
+  four refusals and `referencedNodes`' order. It gains:
+  - "a quantifier and a function that is not admitted report both", over
+    `leaf(x) /\ forall y . p95(y, "inherent") < 5`;
+  - "a refusal that occurs twice is reported once", over
+    `forall y . forall z . leaf(x)`, which gives one
+    `TargetingQuantifierNotAllowed`;
+  - "the refusals follow the formula's order", over
+    `eq(x, node_named("A")) /\ mitigated(x)`, which gives
+    `List(TargetingNodeNameReferenced, TargetingMitigationStateReferenced)`;
+  - "a node function nested in a value function reports both", over
+    `leaf(x) /\ p95(node_named("A"), "inherent") < 5`.
+- `RiskTreeKnowledgeBaseSpec`. "A targeting predicate admits exactly the two
+  node-returning functions" becomes "a targeting predicate admits `node_id`
+  alone", asserting `Set(SymbolName("node_id"))`. The assertion changes because
+  this plan changes the set it pins. It gains "a targeting predicate may not
+  name the three mitigation-state predicates", asserting
+  `targetingForbiddenPredicates` against the three symbols.
+- The four tiers that need no image rebuild, then BATS suites C and A, because
+  the slice ends a phase.
+
+**ADR alignment.**
+
+- ADR-020 §10: compliant, under the first-party exemption.
+- ADR-029 §3: compliant. The `TargetingPredicate.create` row states the same
+  restrictions, and the formula is still never re-serialised.
+- ADR-035 §5: compliant. The fragment refusals are `FieldProblem` cases that
+  carry no caller text. The engine's `SymbolText` payload stays in the
+  mapping.
+- ADR-037: compliant. The forbidden set is derived from `QueryPredicate`'s
+  cases, and the one string compared, `node_named`, is `NodeFunction.ByName`'s
+  declared symbol.
+- ADR-001 and ADR-010: compliant. `create` remains the one validation
+  boundary, and independent refusals still accumulate.
+
+**Open decisions.** None. The engine's §10 settles each step, and the widened
+behaviour is the one §7.6.15 asked for.
+
+**Terminology impact.** None. TERMINOLOGY.md 3.8 says a targeting predicate "may
+use only the tree's structure". That stays true, because what is refused is
+unchanged.
+
+##### File inventory
+
+Every path is on `PLAN-RISKTRANSFORM-INVENTORY.md`: `build.sbt`,
+`FolSymbols.scala`, `TargetingPredicate.scala`, `TargetingPredicateSpec.scala`
+and `RiskTreeKnowledgeBaseSpec.scala`.
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 

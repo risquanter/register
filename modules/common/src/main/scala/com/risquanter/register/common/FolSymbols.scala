@@ -55,6 +55,9 @@ object FolSymbols:
     case ById   extends NodeFunction("node_id")
     case ByName extends NodeFunction("node_named")
 
+    /** The name the engine's catalog declares for this symbol. */
+    def symbolName: SymbolName = SymbolName(symbol)
+
   /** The query language's predicates. `symbol` is the name the engine binds
     * (ADR-037). */
   enum QueryPredicate(val symbol: String):
@@ -71,6 +74,18 @@ object FolSymbols:
     case Mitigate         extends QueryPredicate("mitigate")
     case Mitigated        extends QueryPredicate("mitigated")
     case Unmitigated      extends QueryPredicate("unmitigated")
+
+    /** The name the engine's catalog declares for this symbol. */
+    def symbolName: SymbolName = SymbolName(symbol)
+
+    /** Whether a targeting predicate may name this predicate. A mitigation
+      * must not target by the state it changes, so the three mitigation-state
+      * predicates are refused. Every case is listed, so a new predicate is
+      * classified where it is declared. */
+    def admittedInTarget: Boolean = this match
+      case Mitigate | Mitigated | Unmitigated => false
+      case Leaf | Portfolio | ChildOf | DescendantOf | LeafDescendantOf | GtLoss | GtProb | Eq |
+           MitigationNamed | MitigationIdOf => true
 
   /** The sorts the knowledge base's catalog declares.
     *
@@ -225,12 +240,12 @@ object FolSymbols:
       SymbolName(ValueFunction.P95.symbol)   -> FunctionSig(List(node, mitigation), loss),
       SymbolName(ValueFunction.P99.symbol)   -> FunctionSig(List(node, mitigation), loss),
       SymbolName(ValueFunction.Lec.symbol)   -> FunctionSig(List(node, loss, mitigation), probability),
-      SymbolName(NodeFunction.ById.symbol)   -> FunctionSig(List(nodeIdLiteral), node),
-      SymbolName(NodeFunction.ByName.symbol) -> FunctionSig(List(nodeNameLiteral), node)
+      NodeFunction.ById.symbolName           -> FunctionSig(List(nodeIdLiteral), node),
+      NodeFunction.ByName.symbolName         -> FunctionSig(List(nodeNameLiteral), node)
     )
 
     val predicates: Map[SymbolName, PredicateSig] =
-      QueryPredicate.values.map(p => SymbolName(p.symbol) -> signature(p)).toMap
+      QueryPredicate.values.map(p => p.symbolName -> signature(p)).toMap
 
     private def signature(predicate: QueryPredicate): PredicateSig = predicate match
       case QueryPredicate.Leaf | QueryPredicate.Portfolio | QueryPredicate.Mitigated |
@@ -247,13 +262,24 @@ object FolSymbols:
       * functions a targeting predicate admits, and binds nothing. */
     val catalog: TypeCatalog = TypeCatalog.unsafe(types, constants, functions, predicates, Map.empty)
 
-    /** The functions a targeting predicate admits: those returning a node.
+    /** The functions a targeting predicate admits: those returning a node,
+      * except `node_named`, so a rename cannot move a scope onto another node.
       *
       * {{{
-      * targetingFunctions  // Set(SymbolName("node_id"), SymbolName("node_named"))
+      * targetingFunctions  // Set(SymbolName("node_id"))
       * }}}
       */
-    val targetingFunctions: Set[SymbolName] = catalog.domainReturningFunctions
+    val targetingFunctions: Set[SymbolName] =
+      catalog.domainReturningFunctions - NodeFunction.ByName.symbolName
+
+    /** The predicates a targeting predicate may not name.
+      *
+      * {{{
+      * targetingForbiddenPredicates  // Set(SymbolName("mitigate"), SymbolName("mitigated"), SymbolName("unmitigated"))
+      * }}}
+      */
+    val targetingForbiddenPredicates: Set[SymbolName] =
+      QueryPredicate.values.filterNot(_.admittedInTarget).map(_.symbolName).toSet
 
   /** Every function, predicate and constant name of the catalog. */
   val reservedNames: Set[String] =

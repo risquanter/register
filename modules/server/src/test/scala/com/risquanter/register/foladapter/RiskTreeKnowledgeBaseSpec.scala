@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{
   ResultTransformSpec, MitigationSelection
 }
 import com.risquanter.register.common.ValuationBasis
-import com.risquanter.register.common.FolSymbols.{NodeFunction, QuerySort, Signatures, ValueFunction}
+import com.risquanter.register.common.FolSymbols.{QuerySort, Signatures, ValueFunction}
 import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
@@ -20,7 +20,7 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import vql.parser.VagueQueryParser
 import vql.semantics.VagueSemantics
 import vql.error.TypeCheckError
-import vql.typed.{Value, FolModel, QueryBinder}
+import vql.typed.{Value, FolModel, QueryBinder, SymbolName}
 
 /** Tests for [[RiskTreeKnowledgeBase]] — the bridge between register's domain
   * model and the vql-engine typed evaluation pipeline.
@@ -263,12 +263,12 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // totalTrials = 5, target = 5 * 0.95 = 4.75
       // Walk: 0→cum 1, 5000→cum 2, 10000→cum 3, 20000→cum 4, 50000→cum 5
       // First where cum >= 4.75 is 50000 (cum=5)
-      val result = kb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val result = kb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
       assertTrue(result == Right(50000L))
     },
     test("p99 returns correct loss for known distribution") {
       // Same logic, target = 5 * 0.99 = 4.95 → 50000 (cum=5)
-      val result = kb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
+      val result = kb.dispatcher.evalFunction(SymbolName("p99"), List(nodeVal("Cyber"), inherent))
       assertTrue(result == Right(50000L))
     },
     test("p95 on wider distribution selects correct quantile") {
@@ -277,7 +277,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // totalTrials = 5, target = 5 * 0.95 = 4.75
       // Walk: 500→1, 1000→3, 2000→4, 8000→5
       // First where cum >= 4.75 is 8000 (cum=5)
-      val result = kb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Hardware"), inherent))
+      val result = kb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Hardware"), inherent))
       assertTrue(result == Right(8000L))
     },
     test("p50 behaviour via percentile — verified through lec instead") {
@@ -285,17 +285,17 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // Cyber outcomeCount: {0→1, 5000→1, 10000→1, 20000→1, 50000→1}
       // rangeFrom(10000) = {10000→1, 20000→1, 50000→1}, sum = 3
       // P = 3/5 = 0.6
-      val result = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossVal(10000L), inherent))
+      val result = kb.dispatcher.evalFunction(SymbolName("lec"), List(nodeVal("Cyber"), lossVal(10000L), inherent))
       assertTrue(result == Right(0.6))
     },
     test("percentile with empty outcomes returns 0") {
       val emptyKb = kbInherent(tree, results.updated(cyberId, emptyResult))
-      val result = emptyKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val result = emptyKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
       assertTrue(result == Right(0L))
     },
     test("percentile monotonicity: p95 <= p99") {
-      val p95 = kb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
-      val p99 = kb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
+      val p95 = kb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val p99 = kb.dispatcher.evalFunction(SymbolName("p99"), List(nodeVal("Cyber"), inherent))
       for
         v95 <- p95
         v99 <- p99
@@ -318,7 +318,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // Walk: 5000→cum 8, 10000→cum 9, 50000→cum 10
       // First where cum >= 9.5 is 50000 (cum=10)
       val sparseKb = kbInherent(tree, sparseResults)
-      val result = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val result = sparseKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
       assertTrue(result == Right(50000L))
     },
     test("p95 on sparse hardware — walks past zero mass into tail") {
@@ -326,7 +326,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // target = 10 * 0.95 = 9.5, cum: 7, 8, 9, 10
       // Walk: 500→8, 1000→9, 2000→10 → first >= 9.5 is 2000
       val sparseKb = kbInherent(tree, sparseResults)
-      val result = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Hardware"), inherent))
+      val result = sparseKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Hardware"), inherent))
       assertTrue(result == Right(2000L))
     },
     test("p99 with low occurrence returns last outcome") {
@@ -334,7 +334,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // target = 10 * 0.99 = 9.9
       // Walk: 5000→8, 10000→9, 50000→10 → first >= 9.9 is 50000
       val sparseKb = kbInherent(tree, sparseResults)
-      val result = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
+      val result = sparseKb.dispatcher.evalFunction(SymbolName("p99"), List(nodeVal("Cyber"), inherent))
       assertTrue(result == Right(50000L))
     },
     test("p95 with very sparse results returns 0 — target deep in zero mass") {
@@ -345,7 +345,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         leafOf(cyberId, Map(1 -> 10000L, 2 -> 50000L), None)
       }
       val sparseKb = kbInherent(tree, results.updated(cyberId, verySparse))
-      val result = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val result = sparseKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
       assertTrue(result == Right(0L))
     },
     test("single outcome with many implicit zeros — p95 in zero mass, p99 in zero mass") {
@@ -356,8 +356,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         leafOf(cyberId, Map(1 -> 42000L), None)
       }
       val singleKb = kbInherent(tree, results.updated(cyberId, single))
-      val p95 = singleKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
-      val p99 = singleKb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
+      val p95 = singleKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val p99 = singleKb.dispatcher.evalFunction(SymbolName("p99"), List(nodeVal("Cyber"), inherent))
       assertTrue(
         p95 == Right(0L),
         p99 == Right(0L)
@@ -371,8 +371,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         leafOf(cyberId, Map(1 -> 7000L, 2 -> 7000L, 3 -> 7000L, 4 -> 7000L, 5 -> 7000L), None)
       }
       val identKb = kbInherent(tree, results.updated(cyberId, identical))
-      val p95 = identKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
-      val p99 = identKb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
+      val p95 = identKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val p99 = identKb.dispatcher.evalFunction(SymbolName("p99"), List(nodeVal("Cyber"), inherent))
       assertTrue(
         p95 == Right(7000L),
         p99 == Right(7000L)
@@ -386,7 +386,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         leafOf(cyberId, Map(1 -> 30000L), None)
       }
       val bKb = kbInherent(tree, results.updated(cyberId, boundary))
-      val p95 = bKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val p95 = bKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
       assertTrue(p95 == Right(0L))
     },
     test("just past boundary — implicitZeros just below target at p99") {
@@ -397,20 +397,20 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         leafOf(cyberId, Map(1 -> 30000L), None)
       }
       val bKb = kbInherent(tree, results.updated(cyberId, boundary))
-      val p99 = bKb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
+      val p99 = bKb.dispatcher.evalFunction(SymbolName("p99"), List(nodeVal("Cyber"), inherent))
       assertTrue(p99 == Right(30000L))
     },
     test("lec is unaffected by sparse results — still unconditional") {
       // sparseCyberResult: nTrials=10, outcomes = {5000, 10000, 50000}
       // P(Loss >= 5000) = count(outcomes >= 5000) / nTrials = 3/10 = 0.3
       val sparseKb = kbInherent(tree, sparseResults)
-      val result = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossVal(5000L), inherent))
+      val result = sparseKb.dispatcher.evalFunction(SymbolName("lec"), List(nodeVal("Cyber"), lossVal(5000L), inherent))
       assertTrue(result == Right(0.3))
     },
     test("monotonicity holds with sparse outcomes: p95 <= p99") {
       val sparseKb = kbInherent(tree, sparseResults)
-      val p95 = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
-      val p99 = sparseKb.dispatcher.evalFunction(vql.typed.SymbolName("p99"), List(nodeVal("Cyber"), inherent))
+      val p95 = sparseKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val p99 = sparseKb.dispatcher.evalFunction(SymbolName("p99"), List(nodeVal("Cyber"), inherent))
       for
         v95 <- p95
         v99 <- p99
@@ -427,105 +427,105 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private val predicateSuite = suite("predicates")(
     suite("leaf / portfolio")(
       test("leaf returns true for leaf nodes") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("leaf"), List(nodeVal("Cyber")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("leaf"), List(nodeVal("Cyber")))
         assertTrue(r == Right(true))
       },
       test("leaf returns false for portfolio nodes") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("leaf"), List(nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("leaf"), List(nodeVal("Root")))
         assertTrue(r == Right(false))
       },
       test("portfolio returns true for portfolio nodes") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("portfolio"), List(nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("portfolio"), List(nodeVal("Root")))
         assertTrue(r == Right(true))
       },
       test("portfolio returns false for leaf nodes") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("portfolio"), List(nodeVal("Cyber")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("portfolio"), List(nodeVal("Cyber")))
         assertTrue(r == Right(false))
       }
     ),
     suite("child_of")(
       test("direct child returns true") {
         // IT Risk is a child of Root
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("child_of"), List(nodeVal("IT Risk"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("child_of"), List(nodeVal("IT Risk"), nodeVal("Root")))
         assertTrue(r == Right(true))
       },
       test("grandchild returns false") {
         // Cyber is NOT a direct child of Root (it's a child of IT Risk)
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("child_of"), List(nodeVal("Cyber"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("child_of"), List(nodeVal("Cyber"), nodeVal("Root")))
         assertTrue(r == Right(false))
       },
       test("self is not own child") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("child_of"), List(nodeVal("Root"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("child_of"), List(nodeVal("Root"), nodeVal("Root")))
         assertTrue(r == Right(false))
       }
     ),
     suite("descendant_of — standard irreflexive semantics")(
       test("grandchild is a descendant") {
         // Cyber is a descendant of Root (via IT Risk)
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("descendant_of"), List(nodeVal("Cyber"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("descendant_of"), List(nodeVal("Cyber"), nodeVal("Root")))
         assertTrue(r == Right(true))
       },
       test("direct child is a descendant") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("descendant_of"), List(nodeVal("IT Risk"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("descendant_of"), List(nodeVal("IT Risk"), nodeVal("Root")))
         assertTrue(r == Right(true))
       },
       test("node is NOT its own descendant (irreflexive)") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("descendant_of"), List(nodeVal("Root"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("descendant_of"), List(nodeVal("Root"), nodeVal("Root")))
         assertTrue(r == Right(false))
       },
       test("leaf is NOT its own descendant") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("descendant_of"), List(nodeVal("Cyber"), nodeVal("Cyber")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("descendant_of"), List(nodeVal("Cyber"), nodeVal("Cyber")))
         assertTrue(r == Right(false))
       },
       test("parent is not a descendant of child") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("descendant_of"), List(nodeVal("Root"), nodeVal("Cyber")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("descendant_of"), List(nodeVal("Root"), nodeVal("Cyber")))
         assertTrue(r == Right(false))
       }
     ),
     suite("leaf_descendant_of")(
       test("leaf under ancestor returns true") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("leaf_descendant_of"), List(nodeVal("Cyber"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("leaf_descendant_of"), List(nodeVal("Cyber"), nodeVal("Root")))
         assertTrue(r == Right(true))
       },
       test("portfolio under ancestor returns false") {
         // IT Risk is a descendant of Root but NOT a leaf
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("leaf_descendant_of"), List(nodeVal("IT Risk"), nodeVal("Root")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("leaf_descendant_of"), List(nodeVal("IT Risk"), nodeVal("Root")))
         assertTrue(r == Right(false))
       },
       test("leaf is NOT its own leaf_descendant (irreflexive)") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("leaf_descendant_of"), List(nodeVal("Cyber"), nodeVal("Cyber")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("leaf_descendant_of"), List(nodeVal("Cyber"), nodeVal("Cyber")))
         assertTrue(r == Right(false))
       }
     ),
     suite("gt_loss / gt_prob")(
       test("gt_loss with a > b returns true") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("gt_loss"), List(lossVal(5000L), lossVal(1000L)))
+        val r = kb.dispatcher.evalPredicate(SymbolName("gt_loss"), List(lossVal(5000L), lossVal(1000L)))
         assertTrue(r == Right(true))
       },
       test("gt_loss with a == b returns false") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("gt_loss"), List(lossVal(1000L), lossVal(1000L)))
+        val r = kb.dispatcher.evalPredicate(SymbolName("gt_loss"), List(lossVal(1000L), lossVal(1000L)))
         assertTrue(r == Right(false))
       },
       test("gt_loss with string literals (as engine delivers them)") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("gt_loss"), List(lossStr("5000"), lossStr("1000")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("gt_loss"), List(lossStr("5000"), lossStr("1000")))
         assertTrue(r == Right(true))
       },
       test("gt_prob with a > b returns true") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("gt_prob"), List(probVal(0.8), probVal(0.5)))
+        val r = kb.dispatcher.evalPredicate(SymbolName("gt_prob"), List(probVal(0.8), probVal(0.5)))
         assertTrue(r == Right(true))
       },
       test("gt_prob with a <= b returns false") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("gt_prob"), List(probVal(0.5), probVal(0.5)))
+        val r = kb.dispatcher.evalPredicate(SymbolName("gt_prob"), List(probVal(0.5), probVal(0.5)))
         assertTrue(r == Right(false))
       }
     ),
     suite("eq (node identity)")(
       test("same node id returns true") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("eq"), List(nodeVal("Cyber"), nodeVal("Cyber")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("eq"), List(nodeVal("Cyber"), nodeVal("Cyber")))
         assertTrue(r == Right(true))
       },
       test("different node ids return false") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("eq"), List(nodeVal("Cyber"), nodeVal("Hardware")))
+        val r = kb.dispatcher.evalPredicate(SymbolName("eq"), List(nodeVal("Cyber"), nodeVal("Hardware")))
         assertTrue(r == Right(false))
       }
     )
@@ -536,27 +536,27 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private val functionSuite = suite("functions")(
     test("lec computes correct probability of exceedance") {
       // Cyber: P(Loss >= 5000) = 4/5 = 0.8 (values: 5000, 10000, 20000, 50000)
-      val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossVal(5000L), inherent))
+      val r = kb.dispatcher.evalFunction(SymbolName("lec"), List(nodeVal("Cyber"), lossVal(5000L), inherent))
       assertTrue(r == Right(0.8))
     },
     test("lec with raw Long threshold (as engine delivers literals)") {
-      val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossStr("5000"), inherent))
+      val r = kb.dispatcher.evalFunction(SymbolName("lec"), List(nodeVal("Cyber"), lossStr("5000"), inherent))
       assertTrue(r == Right(0.8))
     },
     test("lec at a threshold of zero counts every trial, including those with no loss") {
-      val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossVal(0L), inherent))
+      val r = kb.dispatcher.evalFunction(SymbolName("lec"), List(nodeVal("Cyber"), lossVal(0L), inherent))
       assertTrue(r == Right(1.0))
     },
     test("lec with threshold above max returns 0.0") {
-      val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("lec"), List(nodeVal("Cyber"), lossVal(100000L), inherent))
+      val r = kb.dispatcher.evalFunction(SymbolName("lec"), List(nodeVal("Cyber"), lossVal(100000L), inherent))
       assertTrue(r == Right(0.0))
     },
     test("unknown asset returns Left") {
-      val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Nonexistent"), inherent))
+      val r = kb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Nonexistent"), inherent))
       assertTrue(r.isLeft)
     },
     test("unknown function returns Left") {
-      val r = kb.dispatcher.evalFunction(vql.typed.SymbolName("median"), List(nodeVal("Cyber"), inherent))
+      val r = kb.dispatcher.evalFunction(SymbolName("median"), List(nodeVal("Cyber"), inherent))
       assertTrue(r.isLeft)
     }
   )
@@ -669,7 +669,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val kb3 = RiskTreeKnowledgeBase(RiskTreeKnowledgeBase.schemaFor(t), Map.empty, Map.empty)
       assertTrue(
         !kb3.riskNameToId.contains("leaf"),
-        kb3.catalog.predicates.contains(vql.typed.SymbolName("leaf")),
+        kb3.catalog.predicates.contains(SymbolName("leaf")),
         kb3.riskNameCollisions.exists(s => s.startsWith("reserved:") && s.endsWith("leaf"))
       )
     },
@@ -693,10 +693,13 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         baseline == kb.reservedFolNames
       )
     },
-    test("a targeting predicate admits exactly the two node-returning functions") {
+    test("a targeting predicate admits node_id alone") {
+      assertTrue(Signatures.targetingFunctions == Set(SymbolName("node_id")))
+    },
+    test("a targeting predicate may not name the three mitigation-state predicates") {
       assertTrue(
-        Signatures.targetingFunctions ==
-          NodeFunction.values.map(f => vql.typed.SymbolName(f.symbol)).toSet
+        Signatures.targetingForbiddenPredicates ==
+          Set(SymbolName("mitigate"), SymbolName("mitigated"), SymbolName("unmitigated"))
       )
     },
     test("every value function's symbol reads back as that function, and the catalog declares each") {
@@ -705,7 +708,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       assertTrue(
         ValueFunction.values.forall(f => ValueFunction.fromSymbol(f.symbol) == Some(f)),
         ValueFunction.fromSymbol("leaf").isEmpty,
-        ValueFunction.values.map(f => vql.typed.SymbolName(f.symbol)).toSet.subsetOf(kb.catalog.functions.keySet)
+        ValueFunction.values.map(f => SymbolName(f.symbol)).toSet.subsetOf(kb.catalog.functions.keySet)
       )
     },
     test("the catalog's sorts are exactly QuerySort's, and fromSymbol undoes symbol") {
@@ -802,28 +805,28 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   private val mitigationPredicateSuite = suite("mitigation predicates (M3)")(
     test("mitigate: node in the mitigation's resolved scope → true") {
-      val r = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigate"), List(nodeVal("Cyber"), mitVal(mCyberId)))
+      val r = mitKb.dispatcher.evalPredicate(SymbolName("mitigate"), List(nodeVal("Cyber"), mitVal(mCyberId)))
       assertTrue(r == Right(true))
     },
     test("mitigate: node outside the mitigation's resolved scope → false") {
-      val r = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigate"), List(nodeVal("Hardware"), mitVal(mCyberId)))
+      val r = mitKb.dispatcher.evalPredicate(SymbolName("mitigate"), List(nodeVal("Hardware"), mitVal(mCyberId)))
       assertTrue(r == Right(false))
     },
     test("mitigate: mitigation absent from resolvedScopes (Failed) → false") {
-      val r = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigate"), List(nodeVal("Cyber"), mitVal(mAbsentId)))
+      val r = mitKb.dispatcher.evalPredicate(SymbolName("mitigate"), List(nodeVal("Cyber"), mitVal(mAbsentId)))
       assertTrue(r == Right(false))
     },
     test("mitigated: union of resolved scopes; a Failed mitigation contributes nothing") {
-      val cyber    = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigated"), List(nodeVal("Cyber")))
-      val hardware = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigated"), List(nodeVal("Hardware")))
-      val root     = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigated"), List(nodeVal("Root")))
+      val cyber    = mitKb.dispatcher.evalPredicate(SymbolName("mitigated"), List(nodeVal("Cyber")))
+      val hardware = mitKb.dispatcher.evalPredicate(SymbolName("mitigated"), List(nodeVal("Hardware")))
+      val root     = mitKb.dispatcher.evalPredicate(SymbolName("mitigated"), List(nodeVal("Root")))
       assertTrue(cyber == Right(true), hardware == Right(true), root == Right(false))
     },
     test("unmitigated is the exact complement of mitigated over the node domain") {
       val nodes  = List("Root", "IT Risk", "Cyber", "Hardware")
       val agrees = nodes.forall { n =>
-        val m = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigated"), List(nodeVal(n)))
-        val u = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("unmitigated"), List(nodeVal(n)))
+        val m = mitKb.dispatcher.evalPredicate(SymbolName("mitigated"), List(nodeVal(n)))
+        val u = mitKb.dispatcher.evalPredicate(SymbolName("unmitigated"), List(nodeVal(n)))
         (m, u) match
           case (Right(mb), Right(ub)) => mb != ub
           case _                      => false
@@ -836,15 +839,15 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   private val selectionFunctionSuite = suite("value functions read the mitigation selection slot (M3)")(
     test("p95(x, inherent) reads the base results") {
-      val r = mitKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), inherent))
+      val r = mitKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), inherent))
       assertTrue(r == Right(50000L))
     },
     test("p95(x, residual) reads the precomputed residual results") {
-      val r = mitKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), residual))
+      val r = mitKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), residual))
       assertTrue(r == Right(5000L))
     },
     test("p95(x, m) for a bound mitigation reads that single-mitigation Selected valuation") {
-      val r = mitKb.dispatcher.evalFunction(vql.typed.SymbolName("p95"), List(nodeVal("Cyber"), mitVal(mCyberId)))
+      val r = mitKb.dispatcher.evalFunction(SymbolName("p95"), List(nodeVal("Cyber"), mitVal(mCyberId)))
       assertTrue(r == Right(10000L))
     }
   )
@@ -863,8 +866,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       )
     },
     test("mitigation_named / mitigation_id reduce to MitigationId equality") {
-      val same = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigation_named"), List(mitVal(mCyberId), mitVal(mCyberId)))
-      val diff = mitKb.dispatcher.evalPredicate(vql.typed.SymbolName("mitigation_id"), List(mitVal(mCyberId), mitVal(mHardwareId)))
+      val same = mitKb.dispatcher.evalPredicate(SymbolName("mitigation_named"), List(mitVal(mCyberId), mitVal(mCyberId)))
+      val diff = mitKb.dispatcher.evalPredicate(SymbolName("mitigation_id"), List(mitVal(mCyberId), mitVal(mHardwareId)))
       assertTrue(same == Right(true), diff == Right(false))
     }
   )

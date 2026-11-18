@@ -11,7 +11,7 @@ import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, Field
 import com.risquanter.register.http.errors.{ParseProblem, Positioned}
 
 import parser.{FOLParser, ParseError}
-import logic.{Formula, FOL, FOLUtil, Term}
+import logic.{Formula, FOL, FOLUtil}
 import vql.fragment.{Fragment, FragmentCheck, FragmentViolation}
 
 /** A mitigation's targeting predicate: a bare single-free-variable FOL formula
@@ -24,7 +24,7 @@ import vql.fragment.{Fragment, FragmentCheck, FragmentViolation}
   * of the targeting fragment. It admits structural and
   * attribute predicates over one variable, and names a node by
   * `node_id("…")`. It rejects quantifiers, every function application other
-  * than a node-returning function (the targeting fragment), a node named by
+  * than `node_id` (the targeting fragment), so also a node named by
   * `node_named`, and the mitigation-state predicates
   * `mitigate`/`mitigated`/`unmitigated`, case-insensitively (a mitigation must
   * not target by the state it changes).
@@ -39,25 +39,18 @@ object TargetingPredicate:
   private val MinSourceLength: NonNegativeInt = 1
   private val MaxSourceLength: NonNegativeInt = 2048
 
-  /** Mitigation-state predicates a targeting predicate may not reference — a
-    * mitigation targeting by its own effect would be self-referential. These
-    * are atoms (not function terms), so the targeting fragment does not exclude
-    * them; this check does. Matched case-insensitively (see
-    * `requireNoMitigationPredicate`). */
-  private val reservedPredicates: Set[String] =
-    Set(QueryPredicate.Mitigate, QueryPredicate.Mitigated, QueryPredicate.Unmitigated).map(_.symbol)
-
   /** Boundary validation, cross-compiled (browser and server), in two phases:
     *  - a gate that short-circuits, because each step needs the prior's output:
     *    1. length-refine into `TargetingSource` (1–2048) — also bounds the
     *       input the parser sees; 2. parse via the foundation `FOLParser`;
-    *  - once parsed, four independent checks on the formula, whose errors
+    *  - once parsed, two independent checks on the formula, whose errors
     *    accumulate so an authoring form reports every problem at once:
-    *    3. targeting-fragment membership (no quantifiers, no function term
-    *       other than a node-returning function);
-    *    4. exactly one free variable (the target variable);
-    *    5. no `mitigate` / `mitigated` predicate;
-    *    6. no `node_named`, so a rename cannot move the scope onto another node.
+    *    3. targeting-fragment membership: no quantifier, no function term
+    *       other than `node_id`, so no `node_named` and a rename cannot move
+    *       the scope onto another node, and no mitigation-state predicate,
+    *       compared after lower-casing. Every such refusal is reported, once
+    *       each, in the order the formula holds them;
+    *    4. exactly one free variable (the target variable).
     *
     * A parse refusal carries the parser's typed refusal at its position, and
     * never the parser's sentence or the whole text. Of the caller's text it
@@ -85,11 +78,9 @@ object TargetingPredicate:
 
     Validation.fromEither(gate.left.map(ValidationError(location, _))).flatMap { case (refined, formula) =>
       Validation.validateWith(
-        checked(checkFragment(formula)),
-        checked(requireSingleFreeVariable(formula)),
-        checked(requireNoMitigationPredicate(formula)),
-        checked(requireNoNodeName(formula))
-      )((_, _, _, _) => new TargetingPredicate(refined))
+        checkFragment(formula, location),
+        checked(requireSingleFreeVariable(formula))
+      )((_, _) => new TargetingPredicate(refined))
     }
 
   /** The predicate naming exactly the node `id`: `eq(x, node_id("<id>"))`. It
@@ -116,39 +107,34 @@ object TargetingPredicate:
     * }}}
     */
   def referencedNodes(predicate: TargetingPredicate): List[NodeId] =
-    FOLParser.parse(predicate.source).fold(_ => Nil, namedNodeLiterals)
-      .flatMap(literal => NodeId.fromString(literal).toOption)
-
-  /** The literal of every `node_id("…")` application in the formula, left to
-    * right. */
-  private def namedNodeLiterals(formula: Formula[FOL]): List[String] = formula match
-    case Formula.Atom(FOL(_, terms))  => terms.flatMap(termNodeLiterals)
-    case Formula.Not(p)               => namedNodeLiterals(p)
-    case Formula.And(p, q)            => namedNodeLiterals(p) ++ namedNodeLiterals(q)
-    case Formula.Or(p, q)             => namedNodeLiterals(p) ++ namedNodeLiterals(q)
-    case Formula.Imp(p, q)            => namedNodeLiterals(p) ++ namedNodeLiterals(q)
-    case Formula.Iff(p, q)            => namedNodeLiterals(p) ++ namedNodeLiterals(q)
-    case Formula.Forall(_, p)         => namedNodeLiterals(p)
-    case Formula.Exists(_, p)         => namedNodeLiterals(p)
-    case Formula.True | Formula.False => Nil
-
-  private def termNodeLiterals(term: Term): List[String] = term match
-    case Term.Fn(NodeFunction.ById.symbol, Term.Const(literal) :: Nil) => List(literal)
-    case Term.Fn(_, args)                                              => args.flatMap(termNodeLiterals)
-    case Term.Var(_) | Term.Const(_)                                   => Nil
+    FOLParser.parse(predicate.source).fold(_ => Nil, FragmentCheck.literalArguments(_, NodeFunction.ById.symbolName))
+      .flatMap(literal => NodeId.fromString(literal.value).toOption)
 
   private def parseProblem(error: ParseError): Positioned[ParseProblem] =
     ParseProblem.fromFormulaError(error).fold(
       reason => throw new IllegalStateException(s"The formula parser returned a refusal that does not translate: $reason"),
       identity)
 
-  private def checkFragment(formula: Formula[FOL]): Either[FieldProblem, Unit] =
-    FragmentCheck.check(formula, Fragment.Targeting(Signatures.targetingFunctions))
-      .left.map(fragmentProblem)
+  /** Every targeting-fragment refusal of the formula, once each, in the order
+    * the formula holds them. */
+  private def checkFragment(formula: Formula[FOL], location: ErrorLocation): Validation[ValidationError, Unit] =
+    Validation.validateAll(
+      FragmentCheck.violations(formula, targetingFragment)
+        .map(fragmentProblem)
+        .distinct
+        .map(problem => Validation.fail(ValidationError(location, problem)))
+    ).as(())
+
+  /** The fragment a targeting predicate belongs to. */
+  private val targetingFragment: Fragment =
+    Fragment.Targeting(Signatures.targetingFunctions, Signatures.targetingForbiddenPredicates)
 
   private def fragmentProblem(v: FragmentViolation): FieldProblem = v match
-    case FragmentViolation.QuantifierNotAllowed            => FieldProblem.TargetingQuantifierNotAllowed
+    case FragmentViolation.QuantifierNotAllowed => FieldProblem.TargetingQuantifierNotAllowed
+    case FragmentViolation.FunctionApplicationNotAllowed(function) if function.value == NodeFunction.ByName.symbol =>
+      FieldProblem.TargetingNodeNameReferenced
     case FragmentViolation.FunctionApplicationNotAllowed(_) => FieldProblem.TargetingFunctionNotAllowed
+    case FragmentViolation.PredicateNotAllowed(_)           => FieldProblem.TargetingMitigationStateReferenced
     case FragmentViolation.QuantifierDepthExceeded(limit, found) =>
       FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(limit), NonNegativeInt.count(found))
 
@@ -157,49 +143,6 @@ object TargetingPredicate:
       case _ :: Nil => Right(())
       case Nil      => Left(FieldProblem.TargetingNoFreeVariable)
       case _        => Left(FieldProblem.TargetingSeveralFreeVariables)
-
-  private def requireNoMitigationPredicate(formula: Formula[FOL]): Either[FieldProblem, Unit] =
-    val offending = atomPredicates(formula).filter(p => reservedPredicates.contains(p.toLowerCase))
-    if offending.isEmpty then Right(())
-    else Left(FieldProblem.TargetingMitigationStateReferenced)
-
-  /** A stored predicate names a node by its identifier only, so a name cannot
-    * follow a rename onto a different node. */
-  private def requireNoNodeName(formula: Formula[FOL]): Either[FieldProblem, Unit] =
-    if appliedFunctions(formula).contains(NodeFunction.ByName.symbol) then
-      Left(FieldProblem.TargetingNodeNameReferenced)
-    else Right(())
-
-  /** The predicate names of every atom in the formula. Total over the tree;
-    * quantifier nodes never appear in a targeting-fragment formula but are
-    * walked anyway so the function stands alone. */
-  private def atomPredicates(formula: Formula[FOL]): Set[String] = formula match
-    case Formula.Atom(FOL(predicate, _)) => Set(predicate)
-    case Formula.Not(p)                  => atomPredicates(p)
-    case Formula.And(p, q)               => atomPredicates(p) ++ atomPredicates(q)
-    case Formula.Or(p, q)                => atomPredicates(p) ++ atomPredicates(q)
-    case Formula.Imp(p, q)               => atomPredicates(p) ++ atomPredicates(q)
-    case Formula.Iff(p, q)               => atomPredicates(p) ++ atomPredicates(q)
-    case Formula.Forall(_, p)            => atomPredicates(p)
-    case Formula.Exists(_, p)            => atomPredicates(p)
-    case Formula.True | Formula.False    => Set.empty
-
-  /** The function names applied anywhere in the formula's terms, nested
-    * applications included. */
-  private def appliedFunctions(formula: Formula[FOL]): Set[String] = formula match
-    case Formula.Atom(FOL(_, terms))  => terms.flatMap(termFunctions).toSet
-    case Formula.Not(p)               => appliedFunctions(p)
-    case Formula.And(p, q)            => appliedFunctions(p) ++ appliedFunctions(q)
-    case Formula.Or(p, q)             => appliedFunctions(p) ++ appliedFunctions(q)
-    case Formula.Imp(p, q)            => appliedFunctions(p) ++ appliedFunctions(q)
-    case Formula.Iff(p, q)            => appliedFunctions(p) ++ appliedFunctions(q)
-    case Formula.Forall(_, p)         => appliedFunctions(p)
-    case Formula.Exists(_, p)         => appliedFunctions(p)
-    case Formula.True | Formula.False => Set.empty
-
-  private def termFunctions(term: Term): Set[String] = term match
-    case Term.Fn(name, args)      => args.flatMap(termFunctions).toSet + name
-    case Term.Var(_) | Term.Const(_) => Set.empty
 
   given Equal[TargetingPredicate] = Equal.default
 
