@@ -57,13 +57,13 @@ register-server, and does not pass `/admin`. In k3d, register-infra
 connection to register: its image still holds proxy rules for the API paths,
 which Docker Compose uses, and in the cluster no request reaches them."
 
-**Observation — its logs hold workspace keys.** The nginx template sets
-`access_log /dev/stdout;` with no `log_format`, so nginx writes its default
-`combined` format: the request line and the `Referer` header, both of which hold
-the key under path routing (ADR-025). Its error log, at level `warn`, writes the
-request line when a call to register-server fails. register-server itself logs
-only a request's first path segment (`RequestSpanInterceptor.spanName`). This is
-threat T5 in APPLICATION-TM §4.
+**Observation — its logs hold no workspace key.** Under path routing (ADR-025)
+the key is in the request line, and in the `Referer` of every request a page
+under `/w/` makes. The nginx template writes the access log in its `masked`
+format, which replaces the segment after `/w/` and records no `Referer`. Its
+error log runs at `crit`, because nginx's lines at `error` and `warn` quote the
+request line. register-server itself logs only a request's first path segment
+(`RequestSpanInterceptor.spanName`). This is threat T5 in APPLICATION-TM §4.
 
 **Observation — the SPA's HTML carries no Content-Security-Policy.** Neither
 `modules/app/index.html` nor the nginx template sets one. register-server's

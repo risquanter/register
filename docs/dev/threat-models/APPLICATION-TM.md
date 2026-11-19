@@ -193,7 +193,7 @@ not reach it.
 | DF9 | register-server → SpiceDB | permission checks | see the k3d models | B2, B4 | the response parse | `k3d-L2` |
 | DF10 | register-server → OpenTelemetry collector | spans and metrics | OTLP over gRPC, `http://otel-collector:4317` | B2, B8 | — (outbound only) | when the collector runs |
 | DF11 | environment → register-server | configuration and secrets at startup | the process environment, set by Docker from `docker-compose.yml` and the env file | B2 | the config decoder | all |
-| DF12 | frontend, register-server and collector → Docker log store | stdout and stderr: nginx's access log in its default `combined` format and its error log, register-server's log, the collector's `debug` exporter output | the Docker daemon | B7, B2, B8, B1 | — | compose |
+| DF12 | frontend, register-server and collector → Docker log store | stdout and stderr: nginx's access log in its `masked` format and its error log at `crit`, register-server's log, the collector's `debug` exporter output | the Docker daemon | B7, B2, B8, B1 | — | compose |
 | DF13 | any host process → OpenTelemetry collector, host ports 8888 and 8889 | metrics reads | HTTP | B1, B8 | — | `observability` profile in compose |
 | DF14 | Vite dev server → SPA | the SPA files | HTTP, host port 5173 | B5 | — | compose, without the `frontend` profile |
 
@@ -346,31 +346,34 @@ statement: >
 invariant: No log line written by any component contains a workspace key.
 failure_mode: >
   The SPA routes by path (ADR-025), so every workspace URL holds the key:
-  /w/{key}/... . The nginx template sets `access_log /dev/stdout;` with no
-  log_format, so nginx uses its default `combined` format. That format writes
-  the request line, which holds the key, and the Referer header, which holds the
-  key on every request a page under /w/{key} makes. nginx's error log writes the
-  request line when a call to register-server fails. In compose the access log
-  holds the key for browser navigation and for every API request the frontend
-  passes on. In k3d it holds the key for browser navigation, which the gateway
-  routes to the frontend. In compose without the `frontend` profile, nginx does
-  not run and nothing is logged.
+  /w/{key}/... . nginx's default `combined` access-log format writes the request
+  line, which holds the key, and the Referer header, which holds the key on
+  every request a page under /w/{key} makes. nginx's error log, at levels error
+  and warn, writes the request line when a call to register-server fails. A log
+  configuration that falls back to either default writes the key: in compose for
+  browser navigation and for every API request the frontend passes on, in k3d
+  for browser navigation, which the gateway routes to the frontend.
 mitigations:
   - control: >
-      An access-log format that replaces the key segment of /w/ paths and does
-      not record the Referer header, and an error log that records no request
-      line
+      The access log uses the `masked` format, which replaces the segment after
+      /w/ in the request line and records no Referer. The error log runs at
+      crit, which records no request line
     adr: ADR-022 ("Secrets must never appear in logs or error messages")
-    implemented_in: null
-    test: null
+    implemented_in: containers/prod/Dockerfile.frontend-prod
+    test: tests/bats/suite-a-full-prod.bats
 status:
-  compose-inmem: open
-  compose-persistent: open
-  k3d-L1: open
-  k3d-L2: open
+  compose-inmem: mitigated-tested
+  compose-persistent: mitigated-tested
+  k3d-L1: mitigated-untested
+  k3d-L2: mitigated-untested
 related_code:
   - containers/prod/Dockerfile.frontend-prod
-todo: >
-  Change the nginx template so that neither log records a workspace key, and add
-  a suite test that no key appears in the frontend's log.
+todo: null
 ```
+
+The control is in the frontend image, so every deployment runs it. Test A08 in
+suite A runs the image in compose, where it sends a proxied request with the key
+in its path and its Referer, a browser navigation, and a request while
+register-server is stopped, and then finds the key nowhere in the frontend's
+log. The nginx configuration does not depend on the `persistence` profile, so
+the test covers both compose deployments. No test runs the image in k3d.
