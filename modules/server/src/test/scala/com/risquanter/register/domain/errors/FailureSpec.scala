@@ -14,7 +14,7 @@ import com.risquanter.register.auth.{Permission, ResourceRef, ResourceType}
 import com.risquanter.register.common.FolSymbols.QuerySort
 import com.risquanter.register.domain.data.ExpiryCause
 import com.risquanter.register.domain.data.iron.{
-  BranchChoice, CommitHash, NodeId, QueryLiteral, QueryVariable, QueryWord, Revision, ScenarioName, TelemetryPlaceholders,
+  BranchChoice, CommitHash, NodeId, NonNegativeInt, QueryLiteral, QueryVariable, QueryWord, Revision, SafeName, ScenarioName, TelemetryPlaceholders,
   TreeId, UserId, ValidationMessages, WorkspaceId
 }
 import com.risquanter.register.http.errors.{
@@ -218,7 +218,7 @@ object FailureSpec extends ZIOSpecDefault:
         assertTrue(
           sentence.length > 300,
           failure.logMessage ==
-            s"Rejected: [${ErrorLocation.describe(ErrorLocation.Whole)}] ${sentence.take(300)}… (message truncated)",
+            s"Rejected: ${s"[${ErrorLocation.describe(ErrorLocation.Whole)}] $sentence".take(300)}… (message truncated)",
           failure.toWire(trace, TreeScope.InTree(treeId)) ==
             WireError.ValidationRejected(treeId, RejectionDetail.Query(problem), trace),
           // A query runs only on a route naming a tree, so a refusal with none
@@ -238,7 +238,27 @@ object FailureSpec extends ZIOSpecDefault:
         assertTrue(
           sentence.length > 300,
           failure.logMessage ==
-            s"Rejected: [${ErrorLocation.describe(ErrorLocation.Whole)}] ${sentence.take(300)}… (message truncated)"
+            s"Rejected: ${s"[${ErrorLocation.describe(ErrorLocation.Whole)}] $sentence".take(300)}… (message truncated)"
+        )
+      },
+      test("a refusal of 25 entries logs the first 20 and the count of the rest, and every entry crosses to the caller") {
+        val errors = NonEmptyChunk.fromIterableOption((1 to 25).map(i =>
+          ValidationError(ErrorLocation.nodeField(nodeId, FieldName.Probability), FieldProblem.TooLong(NonNegativeInt.count(i)))
+        )).get
+        val failure = Failure.rejected(TrustZone.Client, errors, Nil)
+        val trace   = TelemetryPlaceholders.UnlinkedTrace
+        assertTrue(
+          failure.logMessage == errors.toList.take(20).map(ValidationError.describe).mkString("Rejected: ", "; ", " and 5 more"),
+          failure.toWire(trace, TreeScope.NoTree) == WireError.RequestRejected(errors.toList, trace)
+        )
+      },
+      test("an entry of any kind longer than 300 characters is cut in the log line") {
+        val names   = (1 to 40).toList.map(i => SafeName.fromString(s"Reserved name number $i").toOption.get)
+        val entry   = ValidationError(ErrorLocation.Whole, FieldProblem.ReservedNodeNames(names))
+        val failure = Failure.rejected(TrustZone.Client, NonEmptyChunk(entry), Nil)
+        assertTrue(
+          ValidationError.describe(entry).length > 300,
+          failure.logMessage == s"Rejected: ${ValidationError.describe(entry).take(300)}… (message truncated)"
         )
       },
       test("a refused query is classified by its case, and a bind refusal by what its problems name") {

@@ -2,7 +2,7 @@ package com.risquanter.register.http.requests
 
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import zio.prelude.Validation
-import com.risquanter.register.domain.data.iron.SeedVarId
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, SeedVarId}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, SubmittedCollection, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.*
 
@@ -17,8 +17,16 @@ object RiskTreeDefinitionRequest:
   given JsonCodec[RiskTreeDefinitionRequest] = DeriveJsonCodec.gen
 
   /** The request refined. A create has no stored leaf, so an absolute
-    * statement among its mitigations is refused at its anchor. */
-  def resolve(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] = {
+    * statement among its mitigations is refused at its anchor. A submission
+    * above a tree ceiling is refused by its count alone, before any entry is
+    * refined (ADR-017 §3). */
+  def resolve(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] =
+    requireWithinCeilings(
+      NonNegativeInt.count(req.portfolios.size + req.leaves.size),
+      NonNegativeInt.count(req.newMitigations.size)
+    ).flatMap(_ => refine(req, newId))
+
+  private def refine(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] = {
     val treeNameV = refineNameField(req.name, ErrorLocation.requestField(FieldName.Name))
     val portfoliosV = refinePortfolioDefs(req.portfolios, SubmittedCollection.Portfolios)
     val leavesV = refineLeafDefs(req.leaves, SubmittedCollection.Leaves)

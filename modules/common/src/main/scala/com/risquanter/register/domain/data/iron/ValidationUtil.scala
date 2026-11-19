@@ -6,7 +6,7 @@ import io.github.iltotore.iron.constraint.collection.MaxLength
 import io.github.iltotore.iron.constraint.string.Match
 import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SecureUrl, SafeId, TreeId, NodeId, WorkspaceKeySecret, WorkspaceKeyHash, ExternalTokenStr, PrintableAscii}
 import com.bilalfazlani.zioUlid.ULID
-import com.risquanter.register.domain.errors.{Alphabet, ErrorLocation, FieldName, FieldProblem, ValidationError, ValueFormat, ValueRange}
+import com.risquanter.register.domain.errors.{Alphabet, BoundedCollection, ErrorLocation, FieldName, FieldProblem, ValidationError, ValueFormat, ValueRange}
 import zio.prelude.Validation
 import zio.NonEmptyChunk
 
@@ -81,6 +81,27 @@ object ValidationUtil {
           NonEmptyChunk(toError.tupled(head), tail.map(toError.tupled)*)
         )
     }
+
+  /** Refuses a count above `limit`, as one `TooMany` at `location`. Every
+    * collection ceiling is this rule with its own collection and limit
+    * (ADR-017 §6).
+    *
+    * {{{
+    * requireAtMost(BoundedCollection.Mitigations, 1001, 1000, location)
+    * // fails with TooMany(Mitigations, 1001, 1000) at location; 1000 succeeds
+    * }}}
+    */
+  def requireAtMost(
+      collection: BoundedCollection,
+      count: NonNegativeInt,
+      limit: NonNegativeInt,
+      location: ErrorLocation
+  ): Validation[ValidationError, Unit] =
+    Validation
+      .fromPredicateWith[ValidationError, NonNegativeInt](
+        ValidationError(location, FieldProblem.TooMany(collection, count, limit))
+      )(count)(_ <= limit)
+      .as(())
 
   /** One refusal at `location`. */
   private def refusal(location: ErrorLocation, problem: FieldProblem): List[ValidationError] =

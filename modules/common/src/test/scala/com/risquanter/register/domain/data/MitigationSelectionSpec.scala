@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.json.{DecoderOps, EncoderOps}
 import com.risquanter.register.domain.data.iron.MitigationId
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem}
+import com.risquanter.register.domain.errors.{BoundedCollection, ErrorLocation, ErrorSubject, FieldName, FieldProblem}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, unsafeGet}
 
 /** `MitigationSelection.create` builds the selection a request states, within
@@ -49,8 +49,8 @@ object MitigationSelectionSpec extends ZIOSpecDefault {
       assertTrue(
         refused.map(_.location) == List(ErrorLocation.requestField(FieldName.Mitigations)),
         refused.forall(_.problem match
-          case FieldProblem.TooManyMitigations(_, limit) => limit == RiskTree.MaxMitigations
-          case _                                         => false)
+          case FieldProblem.TooMany(BoundedCollection.Mitigations, _, limit) => limit == RiskTree.MaxMitigations
+          case _                                                             => false)
       )
     },
 

@@ -1,8 +1,8 @@
 package com.risquanter.register.domain.data
 
-import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeName, TreeId, NodeId, SeedVarId}
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeName, TreeId, NodeId, SeedVarId, ValidationUtil}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{BoundedCollection, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.http.responses.TreeSummaryResponse
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
@@ -103,12 +103,9 @@ object RiskTree {
     * this project (ADR-017 §6). */
   val MaxNodes: NonNegativeInt = 10000
 
-  private def validateNodeCount(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
-    if (nodes.sizeIs <= MaxNodes) Validation.succeed(())
-    else Validation.fail(ValidationError(
-      ErrorLocation.Whole,
-      FieldProblem.TooManyNodes(NonNegativeInt.count(nodes.size), MaxNodes)
-    ))
+  /** Refuses a node count above `MaxNodes`, at `location` (ADR-017 §6). */
+  def requireNodeCount(count: NonNegativeInt, location: ErrorLocation): Validation[ValidationError, Unit] =
+    ValidationUtil.requireAtMost(BoundedCollection.Nodes, count, MaxNodes, location)
 
   /** Create a RiskTree from a flat list of nodes.
     *
@@ -145,7 +142,7 @@ object RiskTree {
           ErrorLocation.Whole
         ),
         resolveSeedVarHighWater(nodes, seedVarHighWater, subject),
-        validateNodeCount(nodes),
+        requireNodeCount(NonNegativeInt.count(nodes.size), ErrorLocation.Whole),
         SafeName.requireDistinct(nodes.map(_.name), ErrorLocation.Whole)
       ) { (index, _, highWater, _, _) => (index, highWater) }
       .flatMap { (index, highWater) =>
@@ -165,6 +162,10 @@ object RiskTree {
     * project (ADR-017 §6). */
   val MaxMitigations: NonNegativeInt = 1000
 
+  /** Refuses a mitigation count above `MaxMitigations`, at `location` (ADR-017 §6). */
+  def requireMitigationCount(count: NonNegativeInt, location: ErrorLocation): Validation[ValidationError, Unit] =
+    ValidationUtil.requireAtMost(BoundedCollection.Mitigations, count, MaxMitigations, location)
+
   /** Tree-level mitigation invariants: unique ids and names, and a bound on the
     * collection size. Predicate validity is enforced when each
     * `TargetingPredicate` is built; resolving a predicate to a node set, and
@@ -177,17 +178,10 @@ object RiskTree {
   ): Validation[ValidationError, Unit] = {
     val mitigationsLocation = ErrorLocation.Field(subject, FieldName.Mitigations)
 
-    val countV =
-      if (mitigations.sizeIs <= MaxMitigations) Validation.succeed(())
-      else Validation.fail(ValidationError(
-        mitigationsLocation,
-        FieldProblem.TooManyMitigations(NonNegativeInt.count(mitigations.size), MaxMitigations)
-      ))
-
     Validation.validateWith(
       Mitigation.requireDistinctIds(mitigations, mitigationsLocation),
       Mitigation.requireDistinctNames(mitigations, mitigationsLocation),
-      countV
+      requireMitigationCount(NonNegativeInt.count(mitigations.size), mitigationsLocation)
     ) { (_, _, _) => () }
   }
 

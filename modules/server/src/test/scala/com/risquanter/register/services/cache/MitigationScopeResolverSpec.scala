@@ -116,8 +116,10 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         yield assertTrue(out.outcomes(m.id) == ScopeOutcome.Resolved(Set(webId, dbId)))
       },
 
-      test("logFailures writes one line of fixed length, beginning with the count, however many mitigations failed") {
+      test("logFailures writes one bounded line, beginning with the count and naming at most 20 mitigations, however many failed") {
         val stale = (1 to 50).map(i => mit(s"m-stale-$i", staleSource, leafSpec))
+        // At most 20 entries of at most 300 characters each, a cut marker and a separator.
+        val entryBound = 300 + "… (message truncated)".length + "; ".length
         for
           r     <- newResolver
           out   <- r.resolve(ctx(rev1), mkTree(stale*))
@@ -127,7 +129,9 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         yield assertTrue(
           line.size == 1,
           line.head.startsWith("MitigationScopeResolver: 50 mitigation(s)"),
-          line.head.length <= 300 + "… (message truncated)".length
+          line.head.endsWith(" and 30 more"),
+          line.head.length <= "MitigationScopeResolver: 50 mitigation(s) did not resolve against this tree version: ".length +
+            20 * entryBound + " and 30 more".length
         )
       },
 

@@ -22,6 +22,7 @@ single list.
 | ~~6~~ | ~~`docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md`~~ | **Landed in 0.10.36** (`docs/archive/plans/DONE-PLAN-LOSSDISTRIBUTION-TO-SERVER.md`). It moved the `LossDistribution` file and `RiskResultTransformSpec.scala` into `server`, which the valuation transplant then rewrote |
 | 7 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a `MitigationScopeResolverRegistry` field to `RiskTreeServiceLive` and rewrites the resolver's memo, both of which reach the type through the `MitigationScopeResolverRegistry.forWorkspace` name that 2 introduces. Landing M4 first would grow 2's ripple list by everything M4 adds |
 | — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | fully independent; shares no file with any of the above and may land at any point |
+| after 7 | item 46 below, the review of collection bounds as types | first work once 7 closes: the M4 slice 10 security review corrected its premise, and the review settles whether Lever 2 stays deferred |
 
 Steps 3 and 5 both touch `Application.scala`, on different lines — a
 released-cache layer and a limiter layer — so the order between them is a matter
@@ -1797,7 +1798,7 @@ limiting mechanism, not per-endpoint re-implementations.
 **Status: DONE (2026-11-14).** `PLAN-RISKTRANSFORM` M4 slice 1 landed the bound:
 `LECCurvesMultiRequest` refines the requested node list against the 10 000-node
 tree ceiling, `RiskTree.MaxNodes`, alongside the two selection bounds, and refuses
-a longer list in its decoder with `TooManyNodes`. (Moved here from the
+a longer list in its decoder with `TooMany` naming `Nodes`. (Moved here from the
 code-quality-review skill's known-gap note, 2026-08-10; originally flagged in a
 security review.)
 
@@ -2001,6 +2002,29 @@ node-name-uniqueness, `RiskPortfolio.create` childIds cap, plus the 8 MiB
 request body cap), and the expert-point range is enforced in
 `QuantileAnchors.create`. Iron `MaxLength` collection typing remains as a later
 compile-time hardening.
+
+**Correction from the M4 slice 10 security review, 2026-11-19.** The finding
+above names the `RiskTree.fromNodes` count validators as the attacker-facing
+control. That was inaccurate about where the control ran. `fromNodes` runs only
+after `resolve` has refined every submitted entry, so the validators bounded the
+stored tree and not the work or the refusal. A tree write of about 73 000
+mitigations inside the 8 MiB body was refined in full, with a refinement loop
+that grew with the square of the count. It was then refused with every entry's
+refusals, in a response several times the request's size and one unbounded log
+line. The fix ruled for `PLAN-RISKTRANSFORM.md` §7.6.19 makes the premise
+accurate. `resolve` refuses a submission by its node and mitigation counts
+before refining any entry, and a refusal's log line has a fixed upper size.
+
+**The conclusion survives the correction.** Once the counts are checked first in
+`resolve`, an attacker still reaches the domain only through that check. A
+ceiling carried in the type would still add only the compile-time guarantee
+against an internal construction path, so the deferral's reasoning stands.
+
+**Next step: the first work after `PLAN-RISKTRANSFORM.md` closes.** Re-read this
+item against the code as it then stands. Confirm that the six count ceilings
+share one rule (`ValidationUtil.requireAtMost`) and that `resolve` checks the
+tree's two ceilings before refinement. Then decide whether Lever 2 stays
+deferred, is scoped as its own plan, or is dropped.
 
 ---
 

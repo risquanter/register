@@ -3,7 +3,7 @@ package com.risquanter.register.http.requests
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.Mitigation
-import com.risquanter.register.domain.data.iron.SeedVarId
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, SeedVarId}
 import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, SubmittedCollection, ValidationError}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.http.requests.RiskTreeRequests.*
@@ -24,8 +24,21 @@ object RiskTreeUpdateRequest:
     * each `portfolios` entry must name a stored portfolio, each `leaves` entry
     * a stored leaf, each `mitigations` entry a stored mitigation, and each
     * absolute statement's anchor a stored leaf. Those checks accumulate with
-    * every other. */
+    * every other. The request lists the whole tree, so its counts are the
+    * resulting tree's, and a submission above a tree ceiling is refused by its
+    * count alone, before any entry is refined (ADR-017 §3). */
   def resolve(
+    req: RiskTreeUpdateRequest,
+    stored: TreeIndex,
+    storedMitigations: Seq[Mitigation],
+    newId: IdGenerator
+  ): Validation[ValidationError, ResolvedUpdate] =
+    requireWithinCeilings(
+      NonNegativeInt.count(req.portfolios.size + req.leaves.size + req.newPortfolios.size + req.newLeaves.size),
+      NonNegativeInt.count(req.mitigations.size + req.newMitigations.size)
+    ).flatMap(_ => refine(req, stored, storedMitigations, newId))
+
+  private def refine(
     req: RiskTreeUpdateRequest,
     stored: TreeIndex,
     storedMitigations: Seq[Mitigation],

@@ -5,7 +5,7 @@ import zio.prelude.{Equal, Validation}
 import sttp.tapir.Schema
 
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, NonNegativeInt}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** How far one selected mitigation reaches: its whole resolved scope, or the
@@ -92,20 +92,15 @@ object MitigationSelection:
     val named = full ++ nodesOnly.map(_.mitigation)
 
     val countV: Validation[ValidationError, Unit] =
-      if named.sizeIs <= RiskTree.MaxMitigations then Validation.succeed(())
-      else Validation.fail(ValidationError(
-        ErrorLocation.requestField(FieldName.Mitigations),
-        FieldProblem.TooManyMitigations(NonNegativeInt.count(named.size), RiskTree.MaxMitigations)
-      ))
+      RiskTree.requireMitigationCount(NonNegativeInt.count(named.size), ErrorLocation.requestField(FieldName.Mitigations))
 
     val perMitigationV: Validation[ValidationError, Unit] =
       Validation.validateAll(
-        nodesOnly.groupBy(_.mitigation).toList.sortBy(_._1.value).collect {
-          case (id, ticks) if ticks.sizeIs > RiskTree.MaxNodes =>
-            Validation.fail(ValidationError(
-              ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Nodes),
-              FieldProblem.TooManyNodes(NonNegativeInt.count(ticks.size), RiskTree.MaxNodes)
-            ))
+        nodesOnly.groupBy(_.mitigation).toList.sortBy(_._1.value).map { (id, ticks) =>
+          RiskTree.requireNodeCount(
+            NonNegativeInt.count(ticks.size),
+            ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Nodes)
+          )
         }
       ).as(())
 

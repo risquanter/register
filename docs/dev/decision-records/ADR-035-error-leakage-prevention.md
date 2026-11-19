@@ -204,9 +204,11 @@ Three facts make this sound:
   (ADR-029 §1).
 
 The log is the one unstructured sink: `logback.xml` writes `%msg%n`. The literal
-alphabet therefore excludes every control character, and `Failure`'s log line
-cuts the sentence of a query refusal and of a targeting predicate's refusal to
-300 characters, because one word may run to the text's whole 2 048 characters.
+alphabet therefore excludes every control character. `Failure`'s log line names
+at most 20 entries, each cut to 300 characters, then the count of the rest,
+because one word may run to the text's whole 2 048 characters and one refusal
+of a whole tree may hold thousands of entries. Every entry is cut, so no kind of
+refusal has to be listed for its line to stay bounded.
 
 Every query refusal carries a `QueryPosition`. `QueryPosition.Unknown()` is the
 case for a refusal the engine reports without one, and it renders as no
@@ -315,7 +317,7 @@ ValuedEndpointOutput(BaseEndpoint.internalFaultOut, WireError.InternalFault(trac
 | `build.sbt` | `-Wconf:msg=match may not be exhaustive:error` promotes an inexhaustive match to a compile error |
 | `QueryProblem`, `ParseProblem`, `BindProblem` | A query refusal carries typed fields and this service's own sentence (§5) |
 | `OpaqueTypes.scala` — `QueryWord`, `QueryDecimal`, `QueryLiteral` | The alphabets of the query text a refusal may carry (§5) |
-| `Failure.logged` | A query refusal's sentence is cut to 300 characters in the log line (§5) |
+| `Failure.boundedLogLine` | A refusal's log line names at most 20 entries, each cut to 300 characters (§5) |
 
 ---
 

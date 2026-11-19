@@ -136,7 +136,7 @@ object TargetingPredicate:
     case FragmentViolation.FunctionApplicationNotAllowed(_) => FieldProblem.TargetingFunctionNotAllowed
     case FragmentViolation.PredicateNotAllowed(_)           => FieldProblem.TargetingMitigationStateReferenced
     case FragmentViolation.QuantifierDepthExceeded(limit, found) =>
-      FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(limit), NonNegativeInt.count(found))
+      FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(found), NonNegativeInt.count(limit))
 
   private def requireSingleFreeVariable(formula: Formula[FOL]): Either[FieldProblem, Unit] =
     FOLUtil.fvFOL(formula).distinct match

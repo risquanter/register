@@ -62,7 +62,10 @@ smart constructor. It is the exception ADR-001 §2 states. A tree create or
 update is a command refined as a whole. Some of its rules read the stored tree,
 and every refusal must be reported together at its entry, so `resolve` checks
 every rule at the service's entry step. A collection the request gains, such as
-its mitigations, is refined by the same `resolve`.
+its mitigations, is refined by the same `resolve`. A collection above its
+ceiling is the exception: `resolve` refuses the submission by its count alone,
+before any entry is refined, so the work and the refusal are bounded by the
+ceilings rather than by the request body.
 
 ```scala
 def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]
@@ -119,14 +122,18 @@ the smart constructors for the collections:
 | Limit | Value | Where enforced |
 |---|---|---|
 | HTTP request body | 8 MiB (env `REGISTER_MAX_REQUEST_BYTES`) | zio-http `RequestStreaming.Disabled(maxRequestBytes)` — rejected with 413 before any handler runs |
-| Nodes per tree | ≤ 10 000 | `RiskTree.fromNodes` (`validateNodeCount`) |
+| Nodes per tree | ≤ 10 000 | `RiskTree.fromNodes` (`requireNodeCount`) and, for a submitted tree, `resolve` before any entry is refined |
 | Children per portfolio | ≤ 1 000 | `RiskPortfolio.create` (accumulated with the non-empty rule) |
 | Expert percentile/quantile points | 2 … 20 | `QuantileAnchors.create` — matches the metalog fitter's valid term range |
-| Mitigations per tree | ≤ 1 000 | `RiskTree.fromNodes` (`validateMitigations`) |
+| Mitigations per tree | ≤ 1 000 | `RiskTree.fromNodes` (`requireMitigationCount`) and, for a submitted tree, `resolve` before any entry is refined |
 
 The 8 MiB body cap is sized above the largest valid tree payload (a maximal
 10 000-node expert-leaf tree serialises to ≈ 4.94 MiB). The body-size control is
 a transport-layer DoS defence and is cross-referenced from ADR-029.
+
+Every count ceiling is one rule, `ValidationUtil.requireAtMost`, refusing with
+`FieldProblem.TooMany` naming the `BoundedCollection` and its limit. Each limit
+stays a named value in the companion of the type that owns it.
 
 ### 7. One Path Form per Resource
 

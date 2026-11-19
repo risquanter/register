@@ -6,7 +6,7 @@ import sttp.tapir.Schema
 
 import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
 import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Body of the multi-node curve read: the nodes to draw, and the one selection
@@ -24,13 +24,9 @@ object LECCurvesMultiRequest:
     nodeIds: List[NodeId],
     selection: MitigationSelection.Enumerated
   ): Validation[ValidationError, LECCurvesMultiRequest] =
-    if nodeIds.sizeIs <= RiskTree.MaxNodes then
-      Validation.succeed(new LECCurvesMultiRequest(nodeIds, selection))
-    else
-      Validation.fail(ValidationError(
-        ErrorLocation.requestField(FieldName.Nodes),
-        FieldProblem.TooManyNodes(NonNegativeInt.count(nodeIds.size), RiskTree.MaxNodes)
-      ))
+    RiskTree
+      .requireNodeCount(NonNegativeInt.count(nodeIds.size), ErrorLocation.requestField(FieldName.Nodes))
+      .as(new LECCurvesMultiRequest(nodeIds, selection))
 
   private case class Raw(nodeIds: List[NodeId], selection: Option[MitigationSelection.Enumerated])
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }

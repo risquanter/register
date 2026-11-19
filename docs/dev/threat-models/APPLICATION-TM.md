@@ -239,7 +239,7 @@ each one exists. The solid box inside B2 is the register-server component, and
 its two ports are where the flows end. Who can reach a process without a drawn
 flow is read from §2.6.
 
-**System version:** 0.24.9
+**System version:** 0.25.0
 
 ```mermaid
 flowchart LR

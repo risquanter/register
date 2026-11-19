@@ -8,11 +8,11 @@ import com.risquanter.register.testutil.TestHelpers.{
 import com.risquanter.register.http.requests.RiskTreeRequests.*
 import com.risquanter.register.domain.data.{
   AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget,
-  RelativeLikelihood, RelativeSeverity, RiskLeaf, RiskNode, RiskPortfolio, TargetingPredicate
+  RelativeLikelihood, RelativeSeverity, RiskLeaf, RiskNode, RiskPortfolio, RiskTree, TargetingPredicate
 }
-import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeId, SafeName, ValidationMessages}
+import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, NonNegativeInt, SafeId, SafeName, ValidationMessages}
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationError, ValidationErrorCode
+  BoundedCollection, ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationError, ValidationErrorCode
 }
 import com.risquanter.register.domain.tree.TreeIndex
 
@@ -128,6 +128,9 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
     )
 
   private val atFirstNew: ErrorSubject = ErrorSubject.mitigationAtIndex(SubmittedMitigations.NewMitigations, 0)
+
+  /** A new mitigation refused on its own, by its blank name and its anchor. */
+  private val blankNamed: MitigationDefinitionRequest = newAbsolute("not-a-leaf").copy(name = "")
 
   def spec = suite("RiskTreeRequests")(
     test("resolveCreate fails when a leaf's shape breaks its own rule") {
@@ -742,6 +745,58 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         specsOf(changed) == Seq(ResolvedSpec.Unstamped(
           AbsoluteReplacement.Likelihood(residualProbability(0.04)), nodeIdOf(childIdStr)))
       )
+    },
+
+    test("a create above the mitigation ceiling is refused by its count alone, before any mitigation is refined") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest("Root", None)),
+        leaves = Seq(validLeafDef("Leaf1", Some("Root"))),
+        newMitigations = Seq.fill(RiskTree.MaxMitigations + 1)(blankNamed)
+      )
+      assertTrue(errorsOf(resolveCreate(req, () => safeId("generated"))) == List(ValidationError(
+        ErrorLocation.requestField(FieldName.Mitigations),
+        FieldProblem.TooMany(BoundedCollection.Mitigations, NonNegativeInt.count(RiskTree.MaxMitigations + 1), RiskTree.MaxMitigations)
+      )))
+    },
+
+    test("a create at the mitigation ceiling is refined, so each mitigation's own refusal is reported") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest("Root", None)),
+        leaves = Seq(validLeafDef("Leaf1", Some("Root"))),
+        newMitigations = Seq.fill(RiskTree.MaxMitigations)(blankNamed)
+      )
+      val errors = errorsOf(resolveCreate(req, () => safeId("generated")))
+      assertTrue(
+        errors.nonEmpty,
+        errors.forall(_.problem match
+          case FieldProblem.TooMany(_, _, _) => false
+          case _                             => true)
+      )
+    },
+
+    test("a create above the node ceiling is refused by its count alone, before any node is refined") {
+      val req = RiskTreeDefinitionRequest(
+        name = "",
+        portfolios = Seq(RiskPortfolioDefinitionRequest("Root", None)),
+        leaves = (1 to RiskTree.MaxNodes).map(i => validLeafDef(s"L$i", Some("Root"))),
+        newMitigations = Seq.empty
+      )
+      assertTrue(errorsOf(resolveCreate(req, () => safeId("generated"))) == List(ValidationError(
+        ErrorLocation.Whole,
+        FieldProblem.TooMany(BoundedCollection.Nodes, NonNegativeInt.count(RiskTree.MaxNodes + 1), RiskTree.MaxNodes)
+      )))
+    },
+
+    test("an update counts kept and new mitigations together against the ceiling") {
+      val kept = Seq.fill(RiskTree.MaxMitigations / 2 + 1)(
+        MitigationUpdateRequest(id = "", name = "", target = None, spec = blankNamed.spec, precedence = MitigationPrecedence.default))
+      val req = keepNodes(kept, Seq.fill(RiskTree.MaxMitigations / 2)(blankNamed))
+      assertTrue(errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated"))) == List(ValidationError(
+        ErrorLocation.requestField(FieldName.Mitigations),
+        FieldProblem.TooMany(BoundedCollection.Mitigations, NonNegativeInt.count(RiskTree.MaxMitigations + 1), RiskTree.MaxMitigations)
+      )))
     }
   )
 }

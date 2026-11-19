@@ -1,9 +1,10 @@
 package com.risquanter.register.domain.data.iron
 
+import zio.NonEmptyChunk
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.domain.errors.{Alphabet, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValueFormat}
+import com.risquanter.register.domain.errors.{Alphabet, BoundedCollection, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, ValueFormat}
 
 object ValidationUtilSpec extends ZIOSpecDefault {
 
@@ -552,6 +553,17 @@ object ValidationUtilSpec extends ZIOSpecDefault {
       test("preserves non-blank content") {
         val result = ValidationUtil.nonEmpty("Valid Name")
         assertTrue(result == "Valid Name")
+      }
+    ),
+
+    suite("requireAtMost")(
+      test("a count at its limit passes") {
+        assertTrue(ValidationUtil.requireAtMost(BoundedCollection.Children, 3, 3, passedIn).toEither.isRight)
+      },
+
+      test("a count one above its limit is one TooMany at the location passed in") {
+        assertTrue(ValidationUtil.requireAtMost(BoundedCollection.Children, 4, 3, passedIn).toEither ==
+          Left(NonEmptyChunk(ValidationError(passedIn, FieldProblem.TooMany(BoundedCollection.Children, 4, 3)))))
       }
     )
   )

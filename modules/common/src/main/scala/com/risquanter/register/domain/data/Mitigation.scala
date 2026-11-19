@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.iron.{
   ContentHash, MitigationId, NodeId, NonNegativeInt, Probability, ResidualProbability,
   SafeName, ValidationUtil
 }
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{BoundedCollection, ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** What a mitigation applies to; resolves server-side to the scoped node set. */
@@ -182,10 +182,10 @@ object MitigationSpec {
       pipeline.steps.size match {
         case n if n < MinPipelineSteps =>
           Validation.fail(ValidationError(location, FieldProblem.PipelineEmpty(MinPipelineSteps)))
-        case n if n > MaxPipelineSteps =>
-          Validation.fail(ValidationError(
-            location, FieldProblem.PipelineTooLong(NonNegativeInt.count(n), MaxPipelineSteps)))
-        case _ => Validation.succeed(new ResultStage(pipeline))
+        case n =>
+          ValidationUtil
+            .requireAtMost(BoundedCollection.PipelineSteps, NonNegativeInt.count(n), MaxPipelineSteps, location)
+            .as(new ResultStage(pipeline))
       }
 
     /** Wire form: an object, so the discriminated parent has a field set to add

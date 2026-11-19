@@ -6862,6 +6862,35 @@ the variable's sort. That is the report TERMINOLOGY 3.9 states for a predicate
 that does not fit. `MitigationScopeResolverSpec` pins it with
 `mitigation_named(x, "m-mitsort")`.
 
+**Security-review fixes, approved 2026-11-19.** The slice's security review
+found two pre-existing defects on the tree-write path, and the user ruled on
+both, plus three consolidations:
+
+1. `RiskTreeRequests.collectAllWithIndex` appended to a `List`, so refining n
+   entries cost about n²/2 copies before any ceiling was checked. It now
+   accumulates into a `Vector`.
+2. The node and mitigation ceilings were checked only in `RiskTree.fromNodes`,
+   after every entry was refined, so a refused write's work, response and log
+   line grew with the request body. Both `resolve` functions now run
+   `requireWithinCeilings` first and refuse by the count alone (the user chose
+   Option A). ADR-001 §1 and §2 and ADR-017 §3 and §6 state the carve-out.
+3. The count rule written at six sites is one rule,
+   `ValidationUtil.requireAtMost`, with `RiskTree.requireNodeCount` and
+   `RiskTree.requireMitigationCount` binding the tree's two limits.
+4. `TooManyChildren`, `TooManyNodes`, `TooManyMitigations` and
+   `PipelineTooLong` are one case, `FieldProblem.TooMany(collection:
+   BoundedCollection, count, limit)`. `TargetingQuantifierDepthExceeded` reads
+   `(found, limit)`. Both are wire changes, carried by the plan's MINOR
+   close-out bump.
+5. A refusal's log line had two bounds, a per-problem allowlist in `Failure`
+   and a whole-line cut in `ResolvedScopes.logFailures`. Both now call
+   `Failure.boundedLogLine`: at most 20 entries (`LoggedEntryLimit`, chosen
+   here), each cut to 300 characters, then " and N more". ADR-035 §5 and
+   ADR-029 §3 state it.
+
+`docs/dev/TODO.md` item 46 records the corrected premise of the Lever 2
+deferral, and its review is the first work after this plan closes.
+
 **Origin.** §8.4-3's reach ruling of 2026-11-17 moves every inspection of a
 targeting formula behind an engine API. The engine's plan for that API, in the
 `vague-quantifier-logic` repository at

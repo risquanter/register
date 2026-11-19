@@ -1,6 +1,6 @@
 package com.risquanter.register.domain.data.iron
 
-import com.risquanter.register.domain.errors.{Alphabet, ExpectedInput, FieldProblem, ValueFormat, ValueRange}
+import com.risquanter.register.domain.errors.{Alphabet, BoundedCollection, ExpectedInput, FieldProblem, ValueFormat, ValueRange}
 import com.risquanter.register.http.errors.{ParseProblem, QueryProblem}
 
 /** The sentence for each refusal, shared across JVM and JS.
@@ -66,9 +66,8 @@ object ValidationMessages:
       "Portfolio must have at least one child"
     case FieldProblem.PortfolioHasNoChildren(portfolios) =>
       s"Every portfolio must have at least one child: ${portfolios.map(_.value).mkString(", ")}"
-    case FieldProblem.TooManyChildren(count, limit)    => s"too many children: $count exceeds the limit of $limit"
-    case FieldProblem.TooManyNodes(count, limit)       => s"too many nodes: $count exceeds the limit of $limit"
-    case FieldProblem.TooManyMitigations(count, limit) => s"too many mitigations: $count exceeds the limit of $limit"
+    case FieldProblem.TooMany(collection, count, limit) =>
+      s"too many ${entries(collection)}: $count exceeds the limit of $limit"
 
     // A stored node named by a tree update
     case FieldProblem.StoredNodeListedTwice => "this id is listed more than once; each stored node appears once, in portfolios or in leaves"
@@ -120,8 +119,6 @@ object ValidationMessages:
     // Mitigation
     case FieldProblem.PipelineEmpty(min) =>
       s"result-stage pipeline is empty: at least $min step is required"
-    case FieldProblem.PipelineTooLong(count, limit) =>
-      s"result-stage pipeline has too many steps: $count exceeds the limit of $limit"
     case FieldProblem.AggregatedLossOverflow  => "Aggregated loss exceeds the maximum representable value"
     case FieldProblem.MitigationEliminatesRisk =>
       "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap, the scale factor or the policy's deductible, lower the policy's limit, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
@@ -133,7 +130,7 @@ object ValidationMessages:
       s"Targeting predicate is not valid syntax: ${ParseProblem.describe(problem)}"
     case FieldProblem.TargetingQuantifierNotAllowed  => "Targeting predicates may not use quantifiers"
     case FieldProblem.TargetingFunctionNotAllowed    => "Targeting predicates may apply no function other than node_id(\"…\")"
-    case FieldProblem.TargetingQuantifierDepthExceeded(limit, found) =>
+    case FieldProblem.TargetingQuantifierDepthExceeded(found, limit) =>
       s"Targeting predicate quantifier depth $found exceeds the limit of $limit"
     case FieldProblem.TargetingNoFreeVariable =>
       "Targeting predicate must reference exactly one variable; found none"
@@ -170,6 +167,13 @@ object ValidationMessages:
     case ExpectedInput.Declared    => "The value could not be read"
     case ExpectedInput.Json        => "The stored value is not valid JSON"
     case ExpectedInput.Interval    => "The stored value is not a valid interval"
+
+  /** The plural noun for what a bounded collection holds. */
+  private def entries(collection: BoundedCollection): String = collection match
+    case BoundedCollection.Nodes         => "nodes"
+    case BoundedCollection.Mitigations   => "mitigations"
+    case BoundedCollection.Children      => "children"
+    case BoundedCollection.PipelineSteps => "result-stage pipeline steps"
 
   private def alphabet(allowed: Alphabet): String = allowed match
     case Alphabet.NodeName     => "letters, digits, spaces, hyphens, and forward slashes"

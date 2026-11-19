@@ -8,7 +8,7 @@ import sttp.tapir.Schema
 import sttp.tapir.Schema.annotations.encodedName
 import com.risquanter.register.domain.data.iron.{NonNegativeInt, SafeId, SafeName, Probability, NodeId, SeedVarId, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
+import com.risquanter.register.domain.errors.{BoundedCollection, ErrorLocation, ErrorSubject, ExpectedInput, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** ADT representing a node of a risk hierarchy tree.
@@ -262,7 +262,7 @@ final case class RiskPortfolio private (
 object RiskPortfolio {
 
   /** Upper bound on a portfolio's direct child count — a resource limit
-    * against oversized fan-out. */
+    * against oversized fan-out. Chosen by this project (ADR-017 §6). */
   private val MaxChildren: NonNegativeInt = 1000
 
   /** Smart constructor: Validates all fields and returns Validation.
@@ -295,12 +295,12 @@ object RiskPortfolio {
     val nonEmptyV = Validation.fromPredicateWith[ValidationError, Vector[NodeId]](
       ValidationError(ErrorLocation.Field(subject, FieldName.ChildIds), FieldProblem.PortfolioHasNoChildren(Nil))
     )(childIds)(_.nonEmpty)
-    val countV = Validation.fromPredicateWith[ValidationError, Vector[NodeId]](
-      ValidationError(
-        ErrorLocation.Field(subject, FieldName.ChildIds),
-        FieldProblem.TooManyChildren(NonNegativeInt.count(childIds.length), MaxChildren)
-      )
-    )(childIds)(_.length <= MaxChildren)
+    val countV = ValidationUtil.requireAtMost(
+      BoundedCollection.Children,
+      NonNegativeInt.count(childIds.length),
+      MaxChildren,
+      ErrorLocation.Field(subject, FieldName.ChildIds)
+    )
     val childIdsValidation: Validation[ValidationError, Vector[NodeId]] =
       Validation.validateWith(nonEmptyV, countV)((_, _) => childIds)
 

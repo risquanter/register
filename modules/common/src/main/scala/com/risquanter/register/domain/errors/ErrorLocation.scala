@@ -51,6 +51,19 @@ object SubmittedMitigations:
     given Configuration = discriminated
     Schema.derived[SubmittedMitigations]
 
+/** Which bounded collection a count refusal is about. Each collection's limit
+  * is a named value in the companion of the type that owns it (ADR-017 §6). */
+@jsonDiscriminator(TagField)
+enum BoundedCollection:
+  case Nodes, Mitigations, Children, PipelineSteps
+
+object BoundedCollection:
+  given codec: JsonCodec[BoundedCollection] = DeriveJsonCodec.gen[BoundedCollection]
+
+  given schema: Schema[BoundedCollection] =
+    given Configuration = discriminated
+    Schema.derived[BoundedCollection]
+
 /** What a failure is about.
   *
   * A subject and a field vary independently — the same field can fail under any
@@ -514,9 +527,9 @@ enum FieldProblem:
   case ParentIsLeaf(parent: SafeName.SafeName)
   case CycleDetected(node: SafeName.SafeName)
   case PortfolioHasNoChildren(portfolios: List[SafeName.SafeName])
-  case TooManyChildren(count: NonNegativeInt, limit: NonNegativeInt)
-  case TooManyNodes(count: NonNegativeInt, limit: NonNegativeInt)
-  case TooManyMitigations(count: NonNegativeInt, limit: NonNegativeInt)
+
+  /** A bounded collection held more entries than its limit. */
+  case TooMany(collection: BoundedCollection, count: NonNegativeInt, limit: NonNegativeInt)
 
   // A stored node named by a tree update; the location carries its id
   case StoredNodeListedTwice
@@ -556,7 +569,6 @@ enum FieldProblem:
 
   // Mitigation
   case PipelineEmpty(min: NonNegativeInt)
-  case PipelineTooLong(count: NonNegativeInt, limit: NonNegativeInt)
   case AggregatedLossOverflow
   case MitigationEliminatesRisk
   case MitigationLowersMinLossBelowFloor(min: PositiveLong, minFactor: PositiveDouble)
@@ -564,7 +576,7 @@ enum FieldProblem:
   case TargetingPredicateUnparseable(problem: Positioned[ParseProblem])
   case TargetingQuantifierNotAllowed
   case TargetingFunctionNotAllowed
-  case TargetingQuantifierDepthExceeded(limit: NonNegativeInt, found: NonNegativeInt)
+  case TargetingQuantifierDepthExceeded(found: NonNegativeInt, limit: NonNegativeInt)
   case TargetingNoFreeVariable
   case TargetingSeveralFreeVariables
   case TargetingMitigationStateReferenced
@@ -626,9 +638,7 @@ object FieldProblem:
     case ParentIsLeaf(_)                            => ValidationErrorCode.INVALID_NODE_TYPE
     case CycleDetected(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
     case PortfolioHasNoChildren(_)                  => ValidationErrorCode.EMPTY_COLLECTION
-    case TooManyChildren(_, _)                      => ValidationErrorCode.CONSTRAINT_VIOLATION
-    case TooManyNodes(_, _)                         => ValidationErrorCode.CONSTRAINT_VIOLATION
-    case TooManyMitigations(_, _)                   => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case TooMany(_, _, _)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
     case StoredNodeListedTwice                      => ValidationErrorCode.DUPLICATE_VALUE
     case StoredNodeIsLeaf                           => ValidationErrorCode.INVALID_NODE_TYPE
     case StoredNodeIsPortfolio                      => ValidationErrorCode.INVALID_NODE_TYPE
@@ -654,7 +664,6 @@ object FieldProblem:
     case MetalogFitFailed                           => ValidationErrorCode.INVALID_METALOG_PARAMS
     case LognormalFitFailed                         => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS
     case PipelineEmpty(_)                          => ValidationErrorCode.CONSTRAINT_VIOLATION
-    case PipelineTooLong(_, _)                      => ValidationErrorCode.CONSTRAINT_VIOLATION
     case AggregatedLossOverflow                     => ValidationErrorCode.CONSTRAINT_VIOLATION
     case MitigationEliminatesRisk                   => ValidationErrorCode.CONSTRAINT_VIOLATION
     case MitigationLowersMinLossBelowFloor(_, _)    => ValidationErrorCode.INVALID_LOGNORMAL_PARAMS

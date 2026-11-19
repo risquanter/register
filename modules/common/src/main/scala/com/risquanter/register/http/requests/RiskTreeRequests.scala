@@ -4,9 +4,9 @@ import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
 import com.risquanter.register.domain.data.{
   AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget, RiskLeaf,
-  RiskNode, RiskPortfolio, TargetingPredicate
+  RiskNode, RiskPortfolio, RiskTree, TargetingPredicate
 }
-import com.risquanter.register.domain.data.iron.{ValidationUtil, MitigationId, SafeName, SafeId, SeedVarId, NodeId, Probability}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, MitigationId, NonNegativeInt, SafeName, SafeId, SeedVarId, NodeId, Probability}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{
@@ -178,6 +178,19 @@ object RiskTreeRequests {
   /** The single place the wire's absent parent and the domain's named case meet.
     * A JSON `null`, an absent key and a blank string all mean the root.
     */
+  /** Refuses a submission whose node count or mitigation count is above its
+    * tree ceiling, before any entry is refined, so the work and the refusal
+    * stay bounded by the ceilings rather than by the request body (ADR-017 §6).
+    * Both counts are checked, and each over its ceiling is one refusal. */
+  private[requests] def requireWithinCeilings(
+    nodeCount: NonNegativeInt,
+    mitigationCount: NonNegativeInt
+  ): Validation[ValidationError, Unit] =
+    Validation.validateWith(
+      RiskTree.requireNodeCount(nodeCount, ErrorLocation.Whole),
+      RiskTree.requireMitigationCount(mitigationCount, ErrorLocation.requestField(FieldName.Mitigations))
+    )((_, _) => ())
+
   private[requests] def refineParentName(raw: Option[String], location: ErrorLocation): Validation[ValidationError, ParentRef] =
     raw.map(_.trim).filter(_.nonEmpty) match {
       case Some(value) => toValidation(ValidationUtil.refineName(value, location)).map(ParentRef.Under(_))
@@ -652,7 +665,7 @@ object RiskTreeRequests {
   }
 
   private[requests] def collectAllWithIndex[A, B](as: Seq[A])(f: (A, Int) => Validation[ValidationError, B]): Validation[ValidationError, Seq[B]] =
-    as.zipWithIndex.foldLeft[Validation[ValidationError, List[B]]](Validation.succeed(Nil)) {
+    as.zipWithIndex.foldLeft[Validation[ValidationError, Vector[B]]](Validation.succeed(Vector.empty)) {
       case (acc, (a, idx)) => Validation.validateWith(acc, f(a, idx))((xs, b) => xs :+ b)
     }.map(_.toSeq)
 }

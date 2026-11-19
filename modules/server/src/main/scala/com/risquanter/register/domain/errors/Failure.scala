@@ -79,7 +79,7 @@ object Failure:
       * }}}
       */
     def logMessage: String =
-      view(f).entries.toList.mkString(s"${f.productPrefix}: ", "; ", "")
+      boundedLogLine(s"${f.productPrefix}: ", view(f).entries.toList)
 
     /** The structured fields for the log line: every diagnostic rendered, plus
       * `trust_zone`. Diagnostics rendering under one key keep every value,
@@ -176,7 +176,7 @@ object Failure:
   private final case class View(zone: TrustZone, entries: NonEmptyChunk[String], diagnostics: List[Diagnostic])
 
   private def view(f: Failure): View = f match
-    case Rejected(c)     => View(c.zone, entries(c, logged), c.diagnostics)
+    case Rejected(c)     => View(c.zone, entries(c, ValidationMessages.render), c.diagnostics)
     case Unanswered(c)   => View(TrustZone.Peer(c.zone), entries(c, OutageMode.describe), c.diagnostics)
     case NotFound(c)     => View(c.zone, entries(c, NotFoundKind.describe), c.diagnostics)
     case Conflict(c)     => View(c.zone, entries(c, ConflictKind.describe), c.diagnostics)
@@ -187,32 +187,44 @@ object Failure:
   private def entries[Z, P](core: Core[Z, P], describe: P => String): NonEmptyChunk[String] =
     core.errors.map((location, problem) => s"[${ErrorLocation.describe(location)}] ${describe(problem)}")
 
-  /** How much of a sentence repeating the caller's words reaches a log line.
+  /** How much of one entry reaches a log line.
     *
     * A refusal of query or targeting text repeats the caller's words and
     * literals, and one word may run to the text's whole 2 048 characters. One
     * line per failed request is written synchronously to standard output, so a
     * long sentence makes a request's log cost follow its text. 300 characters
     * is chosen here as enough to identify where a text was refused while
-    * keeping the line a fixed cost.
-    *
-    * The full refusal still crosses to the caller who sent the text, because
-    * it is their own text coming back.
+    * keeping the line a fixed cost. Every entry is cut, so no kind of refusal
+    * has to be named here for its line to stay bounded.
     */
   private val LoggedMessageLimit: Int = 300
 
-  /** A refused problem's sentence for the log line, with the sentence of a
-    * query refusal and of a targeting predicate's refusal cut to
-    * `LoggedMessageLimit`. */
-  private def logged(problem: FieldProblem): String = problem match
-    case FieldProblem.Query(_) | FieldProblem.TargetingPredicateUnparseable(_) => boundedForLog(ValidationMessages.render(problem))
-    case other                                                                 => ValidationMessages.render(other)
+  /** How many entries a log line names. A refusal of a whole tree can hold
+    * thousands of entries; 20 is chosen here so the line stays a fixed cost.
+    *
+    * Every entry still crosses to the caller, because the refusal answers the
+    * caller's own request.
+    */
+  private val LoggedEntryLimit: Int = 20
 
-  /** A sentence repeating the caller's words, cut for a log line to
-    * `LoggedMessageLimit` characters and marked when cut. */
-  private[register] def boundedForLog(message: String): String =
-    if message.length <= LoggedMessageLimit then message
-    else s"${message.take(LoggedMessageLimit)}… (message truncated)"
+  /** A log line: `prefix`, then at most `LoggedEntryLimit` entries, each cut to
+    * `LoggedMessageLimit` characters, then the count of the entries left out.
+    * Its length is therefore bounded whatever the entries hold.
+    *
+    * {{{
+    * boundedLogLine("Rejected: ", 25 entries)
+    * // "Rejected: e1; e2; …; e20 and 5 more"
+    * }}}
+    */
+  private[register] def boundedLogLine(prefix: String, entries: Seq[String]): String =
+    val (kept, left) = entries.splitAt(LoggedEntryLimit)
+    val omitted      = if left.isEmpty then "" else s" and ${left.size} more"
+    kept.map(boundedEntry).mkString(prefix, "; ", omitted)
+
+  /** One entry cut to `LoggedMessageLimit` characters, marked when cut. */
+  private def boundedEntry(entry: String): String =
+    if entry.length <= LoggedMessageLimit then entry
+    else s"${entry.take(LoggedMessageLimit)}… (message truncated)"
 
   /** The zone's log value. Declared rather than derived from the case name,
     * because the log pipeline matches it exactly (ADR-037). */

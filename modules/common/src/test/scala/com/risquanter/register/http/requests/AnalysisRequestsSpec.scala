@@ -3,7 +3,7 @@ package com.risquanter.register.http.requests
 import zio.test.*
 import zio.json.DecoderOps
 import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, FieldProblem}
+import com.risquanter.register.domain.errors.{BoundedCollection, ErrorLocation, FieldName, FieldProblem}
 import com.risquanter.register.testutil.TestHelpers.nodeId
 
 /** The two analysis request bodies: the node-count bound on the curve request,
@@ -18,8 +18,8 @@ object AnalysisRequestsSpec extends ZIOSpecDefault {
       assertTrue(
         refused.map(_.location) == List(ErrorLocation.requestField(FieldName.Nodes)),
         refused.forall(_.problem match
-          case FieldProblem.TooManyNodes(_, limit) => limit == RiskTree.MaxNodes
-          case _                                   => false)
+          case FieldProblem.TooMany(BoundedCollection.Nodes, _, limit) => limit == RiskTree.MaxNodes
+          case _                                                       => false)
       )
     },
 
