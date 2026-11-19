@@ -235,3 +235,27 @@ run_staging_script() {
     require_httpie
     run_staging_script stage-history-slider-httpie.sh
 }
+
+# ============================================================================
+# Secrets in logs — the workspace key never reaches the frontend's log
+# ============================================================================
+
+@test "A08: the frontend's logs hold no workspace key" {
+    create_workspace "${FRONTEND_URL}"
+
+    # A proxied API request carrying the key in its path and in its Referer.
+    curl -s -o /dev/null -H "Referer: ${FRONTEND_URL}/w/${WORKSPACE_KEY}/" \
+        "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees"
+    # A browser navigation, which nginx answers with the SPA shell.
+    curl -s -o /dev/null -H "Accept: text/html" "${FRONTEND_URL}/w/${WORKSPACE_KEY}"
+    # A proxied request while register-server is down, which nginx answers 502.
+    docker compose stop register-server 2>&1
+    status=$(curl -s -o /dev/null -w '%{http_code}' "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
+    docker compose start register-server 2>&1
+    wait_for_url "${REGISTER_URL}/health" 30
+
+    [ "$status" = "502" ]
+    logs=$(docker compose --profile persistence --profile frontend logs frontend 2>&1)
+    [[ "$logs" == *'/w/<key>/risk-trees'* ]]
+    [[ "$logs" != *"${WORKSPACE_KEY}"* ]]
+}

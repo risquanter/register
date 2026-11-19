@@ -164,7 +164,7 @@ COPY --from=builder /app/modules/app/dist/ /srv/app/
 RUN cat <<'EOF' > /etc/nginx/nginx.conf.template
 pid /tmp/nginx.pid;
 worker_processes auto;
-error_log /dev/stderr warn;
+error_log /dev/stderr crit;
 
 events {
     worker_connections 1024;
@@ -173,7 +173,20 @@ events {
 http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
-    access_log    /dev/stdout;
+
+    # The workspace key is a secret and never reaches a log (ADR-022). Under
+    # path routing (ADR-025) it is the segment after /w/ in the request line,
+    # and in the Referer of every request a page under /w/ makes. The access
+    # log writes the request line with that segment replaced, and does not
+    # write the Referer. The error log runs at crit, because its lines at
+    # error and warn quote the request line, which nginx cannot mask.
+    map $request $request_masked {
+        "~^(?<rq_head>\S+ /w/)[^/?\s]+(?<rq_tail>.*)$"  "${rq_head}<key>${rq_tail}";
+        default                                         $request;
+    }
+    log_format masked '$remote_addr - [$time_local] "$request_masked" $status $body_bytes_sent "$http_user_agent"';
+    access_log    /dev/stdout masked;
+
     sendfile      on;
     server_tokens off;   # suppress nginx version in Server header + error pages
 
