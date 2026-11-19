@@ -576,8 +576,9 @@ V=x.y.z; sed -i "s/^ThisBuild \/ version .*/ThisBuild \/ version      := \"$V\"/
 
 It sets the version in `build.sbt`, regenerates `.env` from it (a single-line file, safe
 to regenerate), replaces only the `APP_VERSION` line of the multi-line `.env.irmin`, and
-replaces only the `**System version:**` line of each threat model. The greps must print
-the same version on every line.
+replaces only the `**System version:**` line of each threat model. Every version the greps
+print must be the same; the comment line `.env.irmin` holds about `APP_VERSION` prints
+too, and carries none.
 
 After this, `docker compose up` tags all application images with the new version.
 Full map of what a bump or dependency change triggers: `docs/dev/VERSION-UPGRADE-PROTOCOL.md`.
