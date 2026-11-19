@@ -27,11 +27,23 @@ the deployments:
 | k3d, Layer 1 | `k3d-L1` | `identity` | register-infra |
 | k3d, Layer 2 | `k3d-L2` | `fine-grained` | register-infra |
 
-Each model states the system version it describes on one line directly above
-its diagram: `**System version:** x.y.z`. The version bump command in the
-register-dev skill rewrites that line in every `docs/dev/threat-models/*-TM.md`
-together with `build.sbt`, so the line always carries the version the repository
-is at.
+Each model carries two lines directly above its diagram:
+
+```markdown
+**System version:** 0.25.2
+**Assessed:** version 0.25.0 · commit b49e50fd · stage 5
+```
+
+The first line is the version the repository is at. The version bump command in
+the register-dev skill rewrites it in every `docs/dev/threat-models/*-TM.md`
+together with `build.sbt`. The second line says what the model describes: the
+version and the commit that were assessed, and the last stage of the
+threat-modelling workflow that passed against them. Only a stage that passes
+rewrites it. The commit is the one the assessment read, which is the parent of
+the commit that lands the model, because a commit cannot name its own hash.
+
+When the two versions differ, the system has moved since the model was
+assessed, and the model is due for re-checking.
 
 The application model holds every threat that does not depend on the deployment.
 A deployment model lists only the elements, boundaries and flows its deployment
@@ -77,7 +89,8 @@ register's suite is therefore a new dependency for register, decided under the
 
 ## 3. A model describes the system as built
 
-A model describes one version of the system, and it names that version (§1). A boundary is drawn only where its control exists in that
+A model describes one version of the system, and its `**Assessed:**` line names
+that version and commit (§1). A boundary is drawn only where its control exists in that
 version. A control that is intended but not built appears as a mitigation with
 status `open` and a `todo`. It never appears as a boundary.
 
@@ -237,6 +250,21 @@ STRIDE names six classes of threat: **S**poofing, **T**ampering,
 2. every data flow that crosses a boundary;
 3. every boundary row in §2.6 marked wider than designed.
 
+Not every class applies to every kind of element. The rule set Microsoft
+published for STRIDE per element, which Shostack's *Threat Modeling: Designing
+for Security* Appendix B repeats as its Table B-0, is:
+
+| Kind of element | Classes asked |
+|---|---|
+| External entity | S, R |
+| Process | S, T, R, I, D, E |
+| Data store | T, I, D, and R when the store holds logs |
+| Data flow | T, I, D |
+
+The repudiation entry for a data store has that condition because a log is what
+answers a repudiation threat. A store that holds the log can then be tampered
+with to remove the evidence.
+
 Each threat found becomes one YAML entry in the model's §4, in the schema of its
 §1. Its `statement` uses the grammar of §2. It names the `flow` or the `element`
 it acts on, and it maps each mitigation to three references: the decision
@@ -307,6 +335,8 @@ with status `open` describes a weakness that is not yet fixed.
 - Adam Shostack, [Boundaries](https://threatmodelingbook.com/blog/boundaries-threat-model-thursday/)
 - Microsoft, [Threat Modeling Tool feature overview](https://learn.microsoft.com/en-us/azure/security/azure-security-threat-modeling-tool-feature-overview)
 - Microsoft Learn, [Visualize risk](https://learn.microsoft.com/en-us/training/modules/threat-modeling-enterprise-infrastructure/4-visualize-risk)
+- Adam Shostack, [Appendix B, Threat Trees](https://shostack.org/files/tmbookchapters/AppendixB-ThreatTrees-web.pdf), Table B-0
+- Larry Osterman, [Threat Modeling Again, STRIDE per Element](https://learn.microsoft.com/en-us/archive/blogs/larryosterman/threat-modeling-again-stride-per-element), Microsoft
 - Hernan, Lambert, Ostwald and Shostack, [Uncover Security Design Flaws Using the STRIDE Approach](https://msdn.microsoft.com/en-us/magazine/cc163519.aspx), MSDN Magazine
 - W3C, [Threat Modeling Guide](https://www.w3.org/TR/threat-modeling-guide/)
 - AWS, [Threat Composer](https://github.com/awslabs/threat-composer)

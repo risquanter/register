@@ -41,6 +41,24 @@ of `DELETE /admin/workspaces/expired` to the edge. Compose has no edge in front
 of port 8090, so every element of B1 and every host process can call the route
 (APPLICATION-TM §2.6, row B2).
 
+**Observation — nothing bounds how many simulations run at once.**
+`maxConcurrentSimulations` is a field of `SimulationConfig`, set to 4 in
+`application.conf`, and no server code reads it. `docker-compose.yml` says of
+`REGISTER_MAX_CONCURRENT_SIMULATIONS`: "Not read by the server yet — the
+resolver's fan-out across sibling nodes is unbounded." The container's limits of
+2 CPUs and 256 MiB are the only bound (APPLICATION-TM §2.2).
+
+**Observation — the schema migrations run as the application's database user.**
+`application.conf` gives `register.flyway.user` and `register.db.dataSource.user`
+the same variable, `REGISTER_DB_USER`. The user register-server reads and writes
+workspace records with therefore also holds the right to change the schema
+(APPLICATION-TM §2.5, DF8).
+
+**Observation — comments in the server still describe Istio.** `UserContext.scala`
+("populated from Istio-injected claim headers"), `AuthConfig.scala` and
+`HealthProbeServer.scala` name it. Istio is no longer installed in the k3d
+cluster (register-infra commit `f2e7567`).
+
 **Observation — the health port's rationale names Istio.** The comment on
 `healthPort` in
 [application.conf](../../../modules/server/src/main/resources/application.conf)
@@ -110,12 +128,26 @@ sets `POSTGRES_PASSWORD: dev-only-password`, and register-server's
 fine-grained mode fails at startup unless SPICEDB_URL and SPICEDB_TOKEN are set
 — fail-closed by construction."
 
+**Observation — the SpiceDB URL may be plain HTTP, on the premise of a mesh that
+is gone.** `SpiceDbConfig` takes its URL as `MeshServiceUrl`. The comment on that
+type in `OpaqueTypes.scala` says it "Accepts both http:// and https:// —
+transport security is the mesh's responsibility", and that "The Istio control
+plane provides mutual TLS between all mesh-enrolled pods transparently". Istio
+is no longer installed (register-infra commit `f2e7567`). The request carries
+`SPICEDB_TOKEN`. What protects DF9 in transit now is settled in the k3d Layer 2
+model.
+
 ## OpenTelemetry collector
 
 **Observation — its receivers take no credential.** The collector runs with
 [otel-collector-config.yaml](../../../otel-collector-config.yaml), and compose
 publishes ports 4317, 4318, 8888 and 8889 on the host when the `observability`
 profile runs.
+
+**Observation — its configuration file is mounted writable.** Compose mounts
+`./otel-collector-config.yaml` into the collector with no `:ro` flag, so a
+process inside the collector container can rewrite the file in the repository
+checkout on the host (APPLICATION-TM §2.5, DF15).
 
 **Observation — its image is pinned by version, not by digest.** Compose runs
 `otel/opentelemetry-collector-contrib:0.95.0`. ADR-020 §1 requires exact pins,
