@@ -545,7 +545,9 @@ docker compose --profile persistence --profile frontend --profile observability 
 
 `build.sbt` (`ThisBuild / version`) is the single source of truth. **Both** `.env` and
 `.env.irmin` must be kept in sync — Docker Compose reads `APP_VERSION` to tag images,
-and `--env-file .env.irmin` replaces `.env`, so each file needs its own copy.
+and `--env-file .env.irmin` replaces `.env`, so each file needs its own copy. Each
+threat model `docs/dev/threat-models/*-TM.md` carries the version too, on its
+`**System version:**` line above the diagram.
 
 ### When to bump
 
@@ -557,11 +559,11 @@ and `--env-file .env.irmin` replaces `.env`, so each file needs its own copy.
 | Docs-only, test-only, skill/tooling-only changes (no shipped code) | **No bump** |
 
 **Ownership: the user runs every bump. The agent never edits the version** — not in
-`build.sbt`, `.env` or `.env.irmin`. When the agent reports a landed work step and
+`build.sbt`, `.env`, `.env.irmin` or a threat model's `**System version:**` line. When the agent reports a landed work step and
 proposes its commits, it reads the current version from `build.sbt`, picks the next
 one from the table above, and presents the bump command below with that version
 filled in. The command goes in its own block **above** the commit block, so it runs
-first and the commit covers the three version files. A step that needs no bump gets
+first and the commit covers the version files. A step that needs no bump gets
 no command. MAJOR is proposed only where the user has pre-declared it (e.g., a note
 at the end of a plan document naming the milestone). Dependency changes and
 supply-chain rules: supply-chain skill.
@@ -569,12 +571,13 @@ supply-chain rules: supply-chain skill.
 ### The bump command
 
 ```bash
-V=x.y.z; sed -i "s/^ThisBuild \/ version .*/ThisBuild \/ version      := \"$V\"/" build.sbt && sed -n 's/ThisBuild \/ version[[:space:]]*:= "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env && sed -i "s/^APP_VERSION=.*/$(cat .env)/" .env.irmin && grep -H 'ThisBuild / version' build.sbt && grep APP_VERSION .env .env.irmin
+V=x.y.z; sed -i "s/^ThisBuild \/ version .*/ThisBuild \/ version      := \"$V\"/" build.sbt && sed -n 's/ThisBuild \/ version[[:space:]]*:= "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env && sed -i "s/^APP_VERSION=.*/$(cat .env)/" .env.irmin && sed -i "s/^\*\*System version:\*\* .*/**System version:** $V/" docs/dev/threat-models/*-TM.md && grep -H 'ThisBuild / version' build.sbt && grep APP_VERSION .env .env.irmin && grep -H '^\*\*System version:\*\*' docs/dev/threat-models/*-TM.md
 ```
 
 It sets the version in `build.sbt`, regenerates `.env` from it (a single-line file, safe
-to regenerate), and replaces only the `APP_VERSION` line of the multi-line `.env.irmin`.
-The last two greps must print the same version three times.
+to regenerate), replaces only the `APP_VERSION` line of the multi-line `.env.irmin`, and
+replaces only the `**System version:**` line of each threat model. The greps must print
+the same version on every line.
 
 After this, `docker compose up` tags all application images with the new version.
 Full map of what a bump or dependency change triggers: `docs/dev/VERSION-UPGRADE-PROTOCOL.md`.

@@ -888,6 +888,16 @@ any other zone, it is content this service did not expect from a peer, or a
 fault of its own. The caller is then told only that the service failed, and the
 detail goes to the server's log.
 
+In a threat model the same words name a different thing. There a **trust
+boundary** encloses components, and a control separates the principals inside it
+from those outside — a network that admits only certain callers, a password, a
+process edge. The two meanings give the same line at the edge of a process,
+where the check every incoming value must pass is that control. Elsewhere they
+differ: a database's password marks a boundary in a threat model without
+checking any value, and the workspace key's narrow boundary says where one value
+may travel, not which component may be reached. The threat models' meaning is
+set out in `docs/dev/threat-models/TM-METHODOLOGY-CONCEPTS.md` §4.
+
 ### 8.2 Secret
 
 A **secret** is a value where holding it *is* permission. The workspace key is
