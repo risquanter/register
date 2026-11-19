@@ -175,9 +175,6 @@ object RiskTreeRequests {
   ): Validation[ValidationError, ResolvedUpdate] =
     RiskTreeUpdateRequest.resolve(req, stored, storedMitigations, newId)
 
-  /** The single place the wire's absent parent and the domain's named case meet.
-    * A JSON `null`, an absent key and a blank string all mean the root.
-    */
   /** Refuses a submission whose node count or mitigation count is above its
     * tree ceiling, before any entry is refined, so the work and the refusal
     * stay bounded by the ceilings rather than by the request body (ADR-017 §6).
@@ -191,6 +188,9 @@ object RiskTreeRequests {
       RiskTree.requireMitigationCount(mitigationCount, ErrorLocation.requestField(FieldName.Mitigations))
     )((_, _) => ())
 
+  /** The single place the wire's absent parent and the domain's named case meet.
+    * A JSON `null`, an absent key and a blank string all mean the root.
+    */
   private[requests] def refineParentName(raw: Option[String], location: ErrorLocation): Validation[ValidationError, ParentRef] =
     raw.map(_.trim).filter(_.nonEmpty) match {
       case Some(value) => toValidation(ValidationUtil.refineName(value, location)).map(ParentRef.Under(_))

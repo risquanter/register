@@ -789,6 +789,23 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       )))
     },
 
+    test("a create above both ceilings is refused by both counts together, and by nothing else") {
+      val req = RiskTreeDefinitionRequest(
+        name = "",
+        portfolios = Seq(RiskPortfolioDefinitionRequest("Root", None)),
+        leaves = (1 to RiskTree.MaxNodes).map(i => validLeafDef(s"L$i", Some("Root"))),
+        newMitigations = Seq.fill(RiskTree.MaxMitigations + 1)(blankNamed)
+      )
+      assertTrue(errorsOf(resolveCreate(req, () => safeId("generated"))) == List(
+        ValidationError(
+          ErrorLocation.Whole,
+          FieldProblem.TooMany(BoundedCollection.Nodes, NonNegativeInt.count(RiskTree.MaxNodes + 1), RiskTree.MaxNodes)),
+        ValidationError(
+          ErrorLocation.requestField(FieldName.Mitigations),
+          FieldProblem.TooMany(BoundedCollection.Mitigations, NonNegativeInt.count(RiskTree.MaxMitigations + 1), RiskTree.MaxMitigations))
+      ))
+    },
+
     test("an update counts kept and new mitigations together against the ceiling") {
       val kept = Seq.fill(RiskTree.MaxMitigations / 2 + 1)(
         MitigationUpdateRequest(id = "", name = "", target = None, spec = blankNamed.spec, precedence = MitigationPrecedence.default))

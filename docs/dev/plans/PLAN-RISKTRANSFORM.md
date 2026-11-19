@@ -2749,6 +2749,12 @@ object MitigationSelection:
     Schema.derived[Raw].map(raw => fromRaw(raw).toEither.toOption)(toRaw)
 ```
 
+**Superseded by §7.6.19:** the two bounds in `create` call
+`RiskTree.requireMitigationCount` and `RiskTree.requireNodeCount`, and both
+refuse with `FieldProblem.TooMany`. `TooManyMitigations` and `TooManyNodes`,
+named here and in §7.6.11, no longer exist. Do not implement the two checks
+above.
+
 Five points about that file.
 
 **Why the codec is declared for `Enumerated` and not for `MitigationSelection`.**
@@ -2928,6 +2934,10 @@ object ProbOfExceedanceRequest:
   given schema: Schema[ProbOfExceedanceRequest] =
     Schema.derived[Raw].map(raw => Some(fromRaw(raw)))(toRaw)
 ```
+
+**Superseded by §7.6.19:** `LECCurvesMultiRequest.create` calls
+`RiskTree.requireNodeCount`, which refuses with `FieldProblem.TooMany`. Do not
+implement the `if` above.
 
 Four points about that file.
 
@@ -6874,7 +6884,7 @@ both, plus three consolidations:
    line grew with the request body. Both `resolve` functions now run
    `requireWithinCeilings` first and refuse by the count alone (the user chose
    Option A). ADR-001 §1 and §2 and ADR-017 §3 and §6 state the carve-out.
-3. The count rule written at six sites is one rule,
+3. The count rule written at seven sites is one rule,
    `ValidationUtil.requireAtMost`, with `RiskTree.requireNodeCount` and
    `RiskTree.requireMitigationCount` binding the tree's two limits.
 4. `TooManyChildren`, `TooManyNodes`, `TooManyMitigations` and
@@ -7097,7 +7107,7 @@ In `create`, the four accumulated checks become two:
     case FragmentViolation.FunctionApplicationNotAllowed(_) => FieldProblem.TargetingFunctionNotAllowed
     case FragmentViolation.PredicateNotAllowed(_)           => FieldProblem.TargetingMitigationStateReferenced
     case FragmentViolation.QuantifierDepthExceeded(limit, found) =>
-      FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(limit), NonNegativeInt.count(found))
+      FieldProblem.TargetingQuantifierDepthExceeded(NonNegativeInt.count(found), NonNegativeInt.count(limit))
 ```
 
 `referencedNodes` keeps its signature (§7.6.17) and its order and repeats:
@@ -14024,6 +14034,11 @@ private[register] def boundedForLog(message: String): String   // was private de
 `MitigationScopeResolver.scala`: `ResolvedScopes.logFailures` passes its whole
 message through `Failure.boundedForLog`. The message begins with the count of
 failed mitigations, so the cut keeps the count and the first entries.
+
+**Superseded by §7.6.19:** `logged` and `boundedForLog` are deleted. Every
+refusal's log line and `ResolvedScopes.logFailures` call
+`Failure.boundedLogLine`, which names at most 20 entries, each cut to 300
+characters. Do not implement the two signatures above.
 
 ### 11.4 What the change does to stored and sent data
 
