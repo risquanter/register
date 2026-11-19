@@ -2021,8 +2021,8 @@ ceiling carried in the type would still add only the compile-time guarantee
 against an internal construction path, so the deferral's reasoning stands.
 
 **Next step: the first work after `PLAN-RISKTRANSFORM.md` closes.** Re-read this
-item against the code as it then stands. Confirm that the six count ceilings
-share one rule (`ValidationUtil.requireAtMost`) and that `resolve` checks the
+item against the code as it then stands. Confirm that the seven count checks,
+over four ceilings, share one rule (`ValidationUtil.requireAtMost`) and that `resolve` checks the
 tree's two ceilings before refinement. Then decide whether Lever 2 stays
 deferred, is scoped as its own plan, or is dropped.
 

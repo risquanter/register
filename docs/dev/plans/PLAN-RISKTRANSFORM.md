@@ -1,6 +1,8 @@
 # PLAN — RiskTransform (Mitigation): Knowledge Consolidation & Open Decisions
 
-Status: **Partially executed.** Created 2026-07-16. On 2026-07-17 the user decided
+Status: **Implemented.** Every item has landed green; M4 slices 9 and 10
+(§7.6.18, §7.6.19) were the last, and BATS suites C and A passed on 2026-11-19.
+Created 2026-07-16. On 2026-07-17 the user decided
 and the following was implemented: B.8 defect fixes, D2 Option 1 (delete `Equal`),
 D6 Option 1 (retarget to `TrialOutcomes`); D3 was decided (Option 1, cache raw)
 as policy — no code exists to wire it yet. D1 is decided (stratified
@@ -6897,6 +6899,59 @@ both, plus three consolidations:
    `Failure.boundedLogLine`: at most 20 entries (`LoggedEntryLimit`, chosen
    here), each cut to 300 characters, then " and N more". ADR-035 §5 and
    ADR-029 §3 state it.
+
+The signatures these fixes add or change, as implemented:
+
+```scala
+// ErrorLocation.scala — beside SubmittedCollection and SubmittedMitigations
+enum BoundedCollection:
+  case Nodes, Mitigations, Children, PipelineSteps
+
+object BoundedCollection:
+  given codec: JsonCodec[BoundedCollection] = DeriveJsonCodec.gen[BoundedCollection]
+
+  given schema: Schema[BoundedCollection] =
+    given Configuration = discriminated
+    Schema.derived[BoundedCollection]
+
+// FieldProblem — replaces TooManyChildren, TooManyNodes, TooManyMitigations, PipelineTooLong
+case TooMany(collection: BoundedCollection, count: NonNegativeInt, limit: NonNegativeInt)
+// FieldProblem — fields reordered
+case TargetingQuantifierDepthExceeded(found: NonNegativeInt, limit: NonNegativeInt)
+
+// ValidationUtil
+def requireAtMost(
+    collection: BoundedCollection,
+    count: NonNegativeInt,
+    limit: NonNegativeInt,
+    location: ErrorLocation
+): Validation[ValidationError, Unit]
+
+// RiskTree companion
+def requireNodeCount(count: NonNegativeInt, location: ErrorLocation): Validation[ValidationError, Unit]
+def requireMitigationCount(count: NonNegativeInt, location: ErrorLocation): Validation[ValidationError, Unit]
+
+// RiskTreeRequests
+private[requests] def requireWithinCeilings(
+  nodeCount: NonNegativeInt,
+  mitigationCount: NonNegativeInt
+): Validation[ValidationError, Unit]
+
+// RiskTreeDefinitionRequest companion — the former body of resolve, run after requireWithinCeilings
+private def refine(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate]
+
+// RiskTreeUpdateRequest companion — the same split
+private def refine(
+  req: RiskTreeUpdateRequest,
+  stored: TreeIndex,
+  storedMitigations: Seq[Mitigation],
+  newId: IdGenerator
+): Validation[ValidationError, ResolvedUpdate]
+
+// Failure companion (server)
+private val LoggedEntryLimit: Int = 20
+private[register] def boundedLogLine(prefix: String, entries: Seq[String]): String
+```
 
 `docs/dev/TODO.md` item 46 records the corrected premise of the Lever 2
 deferral, and its review is the first work after this plan closes.
