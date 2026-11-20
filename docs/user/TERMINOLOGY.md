@@ -31,6 +31,28 @@ the random-number stream it draws from (1.6). None of those four describes the
 risk. That distinction becomes load-bearing at Part 3, because a mitigation can
 change the two parts above and nothing else.
 
+**Risk, likelihood and consequence in the ISO standards.** ISO 27001, the
+information security management standard, takes its risk vocabulary from ISO
+31000, the general risk management standard, by way of ISO/IEC 27000. The terms
+above map onto that vocabulary as follows.
+
+ISO 31000 defines a risk as the effect of uncertainty on objectives. It says a
+risk is usually described by its sources, its events, their consequences and
+their likelihood. A risk here is the event-based form of that: one event, with
+its likelihood and its impact. ISO/IEC 27005, the guidance on information
+security risk management, accepts this event-based way of identifying risks
+beside an asset-based one. ISO's risk also covers positive effects. The register
+models losses only, so it has none.
+
+ISO's **likelihood** is the chance of something happening. That is the same as
+likelihood here. The code names the field `probability`.
+
+ISO's **consequence** is the outcome of an event that affects objectives. Impact
+here is that consequence, stated as a loss distribution. ISO's **level of risk**
+combines consequence and likelihood. A loss exceedance curve (1.11) is a level of
+risk that keeps the whole distribution. A heat map reduces the same combination
+to one likelihood and one consequence.
+
 ### 1.2 Portfolio
 
 A **portfolio** is a node with children. It has no likelihood and no loss
