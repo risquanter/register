@@ -74,6 +74,10 @@ Each threat is one YAML block under its own heading, and the heading repeats
 #                       open               - no control exists
 #                       not-applicable     - the deployment has no element the
 #                                            threat needs
+#                       not-assessed       - the control would sit in the
+#                                            deployment's own elements, and that
+#                                            deployment's model has not assessed
+#                                            it yet
 #   related_code    - list of repository-relative paths directly involved
 #   todo            - outstanding work, or null
 ```
@@ -145,6 +149,7 @@ The routes come from the endpoint definitions in
 |---|---|---|
 | `POST /workspaces` | none. It creates the credential | `WorkspaceLifecycleEndpoints.bootstrapWorkspaceEndpoint` |
 | `/w/{key}/...`: trees, history, revert, structure, changed nodes, analysis, query, scenarios, rotate, delete | the workspace key in the path. `x-user-id` is read as an optional header | `BaseEndpoint.authedBaseEndpoint`, `BaseEndpoint.workspaceRoute` |
+| `GET /w/{key}/events/tree/{treeId}` | the workspace key in the path, resolved once when the stream opens. A server-sent event stream of the tree's change events, with a heartbeat every 30 seconds | `SSEEndpoints`, `SSEController`, both in the server module |
 | `POST /distribution/preview` | none. `x-user-id` is read as an optional header | `DistributionPreviewEndpoints`, `BaseEndpoint.authedBaseEndpoint` |
 | `DELETE /admin/workspaces/expired` | none in the application. The controller takes the system maintenance token, and the edge decides who can reach the route | `WorkspaceLifecycleController.evictExpired`; AUTHORIZATION-PLAN L1.5 |
 | `GET /health` on port 8090 | none | `SystemEndpoints` |
@@ -270,7 +275,7 @@ its two ports are where the flows end. Who can reach a process without a drawn
 flow is read from §2.6.
 
 **System version:** 0.25.0
-**Assessed:** version 0.25.0 · commit 90b5d67a · stage 5
+**Assessed:** version 0.25.0 · commit cfe81c91 · stage 6
 
 ```mermaid
 flowchart LR
@@ -372,12 +377,86 @@ their own deployment.
 
 ## 4. Threats
 
-The STRIDE pass over the elements in §2.1, the flows in §2.5 and the rows of
-§2.6 marked "wider than designed" has not been run yet. T5 is recorded ahead of
-it. T4 moves here from
+The STRIDE pass covers the compose deployments. It asked the STRIDE classes of
+the elements in §2.1, the flows in §2.5 that cross a boundary, and the rows of
+§2.6 marked "wider than designed". §4.1 records every answer, and §4.2 holds the
+entries. T4 comes from
 [THREAT-CATALOG-(INCOMPLETE).md](../THREAT-CATALOG-(INCOMPLETE).md), because the
 sentinel user is part of the application. T1–T3 concern the edge, and they move
-to the k3d models.
+to the k3d models. The elements and flows that exist only in k3d (the edge
+gateway, SpiceDB, DF5, DF6 and DF9) are assessed in the k3d models.
+
+Three rules hold for every entry:
+
+- A unit test or an sbt integration test runs in no deployment. Where such a
+  test is the only proof of a control, the entry names it and the compose status
+  is `mitigated-untested`.
+- An entry whose controls do not all exist has status `open`.
+- A k3d status is given only where the control is in the application's own code
+  or image. Otherwise it is `not-assessed`.
+
+### 4.1 Coverage
+
+Each cell is a threat id, or "none" with the reason and its source. The classes
+asked of each kind of element are those of
+[TM-METHODOLOGY-CONCEPTS.md](TM-METHODOLOGY-CONCEPTS.md) §9. Irmin and
+PostgreSQL are asked as processes, which is the wider set, because each has a
+process boundary and a listening port.
+
+**Elements**
+
+| Element (kind) | S | T | R | I | D | E |
+|---|---|---|---|---|---|---|
+| Single-page application (process) | T6 | T6, T15 | T17 | T15. Key in the address bar: none, path routing is the design (`WorkspaceState.scala`) | none: static files, no shared state | T15 |
+| frontend (process) | T6 | none: `read_only`, uid 101, configuration written once at start | T17 | T5. Version: none, `server_tokens off` | T8 | none for its own privileges: uid 101, `no-new-privileges`, and it does not pass `/admin` on. T7, T11 and T12 start from any element of B1 |
+| register-server (process) | T6 for the client's view of the server. Key guessing: none, 16 bytes of `SecureRandom` (`WorkspaceKeyCrypto.scala`) | T11, T12 for its stored state. Request content: none, codecs refine at ingress (ADR-039) | T17 | T14, T16. Key in its log: none (`RequestSpanInterceptor.spanName`) | T8, T9, T10 | T7, T16. Container privileges: none, uid 65532, distroless, `read_only`, `no-new-privileges` |
+| Irmin (process and store) | T11 | T11 | T17 | T11 | T11 | T11 |
+| PostgreSQL (process and store) | T12 | T12 | T17 | T12 | T12, T9 | T20 |
+| OpenTelemetry collector (process) | T13 | T13 | T13 | T14 | T13 | T21 |
+| Vite dev server (process) | none: serves the developer's checkout, checks no credential | none: same | none: no action it could deny | none: SPA files only | none: one developer's process | none: `vite.config.js` sets no proxy |
+| API client (external) | none: holding the key is the identity (ADR-021) | n/a | T17 | n/a | n/a | n/a |
+| Host process (external) | T7 for `/admin`. Probes: none, constant answers (`HealthProbeServer.scala`) | n/a | T17 | n/a | n/a | n/a |
+| Docker host and daemon (process) | none: taken as correct | none: same | none: same | T22 | none: same | T22 |
+| Docker log store (store, logs) | n/a | none: only the daemon writes it | none: same | T5, T14, T22 | T23 | n/a |
+| Docker volumes (store) | n/a | T22. Through the processes: T11, T12 | n/a | T22 | T8 | n/a |
+| Compose file and env files (store) | n/a | T22, T21 | n/a | T22. Database password: none, it is public (`docker-compose.yml`) | none: read once at `up` | n/a |
+| Local image store (store) | n/a | T18 | n/a | none: no Dockerfile bakes a secret in | none: needs the daemon, T22 | n/a |
+| Docker embedded DNS (process) | none: part of the daemon, taken as correct | none: same | none: same | none: service names are not secret | none: same | none: same |
+
+**Flows that cross a boundary**
+
+| Flow | T | I | D |
+|---|---|---|---|
+| DF1 | T6 | T6 for a navigation to `/w/{key}`. The SPA files and `/config.json`: none, no secret in them | T8 |
+| DF2 | T6, T19 | T6, T19, T5 | T8, T10 |
+| DF3 | T6 | T6 | T8, T7 |
+| DF4 | none: constant answers | none: liveness only | T8 |
+| DF7 | T11, T19 | T11, T19 | T11. A slow store: none, 30 s timeout (`application.conf`) |
+| DF8 | T12, T19 | T12, T19 | T12, T9 |
+| DF10 | T13 | T14, T19 | none: batched asynchronous export (`TelemetryLive.scala`). No test proves it |
+| DF11 | T22 | T22 | none: read once at start |
+| DF12 | none: daemon taken as correct | T5, T14, T22. Workspace identifier in the server log: none, permitted ([TERMINOLOGY.md](../../user/TERMINOLOGY.md) §8.3) | T23 |
+| DF13 | T13 | T13 | T13 |
+| DF14 | none: development files to the developer's browser | none: SPA files hold no secret | none: one developer |
+| DF15 | T21 | none: the file is in the public repository | none: read at start |
+| DF16 | T22 | T22 | T8 |
+| DF17 | none: the daemon's resolver, taken as correct | none: names are not secret | none: same |
+| DF18 | none: fixed commands to 127.0.0.1 | none: the commands carry no secret | none: fixed interval |
+| DF19 | T18 | none: images hold no secret | none: needs the daemon |
+
+**Admits rows marked wider than designed**
+
+| Row | S | T | R | I | D | E |
+|---|---|---|---|---|---|---|
+| B1 | T11, T12, T13 | T11, T12, T13 | T17 | T11, T12, T13 | T11, T12, T13 | T7, T20 |
+| B2 (`/admin`) | T7 | T7 | T17 | none: the answer is one count | T7 | T7 |
+| B3 | T12 | T12 | T17 | T12 | T12 | T20 |
+| B5 | T15 | T15 | none: the SPA records nothing | T15 | none: per browser | T15 |
+| B6 | T11 | T11 | T17 | T11 | T11 | T11 |
+| B8 | T13 | T13 | T13 | T14 | T13 | T21 |
+| B9 | from the network, as B1 | T22 | T22 | T22 | T22 | T22 |
+
+### 4.2 Entries
 
 ### T5: Workspace key written to the frontend's logs
 
@@ -427,3 +506,861 @@ in its path and its Referer, a browser navigation, and a request while
 register-server is stopped, and then finds the key nowhere in the frontend's
 log. The nginx configuration does not depend on the `persistence` profile, so
 the test covers both compose deployments. No test runs the image in k3d.
+
+### T4: Sentinel UUID Exclusion from SpiceDB
+
+```yaml
+id: T4
+label: Sentinel UUID Exclusion from SpiceDB
+stride: [elevation-of-privilege, spoofing]
+flow: null
+element: register-server
+statement: >
+  A caller with a route to register-server that lets it set x-user-id to
+  00000000-0000-0000-0000-000000000000, in a deployment whose SpiceDB holds a
+  relationship for that subject, can pass permission checks as the sentinel
+  user, which leads to the access those relationships grant, negatively
+  impacting the risk trees and workspaces the relationships name.
+invariant: >
+  The sentinel UUID holds no permission in SpiceDB, and no request reaches a
+  permission check carrying it.
+failure_mode: >
+  The x-user-id decoder accepts the all-zero UUID as UserId.Authenticated. In
+  capability-only mode the extractor yields the sentinel when the header is
+  absent, and AuthorizationServiceNoOp never calls SpiceDB. In fine-grained
+  mode a present value is checked as an ordinary subject.
+mitigations:
+  - control: The edge removes a client-supplied x-user-id before it adds its own
+    adr: ADR-012 §7 (T3)
+    implemented_in: null
+    test: null
+  - control: A rule in SpiceDB that refuses the sentinel subject on every check
+    adr: ADR-012 §7 (T4)
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: not-applicable
+  compose-persistent: not-applicable
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - modules/server/src/main/scala/com/risquanter/register/auth/UserContextExtractor.scala
+  - modules/common/src/test/scala/com/risquanter/register/domain/data/iron/AuthTypesSpec.scala
+todo: The k3d Layer 2 model decides where the sentinel is refused
+```
+
+Compose runs the no-op authorization service and no SpiceDB, so the threat has
+no element there. ADR-012 §7 names a caveat `non_sentinel_user`, and
+`register-infra/infra/spicedb` holds no caveat.
+
+### T6: No transport encryption on the host's published ports
+
+```yaml
+id: T6
+label: No transport encryption on the host's published ports
+stride: [information-disclosure, tampering, spoofing]
+flow: DF2
+element: null
+statement: >
+  A party on the network path between a client and the host, holding no
+  workspace key, can read and alter every request and response on host ports
+  18080 and 8090, which leads to capture of workspace keys and to altered SPA
+  files and API answers, negatively impacting the workspace keys and the risk
+  trees, scenarios and simulation results of those workspaces.
+invariant: >
+  A workspace key, and the SPA files that handle it, cross a network only
+  inside an encrypted and authenticated channel.
+failure_mode: >
+  Compose serves DF1, DF2 and DF3 as plain HTTP on every host interface. The
+  key is in the path of each API request and of each browser navigation to
+  /w/{key}. A client cannot tell the frontend or register-server from an
+  impostor. register-server sends Strict-Transport-Security on its /w and
+  /workspaces answers, and a browser ignores that header over HTTP.
+mitigations:
+  - control: TLS on every entry a client uses
+    adr: 'ADR-021 §4 ("HTTPS-only: Prevents URL sniffing on the wire")'
+    implemented_in: null
+    test: null
+  - control: Publish the ports on 127.0.0.1 only
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+  - containers/prod/Dockerfile.frontend-prod
+  - modules/server/src/main/scala/com/risquanter/register/http/SecurityHeadersInterceptor.scala
+todo: null
+```
+
+The entry covers DF1 and DF3 as well as DF2. Whether a host's interfaces face a
+hostile network is that host's fact.
+
+### T7: Admin eviction route answers any caller
+
+```yaml
+id: T7
+label: Admin eviction route answers any caller
+stride: [elevation-of-privilege, denial-of-service, spoofing]
+flow: null
+element: register-server
+statement: >
+  A caller that reaches register-server on port 8090, from any element of B1 or
+  through the host port, holding no credential, can call DELETE
+  /admin/workspaces/expired as often as it likes, which leads to operator
+  maintenance run by a non-operator and to repeated full reads of the workspace
+  store, negatively impacting simulation capacity and the workspace records.
+invariant: Only the operator can start an eviction sweep.
+failure_mode: >
+  evictExpiredEndpoint is built on baseEndpoint and takes no credential. The
+  controller takes the system maintenance token and checks nothing about the
+  caller. On the PostgreSQL backend each call reads every workspaces row and
+  builds a record for each. The sweep deletes only workspaces already past a
+  deadline.
+mitigations:
+  - control: The frontend does not pass /admin on
+    adr: null
+    implemented_in: containers/prod/Dockerfile.frontend-prod
+    test: null
+  - control: An enforcement point that admits only the operator to /admin
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceLifecycleEndpoints.scala
+  - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleController.scala
+  - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
+  - docker-compose.yml
+todo: null
+```
+
+Host port 8090 reaches the route directly, so the frontend's routing protects
+only callers that come through port 18080. No test asserts that routing.
+
+### T8: No entry limits the request rate of one caller
+
+```yaml
+id: T8
+label: No entry limits the request rate of one caller
+stride: [denial-of-service]
+flow: DF2
+element: null
+statement: >
+  A caller that reaches host port 18080 or 8090, holding no workspace key, can
+  send POST /workspaces and POST /distribution/preview without limit, which
+  leads to memory, storage and CPU exhaustion, negatively impacting simulation
+  capacity, the Docker volumes and, in compose-inmem, every workspace held in
+  register-server's memory.
+invariant: The state and the work an anonymous caller can cause are bounded per caller.
+failure_mode: >
+  POST /workspaces creates a workspace and a tree from up to 8 MiB of request
+  body per call, and nothing counts calls. In compose-inmem the records and
+  trees live in a container limited to 256 MiB with restart unless-stopped, so
+  exhaustion ends in a restart that loses every workspace. In
+  compose-persistent the trees go to the irmin-data volume. The nginx template
+  holds no limit_req and no limit_conn, and the frontend service has no
+  resource limit.
+mitigations:
+  - control: Request body cap of 8 MiB
+    adr: ADR-017 §6
+    implemented_in: modules/server/src/main/scala/com/risquanter/register/Application.scala
+    test: modules/server-it/src/test/scala/com/risquanter/register/http/RequestBodyLimitItSpec.scala
+  - control: The reaper deletes expired workspaces and their trees
+    adr: ADR-021
+    implemented_in: modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceReaper.scala
+    test: modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceReaperSpec.scala
+  - control: >
+      A rate limit per client address at the component that holds the client's
+      connection: the frontend's nginx in compose, which does not cover host
+      port 8090, and the Envoy Gateway in k3d
+    adr: ADR-021 §4
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleController.scala
+  - containers/prod/Dockerfile.frontend-prod
+  - docker-compose.yml
+todo: null
+```
+
+ADR-021 §4: "**This is a known, unclosed gap:** no rate limit exists at the
+gateway today, so workspace creation is currently unbounded." Compose has no
+gateway. Whether Irmin frees space after a delete is not checked.
+
+### T9: One request exhausts the seed-entity counter
+
+```yaml
+id: T9
+label: One request exhausts the seed-entity counter
+stride: [denial-of-service]
+flow: null
+element: register-server
+statement: >
+  A caller that can send POST /workspaces, holding no workspace key, can create
+  one workspace with seedEntityId=99999999, which leads to every later creation
+  that omits seedEntityId failing, negatively impacting the availability of
+  workspace creation for every user.
+invariant: No caller-chosen value can move the shared assignment counter to its end.
+failure_mode: >
+  A provided seedEntityId moves the counter past itself. The in-memory store
+  sets nextSeedEntityId to the provided value plus one, and SeedEntityId refuses
+  100000000 on each later assignment. The PostgreSQL store runs setval on
+  workspace_seed_entity_id_seq, whose MAXVALUE is 99999999, so the state
+  survives restarts and the eviction of the workspace that caused it. The SPA
+  creates workspaces without a seedEntityId.
+mitigations:
+  - control: A counter that a provided value cannot advance, or a provided range kept apart from the assigned range
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: open
+  k3d-L2: open
+related_code:
+  - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStoreLive.scala
+  - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
+  - modules/server/src/main/resources/db/migration/V2__workspace_seed_entity_id.sql
+  - modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceLifecycleEndpoints.scala
+todo: null
+```
+
+The behaviour is read from the code and the migration and has not been run. The
+check on PostgreSQL is `SELECT nextval('workspace_seed_entity_id_seq')` after one
+such create. In k3d the caller needs whatever the edge requires for
+`POST /workspaces`.
+
+### T10: Nothing bounds the simulations in flight
+
+```yaml
+id: T10
+label: Nothing bounds the simulations in flight
+stride: [denial-of-service]
+flow: null
+element: register-server
+statement: >
+  A caller holding one workspace key can send many analysis and query requests
+  at once and open any number of event streams, which leads to CPU and memory
+  exhaustion in register-server, negatively impacting simulation capacity for
+  every other workspace.
+invariant: The work one caller keeps in flight is bounded, and so is the total.
+failure_mode: >
+  maxConcurrentSimulations is configured as 4 and no server code reads it. The
+  resolver fans out across a portfolio's children with an unbounded foreachPar.
+  Application.scala sets no request timeout. SSEHub caps no subscriber count.
+  The container's limits of 2 CPUs and 256 MiB are the only bound.
+mitigations:
+  - control: Limits on nodes, children, mitigations and trees per workspace
+    adr: ADR-017 §6
+    implemented_in: modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala
+    test: modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeBoundsSpec.scala
+  - control: Container limits of 2 CPUs and 256 MiB
+    adr: null
+    implemented_in: docker-compose.yml
+    test: null
+  - control: A cap on concurrent node resolution, read from maxConcurrentSimulations
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: open
+  k3d-L2: open
+related_code:
+  - modules/server/src/main/resources/application.conf
+  - modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala
+  - modules/server/src/main/scala/com/risquanter/register/services/sse/SSEHub.scala
+  - docker-compose.yml
+todo: docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md connects the configured value
+```
+
+The k3d status covers the application's own missing cap. The cluster's limits
+belong to the k3d models.
+
+### T11: Irmin serves any caller with no credential
+
+```yaml
+id: T11
+label: Irmin serves any caller with no credential
+stride: [spoofing, tampering, information-disclosure, denial-of-service, elevation-of-privilege]
+flow: null
+element: Irmin
+statement: >
+  A caller that reaches Irmin on port 8080 from any element of B1, or on host
+  port 9080 from anything that reaches the host, holding no workspace key, can
+  read, rewrite and delete every stored value and branch over GraphQL, which
+  leads to disclosure, alteration and loss of every workspace's data, negatively
+  impacting the risk trees, their history and their scenarios.
+invariant: Only register-server can call Irmin.
+failure_mode: >
+  The image runs irmin graphql on 0.0.0.0:8080 with no authentication, and
+  register-server sends no credential. Compose publishes the port as 9080 on
+  every host interface. The storage paths hold the workspace identifier, so a
+  caller also learns every confidential identifier.
+mitigations:
+  - control: Do not publish port 9080, or publish it on 127.0.0.1 only
+    adr: null
+    implemented_in: null
+    test: null
+  - control: A control that admits only register-server to Irmin's port
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: not-applicable
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+  - containers/prod/Dockerfile.irmin-prod
+  - modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
+  - tests/bats/suite-a-full-prod.bats
+todo: null
+```
+
+Suite A reads Irmin on `http://localhost:9080/graphql` with no credential, which
+shows the read path as built. A write from outside register-server has not been
+exercised.
+
+### T12: PostgreSQL accepts a password that is public
+
+```yaml
+id: T12
+label: PostgreSQL accepts a password that is public
+stride: [spoofing, tampering, information-disclosure, denial-of-service]
+flow: null
+element: PostgreSQL
+statement: >
+  A caller that reaches PostgreSQL on port 5432 from any element of B1, or on
+  host port 5432 from anything that reaches the host, knowing the password
+  written in the repository, can log in as register_app and read and rewrite
+  the workspace records, which leads to takeover of any workspace by replacing
+  its key hash and to deletion of any workspace, negatively impacting the
+  workspace keys, the workspace records and the risk trees they give access to.
+invariant: Only register-server can log in to PostgreSQL.
+failure_mode: >
+  docker-compose.yml sets POSTGRES_PASSWORD to dev-only-password and publishes
+  port 5432 on every host interface. A logged-in caller can set
+  workspaces.key_hash to the SHA-256 of a key it chose, and that key then
+  resolves to the victim's workspace. It can also delete rows and move
+  workspace_seed_entity_id_seq to its end (T9). The stored hashes are of 128-bit
+  random keys and do not yield the keys.
+mitigations:
+  - control: A password taken from the environment, with no default in the compose file
+    adr: ADR-022
+    implemented_in: null
+    test: null
+  - control: Do not publish port 5432, or publish it on 127.0.0.1 only
+    adr: null
+    implemented_in: null
+    test: null
+  - control: Only the SHA-256 hash of a workspace key is stored
+    adr: ADR-021 §1–2
+    implemented_in: modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceKeyCrypto.scala
+    test: modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceKeyCryptoSpec.scala
+status:
+  compose-inmem: not-applicable
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+  - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
+  - modules/server/src/main/resources/db/migration/V1__workspace_schema.sql
+todo: null
+```
+
+The takeover is read from the code, which resolves a key by `key_hash` alone,
+and has not been run. That the image demands the password from other containers
+is the open assumption in [APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md).
+
+### T13: The collector accepts telemetry from any caller
+
+```yaml
+id: T13
+label: The collector accepts telemetry from any caller
+stride: [spoofing, tampering, repudiation, denial-of-service, information-disclosure]
+flow: null
+element: OpenTelemetry collector
+statement: >
+  A caller that reaches the collector on ports 4317 or 4318 from any element of
+  B1 or through the host ports, holding no credential, can send spans and
+  metrics under any service name and at any rate, which leads to false
+  telemetry served on port 8889 and to unbounded output on the collector's
+  stdout, negatively impacting the container logs and the trust placed in the
+  metrics.
+invariant: Only register-server can send telemetry, and only the operator can read it.
+failure_mode: >
+  otel-collector-config.yaml binds both OTLP receivers to 0.0.0.0 with no
+  authentication, and compose publishes 4317, 4318, 8888 and 8889 on every host
+  interface. The pipelines hold a batch processor and no memory limiter, and
+  the service has no resource limit. Forged data cannot be told from
+  register-server's. Anyone who reaches 8889 reads the metrics.
+mitigations:
+  - control: Do not publish 4317 and 4318, and publish 8888 and 8889 on 127.0.0.1 only
+    adr: null
+    implemented_in: null
+    test: null
+  - control: Receiver authentication, a memory limiter and a container resource limit
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-applicable
+  k3d-L2: not-applicable
+related_code:
+  - otel-collector-config.yaml
+  - docker-compose.yml
+todo: null
+```
+
+The threat exists only while the `observability` profile runs. What the metrics
+on port 8889 hold has not been read. The check is
+`curl http://localhost:8889/metrics` with the profile up.
+
+### T14: Query text leaves register-server in span attributes
+
+```yaml
+id: T14
+label: Query text leaves register-server in span attributes
+stride: [information-disclosure]
+flow: DF10
+element: null
+statement: >
+  A person or tool that can read the collector's output or the traffic to it,
+  holding no workspace key, can read the text of users' queries and the tree
+  and node identifiers of their requests, which leads to disclosure of what a
+  customer asks of its risk model, negatively impacting the risk trees and the
+  container logs.
+invariant: A span carries no content a customer wrote.
+failure_mode: >
+  QueryServiceLive sets the span attribute query.text to the submitted query.
+  RiskTreeServiceLive sets tree_id, node_id and node_ids. The exporter sends
+  them over OTLP without TLS. The collector's traces pipeline exports to debug,
+  which prints to stdout and so to the Docker log store.
+mitigations:
+  - control: The span name holds the route family and never the workspace key
+    adr: ADR-021
+    implemented_in: modules/server/src/main/scala/com/risquanter/register/http/RequestSpanInterceptor.scala
+    test: modules/server/src/test/scala/com/risquanter/register/http/RequestSpanInterceptorSpec.scala
+  - control: No customer-written text in a span attribute
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala
+  - modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala
+  - modules/server/src/main/scala/com/risquanter/register/telemetry/TelemetryLive.scala
+  - otel-collector-config.yaml
+todo: null
+```
+
+Whether the `debug` exporter at `verbosity: normal` prints attributes is not
+verified. The check is one query with the profile up, then
+`docker logs otel-collector`. No decision record classifies query text. Tree and
+node identifiers are resource names, which a log may hold.
+
+### T15: The SPA document carries no Content-Security-Policy
+
+```yaml
+id: T15
+label: The SPA document carries no Content-Security-Policy
+stride: [tampering, information-disclosure, elevation-of-privilege]
+flow: null
+element: Single-page application
+statement: >
+  An attacker who gets script to run in the SPA's page, through a flaw in the
+  SPA or one of its bundled libraries, can read the workspace key from the URL
+  and send it to any origin, which leads to full use of that workspace,
+  negatively impacting the workspace key and the risk trees, scenarios and
+  simulation results of the workspace.
+invariant: >
+  The SPA's page loads script only from its own origin and connects only to its
+  own origin.
+failure_mode: >
+  nginx answers the SPA shell with X-Content-Type-Options and Cache-Control
+  only, and modules/app/index.html holds no policy. register-server's policy is
+  on its own answers, which do not include the HTML. Nothing in the browser
+  stops an injected script or limits where it connects.
+mitigations:
+  - control: A Content-Security-Policy on every response nginx generates
+    adr: null
+    implemented_in: null
+    test: null
+  - control: Free text is confined to permitted characters at the Iron boundary
+    adr: ADR-029 §1
+    implemented_in: modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - containers/prod/Dockerfile.frontend-prod
+  - modules/app/index.html
+  - modules/server/src/main/scala/com/risquanter/register/http/SecurityHeadersInterceptor.scala
+todo: null
+```
+
+The pass found no path that injects script. The entry records the missing
+second line of defence. The k3d models say whether the gateway adds a policy.
+
+### T16: An open event stream outlives its workspace key
+
+```yaml
+id: T16
+label: An open event stream outlives its workspace key
+stride: [elevation-of-privilege, information-disclosure]
+flow: null
+element: register-server
+statement: >
+  A former key holder with an event stream opened while the key was valid can
+  keep the stream open after the key is rotated or the workspace expires, which
+  leads to continued receipt of change events for that tree, negatively
+  impacting the confidentiality of the workspace's activity and its resource
+  names.
+invariant: A rotated or expired key grants nothing from the moment it stops resolving.
+failure_mode: >
+  SSEController resolves the key once, when the stream opens. The stream is the
+  hub subscription merged with a 30-second heartbeat, and nothing checks the key
+  again or ends the stream on rotate, delete or expiry.
+mitigations:
+  - control: Rotation replaces the stored hash, so the old key resolves to nothing on new requests
+    adr: ADR-021
+    implemented_in: modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStoreLive.scala
+    test: modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceStoreSpec.scala
+  - control: End every stream of a workspace when its key is rotated, deleted or expired
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: open
+  k3d-L2: open
+related_code:
+  - modules/server/src/main/scala/com/risquanter/register/http/sse/SSEController.scala
+  - modules/server/src/main/scala/com/risquanter/register/services/sse/SSEHub.scala
+todo: null
+```
+
+The SPA opens no event stream, so only an API client reaches this today. What an
+event carries is not verified here beyond the stream's existence.
+
+### T17: No record ties an action to a caller
+
+```yaml
+id: T17
+label: No record ties an action to a caller
+stride: [repudiation]
+flow: null
+element: register-server
+statement: >
+  A key holder, or a caller of a store's open port, can change or delete a
+  workspace's data and later deny it, which leads to changes nobody can
+  attribute, negatively impacting the risk trees, their history and the
+  workspace records.
+invariant: Each change to a workspace is recorded with enough to tell who made it.
+failure_mode: >
+  Every caller is anonymous in capability-only mode. The frontend's access log
+  carries the client address and masks the key, so its lines cannot be matched
+  to a workspace. A call on host port 8090 passes no access log. Every Irmin
+  commit carries the fixed author zio-client. A change made through T11 or T12
+  leaves no line in register-server's log.
+mitigations:
+  - control: Security events for create, delete, rotate and evict, with the workspace identifier
+    adr: null
+    implemented_in: modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStore.scala
+    test: null
+  - control: Irmin keeps each tree's commit history
+    adr: null
+    implemented_in: modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
+    test: null
+  - control: A record of the caller's address or identity beside each change
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
+  - modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
+  - containers/prod/Dockerfile.frontend-prod
+todo: null
+```
+
+In `compose-inmem` no commit history exists. That register-server's own log
+lines carry no client address is not verified line by line.
+
+### T18: Two runtime images are named by a tag alone
+
+```yaml
+id: T18
+label: Two runtime images are named by a tag alone
+stride: [tampering, elevation-of-privilege]
+flow: DF19
+element: null
+statement: >
+  A party that can change what a registry serves for a tag, holding no access
+  to the host, can replace the image behind postgres:17-alpine or
+  otel/opentelemetry-collector-contrib:0.95.0, which leads to code of its choice
+  running inside B1 with the database's data or the telemetry, negatively
+  impacting the workspace records and every element the container can reach.
+invariant: Every image a container starts from is fixed by digest.
+failure_mode: >
+  docker-compose.yml names both images by tag with no digest. The daemon pulls
+  whatever the tag resolves to when the image is absent from the local image
+  store. Neither service sets read_only, no-new-privileges or a resource limit.
+mitigations:
+  - control: A tag plus a digest on each image line
+    adr: 'ADR-020 §1 ("A specific semver tag plus a digest. Never `:latest`, and never a tag alone.")'
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+todo: null
+```
+
+In `compose-inmem` only the collector's image applies, and only with the
+`observability` profile. The three images built from `containers/prod/` pin
+their bases by digest.
+
+### T19: A compromised container can intercept traffic inside the deployment
+
+```yaml
+id: T19
+label: A compromised container can intercept traffic inside the deployment
+stride: [information-disclosure, tampering]
+flow: DF2
+element: null
+statement: >
+  An attacker who controls one container on register-network, holding no
+  workspace key, can place itself between two other containers, which leads to
+  reading and altering the unencrypted flows between them, negatively impacting
+  the workspace keys, the risk trees and the workspace records.
+invariant: A container sees only the traffic addressed to it.
+failure_mode: >
+  The second leg of DF2, and DF7, DF8 and DF10, are unencrypted on one bridge
+  network. No service in docker-compose.yml sets cap_drop. The second leg of
+  DF2 carries the workspace key in its path, and DF7 carries the risk trees.
+mitigations:
+  - control: Drop the NET_RAW capability from every service
+    adr: null
+    implemented_in: null
+    test: null
+  - control: Encrypt the flows between containers
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+todo: null
+```
+
+The entry rests on a premise the repository does not settle: that a container
+on the host's daemon keeps `NET_RAW` and can answer address lookups for a
+neighbour. The check is
+`docker inspect --format '{{.HostConfig.CapDrop}} {{.HostConfig.CapAdd}}' register-server`
+beside the daemon's default capability set.
+
+### T20: PostgreSQL's one role administers the database
+
+```yaml
+id: T20
+label: PostgreSQL's one role administers the database
+stride: [elevation-of-privilege, tampering]
+flow: null
+element: PostgreSQL
+statement: >
+  A caller logged in as register_app, through T12 or through a compromised
+  register-server, can change the schema and use every right the role holds,
+  which leads to control of the database beyond the workspace records,
+  negatively impacting the workspace records and the Docker volume pg-data.
+invariant: The role register-server works with can read and write rows and nothing more.
+failure_mode: >
+  Compose creates one role, POSTGRES_USER register_app. application.conf gives
+  register.flyway.user and register.db.dataSource.user the same variable, so
+  the role that serves requests also owns and migrates the schema. The postgres
+  service sets no read_only, no no-new-privileges and no resource limit.
+mitigations:
+  - control: A migration role separate from an application role limited to rows
+    adr: null
+    implemented_in: null
+    test: null
+  - control: read_only, no-new-privileges and a resource limit on the postgres service
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: not-applicable
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+  - modules/server/src/main/resources/application.conf
+todo: null
+```
+
+Whether `register_app` is a superuser is not in the repository. The check is
+`docker compose --profile persistence exec postgres psql -U register_app -d register -c '\du'`.
+If it is, the role can run programs in the container, and the impact widens.
+
+### T21: The collector can rewrite its own configuration on the host
+
+```yaml
+id: T21
+label: The collector can rewrite its own configuration on the host
+stride: [tampering, elevation-of-privilege]
+flow: DF15
+element: null
+statement: >
+  An attacker who controls the collector process, which takes input from any
+  caller (T13), can write to otel-collector-config.yaml in the host's checkout,
+  which leads to a configuration of its choice at every later start, negatively
+  impacting the compose file and env files and the telemetry.
+invariant: No container can write a file that defines a container.
+failure_mode: >
+  Compose mounts ./otel-collector-config.yaml with no :ro flag. The collector
+  service sets no read_only and no no-new-privileges. A rewritten file can add
+  an exporter that sends every span to an outside address.
+mitigations:
+  - control: Mount the file read-only
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-applicable
+  k3d-L2: not-applicable
+related_code:
+  - docker-compose.yml
+  - otel-collector-config.yaml
+todo: null
+```
+
+Whether the write succeeds depends on the uid the upstream image runs as and on
+the file's mode on the host. The check is `ls -ln otel-collector-config.yaml`
+beside the uid in `docker inspect otel-collector`.
+
+### T22: Every account the daemon's socket admits holds all data and all definitions
+
+```yaml
+id: T22
+label: Every account the daemon's socket admits holds all data and all definitions
+stride: [information-disclosure, tampering, elevation-of-privilege, denial-of-service, repudiation]
+flow: null
+element: Docker host and daemon
+statement: >
+  An account on the host that the Docker daemon's socket admits, or that can
+  write the checkout, holding no workspace key, can read and change the
+  volumes, the container logs, each container's environment and the compose
+  and env files, which leads to disclosure and alteration of every workspace
+  and to containers started from a changed definition, negatively impacting
+  the risk trees, the workspace records, the database credentials and the
+  container logs.
+invariant: Only the operator's account passes B9's control on the host.
+failure_mode: >
+  The volumes hold the risk trees and workspace records unencrypted. The daemon
+  returns each container's environment, which holds REGISTER_DB_PASSWORD. The
+  repository sets no account, no file mode and no socket rule, and nothing in
+  it records who used the daemon.
+mitigations:
+  - control: The host's accounts, its file permissions and the access rule on the daemon's socket
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+  - .gitignore
+todo: null
+```
+
+The control is the host's and is not in the repository, so the repository can
+show no status above `open`. The three checks in
+[APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md) settle it on a given host. In
+`compose-inmem` no volume exists, and the entry covers the logs, the
+environment and the definitions.
+
+### T23: Container logs grow without a configured bound
+
+```yaml
+id: T23
+label: Container logs grow without a configured bound
+stride: [denial-of-service]
+flow: DF12
+element: null
+statement: >
+  A caller that reaches any published port, holding no workspace key, can make
+  the containers write log lines at the rate it sends requests, which leads to
+  the host's disk filling, negatively impacting the container logs, the Docker
+  volumes and every container on the host.
+invariant: The space the container logs take is bounded.
+failure_mode: >
+  docker-compose.yml sets no logging options on any service. nginx writes one
+  access-log line per request. register-server writes a line per Irmin write.
+  The collector's debug exporter prints what it receives from any caller (T13).
+mitigations:
+  - control: A log driver with a size limit and rotation on each service
+    adr: null
+    implemented_in: null
+    test: null
+status:
+  compose-inmem: open
+  compose-persistent: open
+  k3d-L1: not-assessed
+  k3d-L2: not-assessed
+related_code:
+  - docker-compose.yml
+  - containers/prod/Dockerfile.frontend-prod
+  - otel-collector-config.yaml
+todo: null
+```
+
+A bound may exist in the daemon's own configuration, which the repository does
+not hold. The check is `docker info --format '{{.LoggingDriver}}'` beside the
+`log-opts` of `/etc/docker/daemon.json`.

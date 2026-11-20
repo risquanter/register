@@ -40,6 +40,13 @@ not in the repository.
 of that name in the shell that runs `docker compose` replaces the default
 (APPLICATION-TM §2.5, DF11).
 
+## All containers
+
+**Observation — no service drops a capability or bounds its log.**
+`docker-compose.yml` sets no `cap_drop`, no `user:` and no `logging:` on any
+service. Only register-server has a resource limit
+(APPLICATION-TM §4, T19 and T23).
+
 ## All flows
 
 **Observation — compose encrypts no flow.** Every flow in compose is plain HTTP,
@@ -77,6 +84,35 @@ resolver's fan-out across sibling nodes is unbounded." The container's limits of
 the same variable, `REGISTER_DB_USER`. The user register-server reads and writes
 workspace records with therefore also holds the right to change the schema
 (APPLICATION-TM §2.5, DF8).
+
+**Observation — a scaladoc describes a rate limit that does not exist.** The
+scaladoc of `DistributionPreviewEndpoints` says "Rate limiting is handled at the
+nginx/ingress level", and the nginx template holds no `limit_req` and no
+`limit_conn`.
+
+**Observation — a provided seed entity id moves the shared counter.**
+`WorkspaceStoreLive` sets the next assigned id to the provided value plus one,
+and `WorkspaceStorePostgres` runs `setval` on `workspace_seed_entity_id_seq`.
+`V2__workspace_seed_entity_id.sql` gives that sequence `MAXVALUE 99999999`
+(APPLICATION-TM §4, T9).
+
+**Observation — workspace creation requires a user identity outside
+`capability-only` mode.** ADR-021 §4 says "`POST /workspaces` is anonymous in
+every authorization mode". `WorkspaceLifecycleController.bootstrapWorkspace`
+calls `userCtx.requireAuthenticated`, which in `identity` and `fine-grained`
+mode refuses a request with no `x-user-id`.
+
+**Observation — an event stream checks its key once.** `SSEController` calls
+`workspaceStore.resolveTree` when the stream opens and not again
+(APPLICATION-TM §4, T16).
+
+**Observation — spans carry query text and identifiers.** `QueryServiceLive`
+sets the attribute `query.text`, and `RiskTreeServiceLive` sets `tree_id`,
+`node_id` and `node_ids` (APPLICATION-TM §4, T14).
+
+**Observation — the probe server's scaladoc names other ports.** The scaladoc
+of `HealthProbeServer` names ports 8080 and 8081. `application.conf` sets 8090
+and 8091.
 
 **Observation — comments in the server still describe Istio.** `UserContext.scala`
 ("populated from Istio-injected claim headers"), `AuthConfig.scala` and
@@ -151,6 +187,11 @@ resulting `pg_hba.conf`. Check:
 tag that moves. ADR-020 §1: "Floating ranges or unpinned installs are
 forbidden." Every `FROM` line in `containers/` is pinned by digest. This image
 is not, so a moved tag changes what runs.
+
+**Observation — no BATS suite runs the PostgreSQL workspace store.** Suite A
+starts the `persistence` profile and sets only `REGISTER_REPOSITORY_TYPE=irmin`,
+so the workspace store stays in memory while the PostgreSQL container runs
+(`tests/bats/suite-a-full-prod.bats`).
 
 **Observation — the password is a fixed public value.** `docker-compose.yml`
 sets `POSTGRES_PASSWORD: dev-only-password`, and register-server's

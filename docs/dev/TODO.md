@@ -1828,9 +1828,24 @@ API and consumed at register's write-path validation (M2/M3).
 
 ## 42. Scenario creation has no per-workspace rate limit
 
-Branch/scenario creation is unmetered per workspace — a key holder can
-create unbounded branches, each with storage and bookkeeping cost. Evaluate
-a per-workspace limit analogous to `REGISTER_WORKSPACE_MAX_CREATES_PER_IP`.
+Branch and scenario creation is unmetered per workspace. A key holder can
+create unbounded branches, each with storage and bookkeeping cost.
+
+Two different limits are in question, and each belongs where its caller is
+known. ADR-021 §4 separates them.
+
+- **A limit per client address**, for callers who hold no key, such as
+  `POST /workspaces`. Only the component that holds the client's connection
+  knows the address, so the limit belongs there and not in the application. In
+  compose that is the frontend's nginx. Host port 8090 reaches register-server
+  without passing nginx, so a limit in nginx covers only port 18080. In k3d it is
+  the Envoy Gateway, as a rate-limit policy in `register-infra`. Neither limit
+  exists (threat model `docs/dev/threat-models/APPLICATION-TM.md`, T8).
+- **A limit per workspace**, which this item is about. ADR-021 §4: "A
+  per-credential limit is a different question and would legitimately sit in
+  the application, because the workspace key is a value the application holds
+  and the edge cannot see." It counts creations per resolved workspace, so it
+  needs no client address.
 
 **Status:** open (moved here from the code-quality-review skill's known-gap
 note, 2026-08-10).
