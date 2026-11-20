@@ -1,7 +1,9 @@
 # PLAN — RiskTransform (Mitigation): Knowledge Consolidation & Open Decisions
 
-Status: **Implemented.** Every item has landed green; M4 slices 9 and 10
-(§7.6.18, §7.6.19) were the last, and BATS suites C and A passed on 2026-11-19.
+Status: **Implemented.** Every item has landed green. M4 slices 9 and 10
+(§7.6.18, §7.6.19) were the last code, and BATS suites C and A passed on 2026-11-20.
+The last step, routing the "loss is dampened" material into user documentation,
+landed on 2026-11-20.
 Created 2026-07-16. On 2026-07-17 the user decided
 and the following was implemented: B.8 defect fixes, D2 Option 1 (delete `Equal`),
 D6 Option 1 (retarget to `TrialOutcomes`); D3 was decided (Option 1, cache raw)
@@ -13418,6 +13420,19 @@ This composes with the existing user-doc TODO (§7.4.1); it does not replace it.
 ---
 
 ## Task (last step) — route the "how to say a loss is dampened" material into user documentation
+
+**Status: done, 2026-11-20.** The user ruled on 2026-11-20 that the material goes
+into the user-documentation stub as a new section. That stub is §4 "Mitigations"
+of `docs/user/API-TUTORIAL.md`, which discharged the targeting-note task. The
+authoring menu, the two conflation warnings, the σ formula, the absolute-statement
+construction and the percentile pivot are its sections "Choosing what a mitigation
+says" and "Narrowing a leaf's range". Every figure there was recomputed from
+`LognormalDistribution.fromConfidenceInterval` and `scaleSeverityBounds`, and
+matches the tables below. The open question on a ceiling transform is not built and
+not decided. It is `docs/dev/TODO.md` item 71. Of the two binding constraints,
+"no transform may assert a risk has ceased to exist" is ADR-034 §6 already. "A
+measurement is not a mitigation" stays user guidance, because no check in the model
+can tell a measurement from a control.
 
 **The deliverable of this step is a decision about where this material lives, and
 then writing it there.** The material itself is settled and recorded below so that

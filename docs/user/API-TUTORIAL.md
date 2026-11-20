@@ -394,6 +394,79 @@ To re-affirm it, send it back with `"stamp": {"kind": "Restamp"}`. The server re
 
 Deleting the anchor leaf leaves the statement stored with an empty scope. It is not reported as stale, because there is no leaf left for its figures to disagree with.
 
+### Choosing what a mitigation says
+
+"This control dampens the losses" can mean several different things about the world. Each one is written as a different `spec`, and each gives different figures. Find the row that states what you believe the control does:
+
+| What you believe | What to write |
+|---|---|
+| Every loss is proportionally smaller. | `LeafRelative`, with `severity` `{"op": "ScaleSeverity", "factor": f}` |
+| The event happens less often. | `LeafRelative`, with `likelihood` `{"op": "Scale", "factor": f}` |
+| The bad case is much better, and the typical case is a little better. | `LeafAbsolute`, replacing `Severity` with the range you now expect |
+| No loss above a figure reaches you. | `ResultStage`, with `{"op": "CapLosses", "cap": n}` |
+| You bear a fraction of every loss, and the rest is transferred. | `ResultStage`, with `{"op": "ScaleLosses", "factor": f}` |
+| You bear the first part of every loss, and nothing beyond it. | `ResultStage`, with `{"op": "ApplyDeductible", "deductible": n}` |
+| You bear the first part, a counterparty covers the next part up to a limit, and the rest is yours again. | `ResultStage`, with `{"op": "InsurancePolicy", "deductible": n, "limit": n}` |
+| Every loss is smaller, and there is also a hard maximum. | Two mitigations: one `LeafRelative` with `ScaleSeverity`, and one `ResultStage` with `CapLosses` |
+| You understand the loss better, and it is no smaller. | No mitigation. Re-estimate the leaf's bounds. |
+| The risk no longer exists. | No mitigation. Delete the node. |
+
+A mitigation cannot remove a risk. Every factor is greater than 0, and an absolute likelihood is greater than 0, because a control can fail. A risk that has gone, because the system was retired or the business line exited, is deleted from the tree.
+
+Two pairs of rows are the ones most often confused.
+
+#### A measurement is not a mitigation
+
+An assessment, a monitoring tool or an audit tells you more about a risk. It does not make the loss smaller when the event happens. Recorded as a mitigation, for example as a `ScaleSeverity` because the range now looks tighter, it lowers the residual figures. The control is then credited with a reduction that came from learning.
+
+The question that decides it: after this control, if the event happens, is the loss smaller? If the answer is "no, but we are more confident about how large it is", re-estimate the leaf's bounds with a `PUT`. The leaf then states what is now known, and no control is credited with it.
+
+#### A lower upper bound and a cap are different claims
+
+A `LeafAbsolute` statement with a lower `maxLoss` says that losses above the new bound are less likely. They are still possible, one time in twenty, and larger ones beyond that. A `CapLosses` step says that no loss above the cap reaches you. Every trial whose loss would exceed the cap records the cap instead.
+
+Both lower the figures, and usually only one is true of a given control. An engineering change that makes bad outcomes rarer is a lower bound. A contract that limits what you owe is a cap.
+
+### Narrowing a leaf's range
+
+A control can make an outcome more predictable as well as smaller: the worst case improves more than the typical case. This is a change to the leaf's spread, and `ScaleSeverity` does not make it.
+
+A lognormal leaf's [loss distribution](TERMINOLOGY.md#14-loss-distribution) has a spread, written σ (sigma, the standard deviation of the loss measured on a logarithmic scale). The fit computes it from the two bounds:
+
+```
+σ = (ln maxLoss − ln minLoss) / 3.29
+```
+
+The 3.29 is fixed by the fitting method. It is the distance, in standard deviations, between the 5th and the 95th percentile of a normal distribution, which is 2 × 1.645. The formula depends on the bounds only through their ratio, `maxLoss / minLoss`. So:
+
+- `ScaleSeverity` multiplies both bounds by one factor. The ratio stays the same, so the spread stays the same. Every loss moves down in the same proportion.
+- Narrowing the range means changing the ratio. Write a `LeafAbsolute` statement that keeps `minLoss` and lowers `maxLoss` to the upper bound you believe after the control.
+
+Here is one illustrative leaf, bounded at 1 000 and 50 000, under each:
+
+| | bounds | σ | median | mean |
+|---|---|---|---|---|
+| the leaf as stated | 1 000 to 50 000 | 1.19 | 7 071 | 14 339 |
+| `ScaleSeverity` with factor 0.6 | 600 to 30 000 | 1.19 | 4 243 | 8 603 |
+| `LeafAbsolute`, `Severity` 1 000 to 7 071 | 1 000 to 7 071 | 0.59 | 2 659 | 3 173 |
+
+The scaled leaf has the same spread at a lower level. The absolute statement keeps the lower bound where it was and halves the spread.
+
+Narrowing a range does not lower every loss. The fit places the 5th percentile at `minLoss`, so keeping `minLoss` and lowering `maxLoss` turns the whole distribution about that point. Losses above the 5th percentile fall, and the smallest losses below it rise:
+
+| percentile | the leaf as stated | after the statement |
+|---|---|---|
+| 0.1st | 179 | 423 |
+| 1st | 445 | 667 |
+| 5th | 1 000 | 1 000 |
+| 10th | 1 541 | 1 241 |
+| 50th | 7 071 | 2 659 |
+| 95th | 49 991 | 7 070 |
+
+Any change of spread behaves this way. The one way to reduce the spread without raising any loss is to clip the simulated losses, which is what `CapLosses` does.
+
+An absolute statement applies to the one leaf it names. To narrow fifty leaves, write fifty statements, each with that leaf's own bounds. Each one becomes [stale](TERMINOLOGY.md#36-relative-and-absolute-statements) if its leaf is later re-estimated, as described under "Absolute statements" above.
+
 ---
 
 ## Enterprise Risk Model Example

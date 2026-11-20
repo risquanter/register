@@ -3037,3 +3037,32 @@ database is `register` and its owner is `register_app`, so Flyway's migrations
 run as the owner at start.
 
 **Status.** Open. The amendment of ADR-012 is register's to rule.
+
+## 71. A relative transform that lowers a leaf's upper bound across many leaves — undecided
+
+Reference: `docs/dev/plans/PLAN-RISKTRANSFORM.md`, "Task (last step) — route the
+'how to say a loss is dampened' material into user documentation", under "Open
+question — should the ceiling reduction be its own transform?".
+
+**What it would add.** A third `RelativeSeverity` case that lowers a lognormal
+leaf's `maxLoss` by a factor and keeps its `minLoss`. That narrows the leaf's
+spread. One mitigation could then narrow every leaf it targets, each from its own
+bounds.
+
+**What exists instead.** A `LeafAbsolute` statement replacing `Severity` narrows
+one leaf, the one it names. `docs/user/API-TUTORIAL.md`, "Narrowing a leaf's
+range", documents that route. Narrowing fifty leaves takes fifty statements.
+
+**Why it is not built.** The case it serves has a workaround, and the application
+has no screen for writing a relative mitigation, so it is reached only through the
+API. Against building it: one more transform case to design, validate, serialise,
+test and document, and a factor hides from the author what it did to the losses
+below the lower bound, which a stated range shows.
+
+**If it is built.** The plan's section names the parameterisation it recommends, a
+ceiling factor, `maxLoss' = maxLoss × f` with `minLoss` unchanged, and states that
+this is a recommendation rather than a ruling. The new case changes the request's
+wire shape, so it needs its own plan.
+
+**Status.** Open, and undecided. Reconsider it when a screen for relative
+mitigations is designed.
