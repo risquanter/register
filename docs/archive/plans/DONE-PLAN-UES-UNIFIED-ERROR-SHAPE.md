@@ -81,7 +81,7 @@ extension. The plan closes when BATS suites C, B and A pass at 0.19.0.
 The file inventory is
 `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-INVENTORY.md`.
 
-The supporting record `docs/dev/plans/PLAN-UES-UNIFIED-ERROR-SHAPE-ERROR-PATHS.md`
+The supporting record `docs/archive/plans/DONE-PLAN-UES-UNIFIED-ERROR-SHAPE-ERROR-PATHS.md`
 holds the sixty failure paths this plan eliminates, one row per path, with the
 file and line each is built at today (its §3 to §7), the target shape (§8) and
 each row's value under that shape (§9). This plan refers to rows by that

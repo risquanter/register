@@ -8249,7 +8249,7 @@ so register must detect it (M2-D3b A/B). Defining a custom Irmin merge function
 is possible but still per-value, so it cannot enforce a whole-tree invariant;
 it is not pursued. The richer interactive conflict-resolution UI (one-click
 keep-main/keep-scenario, parameter-average) is a deferred convenience item of
-the **milestone-2b** merge workstream (PLAN-UI-MILESTONE-2B §8 / its scratch
+the **milestone-2b** merge workstream (DONE-PLAN-UI-MILESTONE-2B §8 / its scratch
 tracker), not of this plan, and does not bear on M2.
 
 ### 8.9 M2 KB id-carrier elevation (Asset → Node) — implementation-grade (2026-08-15)

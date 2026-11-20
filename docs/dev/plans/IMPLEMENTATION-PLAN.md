@@ -1,9 +1,75 @@
 # Consolidated Implementation Plan
 
 **Date:** February 10, 2026
-**Status:** Active
+**Status:** Superseded as a plan. It governs no work, and the status section below states what became of each part, checked against the code on 2026-11-20 at commit `07e75385`.
 **Supersedes:** `APP-IMPLEMENTATION-PLAN.md`, `PLAN-SPLIT-PANE-LEC-UI.md`, `IMPLEMENTATION-PLAN-PROPOSALS.md`, `RISKTREE-REPOSITORY-IRMIN-PLAN.md`
 **Related (kept):** `IRMIN-INTEGRATION.md` (Irmin reference guide — not a plan, stays as-is)
+
+---
+
+## Status of this document (read first)
+
+This was the master plan from February to July 2026. Its work has since been
+built, or ruled out, or moved into plans of its own. The sections below the
+status are kept as the record of what was planned. Do not start work from them.
+
+### Built
+
+- **Tier 1, the frontend user interface.** All phases are built: the split pane,
+  the tree view, the Vega-Lite LEC (loss exceedance curve) chart, and error
+  handling. Phase G, app-module testing, is listed as "Nice to Have".
+- **Tier 1.5, workspace capability and access control.** Every phase is marked
+  complete except three. W.4's reaper runs as `WorkspaceReaper`. W.7b is
+  optional. W.11, the typed Vega-Lite DSL, is marked intermediate. Rate limiting belongs in
+  nginx in compose and in the Envoy Gateway in k3d (`docs/dev/TODO.md` item 42).
+- **The event hub of Phase H.** `SSEHub` and `InvalidationHandler` are wired
+  into `RiskTreeServiceLive`.
+- **Tier 3 Phase 7, scenario branching.** It was built under milestone 2b
+  (`docs/archive/plans/DONE-PLAN-UI-MILESTONE-2B.md`).
+- **The time-travel TODO.** It was built by
+  `docs/archive/plans/DONE-PLAN-PHASE-E-HISTORY.md`.
+- **Phase 8: name-change re-simulation avoidance.** The cache key hashes the
+  `LeafSimContent` projection, which leaves out `name`, so a renamed node keeps
+  its cached result.
+- **Phase 8: `RiskResultGroup` for drill-down.** A portfolio's cached entry
+  keeps its children's results. The type is now `NodeLosses` in
+  `modules/server/src/main/scala/com/risquanter/register/services/cache/NodeLosses.scala`,
+  holding `children: List[LossDistribution]`.
+
+### Superseded
+
+- **Tier 2 Phase 5, the cache invalidation pipeline, and its `LECRecomputer`.**
+  The cache is addressed by content and is never invalidated (ADR-014).
+  `LECRecomputer` does not exist. `IrminClient.watch` was ruled out by Task 0.
+- **Phase I.b, server-sent events (SSE) reconnection, and the browser's use of
+  the events.** The browser consumer is in the scope of M5 in
+  `docs/dev/plans/PLAN-RISKTRANSFORM.md` §7.7.
+- **Tier 3 Phase 6, conflict detection on concurrent edits.** It is replaced by
+  `docs/dev/plans/PLAN-TREE-WRITE-CONCURRENCY.md`.
+- **Phase 8: risk-level simulation parallelism.** It is built, and the missing
+  bound on it is `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md`.
+- **Phase 8: the eviction strategy, for workspaces that no longer exist.** This
+  is `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md`.
+- **Phase X, capability URL demo mode.** This section already marks it
+  superseded.
+- **ADR-017 Phase 2, batch operations.** `docs/dev/decision-records/ADR-017-NOTES.md`
+  records why per-operation batch types are not adopted.
+
+### Outstanding, and neither designed nor tracked anywhere else
+
+- **Tier 4, WebSockets.** No WebSocket transport exists. The ADR this tier
+  cites, ADR-004b, has no file in `docs/dev/decision-records/`.
+- **Phase J, a naming review of `RiskLeaf` and `RiskPortfolio`.** No rename
+  has been made.
+- **Phase 8: a simulation configuration per branch.** `SimulationConfig` is
+  still one global value.
+- **Phase 8: eviction inside a live workspace's cache.** `ContentCache` still
+  uses `NoOpEvictionStrategy`. `PLAN-WORKSPACE-CACHE-RELEASE.md` leaves this
+  case out of its scope.
+- **TD-1, `commonDependencies` from `%%` to `%%%`.** `build.sbt` still declares
+  every entry with `%%`.
+- **TD-2, the redundant Iron regex in `ValidationUtil.refineUlid`.** The second
+  check on the library's canonical output is still present.
 
 ---
 
