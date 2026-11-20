@@ -9,7 +9,7 @@
 > grounding and the ADR constraints; this note is kept, not superseded.
 >
 > Ties to: `DEPENDENCE.md` (with-vs-without at the portfolio node; TVaR; tail
-> allocation), `docs/dev/plans/LEC-TAIL-TRIMMING.md` (0.5% render trim is
+> allocation), `docs/dev/LEC-TAIL-TRIMMING.md` (0.5% render trim is
 > visualization-only, full sample retained),
 > `docs/archive/plans/MITIGATION-PRE-PLANNING.md` (targeting predicate → node set).
 >
@@ -51,7 +51,7 @@ Grounding first, because the whole conception rests on what is already there.
   exceedance-probability endpoint exist.
 - **The render curve is trimmed at 0.5% exceedance for display only** (1-in-200,
   Solvency II convention; 0.5% is the default of the `curveTailCutoff` setting); the
-  full trial sample is preserved (`docs/dev/plans/LEC-TAIL-TRIMMING.md`).
+  full trial sample is preserved (`docs/dev/LEC-TAIL-TRIMMING.md`).
 - **Missing for ROI:** (i) a **cost field** on `Mitigation` (today `Mitigation` has
   id/name/target/spec/precedence and no cost); (ii) a **TVaR** computation (nothing
   computes mean-loss-beyond-a-quantile today).
