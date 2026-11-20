@@ -250,10 +250,16 @@ run_staging_script() {
     curl -s -o /dev/null -H "Accept: text/html" "${FRONTEND_URL}/w/${WORKSPACE_KEY}"
     # A proxied request while register-server is down, which nginx answers 502.
     docker compose stop register-server 2>&1
+    local asked=$SECONDS
     status=$(curl -s -o /dev/null -w '%{http_code}' "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
+    local answered_after=$((SECONDS - asked))
     docker compose start register-server 2>&1
     wait_for_url "${REGISTER_URL}/health" 30
 
+    # BATS prints these lines only when the test fails.
+    echo "nginx answered ${status} after ${answered_after}s while register-server was stopped"
+    docker compose --profile persistence --profile frontend logs --tail 5 frontend 2>&1 \
+        | sed "s/${WORKSPACE_KEY}/<the key>/g"
     [ "$status" = "502" ]
     logs=$(docker compose --profile persistence --profile frontend logs frontend 2>&1)
     [[ "$logs" == *'/w/<key>/risk-trees'* ]]
