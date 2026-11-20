@@ -8,13 +8,13 @@ not prescribed solutions.
 
 ## Plan landing order — approved plans, in the order they must be implemented
 
-Eight plans were ruled. Two have landed and are struck through below; six remain.
+Eight plans were ruled. Two have landed and one was archived, and those three are struck through below; five remain.
 Each plan repeats its own constraint in a Sequencing section, and this is the
 single list.
 
 | # | Plan | Why here |
 |---|---|---|
-| 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | no technical dependency; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
+| ~~1~~ | ~~`docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md`~~ | **Archived 2026-11-20** (`docs/archive/plans/ARCHIVE-PLAN-NGINX-WORKSPACE-ROUTING.md`). The masked access log landed in commit `2ba561cc`. The routing half was not built and is superseded by `register-infra`'s PLAN-EGC, rule EGC-D-9 and §3.11 |
 | 2 | `docs/archive/plans/DONE-PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 7 |
 | 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
 | ~~4~~ | ~~`docs/dev/plans/PLAN-TELEMETRY-EXPORT.md`~~ | **Landed in 0.10.37** (`docs/archive/plans/DONE-PLAN-TELEMETRY-EXPORT.md`). Metrics and traces now reach the collector by default, so 5's prerequisite is met |

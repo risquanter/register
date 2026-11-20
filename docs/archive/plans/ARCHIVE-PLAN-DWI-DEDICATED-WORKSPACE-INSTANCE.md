@@ -230,7 +230,7 @@ All instances share one login today, and it can write every workspace's row.
 
 Recommendation: none. An earlier recommendation of B was withdrawn on 2026-11-13. Separation at the network leaves the database as the one place where instances still meet, and the example under A shows what that permits. Option B works only if the controller can create database logins, and that is unverified. The check is PLAN-WSS's: whether the controller's own login can be granted the privilege to create roles under the cluster's PostgreSQL setup. Nothing is ranked until it has run. The policies and the migration are designed after the ruling.
 
-**DWI-D-3 — what happens to the routing half of `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md`.**
+**DWI-D-3 — what happens to the routing half of `docs/archive/plans/ARCHIVE-PLAN-NGINX-WORKSPACE-ROUTING.md`.**
 That plan is ruled and not implemented. It does two things in the frontend's nginx. It stops the workspace key from being written to the access log. It also routes each workspace to one server instance by hashing the key. In the cluster, PLAN-WSS gives that second job to the resolver. In Docker Compose there is one instance.
 
 - **A) Withdraw the routing half and keep the logging half.** The plan shrinks to the credential-in-logs fix. Example: nginx keeps proxying to one backend address and no longer logs the key.

@@ -1,6 +1,31 @@
 # Plan: route each workspace to one server instance, and stop logging the workspace key
 
-**Status:** Ruled, awaiting approval as the session's governing plan.
+**Status:** Partially implemented, partially superseded. Archived 2026-11-20.
+
+- **Implemented: the masked access log.** Commit `2ba561cc` (2026-11-19) made
+  nginx write the request line with the workspace key replaced by `<key>`, drop
+  the Referer, and log errors at `crit`. Suite A test A08 checks it. The ADR-021
+  §4 amendment this plan's inventory names for the masking was not written.
+- **Superseded: per-workspace routing.** Nothing of it was built: no
+  `split_clients` block, no `BACKEND_INSTANCES`, no `docker-compose.scale.yml`,
+  and NWR-D-1 was never ruled. Two plans in the `register-infra` repository
+  supersede it in direction:
+  - `docs/plans/PLAN-EGC-ENVOY-GATEWAY-CLUSTER.md`, rule EGC-D-9, sends API
+    calls from the edge straight to the register server, so in the cluster no
+    request reaches this image's proxy rules. Its `EnvoyProxy` access-log format
+    omits the path, which masks the key at the edge.
+  - The same plan's §3.11, "Recorded, not built: one Irmin store per register
+    instance", records the several-instance topology NWR-D-1 was re-opened for.
+    It finds that a hash of the key cannot keep a workspace on one instance
+    across key rotation, and places the assignment in a component in front of
+    the instances that looks it up by the key's digest. The archived
+    `docs/archive/plans/ARCHIVE-PLAN-WSS-WORKSPACE-SEPARATION.md` there names
+    that component "Resolver".
+- **Still true, and unowned:** `SSEHub` delivers only to subscribers in its own
+  process, so with more than one instance an edit served by one never reaches a
+  browser connected to another. It is latent while one instance runs and no
+  browser opens the events connection.
+
 **Date:** 2026-09-13.
 **ADR reference:** ADR-021 (capability URLs — the workspace key is the
 credential); ADR-022 (secret handling — R3, redacted `toString`); ADR-036
