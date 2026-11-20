@@ -7,8 +7,8 @@ deployment models build on it, and each lists only what its deployment adds:
 
 | Deployment id | Deployment | Auth mode |
 |---|---|---|
-| `compose-inmem` | Docker Compose, no `persistence` profile | `capability-only` |
-| `compose-persistent` | Docker Compose with the `persistence` profile and the env file `.env.irmin` | `capability-only` |
+| `compose-inmem` | Docker Compose with the `frontend` profile, no `persistence` profile | `capability-only` |
+| `compose-persistent` | Docker Compose with the `frontend` and `persistence` profiles and the env file `.env.irmin` | `capability-only` |
 | `k3d-L1` | k3d cluster, Layer 1 | `identity` |
 | `k3d-L2` | k3d cluster, Layer 2 | `fine-grained` |
 
@@ -24,7 +24,11 @@ appears as a mitigation with status `open`, never as a boundary.
 The model covers the running system. Building the images is outside it: the
 sources a build fetches from, and how they are pinned, are governed by ADR-020.
 The test stacks are outside it too: `docker-compose.server-it.yml` and the BATS
-runner start their own containers for a test run.
+runner start their own containers for a test run. The development workflow is
+outside it as well. The Vite dev server and the SPA's development build exist
+only there. The SPA in this model is the production build, which nginx serves
+and which calls the API on its own origin
+([Constants.scala](../../../modules/app/src/main/scala/app/core/Constants.scala)).
 
 The auth mode is `register.auth.mode` in
 [application.conf](../../../modules/server/src/main/resources/application.conf).
@@ -92,20 +96,18 @@ example `register-infra/infra/k8s/gateway/clienttrafficpolicy.yaml`.
 ### 2.1 Elements
 
 The compose elements are read from
-[docker-compose.yml](../../../docker-compose.yml), one per service. The Vite dev
-server is read from [vite.config.js](../../../modules/app/vite.config.js), and
-the k3d elements from the register-infra repository.
+[docker-compose.yml](../../../docker-compose.yml), one per service, and the
+k3d elements from the register-infra repository.
 
 | Element | What it is | Where it runs |
 |---|---|---|
 | Single-page application | Scala.js and Laminar, served as static files | the user's browser |
-| frontend | nginx. Serves the SPA files and `/config.json`, and in compose passes API requests on to register-server | `frontend` profile in compose; a pod in k3d |
+| frontend | nginx. Serves the SPA files and `/config.json`, and in compose passes API requests on to register-server | compose; a pod in k3d |
 | register-server | The ZIO, Tapir and zio-http backend, compiled as a GraalVM native image | always |
 | Irmin | Content-addressed store for risk trees and their history, read and written over GraphQL | `persistence` profile in compose; a pod in k3d |
 | PostgreSQL | Workspace records: the key's SHA-256 hash and the workspace's trees | `persistence` profile in compose; a pod in k3d |
 | SpiceDB | Answers permission checks in `fine-grained` mode. Its elements and controls are in the k3d Layer 2 model | a pod in k3d, Layer 2 |
 | OpenTelemetry collector | Receives the server's spans and metrics over OTLP. Its `debug` exporter prints traces and metrics to its stdout, and its `prometheus` exporter serves metrics on port 8889 | `observability` profile in compose |
-| Vite dev server | Serves the SPA files on host port 5173 during frontend development. It has no proxy, so the SPA calls register-server on port 8090 directly | a host process, in the compose workflow without the `frontend` profile |
 | API client | Any HTTP client on a network that reaches the host | outside the host |
 | Host process | Any process an account on the host runs, such as `curl` or a monitoring probe. It reaches the published ports without leaving the host | the host |
 | edge gateway | Envoy Gateway. Its elements and controls are in the k3d models | k3d |
@@ -190,14 +192,14 @@ container are listed for compose. The k3d settings are in the k3d models.
 | B4 | The SpiceDB process | process isolation, and the preshared token `SPICEDB_TOKEN` | `k3d-L2` |
 | B5 | The single-page application's process in the browser | the browser's process and origin isolation. ADR-039 §1 names it as the second trust region | all |
 | B6 | The Irmin process | process isolation. The image runs as uid 65532. Compose sets `read_only`, `no-new-privileges` and a 10 MiB `/tmp` | `compose-persistent`, k3d |
-| B7 | The frontend (nginx) process | process isolation. The image runs as uid 101, and compose sets `read_only`, `no-new-privileges` and a 10 MiB `/tmp` | `frontend` profile in compose; k3d |
+| B7 | The frontend (nginx) process | process isolation. The image runs as uid 101, and compose sets `read_only`, `no-new-privileges` and a 10 MiB `/tmp` | all |
 | B8 | The OpenTelemetry collector process | process isolation. Compose sets no hardening | `observability` profile in compose |
-| B9 | The host: B1, the Docker daemon with its embedded DNS, the Docker log store, the Docker volumes, the local image store, the compose file and env files, and the Vite dev server | the host operating system's accounts and file permissions, and the access rule on the daemon's socket. The repository sets none of them ([APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md)) | `compose-inmem`, `compose-persistent` |
+| B9 | The host: B1, the Docker daemon with its embedded DNS, the Docker log store, the Docker volumes, the local image store, and the compose file and env files | the host operating system's accounts and file permissions, and the access rule on the daemon's socket. The repository sets none of them ([APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md)) | `compose-inmem`, `compose-persistent` |
 
 B2, B3, B4, B6, B7 and B8 lie inside B1. In compose, B1 lies inside B9. The
-Vite dev server, the Docker daemon with its embedded DNS, the Docker log store,
-the Docker volumes, the local image store, and the compose file and env files
-are inside B9 and outside B1. A host process is inside B9. B5 and the API
+Docker daemon with its embedded DNS, the Docker log store, the Docker volumes,
+the local image store, and the compose file and env files are inside B9 and
+outside B1. A host process is inside B9. B5 and the API
 client lie outside B9. The k3d models give the cluster's equivalent of B9. The
 model takes the host's kernel and the Docker daemon as correct
 ([APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md)).
@@ -213,7 +215,7 @@ not reach it.
 |---|---|---|---|---|---|---|
 | DF1 | SPA → frontend | requests for the SPA files and `/config.json` | HTTP, host port 18080 | B5, B9, B1, B7 | — | compose |
 | DF2 | SPA or API client → frontend → register-server | API requests, workspace key in the path | HTTP, host port 18080, then HTTP on `register-network` | B5, B9, B1, B7, B2 | Tapir codec, JSON decoder, typed claim-header input | compose |
-| DF3 | SPA or API client → register-server, host port 8090 | API requests, workspace key in the path, any route including `/admin` | HTTP | B5, B9, B1, B2 | Tapir codec, JSON decoder, typed claim-header input | compose |
+| DF3 | API client or host process → register-server, host port 8090 | API requests, workspace key in the path, any route including `/admin` | HTTP | B9, B1, B2 | Tapir codec, JSON decoder, typed claim-header input | compose |
 | DF4 | any host process → register-server, host port 8091 | health and readiness probes | HTTP | B1, B2 | — | compose |
 | DF5 | SPA or API client → edge gateway → frontend | requests for the SPA files and `/config.json`, browser navigation | see the k3d models | B5, B1, B7 | — | k3d |
 | DF6 | SPA or API client → edge gateway → register-server | API requests, workspace key in the path; the gateway adds `x-user-id` | see the k3d models | B5, B1, B2 | Tapir codec, JSON decoder, typed claim-header input | k3d |
@@ -224,7 +226,6 @@ not reach it.
 | DF11 | compose file, env files and the caller's shell environment → every compose container | each container's definition at startup: image, command, environment, mounts, published ports and hardening options. Command: the collector gets `--config=/etc/otel-collector-config.yaml`, and the other four run their image's command (DF19). Environment: Irmin and the collector get none. register-server: its settings and `REGISTER_DB_PASSWORD`. frontend: `BACKEND_URL`, `REGISTER_REPOSITORY_TYPE`, `APP_VERSION` and `REGISTER_DEBUG_UI`, which its entrypoint writes into `nginx.conf` and `/config.json`. PostgreSQL: `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` | `docker compose` reads the compose file, fills each `${…}` from its caller's shell environment and from `.env` or the file named by `--env-file`, and sends the definitions to the Docker daemon over its socket. The daemon starts each process with them | B1, B2, B7, B3, B6, B8 | the config decoder | compose. The k3d models give the cluster's equivalent |
 | DF12 | frontend, register-server, Irmin, PostgreSQL and collector → Docker log store | stdout and stderr: nginx's access log in its `masked` format and its error log at `crit`; register-server's log, which names storage paths holding the workspace identifier and tree identifiers; Irmin's and PostgreSQL's own logs; the collector's `debug` exporter output | the Docker daemon | B7, B2, B6, B3, B8, B1 | — | compose |
 | DF13 | any host process → OpenTelemetry collector, host ports 8888 and 8889 | metrics reads | HTTP | B1, B8 | — | `observability` profile in compose |
-| DF14 | SPA → Vite dev server | requests for the SPA files, and the dev server's hot-reload WebSocket | HTTP, host port 5173 | B5, B9 | — | compose, without the `frontend` profile |
 | DF15 | `otel-collector-config.yaml` → OpenTelemetry collector | the collector's configuration | a bind mount of the host file. The mount is not read-only | B1, B8 | — | `observability` profile in compose |
 | DF16 | Irmin → volume `irmin-data`; PostgreSQL → volume `pg-data` | the risk trees and the workspace records at rest | the container's filesystem, on a named volume. Unencrypted | B6, B3, B1 | — | `compose-persistent` |
 | DF17 | register-server and frontend → Docker embedded DNS | lookups of the service names | DNS to 127.0.0.11. nginx reads the resolver's address from `/etc/resolv.conf` at startup | B2, B7, B1 | — | compose |
@@ -252,15 +253,15 @@ models, because their controls are the cluster's.
 
 | Boundary | Admits in `compose-inmem` | Admits in `compose-persistent` | Designed crossings | Wider than designed |
 |---|---|---|---|---|
-| B1 | Anything that reaches the host on a published port: 8090 and 8091 (register-server), 18080 (frontend, `frontend` profile), 4317, 4318, 8888 and 8889 (collector, `observability` profile). The port mappings in [docker-compose.yml](../../../docker-compose.yml) name no host address, so Docker publishes them on every host interface | as `compose-inmem`, plus 9080 (Irmin) and 5432 (PostgreSQL) | DF1, DF2, DF3, DF4, DF5, DF6, DF11, DF12, DF13, DF15, DF16, DF17, DF18, DF19 | yes. Ports 9080 and 5432 have no designed flow from outside B1, and the collector's ports 4317 and 4318 have none |
+| B1 | Anything that reaches the host on a published port: 8090 and 8091 (register-server), 18080 (frontend), 4317, 4318, 8888 and 8889 (collector, `observability` profile). The port mappings in [docker-compose.yml](../../../docker-compose.yml) name no host address, so Docker publishes them on every host interface | as `compose-inmem`, plus 9080 (Irmin) and 5432 (PostgreSQL) | DF1, DF2, DF3, DF4, DF5, DF6, DF11, DF12, DF13, DF15, DF16, DF17, DF18, DF19 | yes. Ports 9080 and 5432 have no designed flow from outside B1, and the collector's ports 4317 and 4318 have none |
 | B2 | On 8090, every route from every element of B1 and from anything that reaches the host port (row B1), including `DELETE /admin/workspaces/expired`, which checks no credential. On 8091, the probe routes | as `compose-inmem` | DF2, DF3, DF4, DF6, DF7, DF8, DF9, DF10, DF11, DF12, DF17, DF19 | yes. The `/admin` route has no designed caller outside the operator, and nothing in compose restricts who calls it |
 | B3 | — (PostgreSQL does not run) | Every element of B1, and anything that reaches host port 5432 (row B1), that presents user `register_app` with its password. The password is the fixed value `dev-only-password`, written in `docker-compose.yml` | DF8, DF11, DF12, DF16, DF18, DF19 | yes. Only register-server is designed to connect, and the password is public in the repository |
 | B4 | — (SpiceDB does not run) | — (SpiceDB does not run) | DF9 | — |
-| B5 | Scripts and connections from any origin. Neither `modules/app/index.html` nor the frontend's nginx sends a `Content-Security-Policy`. register-server's policy (`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'`) applies only to responses register-server writes, and the SPA's HTML is not one of them | as `compose-inmem` | DF1, DF2, DF3, DF5, DF6, DF14 | yes. The SPA is designed to load scripts and call APIs only on its own origin |
+| B5 | Scripts and connections from any origin. Neither `modules/app/index.html` nor the frontend's nginx sends a `Content-Security-Policy`. register-server's policy (`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'`) applies only to responses register-server writes, and the SPA's HTML is not one of them | as `compose-inmem` | DF1, DF2, DF5, DF6 | yes. The SPA is designed to load scripts and call APIs only on its own origin |
 | B6 | — (Irmin does not run) | On 8080, every element of B1, with no credential. On host port 9080, anything that reaches the host port (row B1) | DF7, DF11, DF12, DF16, DF18, DF19 | yes. Only register-server is designed to call Irmin, and any caller can read and rewrite every risk tree |
 | B7 | On 8080, every element of B1. On host port 18080, anything that reaches the host port (row B1) | as `compose-inmem` | DF1, DF2, DF5, DF11, DF12, DF17, DF18, DF19 | no. The frontend is the public entry, and every caller it admits is one it is designed to serve |
 | B8 | On 4317 and 4318, every element of B1 and anything that reaches the host ports (row B1), with no credential. On 8888 and 8889, anything that reaches the host ports | as `compose-inmem` | DF10, DF11, DF12, DF13, DF15, DF19 | yes. Only register-server is designed to send telemetry, and any caller can send spans and metrics |
-| B9 | From the network: anything that reaches a published port (row B1). The repository configures no host firewall. On the host: root, and every account the daemon's socket admits. Through the daemon such an account reads each container's definition, including its environment, reads its logs and volumes, runs commands inside it, and starts a container with any host path mounted. Every account that can write the checkout can change the compose file, the env files and the collector's configuration, and every account that can read it can read the env files | as `compose-inmem` | DF1, DF2, DF3, DF14 | yes. From the network, as row B1. On the host, only the operator is designed to change the configuration and to call the daemon. Which other accounts can is the host's configuration ([APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md)) |
+| B9 | From the network: anything that reaches a published port (row B1). The repository configures no host firewall. On the host: root, and every account the daemon's socket admits. Through the daemon such an account reads each container's definition, including its environment, reads its logs and volumes, runs commands inside it, and starts a container with any host path mounted. Every account that can write the checkout can change the compose file, the env files and the collector's configuration, and every account that can read it can read the env files | as `compose-inmem` | DF1, DF2, DF3 | yes. From the network, as row B1. On the host, only the operator is designed to change the configuration and to call the daemon. Which other accounts can is the host's configuration ([APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md)) |
 
 ---
 
@@ -274,8 +275,8 @@ each one exists. The solid box inside B2 is the register-server component, and
 its two ports are where the flows end. Who can reach a process without a drawn
 flow is read from §2.6.
 
-**System version:** 0.25.0
-**Assessed:** version 0.25.0 · commit cfe81c91 · stage 6
+**System version:** 0.25.1
+**Assessed:** version 0.25.0 · commit c8bbcf70 · stage 6
 
 ```mermaid
 flowchart LR
@@ -286,7 +287,6 @@ flowchart LR
   end
 
   subgraph B9["B9 host"]
-    VITE["Vite dev server"]
     LOGS[("Docker log store")]
     VOL[("Docker volumes")]
     ENV["compose file, env files, shell environment, collector config"]
@@ -325,7 +325,6 @@ flowchart LR
     end
   end
 
-  SPA -- "DF14 SPA files" --> VITE
   SPA -- "DF1 SPA files" --> NGINX
   SPA -- "DF2 API request" --> NGINX
   NGINX -- "DF2 API request" --> API
@@ -366,7 +365,7 @@ flowchart LR
   style RS fill:#1c7ed633,stroke:#1c7ed6,stroke-width:2px
 ```
 
-The API client also sends DF2 and DF6. DF17, the name lookups, DF18, the
+The API client also sends DF2 and DF6, and a host process also sends DF3. DF17, the name lookups, DF18, the
 daemon's healthchecks, and DF19, the image's defaults, touch every compose
 container. Those arrows are left out to keep the diagram readable. B9 exists in
 compose only, so the edge gateway and SpiceDB, which run in k3d, are not on the
@@ -413,7 +412,6 @@ process boundary and a listening port.
 | Irmin (process and store) | T11 | T11 | T17 | T11 | T11 | T11 |
 | PostgreSQL (process and store) | T12 | T12 | T17 | T12 | T12, T9 | T20 |
 | OpenTelemetry collector (process) | T13 | T13 | T13 | T14 | T13 | T21 |
-| Vite dev server (process) | none: serves the developer's checkout, checks no credential | none: same | none: no action it could deny | none: SPA files only | none: one developer's process | none: `vite.config.js` sets no proxy |
 | API client (external) | none: holding the key is the identity (ADR-021) | n/a | T17 | n/a | n/a | n/a |
 | Host process (external) | T7 for `/admin`. Probes: none, constant answers (`HealthProbeServer.scala`) | n/a | T17 | n/a | n/a | n/a |
 | Docker host and daemon (process) | none: taken as correct | none: same | none: same | T22 | none: same | T22 |
@@ -437,7 +435,6 @@ process boundary and a listening port.
 | DF11 | T22 | T22 | none: read once at start |
 | DF12 | none: daemon taken as correct | T5, T14, T22. Workspace identifier in the server log: none, permitted ([TERMINOLOGY.md](../../user/TERMINOLOGY.md) §8.3) | T23 |
 | DF13 | T13 | T13 | T13 |
-| DF14 | none: development files to the developer's browser | none: SPA files hold no secret | none: one developer |
 | DF15 | T21 | none: the file is in the public repository | none: read at start |
 | DF16 | T22 | T22 | T8 |
 | DF17 | none: the daemon's resolver, taken as correct | none: names are not secret | none: same |

@@ -406,7 +406,8 @@ Output lands in `modules/app/target/scala-3.8.4/`.
 
 ## Frontend Dev Server (Vite + HMR)
 
-Requires a running backend. Use alongside `sbt ~app/fastLinkJS` for HMR.
+Requires a running backend that allows the Vite origin, started as in Use case A
+below. Use alongside `sbt ~app/fastLinkJS` for HMR.
 
 ```bash
 # Terminal 1 — watch compiler
@@ -484,8 +485,8 @@ If a previous run was hard-killed: `docker rm -f <container-name>`
 ### Use case A — Backend in Docker + Vite dev server (day-to-day frontend dev)
 
 ```bash
-# Terminal 1
-docker compose up -d register-server
+# Terminal 1 — the compose file allows no CORS origin by default
+REGISTER_CORS_ORIGINS=http://localhost:5173 docker compose up -d register-server
 
 # Terminal 2
 sbt ~app/fastLinkJS

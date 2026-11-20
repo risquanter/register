@@ -91,6 +91,6 @@ All configuration is driven by environment variables. The key variables with the
 | `REGISTER_DEFAULT_NTRIALS` | `10000` | Monte Carlo trial count |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace absolute expiry (`.env.irmin` sets `120h`; `0` disables) |
 | `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `24h` | Workspace idle expiry (`.env.irmin` sets `120h`; `0` disables) |
-| `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated allowed origins |
+| `REGISTER_CORS_ORIGINS` | empty in compose | Comma-separated allowed origins. The Vite workflow needs `http://localhost:5173` |
 
 For a full listing of all supported variables see [DOCKER-DEVELOPMENT.md](DOCKER-DEVELOPMENT.md).

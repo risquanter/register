@@ -292,7 +292,7 @@ sbt app/fastLinkJS                       # frontend dev build (~app/fastLinkJS t
 cd modules/app && npm run dev            # Vite dev server at localhost:5173 (needs running backend)
 ```
 
-Day-to-day frontend dev: `docker compose up -d register-server` + `sbt ~app/fastLinkJS` + `npm run dev`. Full stack: `docker compose --profile frontend up -d` (localhost:18080). Always stop with `docker compose down`, never Ctrl+C/`docker stop`. Full Docker/BATS/image-build reference is in the register-dev skill.
+Day-to-day frontend dev: `REGISTER_CORS_ORIGINS=http://localhost:5173 docker compose up -d register-server` + `sbt ~app/fastLinkJS` + `npm run dev`. Full stack: `docker compose --profile frontend up -d` (localhost:18080). Always stop with `docker compose down`, never Ctrl+C/`docker stop`. Full Docker/BATS/image-build reference is in the register-dev skill.
 
 Report test results as **pass or fail only** — never report or act on test counts. A single failure is a blocker regardless of origin.
 

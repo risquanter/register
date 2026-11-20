@@ -65,7 +65,7 @@ docker compose --env-file .env.inmemory up -d register-server
 docker compose --env-file .env.irmin --profile persistence up -d register-server irmin postgres
 ```
 
-You can additionally set local values such as `REGISTER_CORS_ORIGINS` in these files when running the frontend from a non-default host/origin.
+To use either backend with the Vite dev server, add `REGISTER_CORS_ORIGINS=http://localhost:5173` to the env file. The compose file allows no origin by default.
 
 ---
 
@@ -75,7 +75,7 @@ The fastest local development loop runs the backend container from a pre-built p
 
 ```bash
 # Terminal 1 — start the backend (in-memory storage, no Irmin needed)
-docker compose up -d register-server
+REGISTER_CORS_ORIGINS=http://localhost:5173 docker compose up -d register-server
 
 # Terminal 2 — Scala.js watch compiler
 sbt '~app/fastLinkJS'
@@ -86,7 +86,7 @@ cd modules/app && npm run dev
 
 Access at **`http://localhost:5173`**.
 
-Note that in Vite mode the browser makes API calls directly to `http://localhost:8090` (two origins), so CORS is enforced. The default `REGISTER_CORS_ORIGINS` already includes `localhost:5173`. If your backend runs on a remote machine, export the Vite origin explicitly before starting the server:
+Note that in Vite mode the browser makes API calls directly to `http://localhost:8090` (two origins), so CORS is enforced. The compose file allows no origin by default, so Terminal 1 passes the Vite origin. If your backend runs on a remote machine, pass the Vite origin on that machine instead:
 
 ```bash
 REGISTER_CORS_ORIGINS=http://<your-machine>:5173 docker compose up -d register-server

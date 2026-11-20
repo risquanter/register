@@ -85,8 +85,9 @@ services:
       # — connects this value and renames it.
       REGISTER_MAX_CONCURRENT_SIMULATIONS: "4"
       
-      # CORS configuration
-      REGISTER_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      # Allowed CORS origins, empty by default: the SPA that nginx serves calls
+      # the API on its own origin. The Vite workflow passes http://localhost:5173.
+      REGISTER_CORS_ORIGINS: "${REGISTER_CORS_ORIGINS:-}"
 
       # Repository backend — defaults to in-memory. Set to 'irmin' for
       # persistent storage. Suite D injects these for E2E testing.

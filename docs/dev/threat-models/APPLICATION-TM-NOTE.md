@@ -230,14 +230,6 @@ checkout on the host (APPLICATION-TM §2.5, DF15).
 `otel/opentelemetry-collector-contrib:0.95.0`. ADR-020 §1 requires exact pins,
 and the Dockerfiles in `containers/` pin their images by digest as well.
 
-## Vite dev server
-
-**Observation — the SPA it serves calls register-server directly.**
-[vite.config.js](../../../modules/app/vite.config.js) sets port 5173 and no
-proxy. The SPA then calls port 8090, and register-server's CORS configuration
-admits browser reads from `http://localhost:3000` and `http://localhost:5173`
-(`REGISTER_CORS_ORIGINS`).
-
 ## Single-page application
 
 **Assumption — the browser isolates the SPA's process and origin.** B5's control

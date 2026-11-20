@@ -72,8 +72,8 @@ Backend runs in Docker (native binary, in-memory store); frontend served by Vite
 Best for day-to-day frontend development — Scala.js recompiles on every save.
 
 ```bash
-# Terminal 1 — backend
-docker compose up -d register-server
+# Terminal 1 — backend, allowing the Vite origin (compose allows none by default)
+REGISTER_CORS_ORIGINS=http://localhost:5173 docker compose up -d register-server
 
 # Terminal 2 — Scala.js watch compiler
 sbt ~app/fastLinkJS
@@ -249,7 +249,7 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_SEED4` | `0` | HDR histogram seed 4 (0 = random, ADR-003) |
 | `REGISTER_CURVE_TICK_COUNT` | `100` | How many thresholds a loss exceedance curve is sampled at. Chosen by this project: enough for a smooth line on a chart |
 | `REGISTER_CURVE_TAIL_CUTOFF` | `0.005` | Trailing curve ticks below this exceedance probability are not drawn. 0.5% is the Solvency II 1-in-200 year return period |
-| `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated). `localhost:18080` (nginx) is intentionally absent — in that mode the browser only talks to nginx; API calls are proxied server-side so the browser never issues a cross-origin request to port 8090. |
+| `REGISTER_CORS_ORIGINS` | empty in compose | Allowed CORS origins (comma-separated). The Vite workflow passes `http://localhost:5173`. `localhost:18080` (nginx) is intentionally absent — in that mode the browser only talks to nginx; API calls are proxied server-side so the browser never issues a cross-origin request to port 8090. |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace time-to-live |
 | `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
 | `REGISTER_WORKSPACE_REAPER_INTERVAL` | `5m` | How often the reaper runs |
