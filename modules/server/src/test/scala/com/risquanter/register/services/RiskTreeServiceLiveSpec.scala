@@ -12,7 +12,7 @@ import com.risquanter.register.http.requests.{
 }
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.{AbsoluteReplacement, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, MitigationSelection, ScopeOutcome, TargetingPredicate, RelativeLikelihood, RelativeSeverity, ResultTransformSpec}
-import com.risquanter.register.domain.data.iron.ValidationUtil
+import com.risquanter.register.domain.data.iron.{NonNegativeInt, ValidationUtil}
 import com.risquanter.register.domain.data.iron.{BranchChoice, ContentHash, SafeName, NodeId, MitigationId, QueryWord, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.http.errors.{BindProblem, QuerySymbolName}
 import com.risquanter.register.configs.TestConfigs
@@ -24,7 +24,7 @@ import com.risquanter.register.services.cache.{
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.domain.errors.{
-  Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
+  BoundedCollection, Core, ErrorLocation, ErrorSubject, Failure, FieldName, FieldProblem, PeerZone,
   SubmittedMitigations, TrustZone, ValidationError, ValidationErrorCode
 }
 import com.risquanter.register.telemetry.TelemetryLive
@@ -514,6 +514,28 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = service(_.create(stubWsId, invalidRequest, BranchRef.Main)).flip
 
         program.assert(clientRefusals(_).exists(_.exists(mentions(FieldName.Probability))))
+      },
+
+      test("create above the node ceiling is refused by the count alone") {
+        val oversized = validRequest.copy(leaves = Seq.fill(RiskTree.MaxNodes + 1)(validRequest.leaves.head))
+        val program = service(_.create(stubWsId, oversized, BranchRef.Main)).flip
+
+        program.assert(clientRefusals(_).contains(List(ValidationError(
+          ErrorLocation.Whole,
+          FieldProblem.TooMany(BoundedCollection.Nodes, NonNegativeInt.count(RiskTree.MaxNodes + 1), RiskTree.MaxNodes)
+        ))))
+      },
+
+      test("update above the node ceiling is refused by the count alone") {
+        val program = for {
+          tree  <- service(_.create(stubWsId, seedTreeRequest("Ceiling Tree"), BranchRef.Main))
+          added  = Seq.fill(RiskTree.MaxNodes)(leafDef("Extra", "Seed Root"))
+          error <- service(_.update(stubWsId, tree.id, renameOnly(tree, tree.name.value).copy(newLeaves = added), BranchRef.Main)).flip
+        } yield error
+
+        program.assert(clientRefusals(_).exists(_.map(_.problem) == List(
+          FieldProblem.TooMany(BoundedCollection.Nodes, NonNegativeInt.count(RiskTree.MaxNodes + 3), RiskTree.MaxNodes)
+        )))
       },
 
       test("getById returns risk tree when exists, and reports the repository's commit unchanged") {

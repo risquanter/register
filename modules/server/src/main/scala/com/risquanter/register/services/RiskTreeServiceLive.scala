@@ -450,6 +450,8 @@ class RiskTreeServiceLive private (
 
   override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree] = {
     val operation = for {
+      // The ceiling check runs before the request's size drives any work.
+      _ <- RiskTreeDefinitionRequest.requireWithinCeilings(req).toZIOValidation(TrustZone.Client)
       // Identifier generation failing is a broken invariant, as in `allocateIds`.
       treeId <- IdGenerators.nextTreeId.orDie
       ids <- allocateIds(req.portfolios.size + req.leaves.size + req.newMitigations.size)
@@ -484,6 +486,8 @@ class RiskTreeServiceLive private (
   override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree] = {
     val operation = for {
       (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
+      // The ceiling check runs before the request's size drives any work.
+      _ <- RiskTreeUpdateRequest.requireWithinCeilings(req).toZIOValidation(TrustZone.Client)
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size + req.newMitigations.size)
       resolved <- RiskTreeUpdateRequest
         .resolve(req, oldTree.index, oldTree.mitigations, idGeneratorFrom(ids))

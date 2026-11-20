@@ -135,6 +135,23 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         )
       },
 
+      test("logFailures names the lowest identifiers, in identifier order") {
+        val stale  = (1 to 50).map(i => mit(s"m-stale-$i", staleSource, leafSpec))
+        val sorted = stale.map(_.id.value).sorted
+        for
+          r     <- newResolver
+          out   <- r.resolve(ctx(rev1), mkTree(stale*))
+          _     <- ResolvedScopes.logFailures(out)
+          lines <- ZTestLogger.logOutput
+          line   = lines.map(_.message()).filter(_.startsWith("MitigationScopeResolver:")).head
+          named  = sorted.take(20).map(id => line.indexOf(s"$id -> "))
+        yield assertTrue(
+          named.forall(_ >= 0),
+          named == named.sorted,
+          sorted.drop(20).forall(id => !line.contains(s"$id -> "))
+        )
+      },
+
       test("stage-domain restriction — ResultStage keeps portfolios, LeafStage drops them") {
         // portfolio(x) satisfies {Servers, AppTier}. ResultStage domain = all
         // nodes → kept; LeafStage domain = leaves → intersection empty.

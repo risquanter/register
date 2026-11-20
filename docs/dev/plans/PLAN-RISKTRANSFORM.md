@@ -6953,6 +6953,38 @@ private val LoggedEntryLimit: Int = 20
 private[register] def boundedLogLine(prefix: String, entries: Seq[String]): String
 ```
 
+**Ceiling-check fixes, approved 2026-11-20.** The complex review of the
+correction commits found the count check running after work the request's size
+drives. The user ruled Option A: the service runs the ceiling check before it
+mints, with the same pattern at every endpoint where it applies.
+
+1. `RiskTreeServiceLive.create` runs the check before it mints the tree
+   identifier and the identifier pool. `update` runs it after the stored tree
+   is read, so a missing tree still answers 404, and before the pool is minted.
+2. `WorkspaceLifecycleController.bootstrapWorkspace` runs the check before
+   `workspaceStore.create`, so an oversized bootstrap leaves no workspace record.
+   This changes behaviour: before, the record was written and the tree refused.
+3. A submitted result-stage pipeline is refused by its step count alone, before
+   any step is refined. This changes behaviour: before, every step was refined
+   and an over-long pipeline also reported its steps' own refusals.
+4. `ResolvedScopes.logFailures` names the failed mitigations in identifier
+   order, as `toWire` lists them, so the 20 it names are the same on every run.
+
+ADR-001 §2 and ADR-017 §6 state the service step and the pipeline-step ceiling.
+The analysis requests count in their decoder, and query, scenario and revert
+submit no collection, so no other endpoint needed the check.
+
+```scala
+// RiskTreeDefinitionRequest companion; resolve now runs it, then refine
+def requireWithinCeilings(req: RiskTreeDefinitionRequest): Validation[ValidationError, Unit]
+
+// RiskTreeUpdateRequest companion; resolve now runs it, then refine
+def requireWithinCeilings(req: RiskTreeUpdateRequest): Validation[ValidationError, Unit]
+
+// MitigationSpec.ResultStage companion; create now runs it
+def requirePipelineStepCount(count: NonNegativeInt, location: ErrorLocation): Validation[ValidationError, Unit]
+```
+
 `docs/dev/TODO.md` item 46 records the corrected premise of the Lever 2
 deferral, and its review is the first work after this plan closes.
 

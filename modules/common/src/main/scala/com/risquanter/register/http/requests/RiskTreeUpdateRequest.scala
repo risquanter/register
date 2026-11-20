@@ -20,6 +20,16 @@ final case class RiskTreeUpdateRequest(
 object RiskTreeUpdateRequest:
   given JsonCodec[RiskTreeUpdateRequest] = DeriveJsonCodec.gen
 
+  /** Refuses an update above a tree ceiling by its counts alone. The request
+    * lists the whole tree, so its counts are the resulting tree's. The service
+    * runs it before any work the request's size drives, and `resolve` runs it
+    * before refining any entry (ADR-001 §1). */
+  def requireWithinCeilings(req: RiskTreeUpdateRequest): Validation[ValidationError, Unit] =
+    RiskTreeRequests.requireWithinCeilings(
+      NonNegativeInt.count(req.portfolios.size + req.leaves.size + req.newPortfolios.size + req.newLeaves.size),
+      NonNegativeInt.count(req.mitigations.size + req.newMitigations.size)
+    )
+
   /** The request refined and checked against the stored tree it updates:
     * each `portfolios` entry must name a stored portfolio, each `leaves` entry
     * a stored leaf, each `mitigations` entry a stored mitigation, and each
@@ -33,10 +43,7 @@ object RiskTreeUpdateRequest:
     storedMitigations: Seq[Mitigation],
     newId: IdGenerator
   ): Validation[ValidationError, ResolvedUpdate] =
-    requireWithinCeilings(
-      NonNegativeInt.count(req.portfolios.size + req.leaves.size + req.newPortfolios.size + req.newLeaves.size),
-      NonNegativeInt.count(req.mitigations.size + req.newMitigations.size)
-    ).flatMap(_ => refine(req, stored, storedMitigations, newId))
+    requireWithinCeilings(req).flatMap(_ => refine(req, stored, storedMitigations, newId))
 
   private def refine(
     req: RiskTreeUpdateRequest,

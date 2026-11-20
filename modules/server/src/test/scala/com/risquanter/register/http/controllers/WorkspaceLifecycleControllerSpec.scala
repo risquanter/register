@@ -35,6 +35,7 @@ import com.risquanter.register.telemetry.TelemetryLive
   *  - `recordOwnership` failure propagates as an HTTP error response
   *  - Bootstrap succeeds in capability-only mode (noOp extractor, NoOp provisioner)
   *  - Absent `x-user-id` header in identity/fine-grained mode is rejected with 403
+  *  - A bootstrap above the node ceiling is refused before any workspace record is written
   *
   */
 object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
@@ -210,6 +211,27 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         backend  <- buildBackend(UserContextExtractor.requirePresent, stub)
         response <- bootstrapRequest(backend, userId = Some(validUuid))
       yield assertTrue(response.code.code == 503)
+    },
+
+    // Each workspace record takes the next seed entity id, so the valid
+    // bootstrap after a refused one getting the id a fresh store hands out first
+    // shows the refused one wrote no record.
+    test("a bootstrap above the node ceiling answers 400 and leaves no workspace record") {
+      val oversized = validRequest.copy(leaves = Seq.fill(RiskTree.MaxNodes + 1)(validRequest.leaves.head))
+      def seedEntityIdOf(response: Response[Either[String, String]]) =
+        response.body.toOption.flatMap(_.fromJson[WorkspaceBootstrapResponse].toOption).map(_.seedEntityId)
+      for
+        backend  <- buildBackend(UserContextExtractor.noOp, BootstrapProvisionerNoOp)
+        refused  <- basicRequest.post(uri"http://localhost/workspaces")
+                      .body(oversized.toJson).contentType("application/json").send(backend)
+        after    <- bootstrapRequest(backend, userId = None)
+        fresh    <- buildBackend(UserContextExtractor.noOp, BootstrapProvisionerNoOp)
+        first    <- bootstrapRequest(fresh, userId = None)
+      yield assertTrue(
+        refused.code.code == 400,
+        seedEntityIdOf(after).isDefined,
+        seedEntityIdOf(after) == seedEntityIdOf(first)
+      )
     },
 
     test("listWorkspaceTrees is branch-scoped: X-Branch selects which trees are visible") {

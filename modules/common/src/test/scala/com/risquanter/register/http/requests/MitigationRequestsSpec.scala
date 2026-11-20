@@ -1,6 +1,7 @@
 package com.risquanter.register.http.requests
 
 import io.github.iltotore.iron.autoRefine
+import zio.NonEmptyChunk
 import zio.test.*
 import zio.json.{DecoderOps, EncoderOps}
 import zio.prelude.Validation
@@ -11,7 +12,7 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{ContentHash, SafeName}
 import com.risquanter.register.domain.errors.{
-  ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationError
+  BoundedCollection, ErrorLocation, ErrorSubject, FieldName, FieldProblem, SubmittedMitigations, ValidationError
 }
 import com.risquanter.register.http.requests.RiskTreeRequests.ResolvedSpec
 import com.risquanter.register.testutil.TestHelpers.{
@@ -106,6 +107,14 @@ object MitigationRequestsSpec extends ZIOSpecDefault {
       assertTrue(
         locationsOf(badStep.toSpec(subject)) == List(at(FieldName.Cap)),
         locationsOf(empty.toSpec(subject)) == List(at(FieldName.Spec))
+      )
+    },
+
+    test("an over-long pipeline is refused by its count alone, before any step is refined") {
+      val elevenBadSteps = MitigationSpecRequest.ResultStage(List.fill(11)(ResultTransformSpecRequest.CapLosses(0L)))
+      assertTrue(
+        elevenBadSteps.toSpec(subject).toEither ==
+          Left(NonEmptyChunk(ValidationError(at(FieldName.Spec), FieldProblem.TooMany(BoundedCollection.PipelineSteps, 11, 10))))
       )
     },
 

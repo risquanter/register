@@ -122,10 +122,11 @@ the smart constructors for the collections:
 | Limit | Value | Where enforced |
 |---|---|---|
 | HTTP request body | 8 MiB (env `REGISTER_MAX_REQUEST_BYTES`) | zio-http `RequestStreaming.Disabled(maxRequestBytes)` — rejected with 413 before any handler runs |
-| Nodes per tree | ≤ 10 000 | `RiskTree.fromNodes` (`requireNodeCount`) and, for a submitted tree, `resolve` before any entry is refined |
+| Nodes per tree | ≤ 10 000 | `RiskTree.fromNodes` (`requireNodeCount`) and, for a submitted tree, the service's entry step, before identifiers are minted, and `resolve` before any entry is refined |
 | Children per portfolio | ≤ 1 000 | `RiskPortfolio.create` (accumulated with the non-empty rule) |
 | Expert percentile/quantile points | 2 … 20 | `QuantileAnchors.create` — matches the metalog fitter's valid term range |
-| Mitigations per tree | ≤ 1 000 | `RiskTree.fromNodes` (`requireMitigationCount`) and, for a submitted tree, `resolve` before any entry is refined |
+| Mitigations per tree | ≤ 1 000 | `RiskTree.fromNodes` (`requireMitigationCount`) and, for a submitted tree, the service's entry step, before identifiers are minted, and `resolve` before any entry is refined |
+| Steps per result-stage pipeline | 1 … 10 | `MitigationSpec.ResultStage.create` (`requirePipelineStepCount`) and, for a submitted mitigation, before any step is refined |
 
 The 8 MiB body cap is sized above the largest valid tree payload (a maximal
 10 000-node expert-leaf tree serialises to ≈ 4.94 MiB). The body-size control is

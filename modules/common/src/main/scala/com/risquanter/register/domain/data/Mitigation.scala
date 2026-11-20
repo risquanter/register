@@ -175,18 +175,21 @@ object MitigationSpec {
       * at most one of each of the five operation types. */
     private val MaxPipelineSteps: NonNegativeInt = 10
 
+    /** Refuses a step count outside one to ten. A submitted pipeline is
+      * counted with it before any step is refined (ADR-001 §1). */
+    def requirePipelineStepCount(count: NonNegativeInt, location: ErrorLocation): Validation[ValidationError, Unit] =
+      count match {
+        case n if n < MinPipelineSteps =>
+          Validation.fail(ValidationError(location, FieldProblem.PipelineEmpty(MinPipelineSteps)))
+        case n =>
+          ValidationUtil.requireAtMost(BoundedCollection.PipelineSteps, n, MaxPipelineSteps, location)
+      }
+
     def create(
       pipeline: TransformPipeline,
       location: ErrorLocation
     ): Validation[ValidationError, ResultStage] =
-      pipeline.steps.size match {
-        case n if n < MinPipelineSteps =>
-          Validation.fail(ValidationError(location, FieldProblem.PipelineEmpty(MinPipelineSteps)))
-        case n =>
-          ValidationUtil
-            .requireAtMost(BoundedCollection.PipelineSteps, NonNegativeInt.count(n), MaxPipelineSteps, location)
-            .as(new ResultStage(pipeline))
-      }
+      requirePipelineStepCount(NonNegativeInt.count(pipeline.steps.size), location).as(new ResultStage(pipeline))
 
     /** Wire form: an object, so the discriminated parent has a field set to add
       * the stage tag to. */

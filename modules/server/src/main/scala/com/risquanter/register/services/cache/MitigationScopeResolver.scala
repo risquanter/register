@@ -51,12 +51,13 @@ object ResolvedScopes:
   /** Per-mitigation drift signals (ADR-002): a predicate that no longer binds
     * makes that one mitigation a no-op, never a request failure, so this only
     * logs. The line repeats the predicates' words, so it is bounded like a
-    * refusal's line, one entry per failed mitigation; it starts with the count. */
+    * refusal's line, one entry per failed mitigation in identifier order, as
+    * `toWire` lists them. It starts with the count. */
   def logFailures(resolved: ResolvedScopes): UIO[Unit] =
     ZIO.when(resolved.failures.nonEmpty)(
       ZIO.logWarning(Failure.boundedLogLine(
         s"MitigationScopeResolver: ${resolved.failures.size} mitigation(s) did not resolve against this tree version: ",
-        resolved.failures.toList.map((id, errs) => s"${id.value} -> ${errs.map(BindProblem.describe).mkString("[", "; ", "]")}")
+        resolved.failures.toList.sortBy((id, _) => id.value).map((id, errs) => s"${id.value} -> ${errs.map(BindProblem.describe).mkString("[", "; ", "]")}")
       ))
     ).unit
 

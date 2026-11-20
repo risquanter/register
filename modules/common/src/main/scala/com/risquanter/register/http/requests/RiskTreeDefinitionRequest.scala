@@ -16,15 +16,21 @@ final case class RiskTreeDefinitionRequest(
 object RiskTreeDefinitionRequest:
   given JsonCodec[RiskTreeDefinitionRequest] = DeriveJsonCodec.gen
 
+  /** Refuses a create above a tree ceiling by its counts alone. The service
+    * runs it before any work the request's size drives, and `resolve` runs it
+    * before refining any entry (ADR-001 §1). */
+  def requireWithinCeilings(req: RiskTreeDefinitionRequest): Validation[ValidationError, Unit] =
+    RiskTreeRequests.requireWithinCeilings(
+      NonNegativeInt.count(req.portfolios.size + req.leaves.size),
+      NonNegativeInt.count(req.newMitigations.size)
+    )
+
   /** The request refined. A create has no stored leaf, so an absolute
     * statement among its mitigations is refused at its anchor. A submission
     * above a tree ceiling is refused by its count alone, before any entry is
     * refined (ADR-017 §3). */
   def resolve(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] =
-    requireWithinCeilings(
-      NonNegativeInt.count(req.portfolios.size + req.leaves.size),
-      NonNegativeInt.count(req.newMitigations.size)
-    ).flatMap(_ => refine(req, newId))
+    requireWithinCeilings(req).flatMap(_ => refine(req, newId))
 
   private def refine(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] = {
     val treeNameV = refineNameField(req.name, ErrorLocation.requestField(FieldName.Name))

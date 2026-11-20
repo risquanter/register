@@ -8,8 +8,10 @@ import com.risquanter.register.auth.{AuthorizationService, BootstrapProvisioner,
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.errors.{ErrorLocation, Failure, FieldProblem, RequestHeaderName, TrustZone, ValidationError}
+import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, NonNegativeInt, Revision}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
+import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{EvictExpiredResponse, TreeListResponse, TreeLocation, WorkspaceBootstrapResponse, WorkspaceLocation, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -55,6 +57,8 @@ class WorkspaceLifecycleController private (
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[LifecycleMarker.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
+        // Before the workspace is written, so an oversized tree leaves no workspace behind.
+        _      <- RiskTreeDefinitionRequest.requireWithinCeilings(req).toZIOValidation(TrustZone.Client)
         // exempt: pre-resource-creation — no resource exists yet to check
         key    <- workspaceStore.create(seedEntityId)
         ws     <- workspaceStore.resolve(key)  // exempt: Layer 0 capability gate

@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{
   AbsoluteReplacement, Mitigation, MitigationPrecedence, MitigationSpec, MitigationTarget, RelativeLikelihood,
   RelativeSeverity, ResultTransformSpec, RiskLeafTransform, TransformPipeline
 }
-import com.risquanter.register.domain.data.iron.{NodeId, ResidualProbability, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt, ResidualProbability, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 import com.risquanter.register.http.requests.RiskTreeRequests.ResolvedSpec
 
@@ -56,13 +56,14 @@ object MitigationSpecRequest:
           ValidationUtil.refineId(anchor, ErrorLocation.Field(subject, FieldName.Anchor)).map(NodeId(_)))
       )(ResolvedSpec.Unstamped(_, _))
 
-  /** The step-count rule is `MitigationSpec.ResultStage.create`'s, refused at
-    * `subject`'s `Spec`. */
+  /** The step-count rule is `MitigationSpec.ResultStage`'s, refused at
+    * `subject`'s `Spec` by the count alone, before any step is refined. */
   final case class ResultStage(pipeline: List[ResultTransformSpecRequest]) extends MitigationSpecRequest:
     def toSpec(subject: ErrorSubject): Validation[ValidationError, ResolvedSpec] =
-      Validation.validateAll(pipeline.map(_.toStep(subject))).flatMap(steps =>
-        MitigationSpec.ResultStage.create(TransformPipeline(steps), ErrorLocation.Field(subject, FieldName.Spec))
-          .map(ResolvedSpec.Complete(_)))
+      val location = ErrorLocation.Field(subject, FieldName.Spec)
+      MitigationSpec.ResultStage.requirePipelineStepCount(NonNegativeInt.count(pipeline.size), location)
+        .flatMap(_ => Validation.validateAll(pipeline.map(_.toStep(subject))))
+        .flatMap(steps => MitigationSpec.ResultStage.create(TransformPipeline(steps), location).map(ResolvedSpec.Complete(_)))
 
   /** The submitted form of a stored spec, and the inverse of `toSpec`. An
     * absolute statement keeps its stored stamp when it is resubmitted unchanged. */

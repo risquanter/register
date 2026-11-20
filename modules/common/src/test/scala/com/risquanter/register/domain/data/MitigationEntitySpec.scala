@@ -1,10 +1,13 @@
 package com.risquanter.register.domain.data
 
+import zio.NonEmptyChunk
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
-import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, NonNegativeInt, SafeName}
+import com.risquanter.register.domain.errors.{
+  BoundedCollection, ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError, ValidationErrorCode
+}
 import com.risquanter.register.testutil.TestHelpers.{
   idStr, lognormalShape, mitigationId, nodeId, residualProbability, retentionFactor, treeId, unsafeGet
 }
@@ -117,6 +120,16 @@ object MitigationEntitySpec extends ZIOSpecDefault {
         val result = resultStage(Nil)
         assertTrue(result.toEither.swap.toOption.get.exists(e =>
           FieldProblem.code(e.problem) == ValidationErrorCode.CONSTRAINT_VIOLATION && e.location == specLocation))
+      },
+      test("requirePipelineStepCount admits one to ten steps and refuses zero and eleven by the count") {
+        assertTrue(
+          MitigationSpec.ResultStage.requirePipelineStepCount(NonNegativeInt.count(0), specLocation).toEither ==
+            Left(NonEmptyChunk(ValidationError(specLocation, FieldProblem.PipelineEmpty(1)))),
+          MitigationSpec.ResultStage.requirePipelineStepCount(NonNegativeInt.count(1), specLocation).toEither.isRight,
+          MitigationSpec.ResultStage.requirePipelineStepCount(NonNegativeInt.count(10), specLocation).toEither.isRight,
+          MitigationSpec.ResultStage.requirePipelineStepCount(NonNegativeInt.count(11), specLocation).toEither ==
+            Left(NonEmptyChunk(ValidationError(specLocation, FieldProblem.TooMany(BoundedCollection.PipelineSteps, 11, 10))))
+        )
       },
       test("the decoder routes through create, so an over-long pipeline is refused on the wire") {
         val valid  = mk("m-result", resultSpec).toEither.toOption.get
