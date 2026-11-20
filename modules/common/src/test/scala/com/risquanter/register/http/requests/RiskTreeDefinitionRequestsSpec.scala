@@ -814,6 +814,29 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         ErrorLocation.requestField(FieldName.Mitigations),
         FieldProblem.TooMany(BoundedCollection.Mitigations, NonNegativeInt.count(RiskTree.MaxMitigations + 1), RiskTree.MaxMitigations)
       )))
+    },
+
+    test("an update counts all four node collections together against the node ceiling") {
+      def withNewLeaves(count: Int): RiskTreeUpdateRequest =
+        keepNodes(Nil, Nil).copy(
+          name = "",
+          newPortfolios = Seq(RiskPortfolioDefinitionRequest("Extra", Some("Root"))),
+          newLeaves = (1 to count).map(i => validLeafDef(s"N$i", Some("Extra")))
+        )
+      // One kept portfolio, one kept leaf and one new portfolio, so the new
+      // leaves fill the rest of the count.
+      val over    = withNewLeaves(RiskTree.MaxNodes - 2)
+      val atLimit = withNewLeaves(RiskTree.MaxNodes - 3)
+      def resolved(req: RiskTreeUpdateRequest) = errorsOf(resolveUpdate(req, stored(NodeKind.Leaf), Nil, () => safeId("generated")))
+      assertTrue(
+        resolved(over) == List(ValidationError(
+          ErrorLocation.Whole,
+          FieldProblem.TooMany(BoundedCollection.Nodes, NonNegativeInt.count(RiskTree.MaxNodes + 1), RiskTree.MaxNodes)
+        )),
+        resolved(atLimit).forall(_.problem match
+          case FieldProblem.TooMany(_, _, _) => false
+          case _                             => true)
+      )
     }
   )
 }
