@@ -82,6 +82,18 @@ Each threat is one YAML block under its own heading, and the heading repeats
 #                                            deployment's own elements, and that
 #                                            deployment's model has not assessed
 #                                            it yet
+#   triage          - the description stage 7 writes for an open threat, or
+#                     null for a threat that is open in no deployment:
+#                       loss            - the kinds of loss, each tied to an
+#                                         asset of §2.2
+#                       attempted_by    - the threat source and what it needs
+#                                         first, per deployment
+#                       in_the_way      - each control an attempt must get
+#                                         past, and whether it stops attempts
+#                                         one by one or works or fails as a
+#                                         whole
+#   decision        - the user's ruling on an open threat: fix, accept or
+#                     route, with what it names; null until ruled
 #   related_code    - list of repository-relative paths directly involved
 #   todo            - outstanding work, or null
 ```
@@ -275,7 +287,7 @@ each one exists. The solid box inside B2 is the register-server component, and
 its two ports are where the flows end. Who can reach a process without a drawn
 flow is read from §2.6.
 
-**System version:** 0.25.1
+**System version:** 0.25.2
 **Assessed:** version 0.25.0 · commit c8bbcf70 · stage 6
 
 ```mermaid
@@ -492,6 +504,8 @@ status:
   compose-persistent: mitigated-tested
   k3d-L1: mitigated-untested
   k3d-L2: mitigated-untested
+triage: null
+decision: null
 related_code:
   - containers/prod/Dockerfile.frontend-prod
 todo: null
@@ -540,6 +554,8 @@ status:
   compose-persistent: not-applicable
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage: null
+decision: null
 related_code:
   - modules/server/src/main/scala/com/risquanter/register/auth/UserContextExtractor.scala
   - modules/common/src/test/scala/com/risquanter/register/domain/data/iron/AuthTypesSpec.scala
@@ -587,6 +603,20 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    The workspace keys of every client whose traffic the party sees, and through
+    them the risk trees, scenarios and simulation results of those workspaces.
+    Altered SPA files extend the loss to the keys of every later visitor.
+  attempted_by: >
+    A party on the network path between a client and the host, such as a shared
+    LAN or Wi-Fi network, in both compose deployments. A client on the host
+    itself has no such path.
+  in_the_way: >
+    Nothing as built. TLS would work or fail as a whole. Publishing the ports on
+    127.0.0.1 would remove the network path as a whole, and leave only clients
+    on the host.
+decision: null
 related_code:
   - docker-compose.yml
   - containers/prod/Dockerfile.frontend-prod
@@ -632,6 +662,18 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    Simulation capacity, through repeated full reads of the workspace store. The
+    sweep deletes only workspaces already past their deadline, so no workspace a
+    user still holds is lost.
+  attempted_by: >
+    Any caller that reaches port 8090, through the host port or from any element
+    of B1, with no credential, in both compose deployments.
+  in_the_way: >
+    The frontend does not pass /admin on. It works as a whole and covers only
+    callers on port 18080. Nothing stands in the way on port 8090.
+decision: null
 related_code:
   - modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceLifecycleEndpoints.scala
   - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleController.scala
@@ -687,6 +729,19 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    Simulation capacity. In compose-persistent, space on the irmin-data volume.
+    In compose-inmem, every workspace held in register-server's memory, lost
+    when the container restarts at its 256 MiB limit.
+  attempted_by: >
+    Any caller that reaches host port 18080 or 8090, with no workspace key, in
+    both compose deployments.
+  in_the_way: >
+    The 8 MiB body cap stops each request one by one at a size, and does not
+    count requests. The reaper removes a workspace after its deadline, as a
+    whole. No rate limit exists.
+decision: null
 related_code:
   - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleController.scala
   - containers/prod/Dockerfile.frontend-prod
@@ -729,6 +784,21 @@ status:
   compose-persistent: open
   k3d-L1: open
   k3d-L2: open
+triage:
+  loss: >
+    The availability of workspace creation for every user who omits
+    seedEntityId, which includes every user of the SPA. On PostgreSQL the state
+    outlives a restart and the eviction of the workspace that caused it, until
+    the sequence is reset by hand. In memory it lasts until register-server
+    restarts.
+  attempted_by: >
+    Any caller that can send POST /workspaces, with one request and no workspace
+    key, in every deployment that admits that route.
+  in_the_way: >
+    Nothing. Checked against local/register-server:0.25.0: a create with
+    seedEntityId=99999999 answered 201, and every later create without it
+    answered 503 on PostgreSQL, also after a restart, and 500 in memory.
+decision: null
 related_code:
   - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStoreLive.scala
   - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
@@ -737,9 +807,10 @@ related_code:
 todo: null
 ```
 
-The behaviour is read from the code and the migration and has not been run. The
-check on PostgreSQL is `SELECT nextval('workspace_seed_entity_id_seq')` after one
-such create. In k3d the caller needs whatever the edge requires for
+The behaviour was run against `local/register-server:0.25.0` on both stores.
+After one such create, `workspace_seed_entity_id_seq` stood at 99999999. The
+in-memory store answers the later creates with 500, a defect rather than a typed
+failure. In k3d the caller needs whatever the edge requires for
 `POST /workspaces`.
 
 ### T10: Nothing bounds the simulations in flight
@@ -779,6 +850,18 @@ status:
   compose-persistent: open
   k3d-L1: open
   k3d-L2: open
+triage:
+  loss: >
+    Simulation capacity for every workspace. In compose-inmem, every workspace
+    in memory when the container restarts at its 256 MiB limit.
+  attempted_by: >
+    A caller holding one workspace key. Creation is anonymous (T8), so any
+    caller can hold one.
+  in_the_way: >
+    The ADR-017 bounds on nodes, children, mitigations and trees stop each
+    request one by one at a size. The container's limits work as a whole.
+    Nothing caps the work in flight.
+decision: null
 related_code:
   - modules/server/src/main/resources/application.conf
   - modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala
@@ -824,6 +907,16 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    The confidentiality, integrity and existence of every workspace's risk
+    trees, history and scenarios, and every workspace identifier.
+  attempted_by: >
+    In compose-persistent, any element of B1 on port 8080, and anything that
+    reaches host port 9080. No credential is needed.
+  in_the_way: >
+    Nothing.
+decision: null
 related_code:
   - docker-compose.yml
   - containers/prod/Dockerfile.irmin-prod
@@ -877,6 +970,21 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    Every workspace, taken over by replacing its key hash or deleted, together
+    with the risk trees its key gives access to. The role is a superuser, so the
+    loss widens to T20.
+  attempted_by: >
+    In compose-persistent, any element of B1 on port 5432, and anything that
+    reaches host port 5432, knowing the password written in docker-compose.yml.
+  in_the_way: >
+    Password authentication works as a whole. Checked against
+    postgres:17-alpine: pg_hba.conf ends in host all all all scram-sha-256, and
+    a wrong password from another container is refused. The password is public,
+    so the control stops nobody who reads the repository. Storing only the key's
+    hash stops reading a key, not replacing one.
+decision: null
 related_code:
   - docker-compose.yml
   - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
@@ -885,8 +993,8 @@ todo: null
 ```
 
 The takeover is read from the code, which resolves a key by `key_hash` alone,
-and has not been run. That the image demands the password from other containers
-is the open assumption in [APPLICATION-TM-NOTE.md](APPLICATION-TM-NOTE.md).
+and has not been run. The image demands the password from other containers:
+`pg_hba.conf` ends in `host all all all scram-sha-256`.
 
 ### T13: The collector accepts telemetry from any caller
 
@@ -924,6 +1032,18 @@ status:
   compose-persistent: open
   k3d-L1: not-applicable
   k3d-L2: not-applicable
+triage:
+  loss: >
+    The integrity of the metrics served on port 8889, the container logs through
+    the debug exporter's output, and the collector's memory.
+  attempted_by: >
+    While the observability profile runs: any element of B1, and anything that
+    reaches host ports 4317, 4318, 8888 and 8889, with no credential.
+  in_the_way: >
+    Nothing. What port 8889 serves is still unchecked. The check needs
+    register-server to send telemetry, and no register-server image at the
+    current version is in the local image store.
+decision: null
 related_code:
   - otel-collector-config.yaml
   - docker-compose.yml
@@ -968,6 +1088,19 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    The confidentiality of what customers ask of their risk models, and their
+    resource names.
+  attempted_by: >
+    While the observability profile runs: an account that can read the container
+    logs (T22), or a party that sees DF10 (T19).
+  in_the_way: >
+    Reading the container logs needs the daemon's socket, which works as a
+    whole. Nothing in register-server keeps query text out of a span. Whether
+    the debug exporter prints attributes is still unchecked, for the reason
+    given in T13.
+decision: null
 related_code:
   - modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala
   - modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala
@@ -1017,6 +1150,17 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    One workspace key per successful injection, and that workspace's risk trees,
+    scenarios and simulation results.
+  attempted_by: >
+    An attacker with a flaw that injects script into the SPA, in its code or a
+    bundled library. The STRIDE pass found no such flaw.
+  in_the_way: >
+    The Iron character limits on free text stop each value one by one. No
+    Content-Security-Policy limits an injected script.
+decision: null
 related_code:
   - containers/prod/Dockerfile.frontend-prod
   - modules/app/index.html
@@ -1060,6 +1204,17 @@ status:
   compose-persistent: open
   k3d-L1: open
   k3d-L2: open
+triage:
+  loss: >
+    The confidentiality of a workspace's change activity and resource names
+    after its key stops resolving.
+  attempted_by: >
+    A former key holder with an event stream opened before rotation or expiry,
+    through an API client. The SPA opens no stream.
+  in_the_way: >
+    Rotation stops every new request with the old key, as a whole. Nothing ends
+    a stream that is already open.
+decision: null
 related_code:
   - modules/server/src/main/scala/com/risquanter/register/http/sse/SSEController.scala
   - modules/server/src/main/scala/com/risquanter/register/services/sse/SSEHub.scala
@@ -1107,6 +1262,17 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    The ability to attribute a change to a risk tree or a workspace record, and
+    with it the investigation of any other threat.
+  attempted_by: >
+    Any key holder, and any caller of an open store port (T11, T12).
+  in_the_way: >
+    The security events for create, delete, rotate and evict record the
+    workspace and no caller. Irmin's history records the fixed author zio-
+    client. Neither ties a change to a caller.
+decision: null
 related_code:
   - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
   - modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
@@ -1146,6 +1312,18 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    The workspace records and the telemetry, and code of the attacker's choice
+    inside B1.
+  attempted_by: >
+    A party that controls what a registry serves for postgres:17-alpine or the
+    collector's tag, at a moment the image is absent from the local image store,
+    such as a first pull or after a prune.
+  in_the_way: >
+    An image already in the local image store is reused, which works as a whole
+    until it is removed. No digest fixes the image.
+decision: null
 related_code:
   - docker-compose.yml
 todo: null
@@ -1187,16 +1365,31 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    As the statement: the workspace keys on the second leg of DF2, and the risk
+    trees on DF7.
+  attempted_by: >
+    An attacker who controls a container process and also gains root inside that
+    container. Checked against the local images: postgres runs as uid 70, nginx
+    as 101, Irmin and register-server as 65532, and each process's effective
+    capability set is empty. The postgres image holds no setuid file. Answering
+    address lookups for a neighbour needs NET_RAW in the effective set. The
+    collector's image runs as uid 10001.
+  in_the_way: >
+    The non-root user works as a whole. no-new-privileges, which compose sets on
+    register-server, the frontend and Irmin, works as a whole. The absence of
+    setuid files in the postgres image works as a whole.
+decision: null
 related_code:
   - docker-compose.yml
 todo: null
 ```
 
-The entry rests on a premise the repository does not settle: that a container
-on the host's daemon keeps `NET_RAW` and can answer address lookups for a
-neighbour. The check is
-`docker inspect --format '{{.HostConfig.CapDrop}} {{.HostConfig.CapAdd}}' register-server`
-beside the daemon's default capability set.
+Every container keeps `NET_RAW` in its bounding set, because no service sets
+`cap_drop`. The processes run as non-root users with an empty effective set, so
+the threat needs root inside a container first. The collector's image sets
+`User` to 10001 (`docker inspect`).
 
 ### T20: PostgreSQL's one role administers the database
 
@@ -1231,15 +1424,27 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    The workspace records, the pg-data volume, and command execution inside the
+    postgres container as uid 70, because a superuser can run COPY ... TO
+    PROGRAM.
+  attempted_by: >
+    Anyone through T12, or an attacker who controls register-server. Checked
+    against postgres:17-alpine with compose's settings: register_app is a
+    superuser.
+  in_the_way: >
+    Nothing beyond T12's public password.
+decision: null
 related_code:
   - docker-compose.yml
   - modules/server/src/main/resources/application.conf
 todo: null
 ```
 
-Whether `register_app` is a superuser is not in the repository. The check is
-`docker compose --profile persistence exec postgres psql -U register_app -d register -c '\du'`.
-If it is, the role can run programs in the container, and the impact widens.
+`register_app` is a superuser. The postgres image creates `POSTGRES_USER` as
+one, and `select rolsuper from pg_roles` answered true. The role can therefore
+run programs in the container.
 
 ### T21: The collector can rewrite its own configuration on the host
 
@@ -1269,6 +1474,20 @@ status:
   compose-persistent: open
   k3d-L1: not-applicable
   k3d-L2: not-applicable
+triage:
+  loss: >
+    The collector's configuration in the host's checkout, and through it every
+    later span, which a rewritten exporter can send to an outside address.
+  attempted_by: >
+    While the observability profile runs: an attacker who controls the collector
+    process through a flaw reached by its open receivers (T13).
+  in_the_way: >
+    The file's mode and owner on the host work as a whole. On this host the file
+    is 0664, owned by uid 1000 and gid 989, and the daemon runs with userns-
+    remap, so no container uid maps to either. The write therefore fails on this
+    host. The collector runs as uid 10001, so on any host the write fails unless
+    the file is writable by every account or owned by uid 10001.
+decision: null
 related_code:
   - docker-compose.yml
   - otel-collector-config.yaml
@@ -1276,8 +1495,8 @@ todo: null
 ```
 
 Whether the write succeeds depends on the uid the upstream image runs as and on
-the file's mode on the host. The check is `ls -ln otel-collector-config.yaml`
-beside the uid in `docker inspect otel-collector`.
+the file's mode on the host. The image runs as uid 10001, and on this host the
+write fails, as `triage` states.
 
 ### T22: Every account the daemon's socket admits holds all data and all definitions
 
@@ -1311,6 +1530,18 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    Every asset the host holds: the risk trees and workspace records on the
+    volumes, the container logs, the database password in each container's
+    environment, and the definitions of every container.
+  attempted_by: >
+    An account on the host that the daemon's socket admits, or that can write
+    the checkout.
+  in_the_way: >
+    The host's accounts, file permissions and socket rule work as a whole. The
+    repository sets none of them.
+decision: null
 related_code:
   - docker-compose.yml
   - .gitignore
@@ -1351,6 +1582,17 @@ status:
   compose-persistent: open
   k3d-L1: not-assessed
   k3d-L2: not-assessed
+triage:
+  loss: >
+    The host's disk, and with it every container and volume on the host.
+  attempted_by: >
+    Any caller that reaches a published port, at the rate it sends requests.
+    While the observability profile runs, any caller of the collector's
+    receivers as well.
+  in_the_way: >
+    Nothing. Checked on this host: the daemon's logging driver is json-file, and
+    /etc/docker/daemon.json sets no log-opts.
+decision: null
 related_code:
   - docker-compose.yml
   - containers/prod/Dockerfile.frontend-prod
@@ -1358,6 +1600,5 @@ related_code:
 todo: null
 ```
 
-A bound may exist in the daemon's own configuration, which the repository does
-not hold. The check is `docker info --format '{{.LoggingDriver}}'` beside the
-`log-opts` of `/etc/docker/daemon.json`.
+A bound may exist in a host daemon's own configuration, which the repository
+does not hold. This host sets none.

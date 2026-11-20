@@ -21,7 +21,11 @@ settle who else passes. Three checks settle it on a given host:
 `getent group docker` lists the accounts the socket admits besides root,
 `ls -l /var/run/docker.sock` shows the socket's own rule, and
 `ls -l docker-compose.yml otel-collector-config.yaml .env .env.irmin .env.inmemory`
-shows who can read and write the configuration.
+shows who can read and write the configuration. On the host this model was
+assessed on, the socket admits root and group `docker`, whose one member is the
+operator. The configuration files are writable by the operator and that group,
+and readable by every account. None of them holds a secret that is not already
+in the repository.
 
 **Observation — an account the daemon's socket admits holds every container.**
 Through the daemon it reads each container's definition, which includes its
@@ -177,11 +181,15 @@ in the `register` namespace.
 
 ## PostgreSQL
 
-**Assumption — the official image requires a password for connections from
-other containers.** The model's B3 control is password authentication. The
-compose service sets `POSTGRES_PASSWORD`, and the repository does not show the
-resulting `pg_hba.conf`. Check:
-`docker compose --profile persistence exec postgres cat /var/lib/postgresql/data/pg_hba.conf`.
+**Observation — the image requires a password for connections from other
+containers.** With compose's settings, `postgres:17-alpine` writes a
+`pg_hba.conf` that trusts local and loopback connections and ends in
+`host all all all scram-sha-256`. A connection from another container with a
+wrong password is refused. That is the model's B3 control.
+
+**Observation — the application's role is a superuser.** The image creates
+`POSTGRES_USER`, here `register_app`, as a superuser, and
+`select rolsuper from pg_roles` answers true for it (APPLICATION-TM §4, T20).
 
 **Observation — its image is not pinned.** Compose runs `postgres:17-alpine`, a
 tag that moves. ADR-020 §1: "Floating ranges or unpinned installs are
