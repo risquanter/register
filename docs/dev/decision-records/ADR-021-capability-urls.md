@@ -71,17 +71,20 @@ DELETE /w/{key}                                → delete workspace + cascade tr
 - **Creation rate limit: an edge concern, and the application holds none.**
   `POST /workspaces` is anonymous in every authorization mode — Layer 0 has no
   JWT to require, so the mesh admits the request unauthenticated — so this
-  endpoint does need a limit. That limit belongs at the ingress gateway, and the
-  application deliberately implements none.
+  endpoint does need a limit. That limit belongs at the component that holds the
+  client's connection, and the application deliberately implements none. In
+  compose that component is the frontend's nginx, which does not cover the
+  server's host port 8090. In k3d it is the Envoy Gateway.
   The reason is that only the component holding the connection knows who is
   calling. Anything further in has to be told, through a forwarded-header
   convention that must be kept in agreement with the deployment's topology by
   hand; a wrong value there silently counts an identity the caller chooses, and
   the limit stops holding with no error and no log line. An application-level
   per-address limit was implemented and removed for exactly that reason.
-  **This is a known, unclosed gap:** no rate limit exists at the gateway today,
-  so workspace creation is currently unbounded. Building it is required work in
-  the `register-infra` repository.
+  **This is a known, unclosed gap:** neither nginx nor the gateway holds a rate
+  limit, so workspace creation is unbounded. The nginx limit is required work in
+  this repository. The gateway limit is required work in the `register-infra`
+  repository.
   A per-credential limit is a different question and would legitimately sit in
   the application, because the workspace key is a value the application holds
   and the edge cannot see (`docs/dev/TODO.md` item 42).
@@ -154,7 +157,7 @@ GET /w  → List[WorkspaceKeySecret]
 | `WorkspaceStore` | `server/.../services/workspace/WorkspaceStore.scala` — trait + `Ref[Map]` + TTL + reaper fiber |
 | Workspace endpoints | `common/.../http/endpoints/WorkspaceLifecycleEndpoints.scala`, `WorkspaceTreeEndpoints.scala`, `WorkspaceAnalysisEndpoints.scala`, `WorkspaceQueryEndpoints.scala` — Tapir endpoint definitions under `/w/{key}`, split by concern |
 | Workspace controllers | `server/.../http/controllers/WorkspaceLifecycleController.scala`, `WorkspaceTreeController.scala`, `WorkspaceAnalysisController.scala` — wire those endpoints to `WorkspaceStore` + `RiskTreeService` |
-| `WorkspaceConfig` | `server/.../configs/WorkspaceConfig.scala` — TTL, rate limit, reaper interval |
+| `WorkspaceConfig` | `server/.../configs/WorkspaceConfig.scala` — TTL, idle timeout, reaper interval, tree cap, cascade-delete parallelism |
 | Istio policy | `AuthorizationPolicy` — skip JWT validation for `/w/*` paths |
 
 ---
