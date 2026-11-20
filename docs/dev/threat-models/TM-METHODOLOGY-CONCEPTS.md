@@ -281,7 +281,7 @@ threats continue from T5.
 
 | Drawn as | Means |
 |---|---|
-| Dashed box with its own coloured border and no fill | a boundary. B1 orange `#e8590c`, B2 blue `#1c7ed6`, B3 green `#2f9e44`, B4 purple `#ae3ec9`, B5 amber `#f59f00`, B6 teal `#0c8599`, B7 pink `#d6336c`, B8 grey `#868e96` |
+| Dashed box with its own coloured border and no fill | a boundary. B1 orange `#e8590c`, B2 blue `#1c7ed6`, B3 green `#2f9e44`, B4 purple `#ae3ec9`, B5 amber `#f59f00`, B6 teal `#0c8599`, B7 pink `#d6336c`, B8 grey `#868e96`, B9 brown `#9c6644` |
 | Solid box with a light fill, inside a boundary | a component that has ports. Mermaid cannot place a node inside a node, so the component is a nested subgraph |
 | Plain box | an element |
 | Cylinder | a store |

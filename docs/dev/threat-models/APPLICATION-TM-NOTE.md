@@ -10,11 +10,35 @@ configuration, with its source.
 
 ## Docker host and daemon
 
-**Assumption — the host and its Docker daemon are trusted.** Root on the host,
-and every member of the `docker` group, can read each container's environment
-(including `REGISTER_DB_PASSWORD`), its volumes and its logs, and can exec into
-it. The model draws no boundary against them. Whether the host is trusted is
-the operator's premise, and the repository cannot settle it.
+**Assumption — the host's kernel and the Docker daemon are correct.** B9's
+control is the host operating system's accounts and file permissions, and the
+access rule on the daemon's socket. The model takes the kernel that enforces
+them, and the daemon that isolates the containers, as correct.
+
+**Assumption — only the operator's account passes B9's control on the host.**
+The repository sets no account, no file mode and no socket rule, so it cannot
+settle who else passes. Three checks settle it on a given host:
+`getent group docker` lists the accounts the socket admits besides root,
+`ls -l /var/run/docker.sock` shows the socket's own rule, and
+`ls -l docker-compose.yml otel-collector-config.yaml .env .env.irmin .env.inmemory`
+shows who can read and write the configuration.
+
+**Observation — an account the daemon's socket admits holds every container.**
+Through the daemon it reads each container's definition, which includes its
+environment and with it `REGISTER_DB_PASSWORD`. It reads the container's logs
+and volumes, and runs commands inside it (APPLICATION-TM §2.6, row B9). This is
+the daemon's interface and not a setting in the repository.
+
+**Observation — the env files exist only on the host.** `.gitignore` excludes
+`.env` and `.env.*` and keeps `.env.*.example`. The content and the file mode of
+`.env`, `.env.irmin` and `.env.inmemory` are therefore set on each host and are
+not in the repository.
+
+**Observation — compose takes values from its caller's shell.**
+`docker-compose.yml` writes many values as `${NAME:-default}`, for example
+`REGISTER_DB_PASSWORD: "${REGISTER_DB_PASSWORD:-dev-only-password}"`. A variable
+of that name in the shell that runs `docker compose` replaces the default
+(APPLICATION-TM §2.5, DF11).
 
 ## All flows
 
@@ -89,6 +113,18 @@ request line. register-server itself logs only a request's first path segment
 (APPLICATION-TM §2.6, row B5).
 
 ## Irmin
+
+**Observation — its process settings come from the image, and compose adds
+none.** [Dockerfile.irmin-prod](../../../containers/prod/Dockerfile.irmin-prod)
+sets the entrypoint `irmin graphql` and the command `--port 8080 --address
+0.0.0.0 --root /data`. The compose service sets no `command:` and no
+`environment:` (APPLICATION-TM §2.5, DF11 and DF19).
+
+**Observation — the Irmin binary accepts a configuration file, and none is
+given.** `docker run --rm --network none local/irmin-prod:3.11-p2 --help=plain`
+lists `--config=PATH (absent=null)`: "Allows configuration file to be specified
+on the command-line." The image's command does not pass it. A `command:` added
+to the compose service would replace the image's command and could.
 
 **Observation — register-server calls Irmin without a credential.**
 `modules/server/src/main/scala/com/risquanter/register/infra/irmin/` sends no
