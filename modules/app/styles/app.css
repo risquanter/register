@@ -2435,6 +2435,48 @@ button.summary-list-entry:hover {
   font-size: var(--text-base);
 }
 
+/* A section of a loaded tree card: a title that opens and closes it, and a
+   body that slides. The body animates its single grid row between 1fr and
+   0fr, because a height cannot be animated to or from auto. 200ms is chosen
+   by this project. */
+.tree-section {
+  margin-bottom: var(--sp-2);
+}
+.tree-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+  padding: var(--sp-1) 0;
+  background: transparent;
+  border: none;
+  color: var(--foreground-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  cursor: pointer;
+}
+.tree-section-title:hover {
+  color: var(--foreground);
+}
+.tree-section-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.tree-section-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 200ms ease;
+}
+.tree-section--collapsed .tree-section-body {
+  grid-template-rows: 0fr;
+}
+.tree-section-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .tree-detail-nodes {
   font-family: var(--font-mono);
   font-size: var(--text-sm);

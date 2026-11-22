@@ -51,6 +51,36 @@ object TreeDetailView:
     * Chosen by this project: long enough to read one sentence. */
   private val TransientNoticeMillis: Int = 2200
 
+  /** The titles of a loaded card's two sections. */
+  private val MitigationsTitle: String = "Mitigations"
+  private val StructureTitle: String   = "Tree structure"
+
+  private val NoTreeSelected: String   = "Select a tree to view its structure."
+  private val LoadingStructure: String = "Loading tree structure…"
+  private val MirroringHint: String    = "mirroring baseline"
+
+  /** How many leading characters of a commit hash the pinned banner shows.
+    * Chosen by this project; the history slider's tooltip shows as many. */
+  private val ShortHashChars: Int = 8
+
+  /** The banner over a card pinned to an earlier commit. */
+  private def pinnedBanner(entry: TreeHistoryEntry): String =
+    s"Viewing ${entry.at} · ${entry.commitHash.value.take(ShortHashChars)}"
+
+  /** `KeyboardEvent.key` of the Escape key, fixed by the UI Events specification. */
+  private val EscapeKey: String = "Escape"
+
+  /** A charted row's left-border width, and its width while its curve is
+    * hovered. Chosen by this project. */
+  private val CurveBorder: String        = "3px"
+  private val HoveredCurveBorder: String = "5px"
+
+  private val ChangedGlyph: String   = "✎"
+  private val ChangedTooltip: String = "Changed vs. compared branch"
+  private val CoverageGlyph: String  = "◆"
+  private val ScopedHereHeading: String  = "Mitigations scoped here"
+  private val ScopedBelowHeading: String = "Mitigations scoped below"
+
   // ── Node display helpers (mirrors TreePreview.TreeNode pattern) ──
 
   private def nodeIcon(node: RiskNode): SvgElement = node match
@@ -92,10 +122,10 @@ object TreeDetailView:
   ): String =
     (colour, queryMatched) match
       case (Some(hex), _) =>
-        val width = if isHovered then "5px" else "3px"
+        val width = if isHovered then HoveredCurveBorder else CurveBorder
         s"border-left: $width solid ${hex.value}; padding-left: calc(var(--sp-1) - $width);"
       case (None, true) =>
-        "border-left: 3px dotted var(--foreground-variant); padding-left: calc(var(--sp-1) - 3px);"
+        s"border-left: $CurveBorder dotted var(--foreground-variant); padding-left: calc(var(--sp-1) - $CurveBorder);"
       case (None, false) => ""
 
   /** What a click on a tree card row asks for. */
@@ -181,6 +211,10 @@ object TreeDetailView:
     // Strict mirror of the (possibly derived — mirror OR rewound) incoming lock,
     // so the click handler can read it synchronously via `.now()`.
     val lockedNow: Var[Boolean] = Var(false)
+    // Whether each section of the card is open. Held here rather than in the
+    // loaded render, so a reload, a branch switch or a pin keeps them.
+    val mitigationsOpen: Var[Boolean] = Var(true)
+    val structureOpen: Var[Boolean]   = Var(true)
 
     div(
       cls := "tree-detail-view",
@@ -191,7 +225,7 @@ object TreeDetailView:
       // Ctrl+click still charts curves at the pinned commit.
       child.maybe <-- pinnedAt.map {
         case Some(entry) =>
-          Some(div(cls := "pinned-banner", s"Viewing ${entry.at} · ${entry.commitHash.value.take(8)}"))
+          Some(div(cls := "pinned-banner", pinnedBanner(entry)))
         case None => None
       },
       // Close picker when clicking outside (attached to the container).
@@ -201,7 +235,7 @@ object TreeDetailView:
       // re-embedded the Vega chart (resetting its toggles) on every click.
       onClick --> { _ => if pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
       // The Escape key closes the picker.
-      onKeyDown --> { ev => if ev.key == "Escape" && pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
+      onKeyDown --> { ev => if ev.key == EscapeKey && pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
       // Closing the picker clears its colour preview.
       pickerOpenFor.signal.changes.filter(_.isEmpty) --> { _ => state.clearPreview() },
       // Auto-hide the transient selection-locked notice; each fresh block
@@ -222,16 +256,9 @@ object TreeDetailView:
       child.maybe <-- lockedNoticeVisible.signal.map { visible =>
         Option.when(visible)(div(cls := "selection-locked-notice", NoticeMessages.SelectionMirrored))
       },
-      MitigationPanel(
-        structure,
-        selection,
-        id => onSelectionEdit(SelectionEdit.toggleWhole(_, id)),
-        lockedNow.signal,
-        staleAction
-      ),
       child <-- structure.map {
-        case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
-        case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
+        case LoadState.Idle        => renderPlaceholder(NoTreeSelected)
+        case LoadState.Loading     => renderPlaceholder(LoadingStructure)
         // The selected tree is held but absent at the branch or commit read.
         // There is nothing to show, and the sentence says where it was looked for,
         // composed from the kind of absence the server's answer names.
@@ -240,7 +267,7 @@ object TreeDetailView:
         case LoadState.Loaded(response) =>
           val view = NodeView(state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds,
             lockedNow.signal, lockedNoticeVisible, response, selection, onSelectionEdit, staleAction)
-          renderTree(response.tree, view)
+          renderTree(response, view, mitigationsOpen, structureOpen)
       }
     )
 
@@ -263,9 +290,15 @@ object TreeDetailView:
   private def renderPlaceholder(message: String): HtmlElement =
     div(cls := "tree-detail-placeholder", p(message))
 
-  /** Render the full tree from a RiskTree domain object. */
-  private def renderTree(tree: RiskTree, view: NodeView): HtmlElement =
-    // Build children lookup: parentId → child nodes
+  /** The loaded card: the tree's name, then its mitigations and its node
+    * structure, each in a section that opens and closes on its title. */
+  private def renderTree(
+    response:        TreeStructureResponse,
+    view:            NodeView,
+    mitigationsOpen: Var[Boolean],
+    structureOpen:   Var[Boolean]
+  ): HtmlElement =
+    val tree: RiskTree = response.tree
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
 
@@ -278,17 +311,51 @@ object TreeDetailView:
         Icons.treeRoot("tree-root-icon"),
         span(cls := "tree-name", tree.name.value.toString),
         child.maybe <-- view.selectionLocked.map { locked =>
-          Option.when(locked)(span(cls := "selection-lock-hint", "mirroring baseline"))
+          Option.when(locked)(span(cls := "selection-lock-hint", MirroringHint))
         }
       ),
-      rootNode match
-        case Some(root) =>
-          div(
-            cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, view, depth = 0)
-          )
-        case None =>
-          FailureNotice.lines(List(ErrorMessages.RootNodeMissing), None)
+      collapsibleSection(
+        MitigationsTitle,
+        mitigationsOpen,
+        MitigationPanel(
+          Val(LoadState.Loaded(response)),
+          view.selection,
+          id => view.onSelectionEdit(SelectionEdit.toggleWhole(_, id)),
+          view.selectionLocked,
+          view.staleAction
+        )
+      ),
+      collapsibleSection(
+        StructureTitle,
+        structureOpen,
+        rootNode match
+          case Some(root) =>
+            div(
+              cls := "tree-detail-nodes",
+              renderNode(root, childrenOf, view, depth = 0)
+            )
+          case None =>
+            FailureNotice.lines(List(ErrorMessages.RootNodeMissing), None)
+      )
+    )
+
+  /** A titled part of the card. A click on the title opens or closes the body,
+    * which slides. */
+  private def collapsibleSection(heading: String, open: Var[Boolean], body: HtmlElement): HtmlElement =
+    div(
+      cls := "tree-section",
+      cls("tree-section--collapsed") <-- open.signal.map(!_),
+      button(
+        cls := "tree-section-title",
+        tpe := "button",
+        onClick --> { _ => open.update(v => !v) },
+        child <-- open.signal.map {
+          case true  => Icons.chevronDown("tree-section-chevron")
+          case false => Icons.chevronRight("tree-section-chevron")
+        },
+        span(heading)
+      ),
+      div(cls := "tree-section-body", div(cls := "tree-section-inner", body))
     )
 
   /** Recursively render a node and its children. */
@@ -432,12 +499,12 @@ object TreeDetailView:
     * faint where one is scoped only below it. Its tooltip lists them. */
   private def renderCoverageBadge(badge: CoverageBadge): HtmlElement =
     val (modifier, mitigations, heading) = badge match
-      case CoverageBadge.Scoped(ms)    => ("coverage-badge--scoped", ms, "Mitigations scoped here")
-      case CoverageBadge.BelowOnly(ms) => ("coverage-badge--below", ms, "Mitigations scoped below")
+      case CoverageBadge.Scoped(ms)    => ("coverage-badge--scoped", ms, ScopedHereHeading)
+      case CoverageBadge.BelowOnly(ms) => ("coverage-badge--below", ms, ScopedBelowHeading)
     span(
       cls := s"coverage-badge $modifier",
       title := (heading :: mitigations.toList.map(_.name.value)).mkString("\n"),
-      "◆"
+      CoverageGlyph
     )
 
   // ── View helpers ──
@@ -445,7 +512,7 @@ object TreeDetailView:
   /** ✎ marker for a node the active Compare diff reports as changed.
     * Identical and unchanged nodes render nothing. */
   private def renderChangedMarker(changed: Boolean): Option[HtmlElement] =
-    Option.when(changed)(span(cls := "node-changed-marker", title := "Changed vs. compared branch", "✎"))
+    Option.when(changed)(span(cls := "node-changed-marker", title := ChangedTooltip, ChangedGlyph))
 
   /** Render the colour-swatch trigger icon for charted nodes. A click opens
     * this node's picker, or closes it when it is already open. */

@@ -727,11 +727,13 @@ The first card in **Load Trees** is the baseline card. It has two selects: the t
 
 ### The mitigation lines at the top of the card
 
-Above the tree, the card lists the tree's four mitigations, one line each. A line holds a checkbox, the mitigation's name, and its stage. The stage reads `parameter stage` for a mitigation that changes a leaf's figures, and `result stage` for one that acts on a node's simulated losses, such as the insurance policy.
+Under the tree's name, the card has two sections, **Mitigations** and **Tree structure**. Click a section's title to close it, and click it again to open it. Closing **Mitigations** leaves more room for the tree.
+
+The **Mitigations** section lists the tree's four mitigations, one line each. A line holds a checkbox, the mitigation's name, and its stage. The stage reads `parameter stage` for a mitigation that changes a leaf's figures, and `result stage` for one that acts on a node's simulated losses, such as the insurance policy.
 
 Hover over a line to see its predicate, the text that says which nodes the mitigation reaches. A `⚠` mark on a line means the predicate matched no node in this version of the tree. A `stale` badge marks an absolute statement whose leaf has changed since the statement was written.
 
-**Check:** the four lines are `MFA and awareness training`, `Cyber insurance`, `Fraud monitoring` and `Regulatory Fine after remediation`. None carries `⚠` or `stale`. Switch **Scenario** to `main`, and the card lists no mitigations. Switch back to `with-controls`.
+**Check:** the four lines are `MFA and awareness training`, `Cyber insurance`, `Fraud monitoring` and `Regulatory Fine after remediation`. None carries `⚠` or `stale`. Switch **Scenario** to `main`, and the **Mitigations** section is empty. Switch back to `with-controls`.
 
 ### Where each mitigation applies
 
