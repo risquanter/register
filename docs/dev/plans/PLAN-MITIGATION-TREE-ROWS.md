@@ -3,6 +3,8 @@
 **Status:** Implemented 2026-11-22 at version 0.26.1. `commonJVM/test`,
 `server/test`, `app/test`, `serverIt/test` and BATS suite A are green. The
 browser check in the verification plan is the user's and closes the plan.
+The continuation section "Each reading is its own curve" is open. It records
+four rulings and one open decision, and it has no signatures yet.
 **Date:** 2026-11-22.
 **Plan code:** MTR. **Inventory:** `docs/dev/plans/PLAN-MITIGATION-TREE-ROWS-INVENTORY.md`,
 which the user creates.
@@ -339,3 +341,70 @@ mitigation rows start to the right of their node, and hovering a mitigation row
 shows the hover background.
 
 Version: PATCH on landing, because shipped frontend code changes.
+
+---
+
+## Continuation — each reading is its own curve
+
+**Status:** rulings recorded 2026-11-22. MTR-D-5 is open. Exact signatures,
+the inventory amendment and the verification plan are written once MTR-D-5 is
+ruled.
+
+### The defect
+
+The chart state holds a set of nodes, `userSelectedNodeIds: Var[Set[NodeId]]`
+in `modules/app/src/main/scala/app/state/LECChartState.scala`. Each charted node
+draws the readings the card's Inherent / Mitigated / Both control lets through.
+So a node's inherent and mitigated curves are added and removed together. A
+mitigation row's Ctrl+click charts the whole node, so on a card set to Both it
+also adds the inherent curve. A node row's Ctrl+Shift+click removes the node, so
+it also removes the mitigated curve.
+
+The user's ruling of 2026-11-22: a mitigated curve is selectable as every other
+curve, with no forced adding or removing of the inherent curve.
+
+### Rulings
+
+- **MTR-D-1.** A chart entry is a pair: a node and a reading. The reading is
+  inherent or mitigated. A curve's colour stays its node's colour, and the
+  point-marker shape tells the two readings apart.
+- **MTR-D-2.** A mitigation row touches only its node's mitigated curve.
+  Ctrl+click applies the mitigation at that node and adds the node's mitigated
+  curve. Ctrl+Shift+click stops applying it there and removes that curve. The
+  inherent curve does not change in either case.
+- **MTR-D-3.** A node row never removes a mitigated curve that a mitigation row
+  added.
+- **MTR-D-4.** The mirror button and copy-for-compare copy the charted curves,
+  where they copied the charted nodes.
+
+The limit on user-chosen curves, `LECChartState.MaxUserSelections` (13, chosen
+by this project), keeps counting nodes. Colour belongs to the node, so a node's
+second curve takes no further colour.
+
+Derived, and reversible: two mitigation rows under one node share that node's
+one mitigated curve, because the selected mitigations covering a node compose
+into a single figure (`docs/user/TERMINOLOGY.md`, section 4.5). The curve stays
+on the chart while either mitigation is still applied at that node.
+
+### Open decisions
+
+- **MTR-D-5 — what the Inherent / Mitigated / Both control becomes.** A node
+  the selection reaches only through a mitigation scoped below it, such as
+  `Enterprise` in the walkthrough tree, has no mitigation row. Today the
+  control is the only way its mitigated curve reaches the chart.
+  - **A.** The control stays. It decides what a node row's Ctrl+click adds and
+    Ctrl+Shift+click removes: the inherent curve, the mitigated curve, or both.
+    It still hides a charted curve whose reading it does not show.
+  - **B.** The control goes. Every node the selection reaches gets a row for
+    its mitigated curve, and a node row stands for its inherent curve only.
+
+  Recommended: A. It keeps the residual-risk view as one click and the
+  comparand cards' Mitigated start.
+
+### Documents this continuation makes stale
+
+- `docs/user/MITIGATION-WALKTHROUGH.md`, step 11, which describes a mitigation
+  row's Ctrl+click as putting the node on the chart with both curves.
+- This plan's objective and worked example, which describe the same behaviour.
+- `docs/dev/plans/PLAN-RISKTRANSFORM-INVENTORY.md`, the OD-3 entry, whose
+  display ruling MTR-D-1 narrows. The user edits that file.
