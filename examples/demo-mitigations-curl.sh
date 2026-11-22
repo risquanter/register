@@ -14,7 +14,7 @@
 # Usage:  ./examples/demo-mitigations-curl.sh [base_url]
 #         default base_url: http://localhost:18080 (nginx proxies API to register-server)
 #         Stack:
-#           docker compose --profile persistence --profile frontend --env-file .env.irmin up -d
+#           docker compose --profile persistence --profile frontend --env-file .env.irmin up -d --wait
 #
 # Tree "Regional Bank Risk Register" (branch main), as created:
 #   Enterprise (portfolio)
@@ -180,6 +180,9 @@ send_query() {
 # ── Shared helpers ───────────────────────────────────────────────────────────
 # From this line to the end the curl and the HTTPie variant are the same text.
 
+# Any command that fails stops the script (set -e). This says where it stopped.
+trap 'fail "Stopped at line $LINENO: $BASH_COMMAND"' ERR
+
 # Turns a structure read into the request that replaces the tree with itself:
 # every stored node and every stored mitigation is kept, by its id. An absolute
 # statement is sent back without the target and the stamp the server wrote, and
@@ -277,7 +280,10 @@ info "Server: $BASE"
 # ── Step 1: Bootstrap workspace + tree (commit C1) ───────────────────────────
 header "Step 1 — Bootstrap workspace + tree (C1 Create)"
 
-BOOTSTRAP=$(bootstrap)
+BOOTSTRAP=$(bootstrap) || {
+  fail "No answer from $BASE. Start the stack: docs/user/MITIGATION-WALKTHROUGH.md, What you need."
+  exit 1
+}
 WS_KEY=$(echo "$BOOTSTRAP" | jq -r '.workspaceKey // empty')
 TREE_ID=$(echo "$BOOTSTRAP" | jq -r '.tree.id // empty')
 EXPIRES=$(echo "$BOOTSTRAP" | jq -r '.expiresAt // empty')
@@ -331,7 +337,7 @@ HISTORY=$(tree_history main)
 MAIN_COMMITS=$(echo "$HISTORY" | jq '(.entries // []) | length' 2>/dev/null || echo 0)
 if [[ "$MAIN_COMMITS" -lt 3 ]]; then
   fail "The history holds $MAIN_COMMITS commit(s), and 3 were made. Commit history needs the Irmin backend:"
-  info "docker compose --profile persistence --profile frontend --env-file .env.irmin up -d"
+  info "docker compose --profile persistence --profile frontend --env-file .env.irmin up -d --wait"
   exit 1
 fi
 echo "$HISTORY" | jq -r '.entries[] | "  \(.commitHash[0:8])  \(.operation.write.kind // .operation.kind)  \(.at)"'
