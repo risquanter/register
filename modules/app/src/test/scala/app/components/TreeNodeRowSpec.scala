@@ -6,12 +6,12 @@ import zio.test.*
   *
   * Because DOM creation requires a browser (Scala.js), these tests
   * exercise the pure data invariants that drive rendering:
-  *   - NodeKind enum has exactly Portfolio and Leaf.
+  *   - NodeKind enum has exactly Portfolio, Leaf and Mitigation.
   *   - Row CSS class names are formatted correctly for any depth.
   *   - The selected/deselected class variants are distinct.
   *
-  * DOM-level rendering tests (slot wiring, click handlers) require
-  * a jsdom environment and are deferred to Phase D.
+  * DOM-level rendering tests (slot wiring, click handlers) need a jsdom
+  * environment, which this test setup does not have.
   */
 object TreeNodeRowSpec extends ZIOSpecDefault:
 
@@ -27,12 +27,12 @@ object TreeNodeRowSpec extends ZIOSpecDefault:
 
     suite("NodeKind enum")(
 
-      test("Portfolio and Leaf are distinct values") {
-        assertTrue(TreeNodeRow.NodeKind.Portfolio != TreeNodeRow.NodeKind.Leaf)
+      test("Portfolio, Leaf and Mitigation are distinct values") {
+        assertTrue(TreeNodeRow.NodeKind.values.toSet.size == 3)
       },
 
-      test("enum has exactly two values") {
-        assertTrue(TreeNodeRow.NodeKind.values.length == 2)
+      test("enum has exactly three values") {
+        assertTrue(TreeNodeRow.NodeKind.values.length == 3)
       }
 
     ),

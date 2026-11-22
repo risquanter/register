@@ -88,6 +88,28 @@ object SelectionEdit:
       val (full, ticks) = statement(current - id)
       MitigationSelection.create(full, ticks ++ flipped.toList.map(NodeMitigationEntry(_, id)))
 
+  /** Apply `id` at `node` of its resolved scope. A selection that already
+    * applies it there is returned unchanged. */
+  def applyAt(
+    selection: MitigationSelection.Enumerated,
+    id:        MitigationId,
+    node:      NodeId,
+    scope:     Set[NodeId]
+  ): Validation[ValidationError, MitigationSelection.Enumerated] =
+    if appliesAt(selection, id, node) then Validation.succeed(selection)
+    else toggleAt(selection, id, node, scope)
+
+  /** Stop applying `id` at `node`. A selection that does not apply it there is
+    * returned unchanged. */
+  def removeAt(
+    selection: MitigationSelection.Enumerated,
+    id:        MitigationId,
+    node:      NodeId,
+    scope:     Set[NodeId]
+  ): Validation[ValidationError, MitigationSelection.Enumerated] =
+    if appliesAt(selection, id, node) then toggleAt(selection, id, node, scope)
+    else Validation.succeed(selection)
+
   /** The part of the selection naming mitigations in `held`, and the
     * identifiers dropped. */
   def present(

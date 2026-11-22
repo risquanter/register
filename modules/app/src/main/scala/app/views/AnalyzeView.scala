@@ -1,6 +1,7 @@
 package app.views
 
 import com.raquo.laminar.api.L.*
+import zio.NonEmptyChunk
 
 import scala.scalajs.js
 
@@ -24,7 +25,7 @@ import com.risquanter.register.http.responses.LECNodeSeries
   *   └── RIGHT: saved-tree-panel (Load Trees)
   *       ├── "Load Trees" title
   *       ├── slot-card stack — one BranchCard per slot, each with its
-  *       │   (branch, tree) picker in the header and its own TreeDetailView in
+  *       │   (tree, branch) picker in the header and its own TreeDetailView in
   *       │   the body: baseline first (swatch + selects + refresh + eye), then
   *       │   one comparand card per row (swatch + selects + mirror + eye +
   *       │   remove; ✎ markers + mirror lock in the body)
@@ -667,7 +668,7 @@ object AnalyzeView:
       )
     )
 
-    // Each slot is one self-contained card: its (branch, tree) picker in the
+    // Each slot is one self-contained card: its (tree, branch) picker in the
     // header, its own tree view in the body — baseline first, one comparand card
     // per row (keyed by pool index so a card keeps its element and picker DOM as
     // rows change). Comparand cards carry the ✎ markers and the mirror lock, and
@@ -882,7 +883,7 @@ object AnalyzeView:
       LECChartView(spec, bridge, paramStore)
     )
 
-  /** Header for the baseline slot card: swatch + branch/tree picker (the bare
+  /** Header for the baseline slot card: swatch + tree/branch picker (the bare
     * `TreeListView`, which keeps the tree-list loading logic) + refresh + the
     * baseline eye — one picker row (the baseline carries a single action). */
   private def renderBaselineHead(
@@ -940,7 +941,7 @@ object AnalyzeView:
       )
     )
 
-  /** Header for a comparand slot card: picker row (swatch + branch/tree picker)
+  /** Header for a comparand slot card: picker row (swatch + tree/branch picker)
     * over an action row (mirror, eye, remove) so the three buttons never crowd
     * the selects in the narrow panel. Mirror syncs this slot's selection to the
     * baseline's; eye hides only its chart contribution; remove tears it down. */
@@ -1135,10 +1136,9 @@ object AnalyzeView:
     compareRoot: Option[NodeId],
     cap: Int = LECChartState.MaxUserSelections
   ): (Option[NodeId], List[NodeId]) =
-    if baseline.nonEmpty then
-      (None, baseline.toList.filter(compareTreeNodeIds.contains).sortBy(_.value).take(cap))
-    else
-      (activeRoot, activeRoot.filter(compareTreeNodeIds.contains).orElse(compareRoot).toList)
+    NonEmptyChunk.fromIterableOption(baseline) match
+      case Some(charted) => (None, charted.toList.filter(compareTreeNodeIds.contains).sortBy(_.value).take(cap))
+      case None          => (activeRoot, activeRoot.filter(compareTreeNodeIds.contains).orElse(compareRoot).toList)
 
   /** The seed a copied slot takes: the source's node selection, kept to the
     * nodes the slot's tree holds, in deterministic id order. It replaces the
@@ -1293,19 +1293,6 @@ object AnalyzeView:
     div(
       cls := "slot-select-pair",
       select(
-        cls := "compare-branch-select",
-        onMountCallback(_ => scenarioState.refresh()),
-        option(value := "", "— compare against —"),
-        FormInputs.splitOptions(optionEntries, disabledBranchValues),
-        controlled(
-          value <-- slot.state.target.signal.map {
-            case CompareTarget.NotChosen     => ""
-            case CompareTarget.Target(coord) => BranchBar.branchOptionValue(coord.branch)
-          },
-          onInput.mapToValue --> { raw => slot.state.target.set(parseBranch(raw)) }
-        )
-      ),
-      select(
         cls := "compare-tree-select",
         cls("compare-select--disabled") <-- treeDisabled,
         disabled <-- treeDisabled,
@@ -1320,6 +1307,19 @@ object AnalyzeView:
             case CompareTarget.NotChosen     => ""
           },
           onInput.mapToValue --> { raw => applyTreeOverride(raw) }
+        )
+      ),
+      select(
+        cls := "compare-branch-select",
+        onMountCallback(_ => scenarioState.refresh()),
+        option(value := "", "— compare against —"),
+        FormInputs.splitOptions(optionEntries, disabledBranchValues),
+        controlled(
+          value <-- slot.state.target.signal.map {
+            case CompareTarget.NotChosen     => ""
+            case CompareTarget.Target(coord) => BranchBar.branchOptionValue(coord.branch)
+          },
+          onInput.mapToValue --> { raw => slot.state.target.set(parseBranch(raw)) }
         )
       )
     )

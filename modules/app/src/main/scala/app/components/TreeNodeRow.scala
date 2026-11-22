@@ -25,8 +25,9 @@ import com.risquanter.register.domain.data.iron.{SafeName, NodeId, Probability, 
   */
 object TreeNodeRow:
 
+  /** What a row shows, which decides its icon. */
   enum NodeKind:
-    case Portfolio, Leaf
+    case Portfolio, Leaf, Mitigation
 
   /** Structured leaf tooltip for the native `title` attribute. The lines below
     * the separator are decided by the shape's case: a metalog fit renders its
@@ -91,8 +92,9 @@ object TreeNodeRow:
   ): HtmlElement =
 
     val icon: SvgElement = kind match
-      case NodeKind.Portfolio => Icons.portfolio("node-icon")
-      case NodeKind.Leaf      => Icons.leaf("node-icon")
+      case NodeKind.Portfolio  => Icons.portfolio("node-icon")
+      case NodeKind.Leaf       => Icons.leaf("node-icon")
+      case NodeKind.Mitigation => Icons.mitigation("node-icon")
 
     val rowCls: Signal[String] =
       isSelected.map(sel =>

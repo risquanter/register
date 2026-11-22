@@ -80,6 +80,24 @@ object SelectionEditSpec extends ZIOSpecDefault:
       )
     },
 
+    test("applyAt applies an unapplied mitigation at that node, and leaves an applied one as it was") {
+      assertTrue(
+        edited(SelectionEdit.applyAt(MitigationSelection.Inherent, m, n, scope)).contains(at(n)),
+        edited(SelectionEdit.applyAt(at(k), m, n, scope)).contains(on),
+        edited(SelectionEdit.applyAt(at(n), m, n, scope)).contains(at(n)),
+        edited(SelectionEdit.applyAt(on, m, n, scope)).contains(on)
+      )
+    },
+
+    test("removeAt stops applying an applied mitigation at that node, and leaves an unapplied one as it was") {
+      assertTrue(
+        edited(SelectionEdit.removeAt(on, m, n, scope)).contains(at(k)),
+        edited(SelectionEdit.removeAt(at(n), m, n, scope)).contains(MitigationSelection.Inherent),
+        edited(SelectionEdit.removeAt(at(k), m, n, scope)).contains(at(k)),
+        edited(SelectionEdit.removeAt(MitigationSelection.Inherent, m, n, scope)).contains(MitigationSelection.Inherent)
+      )
+    },
+
     test("present drops a mitigation the tree does not hold and keeps the rest") {
       val both = MitigationSelection.create(List(m, other), Nil).toOption.get
       assertTrue(

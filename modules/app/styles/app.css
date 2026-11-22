@@ -2746,20 +2746,6 @@ button.summary-list-entry:hover {
   background: var(--error-surface);
 }
 
-/* One mitigation scoped at a node, styled as a child row beneath it. */
-.tree-mitigation-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  padding-left: calc(var(--_depth, 0) * var(--tree-indent-unit, 16px));
-  font-size: var(--text-xs);
-  color: var(--foreground-muted);
-  cursor: default;
-}
-.tree-mitigation-tick--on {
-  color: var(--accent);
-}
-
 /* Coverage badge on a node row: solid where a mitigation is scoped at the
    node, faint where one is scoped only below it. */
 .coverage-badge {

@@ -1,6 +1,6 @@
 package app.views
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 import app.state.{TreeViewState, LoadState}
 import app.components.{FailureNotice, Icons}
@@ -81,12 +81,12 @@ object TreeListView:
 
     if bare then
       // Just the controls — no box, header/title, or slot labels — for use
-      // inside a slot-card header. Branch + tree selects flex to fill the row.
+      // inside a slot-card header. Tree + branch selects flex to fill the row.
       div(
         cls := "tree-list-bare",
         listPlumbing,
-        leadingControl.getOrElse(emptyNode),
-        div(cls := "tree-list-tree-slot tree-list-tree-slot--bare", child <-- treeSelectChild)
+        div(cls := "tree-list-tree-slot tree-list-tree-slot--bare", child <-- treeSelectChild),
+        leadingControl.getOrElse(emptyNode)
       )
     else
       div(
@@ -107,17 +107,17 @@ object TreeListView:
         div(
           cls := "tree-list-controls-row",
           // Labeled explicitly — otherwise two adjacent selects with no caption
-          // read as unclear duplicates rather than "which scenario, which tree".
-          leadingControl.map(c => div(
-            cls := "tree-list-branch-slot",
-            span(cls := "tree-list-slot-label", "Scenario"),
-            c
-          )).getOrElse(emptyNode),
+          // read as unclear duplicates rather than "which tree, which scenario".
           div(
             cls := "tree-list-tree-slot",
             span(cls := "tree-list-slot-label", "Tree"),
             child <-- treeSelectChild
-          )
+          ),
+          leadingControl.map(c => div(
+            cls := "tree-list-branch-slot",
+            span(cls := "tree-list-slot-label", "Scenario"),
+            c
+          )).getOrElse(emptyNode)
         )
       )
 

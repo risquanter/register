@@ -83,26 +83,78 @@ object TreeDetailView:
     case _: RiskPortfolio => true
     case _: RiskLeaf      => false
 
-  /** Inline border style for a tree node based on chart/query state.
-    *
-    * Charted nodes get their curve hex colour as a solid border.
-    * Query-matched-but-not-charted nodes get a neutral dotted border.
-    * All other nodes get no border.
-    */
+  /** The left border of a row: solid in the curve colour, wider while hovered;
+    * dotted for a query match with no curve; none otherwise. */
   private def borderStyleFor(
-    nodeId: NodeId,
-    colorMap: Map[NodeId, HexColor],
-    queryMatched: Set[NodeId],
-    isHovered: Boolean
+    colour:       Option[HexColor],
+    queryMatched: Boolean,
+    isHovered:    Boolean
   ): String =
-    colorMap.get(nodeId) match
-      case Some(hex) =>
+    (colour, queryMatched) match
+      case (Some(hex), _) =>
         val width = if isHovered then "5px" else "3px"
         s"border-left: $width solid ${hex.value}; padding-left: calc(var(--sp-1) - $width);"
-      case None =>
-        if queryMatched.contains(nodeId) then
-          "border-left: 3px dotted var(--foreground-variant); padding-left: calc(var(--sp-1) - 3px);"
-        else ""
+      case (None, true) =>
+        "border-left: 3px dotted var(--foreground-variant); padding-left: calc(var(--sp-1) - 3px);"
+      case (None, false) => ""
+
+  /** What a click on a tree card row asks for. */
+  private enum RowGesture:
+    /** Ctrl+click or Cmd+click. */
+    case Add
+    /** Ctrl+Shift+click or Cmd+Shift+click. */
+    case Remove
+    /** A click with neither key held. */
+    case Plain
+
+  private object RowGesture:
+    def of(ev: org.scalajs.dom.MouseEvent): RowGesture =
+      (ev.ctrlKey || ev.metaKey, ev.shiftKey) match
+        case (true, true)  => Remove
+        case (true, false) => Add
+        case (false, _)    => Plain
+
+  /** The tree card's click rule for a node row and a mitigation row alike. A
+    * Ctrl gesture adds or removes, unless the card mirrors the baseline, when it
+    * shows the locked notice instead. A plain click runs `plain`. */
+  private def onRowGesture(
+    ev:     org.scalajs.dom.MouseEvent,
+    view:   NodeView,
+    add:    () => Unit,
+    remove: () => Unit,
+    plain:  () => Unit
+  ): Unit =
+    (RowGesture.of(ev), view.selectionLocked.now()) match
+      case (RowGesture.Plain, _) => plain()
+      case (_, true) =>
+        ev.preventDefault()
+        view.lockedNoticeVisible.set(true)
+      case (RowGesture.Add, false) =>
+        ev.preventDefault()
+        add()
+      case (RowGesture.Remove, false) =>
+        ev.preventDefault()
+        remove()
+
+  /** A tree card row's border and hover: the border from `border`, and hovering
+    * highlights the curves of `curveNode`. */
+  private def decorateRow(
+    row:       HtmlElement,
+    border:    Signal[String],
+    curveNode: NodeId,
+    view:      NodeView
+  ): HtmlElement =
+    row.amend(
+      cls := "tree-detail-inline",
+      styleAttr <-- border,
+      onMouseEnter --> { _ => view.hoverBridge.hoveredCurveId.set(Some(curveNode)) },
+      onMouseLeave --> { _ => view.hoverBridge.hoveredCurveId.set(None) },
+      position.relative
+    )
+
+  /** The empty expand-arrow slot of a row with no children. */
+  private def toggleSpacer(): HtmlElement =
+    span(cls := "node-toggle node-toggle-spacer", Icons.chevronRight("toggle-icon"))
 
   // ── Public API ────────────────────────────────────────────────
 
@@ -247,7 +299,7 @@ object TreeDetailView:
     depth:      Int
   ): HtmlElement =
     val NodeView(state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds,
-      selectionLocked, lockedNoticeVisible, response, _, _, _) = view
+      _, _, response, _, _, _) = view
     val nodeId      = node.id
     val children    = childrenOf.getOrElse(Some(nodeId), Seq.empty)
     val hasChildren = isPortfolio(node) && children.nonEmpty
@@ -259,31 +311,18 @@ object TreeDetailView:
       state.nodeColorMap
         .combineWith(queryMatchedNodes, hoverBridge.hoveredCurveId.signal)
         .map { (colorMap, queryMatched, hoveredId) =>
-          borderStyleFor(nodeId, colorMap, queryMatched, hoveredId.contains(nodeId))
+          borderStyleFor(colorMap.get(nodeId), queryMatched.contains(nodeId), hoveredId.contains(nodeId))
         }
 
+    // Ctrl+click puts the node on the chart and Ctrl+Shift+click takes it off;
+    // each does nothing when the node is already where it asks. A plain click
+    // selects the node for its detail.
     def handleNodeClick(ev: org.scalajs.dom.MouseEvent): Unit =
-      // Approved gestures (ADR: Ctrl+Click = add to chart, Ctrl+Shift+Click = remove):
-      //   Ctrl/Cmd+Click          → add node to LEC chart selection (no-op if already selected)
-      //   Ctrl/Cmd+Shift+Click    → remove node from LEC chart selection (no-op if not selected)
-      //   plain Click             → navigate / show node detail
-      // While the row mirrors the baseline, its selection is driven by the
-      // baseline; the Ctrl-gestures are blocked and pulse the transient notice
-      // instead. Plain click (navigate) still works.
-      if ev.ctrlKey || ev.metaKey then
-        ev.preventDefault()
-        if selectionLocked.now() then
-          lockedNoticeVisible.set(true)
-        else
-          val alreadySelected = state.userSelectedNodeIds.now().contains(nodeId)
-          if ev.shiftKey then
-            // Remove gesture — only emit if the node is currently selected
-            if alreadySelected then state.userSelectionToggle.onNext(nodeId)
-          else
-            // Add gesture — only emit if the node is not yet selected
-            if !alreadySelected then state.userSelectionToggle.onNext(nodeId)
-      else
-        state.selectNode(nodeId)
+      onRowGesture(ev, view,
+        add    = () => chartNode(state, nodeId),
+        remove = () => unchartNode(state, nodeId),
+        plain  = () => state.selectNode(nodeId)
+      )
 
     val isCharted: Signal[Boolean]             = state.nodeColorMap.map(_.contains(nodeId))
     val currentColor: Signal[Option[HexColor]] = state.nodeColorMap.map(_.get(nodeId))
@@ -305,8 +344,7 @@ object TreeDetailView:
           },
           onClick --> (_ => state.toggleExpanded(nodeId))
         )
-      else
-        span(cls := "node-toggle node-toggle-spacer", Icons.chevronRight("toggle-icon"))
+      else toggleSpacer()
 
     val row = TreeNodeRow(
       label         = nodeLabel(node),
@@ -323,17 +361,11 @@ object TreeDetailView:
         child.maybe <-- isCharted.combineWith(currentColor).map(renderSwatchTrigger(nodeId, pickerOpenFor, _, _)),
         child.maybe <-- pickerOpen.combineWith(currentColor).map(renderPickerPopover(nodeId, state, pickerOpenFor, _, _))
       )
-    ).amend(
-      cls := "tree-detail-inline",
-      styleAttr <-- borderStyle,
-      onMouseEnter --> { _ => hoverBridge.hoveredCurveId.set(Some(nodeId)) },
-      onMouseLeave --> { _ => hoverBridge.hoveredCurveId.set(None) },
-      position.relative
     )
 
     div(
       cls := "tree-detail-node",
-      row,
+      decorateRow(row, borderStyle, nodeId, view),
       MitigationReadout.scopingAt(response, nodeId).map(renderMitigationRow(nodeId, _, view, depth + 1)),
       if hasChildren then
         div(
@@ -347,34 +379,54 @@ object TreeDetailView:
         emptyNode
     )
 
-  /** One mitigation scoped at `node`, as a child-styled row under it: a tick
-    * when the selection applies the mitigation at this node, its name, and the
-    * stale badge on an absolute statement whose leaf has changed. Ctrl+Click
-    * flips the mitigation at this node alone; while the card mirrors the
-    * baseline the gesture is blocked and pulses the locked notice. */
+  /** One mitigation scoped at `node`, as a row under it drawn like a node row.
+    * Ctrl+click applies the mitigation at this node and puts the node on the
+    * chart, so its mitigated curve is drawn; Ctrl+Shift+click stops applying
+    * it here. An applied row carries the node's curve colour as its border.
+    * The stale badge marks an absolute statement whose leaf has changed. */
   private def renderMitigationRow(node: NodeId, mitigation: Mitigation, view: NodeView, depth: Int): HtmlElement =
     val id    = mitigation.id
     val scope = MitigationReadout.scopeOf(view.response, id)
     val stale = mitigation.spec match
       case _: MitigationSpec.LeafAbsolute                                 => view.response.staleMitigationIds.contains(id)
       case _: MitigationSpec.LeafRelative | _: MitigationSpec.ResultStage => false
-    div(
-      cls := "tree-mitigation-row",
-      styleAttr := s"--_depth: $depth",
-      span(
-        cls := "tree-mitigation-tick",
-        cls("tree-mitigation-tick--on") <-- view.selection.map(SelectionEdit.appliesAt(_, id, node)),
-        child.text <-- view.selection.map(s => if SelectionEdit.appliesAt(s, id, node) then "☑" else "☐")
-      ),
-      span(cls := "tree-mitigation-name", mitigation.name.value),
-      Option.when(stale)(MitigationPanel.staleBadge(id, view.staleAction)),
-      onClick --> { ev =>
-        if ev.ctrlKey || ev.metaKey then
-          ev.preventDefault()
-          if view.selectionLocked.now() then view.lockedNoticeVisible.set(true)
-          else view.onSelectionEdit(SelectionEdit.toggleAt(_, id, node, scope))
-      }
+
+    val borderStyle: Signal[String] =
+      view.selection
+        .combineWith(view.state.nodeColorMap, view.hoverBridge.hoveredCurveId.signal)
+        .map { (selection, colorMap, hoveredId) =>
+          val colour = colorMap.get(node).filter(_ => SelectionEdit.appliesAt(selection, id, node))
+          borderStyleFor(colour, queryMatched = false, hoveredId.contains(node))
+        }
+
+    def handleClick(ev: org.scalajs.dom.MouseEvent): Unit =
+      onRowGesture(ev, view,
+        add = () =>
+          view.onSelectionEdit(SelectionEdit.applyAt(_, id, node, scope))
+          chartNode(view.state, node),
+        remove = () => view.onSelectionEdit(SelectionEdit.removeAt(_, id, node, scope)),
+        plain  = () => ()
+      )
+
+    val row = TreeNodeRow(
+      label         = mitigation.name.value,
+      kind          = TreeNodeRow.NodeKind.Mitigation,
+      depth         = depth,
+      tooltip       = None,
+      onRemove      = None,
+      onNodeClick   = Some(handleClick),
+      prefixContent = List(toggleSpacer()),
+      suffixContent = List(Option.when(stale)(MitigationPanel.staleBadge(id, view.staleAction)))
     )
+    decorateRow(row, borderStyle, node, view)
+
+  /** Put `node` on the chart, unless it is already there. */
+  private def chartNode(state: TreeViewState, node: NodeId): Unit =
+    if !state.userSelectedNodeIds.now().contains(node) then state.userSelectionToggle.onNext(node)
+
+  /** Take `node` off the chart, unless it is not there. */
+  private def unchartNode(state: TreeViewState, node: NodeId): Unit =
+    if state.userSelectedNodeIds.now().contains(node) then state.userSelectionToggle.onNext(node)
 
   /** The node's coverage badge: solid where a mitigation is scoped at the node,
     * faint where one is scoped only below it. Its tooltip lists them. */

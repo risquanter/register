@@ -1,6 +1,6 @@
 package app.components
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 /** Inline SVG icons from the Lucide icon set (https://lucide.dev).
   *
@@ -82,6 +82,13 @@ object Icons:
       svg.path(svg.d := "M8 18v-2"),
       svg.path(svg.d := "M12 18v-4"),
       svg.path(svg.d := "M16 18v-6")
+    )
+
+  /** Lucide `shield` — mitigation row. */
+  def mitigation(cls: String = "node-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z")
     )
 
   /** Lucide `chevron-right` — collapsed tree branch indicator. */

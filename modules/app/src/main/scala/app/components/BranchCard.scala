@@ -1,9 +1,9 @@
 package app.components
 
-import com.raquo.laminar.api.L.{*, given}
+import com.raquo.laminar.api.L.*
 
 /** Bordered, collapsible container for one slot's tree view: the slot's
-  * (branch, tree) picker row lives in the header, the slot's own tree view is
+  * (tree, branch) picker row lives in the header, the slot's own tree view is
   * the body. Each card is an independent Ctrl+click surface — selection
   * identity is the pair (branch, node).
   *
@@ -12,7 +12,7 @@ import com.raquo.laminar.api.L.{*, given}
   */
 object BranchCard:
 
-  /** @param header        The header row content (swatch + branch/tree selects +
+  /** @param header        The header row content (swatch + tree/branch selects +
     *                      action buttons) — built by the caller. The chevron is
     *                      prepended by this component and is the only element
     *                      that toggles collapse, so the header's selects and
