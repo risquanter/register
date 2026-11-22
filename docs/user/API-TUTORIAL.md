@@ -248,7 +248,7 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
 
 A [mitigation](TERMINOLOGY.md#31-mitigation) is a risk reduction measure stored on the tree and applied to the nodes it targets. The nodes keep their own figures. A reading then asks for the tree's figures with mitigations applied or without them.
 
-This section adds mitigations to the tree from step 1, reads which nodes each one reaches, and reads a node's figures under them. Every request and answer below was run against a server. Identifiers are shown as `<IT Risk id>` and similar, because each workspace gets its own.
+This section adds mitigations to the tree from step 1, reads which nodes each one reaches, and reads a node's figures under them. [MITIGATION-WALKTHROUGH.md](MITIGATION-WALKTHROUGH.md) runs the same features as one scripted sequence on a larger tree, with a commit history and a scenario. Every request and answer below was run against a server. Identifiers are shown as `<IT Risk id>` and similar, because each workspace gets its own.
 
 ### What a mitigation holds
 
@@ -348,7 +348,7 @@ Three readings of IT Risk's chance of a loss of at least 1 million, after Phishi
 | `{"fullScope": ["<Endpoint hardening id>", "<Cyber policy id>"]}` | `{"probability": 0.0354, "withMitigations": ["<Endpoint hardening id>", "<Cyber policy id>"]}` |
 | `{"nodesOnly": [{"node": "<Cyber Breach id>", "mitigation": "<Endpoint hardening id>"}]}` | `{"probability": 0.1276, "withMitigations": ["<Endpoint hardening id>"]}` |
 
-`withMitigations` lists the mitigations that changed this node's figure. The exact probabilities depend on the workspace's [seed entity id](TERMINOLOGY.md#16-random-stream), so another workspace gives other figures for the same tree.
+`withMitigations` lists the selected mitigations whose scope covers this node or a node below it. The exact probabilities depend on the workspace's [seed entity id](TERMINOLOGY.md#16-random-stream), so another workspace gives other figures for the same tree.
 
 The curve read, `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi`, takes the same field beside the nodes to draw:
 

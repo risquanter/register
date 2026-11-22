@@ -266,6 +266,8 @@ Ready-to-run scripts for examples live in the [`examples/`](examples/) directory
 | [`examples/demo-simple-curl.sh`](examples/demo-simple-curl.sh) | curl | Simple operational risk (4 leaves) |
 | [`examples/demo-enterprise-httpie.sh`](examples/demo-enterprise-httpie.sh) | httpie | Financial services enterprise risk (21 leaves, 11 portfolios) |
 | [`examples/demo-enterprise-curl.sh`](examples/demo-enterprise-curl.sh) | curl | Financial services enterprise risk (21 leaves, 11 portfolios) |
+| [`examples/demo-mitigations-httpie.sh`](examples/demo-mitigations-httpie.sh) | httpie | Mitigations: history, a scenario, four mitigations, figures with and without them. Needs the Irmin stack. Explained in [`docs/user/MITIGATION-WALKTHROUGH.md`](docs/user/MITIGATION-WALKTHROUGH.md) |
+| [`examples/demo-mitigations-curl.sh`](examples/demo-mitigations-curl.sh) | curl | The same walkthrough with curl |
 
 ```bash
 chmod +x examples/*.sh
@@ -281,6 +283,7 @@ chmod +x examples/*.sh
 |---|---|
 | [docs/user/API-TUTORIAL.md](docs/user/API-TUTORIAL.md) | Step-by-step HTTP API guide, leaf parameterisation reference, enterprise example |
 | [docs/user/VQL-QUERY-EXAMPLES.md](docs/user/VQL-QUERY-EXAMPLES.md) | Full VQL query reference with annotated PASS/FAIL examples |
+| [docs/user/MITIGATION-WALKTHROUGH.md](docs/user/MITIGATION-WALKTHROUGH.md) | Scripted sequence: build a tree, read its history, add mitigations on a scenario, compare the figures with and without them |
 | [docs/user/PERSISTENT-SETUP.md](docs/user/PERSISTENT-SETUP.md) | Enabling Irmin + PostgreSQL persistence |
 | [docs/user/DEVELOPMENT-SETUP.md](docs/user/DEVELOPMENT-SETUP.md) | Local development workflow (Scala.js, Vite HMR, tests) |
 | [docs/user/DOCKER-DEVELOPMENT.md](docs/user/DOCKER-DEVELOPMENT.md) | Container configuration, observability stack, and Kubernetes deployment |

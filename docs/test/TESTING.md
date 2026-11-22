@@ -371,14 +371,15 @@ so the gap cannot go unnoticed.
 
 | Suite | File | Services | Tests | Purpose |
 |-------|------|----------|-------|---------|
-| **A** | `tests/bats/suite-a-full-prod.bats` | server + frontend + irmin | 7 | E2E: data flows nginx → server → Irmin and is verifiable; the history-staging examples run in both client variants |
+| **A** | `tests/bats/suite-a-full-prod.bats` | server + frontend + irmin | 11 | E2E: data flows nginx → server → Irmin and is verifiable; the history-staging and mitigation-walkthrough examples run in both client variants; the frontend log holds no workspace key |
 | **B** | `tests/bats/suite-b-irmin-prod.bats` | irmin (standalone) | 5 | Irmin image security & GraphQL round-trip |
-| **C** | `tests/bats/suite-c-in-memory.bats` | server + frontend | 20 | In-memory mode — nginx routing, ADR-027 validation, and the demo examples in both client variants |
+| **C** | `tests/bats/suite-c-in-memory.bats` | server + frontend | 21 | In-memory mode — nginx routing, ADR-027 validation, and the demo examples in both client variants |
 
 Every example script under `examples/` that ships in both a curl and an HTTPie
 variant is covered in both, so the pair cannot drift apart or fall behind an API
-change without a test going red. The history-staging pair lives in suite A
-because commit history needs the Irmin backend; the demo pairs live in suite C.
+change without a test going red. The history-staging pair and the mitigation
+walkthrough pair live in suite A, because commit history and scenarios need the
+Irmin backend. The demo pairs live in suite C.
 
 ### Prerequisites
 

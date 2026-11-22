@@ -265,3 +265,92 @@ run_staging_script() {
     [[ "$logs" == *'/w/<key>/risk-trees'* ]]
     [[ "$logs" != *"${WORKSPACE_KEY}"* ]]
 }
+
+# ============================================================================
+# Mitigation walkthrough scripts — curl and HTTPie variants must stay in step
+# ============================================================================
+# These scripts are what docs/user/MITIGATION-WALKTHROUGH.md tells a reader to
+# run. They live here rather than in the in-memory suite because they read the
+# tree's commit history and fork a scenario, and both need the Irmin backend.
+#
+# Every figure in the scripts' summary is read back from the server at the end
+# of the run. So the markers below check what the server holds: the commits on
+# each branch, the mitigations stored on each, and the stale statement appearing
+# and clearing.
+
+run_mitigation_walkthrough() {
+    local script="$1"
+    local path="${BATS_TEST_DIRNAME}/../../examples/${script}"
+    [[ -f "$path" ]] || { echo "missing script: $path" >&2; return 1; }
+
+    local output
+    output=$(bash "$path" "${FRONTEND_URL}" 2>&1) || {
+        echo "$output" >&2
+        return 1
+    }
+
+    local marker
+    for marker in \
+        "Workspace key" \
+        "Tree ID" \
+        "Branch main   : 3 commits, 0 mitigations" \
+        "with-controls : 7 commits, 4 mitigations" \
+        "Stale         : 1 after the re-estimate, 0 after re-affirming" \
+        "Open in app"
+    do
+        if ! echo "$output" | grep -q "$marker"; then
+            echo "expected summary line missing: ${marker}" >&2
+            echo "$output" >&2
+            return 1
+        fi
+    done
+
+    # The script issues one screening query for the inherent reading and one for
+    # the residual reading. A rejected query prints no verdict line.
+    local verdicts
+    verdicts=$(echo "$output" | grep -c 'proportion=[0-9]' || true)
+    if [[ "$verdicts" -ne 2 ]]; then
+        echo "expected 2 evaluated queries, got ${verdicts}" >&2
+        echo "$output" >&2
+        return 1
+    fi
+
+    # The four mitigations each reduce a figure, so the residual probability of
+    # the root exceeding the threshold is below the inherent one.
+    local inherent residual
+    inherent=$(echo "$output" | sed -n 's/.*inherent \([0-9.]*\), residual .*/\1/p')
+    residual=$(echo "$output" | sed -n 's/.*residual \([0-9.]*\).*/\1/p')
+    if ! awk -v i="$inherent" -v r="$residual" 'BEGIN { exit !(i != "" && r != "" && r + 0 < i + 0) }'; then
+        echo "expected residual (${residual}) below inherent (${inherent})" >&2
+        echo "$output" >&2
+        return 1
+    fi
+
+    # A jq parse error, or a null where an id or a figure belongs, means a
+    # response was not the JSON the script expected.
+    if echo "$output" | grep -qE 'parse error|Invalid value for|: null|proportion=null'; then
+        echo "$output" >&2
+        return 1
+    fi
+}
+
+@test "A09: examples/demo-mitigations-curl.sh adds the mitigations and reads both valuations" {
+    run_mitigation_walkthrough demo-mitigations-curl.sh
+}
+
+@test "A10: examples/demo-mitigations-httpie.sh adds the mitigations and reads both valuations" {
+    require_httpie
+    run_mitigation_walkthrough demo-mitigations-httpie.sh
+}
+
+# The two variants hold their requests in one section each, and every line
+# after it is the same text. The check prints the difference when they drift.
+@test "A11: the curl and httpie mitigation walkthroughs differ only in their request functions" {
+    local dir="${BATS_TEST_DIRNAME}/../../examples"
+    local from='/^# ── Shared helpers/,$p'
+    grep -q '^# ── Shared helpers' "${dir}/demo-mitigations-curl.sh"
+    grep -q '^# ── Shared helpers' "${dir}/demo-mitigations-httpie.sh"
+    run diff <(sed -n "$from" "${dir}/demo-mitigations-curl.sh") \
+             <(sed -n "$from" "${dir}/demo-mitigations-httpie.sh")
+    [[ "$status" -eq 0 ]] || { echo "$output" >&2; return 1; }
+}
