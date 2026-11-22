@@ -2,7 +2,8 @@
 # ============================================================================
 # Suite A — End-to-End: Frontend → Server → Irmin
 # ============================================================================
-# Compose: local/frontend:dev + register-server:prod + local/irmin-prod:3.11-p2
+# Compose: local/frontend:${APP_VERSION} + local/register-server:${APP_VERSION}
+#          + local/irmin-prod:3.11-p2
 # Profile: --profile persistence --profile frontend
 # Purpose: True end-to-end validation. The server is configured with
 #          REGISTER_REPOSITORY_TYPE=irmin so workspace data flows through
@@ -10,14 +11,18 @@
 #          via the public API is actually persisted in Irmin by querying
 #          Irmin's GraphQL endpoint directly.
 #
-# Run:     bats tests/bats/suite-a-full-prod.bats
-# Prereq:  Images built: register-server:prod, local/frontend:dev,
-#          local/irmin-prod:3.11-p2 (and local/irmin-builder:3.11-p2)
+# Run:     tests/bats/run-suites.sh A
+# Prereq:  local/irmin-prod:3.11-p2 built. run-suites.sh builds the server and
+#          frontend images first.
 # ============================================================================
 
 # Irmin host port — matches docker-compose.yml: "9080:8080"
 IRMIN_DIRECT_PORT="9080"
 IRMIN_DIRECT_URL="http://localhost:${IRMIN_DIRECT_PORT}"
+
+# How long nginx keeps a resolved backend address, plus one second. It matches
+# `resolver … valid=30s` in containers/prod/Dockerfile.frontend-prod.
+NGINX_RESOLVER_CACHE_SECONDS=31
 
 setup_file() {
     # Wire the server to Irmin for real persistence (default is in-memory).
@@ -249,7 +254,13 @@ run_staging_script() {
     # A browser navigation, which nginx answers with the SPA shell.
     curl -s -o /dev/null -H "Accept: text/html" "${FRONTEND_URL}/w/${WORKSPACE_KEY}"
     # A proxied request while register-server is down, which nginx answers 502.
+    # nginx still holds the address it resolved for the request above. Sent
+    # inside that window, the request goes to an address nothing holds any
+    # more, and nginx answers 504 after its 60-second connect timeout. Sent
+    # after it, nginx resolves the name again, finds no such host, and answers
+    # 502 at once.
     docker compose stop register-server 2>&1
+    sleep "${NGINX_RESOLVER_CACHE_SECONDS}"
     local asked=$SECONDS
     status=$(curl -s -o /dev/null -w '%{http_code}' "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
     local answered_after=$((SECONDS - asked))
