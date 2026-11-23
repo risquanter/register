@@ -749,55 +749,63 @@ The first card in **Load Trees** is the baseline card. It has two selects: the t
 
 **Check:** the card shows the tree with its seven leaves.
 
-### The mitigation lines at the top of the card
+### The card is a table
 
-Under the tree's name, the card has two sections, **Mitigations** and **Tree structure**. Click a section's title to close it, and click it again to open it. Closing **Mitigations** leaves more room for the tree.
+The card's body is one table. Each row is a mitigation or a node of the tree. Each column is a [selection](TERMINOLOGY.md#45-selection), the set of mitigations a curve is computed under.
 
-The **Mitigations** section lists the tree's four mitigations, one line each. A line holds a checkbox, the mitigation's name, and its stage. The stage reads `parameter stage` for a mitigation that changes a leaf's figures, and `result stage` for one that acts on a node's simulated losses, such as the insurance policy.
+The card starts with two columns. **Inherent** applies no mitigation. **Residual** applies every mitigation the tree holds. The `+` button after the last column adds a column of your own, named `A`, then `B`, up to `F`. The limit of six comes from the chart, which has eight marker shapes to tell columns apart.
+
+The rows are in two sections, **Mitigations** and **Tree structure**. Click a section's title to hide its rows, and click it again to show them. The header row and the name column stay in view while the table scrolls.
+
+### The Mitigations section
+
+The **Mitigations** section lists the tree's four mitigations, one line each. A line holds the mitigation's name and its stage. The stage reads `parameter stage` for a mitigation that changes a leaf's figures, and `result stage` for one that acts on a node's simulated losses, such as the insurance policy.
 
 Hover over a line to see its predicate, the text that says which nodes the mitigation reaches. A `⚠` mark on a line means the predicate matched no node in this version of the tree. A `stale` badge marks an absolute statement whose leaf has changed since the statement was written.
 
-**Check:** the four lines are `MFA and awareness training`, `Cyber insurance`, `Fraud monitoring` and `Regulatory Fine after remediation`. None carries `⚠` or `stale`. Switch **Scenario** to `main`, and the **Mitigations** section is empty. Switch back to `with-controls`.
+A line has no box under **Inherent**, because that column applies nothing. Its box under **Residual** is ticked and cannot be changed, because that column applies everything. Under a column of your own, the box switches the mitigation on everywhere in its scope.
+
+**Check:** the four lines are `MFA and awareness training`, `Cyber insurance`, `Fraud monitoring` and `Regulatory Fine after remediation`. None carries `⚠` or `stale`. Switch **Scenario** to `main`, and the **Mitigations** section has no lines. Switch back to `with-controls`.
 
 ### Where each mitigation applies
 
 Each node row can carry a `◆` mark. A solid `◆` means a mitigation is scoped at that node. A faint `◆` means a mitigation is scoped only at a node below it. Hover over the mark to see the mitigations' names.
 
-Under each node a mitigation is scoped at, the card adds one row per mitigation, one level further in than the node. The row has a shield icon and the mitigation's name, and it behaves like a node row. While the mitigation is applied at that node and the node is on the chart, the row carries the node's curve colour as its left border.
+Under each node a mitigation is scoped at, the card adds one row per mitigation, one level further in than the node. The row has a shield icon and the mitigation's name. Its boxes say whether each column applies the mitigation at that node.
 
-**Check:** `Cyber` carries a solid `◆` for `Cyber insurance`. `Ransomware`, `Data Breach` and `Phishing` each carry a row for `MFA and awareness training`. `Enterprise` carries a faint `◆`.
+**Check:** `Cyber` carries a solid `◆` and a row for `Cyber insurance`. `Ransomware`, `Data Breach` and `Phishing` each carry a row for `MFA and awareness training`. `Enterprise` carries a faint `◆`.
 
 ### Put curves on the chart
 
-The chart draws the curves of the nodes you choose. Ctrl+click a node row to add its curve, and Ctrl+Shift+click to remove it. On a Mac, use Cmd in place of Ctrl. The chart holds at most 13 nodes you have chosen this way.
+A box in a node's row draws that node's curve under the column's selection. Tick `Enterprise` and `Cyber` under **Inherent**.
 
-Ctrl+click `Enterprise` and `Cyber`.
+A node keeps one colour in every column. The column is told by the marker shape on the curve, which the column's title shows: a circle for **Inherent**, an upward triangle for **Residual**. In the legend, a curve outside the **Inherent** column has the column's name after the node's, as in `Enterprise (Residual)`.
 
-The baseline card has a three-way control: **Inherent**, **Mitigated** and **Both**. **Inherent** draws each node's figures with no mitigation applied. **Mitigated** draws them with the ticked mitigations applied. **Both** draws the two together, and is where the baseline card starts. A mitigated curve has `(mitigated)` after the node's name in the legend, and triangle markers in place of circles.
+A card draws curves for at most 13 nodes. A node ticked in several columns counts once.
 
-**Check:** with no checkbox ticked, each node has one curve, because no mitigation is applied yet.
+**Check:** each of the two nodes has one curve, with circle markers.
 
-### Apply mitigations and watch the curves move
+### Compare selections side by side
 
-Tick `MFA and awareness training`. The checkbox applies it everywhere in its scope. A second curve appears for `Enterprise` and for `Cyber`, marked `(mitigated)`, and it lies below the inherent curve. A lower curve means a smaller chance of each loss.
+Tick `Enterprise` under **Residual**. A second `Enterprise` curve appears in the same colour, with triangle markers. It lies below the inherent curve. A lower curve means a smaller chance of each loss.
 
-Tick `Cyber insurance` as well. The mitigated `Cyber` curve drops further, because the insurance pays part of every Cyber loss above the 250 thousand deductible.
+Now ask what one mitigation is worth by itself. Click `+` to add column `A`. In the **Mitigations** section, tick `MFA and awareness training` under `A`. Nothing is drawn yet, because a mitigation's box changes the column's selection and draws nothing. Tick `Enterprise` under `A`. A third `Enterprise` curve appears, with square markers, between the other two.
 
-Untick both. The mitigated curves disappear.
+Add column `B`, tick `Cyber insurance` under it in the **Mitigations** section, and tick `Cyber` under `B`. The `Cyber (B)` curve lies below `Cyber`, because the insurance pays part of every Cyber loss above the 250 thousand deductible.
 
-**Check:** ticking any of the four mitigations moves the `Enterprise (mitigated)` curve below `Enterprise`. Step 8 printed the same comparison as numbers.
+Click a column's title to hide its curves, and click it again to show them. The `×` beside a title removes a column of your own, with its ticks.
+
+**Check:** the three `Enterprise` curves are in the order inherent, `A`, residual from the top. Step 8 printed the same comparison as numbers.
 
 ### Apply a mitigation at one node only
 
-A mitigation row takes the same clicks as a node row. Ctrl+click applies the mitigation at that node, and puts the node on the chart if it is not there. Ctrl+Shift+click stops applying it at that node. On a Mac, use Cmd in place of Ctrl.
-
-Ctrl+click the `MFA and awareness training` row under `Ransomware`. `Ransomware` is added to the chart with an inherent and a mitigated curve, and the row takes `Ransomware`'s curve colour as its border. The rows under `Data Breach` and `Phishing` have no border. The checkbox at the top of the card shows a dash, the browser's mark for a box that is neither on nor off, because the mitigation is applied at part of its scope.
+In the row `MFA and awareness training` under `Data Breach`, untick the box under `A`. Do the same in the row under `Phishing`. Column `A` now applies the mitigation at `Ransomware` alone. The box on the mitigation's line in the **Mitigations** section shows a dash under `A`, the browser's mark for a box that is neither on nor off, because the mitigation is applied at part of its scope.
 
 This is the browser's form of the `NodesOnly` scope of step 8.
 
-**Check:** the `Enterprise (mitigated)` curve moves less than it did with the whole mitigation ticked.
+**Check:** the `Enterprise (A)` curve lies closer to the inherent curve than it did with the mitigation applied at all three leaves.
 
-Ctrl+Shift+click the row to stop applying the mitigation there. Its border goes, and the mitigated curves go with it.
+Tick the dashed box to apply the mitigation across its whole scope again.
 
 ### Go back in the history
 
@@ -805,7 +813,7 @@ Under the two selects, the card has a row of stops, one per commit on the branch
 
 On `with-controls` there are seven stops. The first three are the commits made on `main` before the fork. The four after them are the scenario's own commits, step 6 to step 10.
 
-Tick `Cyber insurance`, then click the third stop. The tree at that commit has no mitigations, so the lines at the top disappear. A notice over the chart says `1 selected mitigation(s) not present at this point in time`. Click the sixth stop, which is the re-estimate of step 10. `Regulatory Fine after remediation` carries the `stale` badge there. Click the rightmost stop to return to the latest version.
+Column `B` applies `Cyber insurance`. Click the third stop. The tree at that commit has no mitigations, so the **Mitigations** section has no lines. The columns and the ticked nodes stay. A notice over the chart says how many of the columns' mitigations are not present at this point in time. Click the sixth stop, which is the re-estimate of step 10. `Regulatory Fine after remediation` carries the `stale` badge there. Click the rightmost stop to return to the latest version.
 
 **Check:** the badge shows at the sixth stop and not at the seventh, as step 10 reported.
 
@@ -815,9 +823,9 @@ Click **+ Compare tree** at the bottom of **Load Trees**. A second card appears.
 
 The chart now draws both cards. The toggle at the bottom of **Load Trees** chooses **Overlay**, with both cards on one chart, or **Side by side**, with one chart per card. A node that differs between the two cards carries a `✎` mark. On this tree that is `Regulatory Fine`, whose maximum loss step 10 changed on the scenario, and `Compliance` and `Enterprise` above it.
 
-The second card starts on **Mitigated**, and has no mitigations to tick on `main`. Its mirror button makes the card chart the same nodes as the baseline card. It copies the charted nodes, not the ticked mitigations.
+The second card starts with the **Inherent** and **Residual** columns, and with the baseline's ticked nodes ticked under **Inherent**. It has no mitigation lines on `main`. Its mirror button makes the card follow the baseline card: it takes the baseline's columns and ticks, and its boxes cannot be changed while it mirrors.
 
-**Check:** with `MFA and awareness training` ticked on the baseline card, the baseline's mitigated `Enterprise` curve lies below the `main` card's `Enterprise` curve.
+**Check:** the baseline's `Enterprise (Residual)` curve lies below the `main` card's `Enterprise` curve.
 
 Remove the second card with its `−` button.
 
@@ -829,7 +837,7 @@ The query pane is on the left, above the chart. Type the query of step 9 into **
 Q[>=]^{2/3} x (leaf(x), gt_prob(lec(x, 500000, "residual"), 0.05))
 ```
 
-Click **Run**, or press Ctrl+Enter. The answer says whether the query holds. The leaves that satisfy it are marked in the tree, and their curves are added to the chart. Replace `"residual"` with `"inherent"` and run it again.
+Click **Run**, or press Ctrl+Enter. The answer says whether the query holds. The leaves that satisfy it are marked in the tree, and their boxes under **Inherent** are ticked, so their curves are drawn. Those boxes cannot be unticked while the query matches. Replace `"residual"` with `"inherent"` and run it again.
 
 **Check:** the two runs give the two answers step 9 printed.
 
@@ -843,7 +851,7 @@ The script re-affirmed the statement through the API. To do it in the browser, f
 4. Click **Edit** on that row. A window opens, titled `Review the figures of 'Regulatory Fine after remediation'`. It shows the statement's likelihood, 3%.
 5. Click **Apply**. The row now carries a `●` mark, which means re-affirmed but not saved. Click **Update Risk Tree** to save it.
 
-On the Analyze view the `stale` badge on the line at the top of the card is a link. It opens the same window in the Design view, on the same branch.
+On the Analyze view the `stale` badge on the statement's line in the **Mitigations** section is a link. It opens the same window in the Design view, on the same branch.
 
 **Check:** after **Update Risk Tree**, the badge is gone, both in the Design view and on the Analyze card.
 

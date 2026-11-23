@@ -4,8 +4,10 @@
 `server/test`, `app/test`, `serverIt/test` and BATS suite A are green. The
 browser check in the verification plan is the user's and closes the plan.
 The continuation section "A curve request states valuations, and the card
-becomes a grid" is open. Its Part A is specified in full and has no open
-decision. Its Part B has its design ruled and no signatures yet.
+becomes a grid" is implemented. Its Part A landed at version 0.27.0. Its
+Part B was implemented on 2026-11-23, with `commonJVM/test`, `server/test`,
+`app/test` and `serverIt/test` green. BATS suites C and A and the browser check
+of Part B's verification plan are the user's and close the plan.
 **Date:** 2026-11-22.
 **Plan code:** MTR. **Inventory:** `docs/dev/plans/PLAN-MITIGATION-TREE-ROWS-INVENTORY.md`,
 which the user creates.
@@ -19,6 +21,13 @@ endpoints, in the `common`, `server` and `app` modules.
 ---
 
 ## Objective
+
+This section and the worked example after it record the plan as first
+implemented. Part B of the continuation replaced the Ctrl+click and
+Ctrl+Shift+click gestures, the coloured border on an applied mitigation row and
+the checkboxes on the mitigation lines with a grid of boxes. The shared row
+component, the row alignment, the hover highlight, the select order and the
+`computeSeed` change described here still hold.
 
 On the Analyze view a tree card lists, under each node a mitigation is scoped
 at, one row per mitigation. Today that row is a separate `div` styled by
@@ -63,6 +72,9 @@ changed.
 ---
 
 ## Worked example — the gestures on one tree
+
+These gestures were removed by Part B of the continuation, whose own worked
+example under "What a card's state is" describes the grid.
 
 The tree of `docs/user/MITIGATION-WALKTHROUGH.md`, on branch `with-controls`,
 nothing charted, no mitigation applied.
@@ -349,10 +361,9 @@ Version: PATCH on landing, because shipped frontend code changes.
 
 ## Continuation — a curve request states valuations, and the card becomes a grid
 
-**Status:** rulings recorded 2026-11-22. Part A is specified in full and has
-no open decision. Part B has its design ruled. Part B's exact signatures, its
-inventory amendment and its verification plan are added to this section before
-any Part B edit.
+**Status:** rulings recorded 2026-11-22. Part A is implemented at version
+0.27.0, and its BATS run and browser check are the user's. Part B is specified
+in full as of 2026-11-23 and has no open decision.
 
 ### The defect
 
@@ -870,7 +881,7 @@ version is below 1.0.0.
 
 ---
 
-### Part B — the grid (design ruled, signatures to follow)
+### Part B — the grid
 
 A card holds one tree at one scenario and one point in history, as today. Its
 body is one table.
@@ -914,15 +925,564 @@ v Tree structure
   checkboxes tinted by `accent-color`, the checkbox `indeterminate` state, and
   row and column hover. No JavaScript dependency is added.
 
-Open until Part B's signatures are written, and settled there: how many columns
-a card may hold, which the count of marker shapes that stay distinct on the
-chart bounds; and how a compare card's identity is stated once a card holds
-several selections, which today's `SlotCoordinate.selection` decides.
+#### The two items left open, as settled here
 
-### Documents Part B makes stale
+Both were derived on 2026-11-23 from the rulings above and from the code. Each
+is reversible, and approving this section confirms them.
+
+- **MTR-D-9 — a card holds at most eight columns.** Inherent, Residual and six
+  the user adds. A column is told apart on the chart by its marker shape. Vega,
+  the chart library, draws eight filled symbol shapes: `circle`, `square`,
+  `cross`, `diamond`, `triangle-up`, `triangle-down`, `triangle-right` and
+  `triangle-left`. All eight names are in the installed
+  `modules/app/node_modules/vega-scenegraph`. Inherent keeps `circle` and
+  Residual keeps `triangle-up`, the two markers the chart draws today. Eight is
+  below `LECCurvesMultiRequest.MaxValuations`, which is 16.
+- **MTR-D-10 — a compare card's identity is its place.** A place is a branch,
+  an effective tree and a point in history. Today a card's selection is part of
+  its identity, so two cards at one place under two selections both draw. A
+  grid holds several selections in one card, so the selection leaves
+  `SlotCoordinate`. Two cards at one place then show the same tree version, and
+  the later one stays out of the chart until its place differs, as a duplicate
+  does today.
+
+Two consequences of the ruled design are stated here because each removes
+something a user can see.
+
+- **The two sections open and close without sliding.** The grid is one table,
+  so that the Mitigations rows and the Tree structure rows share their columns.
+  A row group of a table cannot animate its height. A click on a section title
+  shows or hides the section's rows at once.
+- **A mirrored card shows no notice on a click.** Its boxes are disabled, and
+  a disabled box takes no click. Each carries the mirror sentence as its
+  tooltip, and the header keeps the `mirroring baseline` hint.
+
+#### What a card's state is
+
+A card's grid is one value, `CurveGrid`, held by the card's `LECChartState`. It
+replaces three things: the set of charted nodes (`userSelectedNodeIds`), the
+card's one selection (`CompareState.baselineSelection` and
+`SlotCoordinate.selection`), and the display mode (`CurveDisplay`).
+
+Worked example, on the walkthrough's tree. The user adds column A, ticks MFA
+on its Mitigations line, and ticks `Cyber` under Inherent and under A.
+
+| Step | Grid after it | Request | Chart |
+|---|---|---|---|
+| add column A | columns Inherent, Residual, A; A applies nothing | none: no node is ticked | empty |
+| tick MFA on A's Mitigations line | A applies MFA at `FullScope` | none | empty |
+| tick `Cyber` under Inherent | Inherent holds `Cyber` | one valuation: Inherent, `[Cyber]` | `Cyber`, circles |
+| tick `Cyber` under A | A holds `Cyber` | two valuations: Inherent and A's selection, each `[Cyber]` | `Cyber` twice, one colour, circles and squares |
+| click A's title | A is hidden | unchanged | `Cyber`, circles |
+
+Rules the pure functions below implement:
+
+1. The query pane's matches count as ticks in the Inherent column. Such a cell
+   is shown ticked and cannot be unticked while the query matches it. They do
+   not count toward the limit of 13, as today.
+2. A request holds one valuation per distinct selection among the columns that
+   hold a tick. Two columns whose selections are equal share one valuation,
+   which names the union of their nodes, because the server refuses a selection
+   stated twice (Part A, rule 5). A column that applies nothing shares the
+   Inherent valuation.
+3. A user column's selection is sent without the mitigations the loaded tree
+   does not hold, as today. While the tree is not loaded and a ticked column
+   names a mitigation, nothing is fetched.
+4. A hidden column is still requested. Hiding changes what is drawn and
+   nothing else, as the card's eye does.
+5. A tree switch empties the grid. A branch switch, a refresh and a rewind keep
+   the columns and their selections. The first two clear the ticks, and a
+   rewind keeps them. This is what each does to the card's selection and its
+   charted nodes today.
+6. A new user column takes the first unused letter, and applies nothing.
+   Removing a column removes its selection, its ticks and its hidden mark.
+
+#### Exact signatures
+
+**`UserColumn` and `GridColumn`** replace `CurveVariant`, in
+`modules/app/src/main/scala/app/chart/LECSpecBuilder.scala`. Family search:
+`enum CurveVariant(val markerShape: String)` with `case Inherent extends
+CurveVariant("circle")` is the existing type for "which valuation a drawn curve
+is". The new pair denotes the same thing over more cases, so it replaces that
+type and no second type is added. The marker shape is a contract with Vega, so
+it is declared. The label of a user column is its case name.
+
+```scala
+/** A column a user adds to a card's grid. `markerShape` is the Vega symbol
+  * name, a contract with Vega. `glyph` is that shape as text, for the column
+  * header. */
+enum UserColumn(val markerShape: String, val glyph: String):
+  case A extends UserColumn("square", "■")
+  case B extends UserColumn("cross", "✚")
+  case C extends UserColumn("triangle-down", "▼")
+  case D extends UserColumn("triangle-right", "▶")
+  case E extends UserColumn("triangle-left", "◀")
+  case F extends UserColumn("diamond", "◆")
+
+/** A column of a card's grid, and so the selection a drawn curve is under. */
+enum GridColumn:
+  case Inherent
+  case Residual
+  case User(column: UserColumn)
+
+object GridColumn:
+  /** Every column a grid can hold, in display order. */
+  val all: List[GridColumn]
+  def label(column: GridColumn): String        // "Inherent", "Residual", "A" … "F"
+  def markerShape(column: GridColumn): String  // "circle", "triangle-up", then the user column's
+  def glyph(column: GridColumn): String        // "●", "▲", then the user column's
+```
+
+`ChartSeries.variant: CurveVariant` becomes `column: GridColumn`.
+`LECSpecBuilder.build` takes `curves: Vector[(LECNodeCurve, GridColumn, HexColor)]`.
+`seriesIdOf(node: NodeId, column: GridColumn): String` gives the bare node id
+for Inherent and the node id followed by `~` and the column's label otherwise.
+`labelOf(curve: LECNodeCurve, column: GridColumn): String` gives the node's
+name for Inherent and the name followed by the label in brackets otherwise. The
+shape scale lists the columns of the series drawn, in `GridColumn.all` order,
+under the legend title `Selection`. `ColorAssigner.pairWithColors` and
+`CompareColorAssigner.OverlaySide.curves` carry `GridColumn` where they carry
+`CurveVariant`.
+
+**`CurveGrid`**, new, in `modules/app/src/main/scala/app/state/CurveGrid.scala`.
+Family search: the app's pure state values with their edits beside them, as
+`object SelectionEdit` in `modules/app/src/main/scala/app/state/SelectionEdit.scala`
+holds the edits of a selection. No existing type holds columns and ticks.
+
+```scala
+/** One card's grid: the columns the user added with the selection each
+  * states, the nodes ticked in each column, and the columns hidden from the
+  * chart. Built from `empty` by the edits below, so a tick or a hidden mark
+  * never names a user column the grid does not hold. */
+final case class CurveGrid private (
+  userColumns: Map[UserColumn, MitigationSelection.Enumerated],
+  ticks:       Map[GridColumn, Set[NodeId]],
+  hidden:      Set[GridColumn]
+):
+  /** Inherent, Residual, then the user columns held, in letter order. */
+  def columns: List[GridColumn]
+
+  /** The selection a user column states. A column not held applies nothing. */
+  def userSelection(column: UserColumn): MitigationSelection.Enumerated
+
+  def isTicked(column: GridColumn, node: NodeId): Boolean
+  def isHidden(column: GridColumn): Boolean
+
+  /** Every node ticked in at least one column. The limit counts these. */
+  def tickedNodes: Set[NodeId]
+
+  /** The grid with the first unused letter added, applying nothing. `None`
+    * when all six are held. */
+  def addColumn: Option[CurveGrid]
+
+  def removeColumn(column: UserColumn): CurveGrid
+
+  /** The grid with `edit` applied to a held column's selection. A column not
+    * held is left as it is. */
+  def editSelection(
+    column: UserColumn,
+    edit:   MitigationSelection.Enumerated => Validation[ValidationError, MitigationSelection.Enumerated]
+  ): Validation[ValidationError, CurveGrid]
+
+  /** The grid with `node` ticked in `column`. `None` when `node` holds no
+    * tick yet and `cap` nodes already do. A column not held takes no tick. */
+  def tick(column: GridColumn, node: NodeId, cap: Int): Option[CurveGrid]
+
+  def untick(column: GridColumn, node: NodeId): CurveGrid
+  def toggleHidden(column: GridColumn): CurveGrid
+
+  /** The columns and their selections, with no node ticked. */
+  def withoutTicks: CurveGrid
+
+  /** The ticks kept to `nodes`. */
+  def restrictedTo(nodes: Set[NodeId]): CurveGrid
+
+  /** `nodes` added to the Inherent column's ticks, uncapped. */
+  def withInherentTicks(nodes: Set[NodeId]): CurveGrid
+
+  /** What the card asks for: each column holding a tick, with its selection
+    * and its nodes. `query` counts as ticks in the Inherent column. */
+  def requested(query: Set[NodeId]): Map[GridColumn, (MitigationSelection, Set[NodeId])]
+
+object CurveGrid:
+  /** Inherent and Residual, nothing ticked, nothing hidden. */
+  val empty: CurveGrid
+```
+
+**`LECChartState`**, in `modules/app/src/main/scala/app/state/LECChartState.scala`.
+The constructor loses `selectionAccessor` and `display`. `userSelectedNodeIds`,
+`userSelectionToggle`, `setUserSelection`, `loadCurves(nodeIds)`, `readings`,
+`seriesByNode` and the three-argument `requestFor` are removed.
+
+```scala
+final class LECChartState(
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  selectedTreeId: StrictSignal[Option[TreeId]],
+  selectedTree: StrictSignal[LoadState[RiskTree]],
+  userIdAccessor: () => Option[UserId.Authenticated],
+  branchAccessor: () => BranchChoice,
+  atAccessor: () => Option[CommitHash],
+  userPalette: Signal[Vector[HexColor]],
+  origin: Signal[Option[String]]
+)
+
+/** The card's grid. Changed only through the edits below. */
+val grid: StrictSignal[CurveGrid]
+
+/** Each requested selection's curves, by node, from the `lec-multi` answer. */
+val curveCache: Var[LoadState[Map[MitigationSelection, Map[NodeId, LECNodeSeries]]]]
+
+/** What the next curve request states, emitted only when it changes. */
+val requested: Signal[Map[GridColumn, (MitigationSelection, Set[NodeId])]]
+
+/** The curves the card draws, per node, each with its column. */
+val drawnCurves: Signal[LoadState[Map[NodeId, List[(GridColumn, LECNodeCurve)]]]]
+
+/** Tick or untick one cell. A tick the limit refuses leaves the grid as it
+  * is and emits on `selectionCapReached`. */
+def setTick(column: GridColumn, node: NodeId, on: Boolean): Unit
+def addColumn(): Unit
+def removeColumn(column: UserColumn): Unit
+def editSelection(
+  column: UserColumn,
+  edit:   MitigationSelection.Enumerated => Validation[ValidationError, MitigationSelection.Enumerated]
+): Unit
+def toggleHidden(column: GridColumn): Unit
+
+/** Replace the grid whole, for the mirror and a copy's seed. Skips an equal one. */
+def setGrid(grid: CurveGrid): Unit
+
+/** Empty the grid, for a tree switch. */
+def clearGrid(): Unit
+```
+
+`satisfyingNodeIds`, `visibleCurves`, `droppedSelections`, `nodeColorMap`,
+`explicitColors`, `specSignal`, `selectionCapReached`, the colour actions,
+`clearCurves` and `reloadCurrentCurves` keep their signatures. `visibleCurves`
+is `grid.tickedNodes` with the query's matches. `reset` clears the ticks and
+keeps the columns. `reloadCurrentCurves` builds its request from `requested`,
+and clears the cache when nothing is requested.
+
+```scala
+object LECChartState:
+  /** The most nodes a card may hold a tick for, chosen by this project. */
+  val MaxTickedNodes: Int = 13
+
+  /** `selection` without the mitigations not in `held`. `Inherent` and
+    * `Residual` name none and pass unchanged. */
+  def sentSelection(selection: MitigationSelection, held: Set[MitigationId]): Validation[ValidationError, MitigationSelection]
+
+  /** The curve request for `requested`: one valuation per distinct sent
+    * selection, naming the union of its columns' nodes in identifier order.
+    * `None` when a requested selection names a mitigation and `held` is not
+    * known. `Left` when a constructor refuses it. `requested` is not empty. */
+  def requestFor(
+    requested: Map[GridColumn, (MitigationSelection, Set[NodeId])],
+    held:      Option[Set[MitigationId]]
+  ): Option[Either[LocalProblem, LECCurvesMultiRequest]]
+
+  /** The answer's valuations, keyed by the selection each repeats. */
+  def curvesBySelection(response: LECCurvesResponse): Map[MitigationSelection, Map[NodeId, LECNodeSeries]]
+
+  /** The curves to draw: for each column of `requested` not in `hidden`, the
+    * curve of each of its nodes under its sent selection, where the answer
+    * holds one. */
+  def drawn(
+    requested: Map[GridColumn, (MitigationSelection, Set[NodeId])],
+    hidden:    Set[GridColumn],
+    held:      Set[MitigationId],
+    curves:    Map[MitigationSelection, Map[NodeId, LECNodeSeries]]
+  ): Map[NodeId, List[(GridColumn, LECNodeCurve)]]
+
+  def deriveDropped(
+    selected: Set[NodeId],
+    cache:    LoadState[Map[MitigationSelection, Map[NodeId, LECNodeSeries]]]
+  ): Set[NodeId]
+```
+
+`MaxUserSelections` is renamed `MaxTickedNodes` and keeps its value.
+
+**`TreeViewState`**, in `modules/app/src/main/scala/app/state/TreeViewState.scala`.
+The constructor loses `selectionSignal` and `display`. `absentSelected` keeps
+its type and names the mitigations of every user column the loaded tree does
+not hold. The two subscriptions that read the selection read the grid instead:
+a loaded structure and a rewind reload the curves when a ticked column names a
+mitigation. `userSelectedNodeIds` and `userSelectionToggle` are removed, and
+`curveCache` takes the new cache type. `Main.scala` drops the two arguments at
+its three call sites.
+
+**`CompareState.scala`**, in `modules/app/src/main/scala/app/state/CompareState.scala`.
+`CurveDisplay`, `CompareState.baselineSelection`, `CompareState.baselineDisplay`,
+`CompareSlotState.display`, `selectionSignal`, `setSelection` and
+`SlotCoordinate.samePairAs` are removed. Callers of `samePairAs` call
+`samePlaceAs`.
+
+```scala
+final case class SlotCoordinate(branch: BranchChoice, treeOverride: Option[TreeId], at: Option[CommitHash]):
+  def effectiveTree(activeTree: Option[TreeId]): Option[TreeId]
+  def samePlaceAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean
+  def collidesWith(activeBranch: BranchChoice, activeTree: Option[TreeId], activeAt: Option[CommitHash]): Boolean
+
+object SlotCoordinate:
+  def activeTab(branch: BranchChoice, at: Option[CommitHash]): SlotCoordinate
+
+/** A side's complete state as copy-for-compare duplicates it. */
+final case class SideSnapshot(coordinate: SlotCoordinate, grid: CurveGrid)
+
+// in CompareSlotState
+/** The grid a copy carries until its tree loads. */
+val pendingSeed: Var[Option[CurveGrid]]
+```
+
+`copyToNextFree` and `removeRow` keep their signatures and stop writing a
+display mode.
+
+**`AnalyzeView`**, in `modules/app/src/main/scala/app/views/AnalyzeView.scala`.
+`renderDisplayToggle`, `displayLabel` and `readingsOf` are removed, with the
+subscription that reset a card's selection on a tree switch, which becomes a
+call of `clearGrid` on the baseline and on each slot following the active tree.
+Each chart reads its side's `drawnCurves`. `SlotOverlayInput.curves` takes that
+type and loses `display`. Each card's curve fetch is one subscription on
+`requested`, debounced 100 ms as today, calling `reloadCurrentCurves`.
+
+```scala
+private[views] def engagedSlots(
+  targets:      Vector[CompareTarget],
+  activeBranch: BranchChoice,
+  activeTreeId: Option[TreeId],
+  activeAt:     Option[CommitHash]
+): Vector[(Int, BranchChoice)]
+
+/** The grid a copied slot takes: the source's, with its ticks kept to the
+  * nodes the slot's tree holds. */
+private[views] def copySeed(pending: CurveGrid, compareTreeNodeIds: Set[NodeId]): CurveGrid
+```
+
+`computeSeed`, `excludedBranchValues` and `excludedTreeOverrideValues` keep
+their signatures. `computeSeed`'s nodes are ticked in the Inherent column,
+through `setTick`. The mirror sets a slot's grid to the baseline's grid, with
+the query's matches added to its Inherent column, kept to the nodes of the
+slot's tree. The copy button's snapshot is built the same way.
+
+**`TreeDetailView`**, in `modules/app/src/main/scala/app/views/TreeDetailView.scala`.
+The card's body becomes one table. `selection`, `onSelectionEdit`, the
+`SelectionUpdate` alias, `RowGesture`, `onRowGesture`, `chartNode`,
+`unchartNode`, `collapsibleSection`, `renderNode` and `renderMitigationRow` are
+removed. A plain click on a node row still selects the node, and a row with a
+tick keeps its border in the node's curve colour.
+
+```scala
+def apply(
+  state: TreeViewState,
+  queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
+  hoverBridge: ChartHoverBridge = new ChartHoverBridge(),
+  changedNodeIds: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
+  selectionLocked: Signal[Boolean] = Val(false),
+  pinnedAt: Signal[Option[TreeHistoryEntry]] = Val(None),
+  structure: Signal[LoadState[TreeStructureResponse]],
+  staleAction: MitigationPanel.StaleBadgeAction
+): HtmlElement
+
+/** The loaded card: one table whose columns are the grid's. */
+private def renderGrid(response: TreeStructureResponse, view: NodeView, mitigationsOpen: Var[Boolean], structureOpen: Var[Boolean]): HtmlElement
+
+/** The header row: the tree's name, one title per column, and the add button. */
+private def headerRow(treeName: String, view: NodeView): HtmlElement
+
+/** One column's title: its marker and label, a click on which hides or shows
+  * its curves, and a remove button on a user column. */
+private def columnHeader(column: GridColumn, view: NodeView): HtmlElement
+
+/** A section's title row. A click shows or hides the section's rows. */
+private def sectionRow(heading: String, open: Var[Boolean], view: NodeView): HtmlElement
+
+/** One mitigation's line in the Mitigations section. */
+private def mitigationLineRow(mitigation: Mitigation, view: NodeView, shown: Signal[Boolean]): HtmlElement
+
+/** A node's row, the rows of the mitigations scoped at it, and its children's. */
+private def nodeRows(
+  node: RiskNode, childrenOf: Map[Option[NodeId], Seq[RiskNode]], view: NodeView,
+  depth: Int, ancestors: List[NodeId], sectionOpen: Signal[Boolean]
+): List[HtmlElement]
+
+/** One mitigation scoped at `node`, as a row under it. */
+private def mitigationRow(node: NodeId, mitigation: Mitigation, view: NodeView, depth: Int, shown: Signal[Boolean]): HtmlElement
+
+/** A node row's cell: the box that draws `node`'s curve under `column`. */
+private def tickCell(column: GridColumn, node: NodeId, view: NodeView): HtmlElement
+
+/** A Mitigations line's cell: empty under Inherent, ticked and fixed under
+  * Residual, and a three-state box under a user column. */
+private def wholeScopeCell(column: GridColumn, id: MitigationId, view: NodeView): HtmlElement
+
+/** A mitigation row's cell: empty under Inherent, ticked and fixed under
+  * Residual, and a box applying the mitigation at `node` under a user column. */
+private def atNodeCell(column: GridColumn, id: MitigationId, node: NodeId, scope: Set[NodeId], view: NodeView): HtmlElement
+```
+
+`NodeView` loses `selection`, `onSelectionEdit` and `lockedNoticeVisible`. A
+row is shown while its section is open and every ancestor of its node is
+expanded. The view holds one more local `Var`, the hovered column, for the
+column hover. A user column's boxes edit through `SelectionEdit.toggleWhole`
+and `SelectionEdit.toggleAt`.
+
+**`MitigationPanel`**, in `modules/app/src/main/scala/app/components/MitigationPanel.scala`.
+`apply` and `line` are removed. Their checkbox becomes `wholeScopeCell`.
+`StaleBadgeAction` and `staleBadge` are unchanged.
+
+```scala
+/** A mitigation's name, stage, binding warning and stale badge, with its
+  * predicate as tooltip: the name cell of its line in a card's grid. */
+def nameCell(response: TreeStructureResponse, mitigation: Mitigation, staleAction: StaleBadgeAction): HtmlElement
+```
+
+**`SelectionEdit`**. `applyAt` and `removeAt` lose their only caller with the
+gestures, and are removed. `toggleAt`, `toggleWhole`, `toggleOf`, `appliesAt`
+and `present` are unchanged.
+
+**Sentences.** In `modules/app/src/main/scala/app/views/BlockedMessages.scala`,
+`selectionCapReached(cap)` becomes
+`s"At most $cap nodes can be ticked. Untick a node before ticking another."`,
+and a new `def columnsFull(columns: Int): String` gives
+`s"A card holds at most $columns columns."`. In
+`modules/app/src/main/scala/app/views/NoticeMessages.scala`, `SelectionMirrored`
+becomes `"Ticks mirror the baseline — turn Mirror off to edit them."`, and a
+new `val MatchedByQuery: String = "Matched by the query."` is the tooltip of a
+cell rule 1 fixes.
+
+**Stylesheet.** `modules/app/styles/app.css` loses the `.curve-display-*`
+rules, `.mitigation-panel-lines`, `.mitigation-line`, `.tree-section-body`,
+`.tree-section--collapsed`, `.tree-section-inner` and `.tree-detail-nodes`. It
+gains rules for `.tree-grid`: a table whose header row and name column are
+sticky, whose boxes take the card's palette colour through `accent-color`, and
+whose hovered row and hovered column are tinted.
+
+#### ADR alignment
+
+- **ADR-019** (frontend component architecture), read in full on 2026-11-23.
+  Compliant. The grid is state with no phases, so it is a value changed by pure
+  edits and not a state machine (§6). `LECChartState` owns it and exposes it as
+  a signal, and the view changes it only through that owner's methods (§2).
+  What is drawn and what is requested are derived signals, and no second copy
+  of either is stored (§4). `MitigationPanel.nameCell` and the cell builders
+  create no `Var` (§5).
+- **ADR-001** (validation). Compliant. A column's selection is built only by
+  `SelectionEdit`, through `MitigationSelection.create`, and a request only by
+  the constructors of Part A.
+- **ADR-037** (constants and closed sets). Compliant. The columns are two
+  enums, declared beside the chart type that uses them. A marker shape is
+  declared because it is Vega's name. A user column's label is its case name.
+  `MaxTickedNodes` keeps its stated origin, and the column bound is the size of
+  the enum and is written nowhere else.
+- **ADR-040** (analysis read contract). Compliant. One valuation per distinct
+  selection satisfies §2, and the card reads each curve from the valuation
+  that repeats its selection (§4).
+- **ADR-038** (response shapes). Compliant. The card holds the decoded answer
+  re-keyed by selection and relies only on what ADR-040 §4 states.
+- **ADR-011** (imports). Compliant. Every new import is top-level.
+- **ADR-033** (exception boundaries). Compliant. No catch is added.
+
+#### Open decisions
+
+None. MTR-D-9 and MTR-D-10 are settled above and confirmed by approval of this
+section.
+
+#### Terminology impact
+
+None. `docs/user/TERMINOLOGY.md` 4.5 defines a selection as "the set of
+mitigations a valuation applies". A column states one selection, and the
+glossary describes no interface.
+
+#### Documents Part B makes stale
 
 - `docs/user/MITIGATION-WALKTHROUGH.md`, step 11.
+- `README.md`, the paragraph "Display control" and the text around it that
+  describes a card's mitigation lines and the Ctrl+click gestures.
 - This plan's objective and worked example, which describe the gestures the
   grid removes.
 - `docs/dev/plans/PLAN-RISKTRANSFORM-INVENTORY.md`, the OD-3 entry, whose
   display ruling the grid replaces. The user edits that file.
+
+#### Inventory amendment
+
+The user applies it with `.claude/bin/approve-inventory`. Already on the
+inventory and edited again: `TreeDetailView.scala`, `AnalyzeView.scala`,
+`SelectionEdit.scala`, `LECChartState.scala`, `BranchCard.scala` (its comment
+names the gesture), `app.css`, `SelectionEditSpec.scala` and
+`LECChartStateSpec.scala`. Added:
+
+- `modules/app/src/main/scala/app/state/CurveGrid.scala`, new
+- `modules/app/src/test/scala/app/state/CurveGridSpec.scala`, new
+- `modules/app/src/main/scala/app/state/TreeViewState.scala`
+- `modules/app/src/main/scala/app/state/CompareState.scala`
+- `modules/app/src/main/scala/app/Main.scala`
+- `modules/app/src/main/scala/app/chart/LECSpecBuilder.scala`
+- `modules/app/src/main/scala/app/chart/ColorAssigner.scala`
+- `modules/app/src/main/scala/app/chart/CompareColorAssigner.scala`
+- `modules/app/src/main/scala/app/components/MitigationPanel.scala`
+- `modules/app/src/main/scala/app/views/BlockedMessages.scala`
+- `modules/app/src/main/scala/app/views/NoticeMessages.scala`
+- `modules/app/src/test/scala/app/state/CompareStateSpec.scala`
+- `modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala`
+- `modules/app/src/test/scala/app/views/AnalyzeViewSeedSpec.scala`
+
+#### Verification plan
+
+Tests added:
+
+- `modules/app/src/test/scala/app/state/CurveGridSpec.scala`: `empty` holds
+  Inherent and Residual; `addColumn` takes the first unused letter and gives
+  `None` at six; `removeColumn` drops the column's selection, ticks and hidden
+  mark; `tick` is refused for a fourteenth node and accepted for a second
+  column of a ticked node; a tick in a column not held changes nothing;
+  `withoutTicks` keeps the columns; `restrictedTo` keeps only the given nodes;
+  `requested` adds the query's matches to Inherent and leaves out a column
+  with no tick.
+
+Tests changed:
+
+- `modules/app/src/test/scala/app/state/LECChartStateSpec.scala`: `requestFor`
+  states one valuation per distinct sent selection, joins two columns with
+  equal selections, joins a column applying nothing with Inherent, drops a
+  mitigation not held, waits while the held set is unknown and a column names
+  a mitigation, and reports a refused request as a failed form; `drawn` gives
+  each node its curve per shown column and leaves out a hidden column;
+  `curvesBySelection` keys the answer by selection. The tests of `readings`,
+  `seriesByNode` and the Ctrl+click cap go with those functions, and the cap
+  is pinned in `CurveGridSpec`.
+- `modules/app/src/test/scala/app/state/CompareStateSpec.scala`: a coordinate
+  is a place; `collidesWith` reads branch, tree and pin; a copy carries the
+  source's grid as its pending seed. Three assertions are removed with what
+  they pinned: that two selections at one place are two pairs (MTR-D-10), and
+  that a copy and a removed row carry a display mode.
+- `modules/app/src/test/scala/app/state/SelectionEditSpec.scala`: the tests of
+  `applyAt` and `removeAt` are removed with those functions.
+- `modules/app/src/test/scala/app/views/AnalyzeViewSeedSpec.scala`:
+  `engagedSlots` without a selection, and `copySeed` over a grid.
+- `modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala`: built
+  with `GridColumn`, with every assertion kept.
+
+Commands, each green:
+
+```bash
+sbt 'commonJVM/test; server/test'
+sbt app/test
+sbt serverIt/test
+```
+
+The register-dev skill's leaked-state cleanup runs before `serverIt/test`.
+Part B ends the continuation, so BATS suites C and A run then, and are the
+user's to run:
+
+```bash
+tests/bats/run-suites.sh C A
+```
+
+A check in the browser, which the user carries out on the walkthrough's data:
+every row of the worked example above gives the stated request and chart; a
+ninth column cannot be added; a fourteenth node cannot be ticked; the header
+row and the name column stay in view while the table scrolls; a mirrored card's
+boxes are disabled; and a copied card shows the source's columns and ticks.
+
+Version: PATCH on landing, because shipped frontend code changes and no
+external API does.
