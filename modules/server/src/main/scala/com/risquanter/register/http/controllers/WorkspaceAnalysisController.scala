@@ -60,10 +60,10 @@ class WorkspaceAnalysisController private (
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        curves <- riskTreeService.getLECCurvesMulti(
-                    ws.id, treeId, body.nodeIds.toSet, ws.seedEntityId, includeProvenance,
-                    branch, at, omitAbsent, body.selection)
-      yield LECCurvesResponse(curves)).wireEither(TreeScope.InTree(treeId))
+        valuations <- riskTreeService.getLECCurvesMulti(
+                        ws.id, treeId, body.valuations, ws.seedEntityId, includeProvenance,
+                        branch, at, omitAbsent)
+      yield LECCurvesResponse(valuations)).wireEither(TreeScope.InTree(treeId))
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

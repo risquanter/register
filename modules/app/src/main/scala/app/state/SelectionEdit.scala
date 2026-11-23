@@ -2,16 +2,17 @@ package app.state
 
 import zio.prelude.Validation
 
-import com.risquanter.register.domain.data.{MitigationSelection, NodeMitigationEntry, ScopeRestriction}
+import com.risquanter.register.domain.data.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
 
 /** How much of one mitigation a selection applies. */
 enum MitigationToggle:
   case Off, Partial, On
 
 /** The interface's edits of a selection. Every result is built by
-  * `MitigationSelection.create`, so a selection the interface holds keeps the
+  * `MitigationSelection.create`, and every node set by
+  * `ScopeRestriction.nodesOnly`, so a selection the interface holds keeps the
   * bounds a decoded one has.
   */
 object SelectionEdit:
@@ -21,21 +22,9 @@ object SelectionEdit:
       case MitigationSelection.Inherent          => Map.empty
       case MitigationSelection.Selected(entries) => entries
 
-  /** The two lists `create` takes for `entries`: the mitigations on across
-    * their whole scope, and the per-node ticks. */
-  private def statement(entries: Map[MitigationId, ScopeRestriction]): (List[MitigationId], List[NodeMitigationEntry]) =
-    (
-      entries.collect { case (id, ScopeRestriction.FullScope) => id }.toList,
-      entries.toList.flatMap {
-        case (id, ScopeRestriction.NodesOnly(nodes)) => nodes.toList.map(NodeMitigationEntry(_, id))
-        case (_, ScopeRestriction.FullScope)         => Nil
-      }
-    )
-
   /** The selection `entries` states, through `create`. */
   private def build(entries: Map[MitigationId, ScopeRestriction]): Validation[ValidationError, MitigationSelection.Enumerated] =
-    val (full, ticks) = statement(entries)
-    MitigationSelection.create(full, ticks)
+    MitigationSelection.create(entries)
 
   def toggleOf(selection: MitigationSelection.Enumerated, id: MitigationId): MitigationToggle =
     entries(selection).get(id) match
@@ -85,8 +74,9 @@ object SelectionEdit:
     if flipped.isEmpty then build(current - id)
     else if flipped == scope then build(current.updated(id, ScopeRestriction.FullScope))
     else
-      val (full, ticks) = statement(current - id)
-      MitigationSelection.create(full, ticks ++ flipped.toList.map(NodeMitigationEntry(_, id)))
+      ScopeRestriction
+        .nodesOnly(flipped, ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Nodes))
+        .flatMap(restriction => build(current.updated(id, restriction)))
 
   /** Apply `id` at `node` of its resolved scope. A selection that already
     * applies it there is returned unchanged. */

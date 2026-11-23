@@ -12,7 +12,7 @@ import com.risquanter.register.domain.data.{MitigationSelection, RiskTree, RiskL
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, NodeId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, LECCurvesMultiRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CurveValuationRequest, LECCurvesMultiRequest}
 import com.risquanter.register.http.responses.{LECCurvesResponse, TreeStructureResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
 import com.risquanter.register.domain.data.LECNodeCurve.QuantileLevel
@@ -131,11 +131,14 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
   private def curvesByName(client: SttpClientFixture.Client, key: String, tree: RiskTree): Task[Map[String, (Vector[LECPoint], Map[QuantileLevel, Double])]] =
     val nodeIds: List[NodeId] = tree.rootId :: tree.nodes.collect { case l: RiskLeaf => l.id }.toList
     basicRequest.header("X-Branch", "main").post(uri"${client.baseUrl}/w/$key/risk-trees/${tree.id.value}/nodes/lec-multi")
-      .body(LECCurvesMultiRequest.create(nodeIds, MitigationSelection.Inherent).toEither.toOption.get)
+      .body(
+        CurveValuationRequest.create(MitigationSelection.Inherent, nodeIds)
+          .flatMap(valuation => LECCurvesMultiRequest.create(List(valuation)))
+          .toEither.toOption.get)
       .response(asJson[LECCurvesResponse]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
-      // The mitigation-free selection answers one reading per node.
-      .map(_.curves.values.map(_.head.curve).map(c => (c.name.value: String) -> (c.curve, c.quantiles)).toMap)
+      // The request states one valuation, so the answer holds one.
+      .map(_.valuations.flatMap(_.curves.values).map(_.curve).map(c => (c.name.value: String) -> (c.curve, c.quantiles)).toMap)
 
   override def spec =
     suite("SeedReproducibilityItSpec")(

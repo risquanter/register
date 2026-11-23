@@ -139,12 +139,12 @@ changed_nodes() {
   curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/changed-nodes?a=main&aAt=$1&b=main"
 }
 
-# Curves and summary figures of several nodes under one selection.
-# $1 branch, $2 selection (JSON), $3 node ids (JSON list)
+# Curves and summary figures under each valuation of one request.
+# $1 branch, $2 valuations (JSON list), each a selection and the nodes to draw
 curves() {
   curl -s -X POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/lec-multi" \
     -H 'Content-Type: application/json' -H "X-Branch: $1" \
-    -d "{\"nodeIds\": $3, \"selection\": $2}"
+    -d "{\"valuations\": $2}"
 }
 
 # The chance that a node's loss meets or exceeds a threshold, under one selection.
@@ -233,20 +233,48 @@ node_names() {
   structure "$1" | jq '.tree.nodes | map(.RiskPortfolio // .RiskLeaf) | map({(.id): .name}) | add'
 }
 
-# Prints one line per reading in a curves answer. A node has one reading where
-# the selection does not reach it, and two where it does.
+# The two selections that name no mitigation: none applied, and every one the
+# tree holds applied across its whole scope.
+INHERENT='{"kind": "Inherent"}'
+RESIDUAL='{"kind": "Residual"}'
+
+# The selection that applies each named mitigation across its whole scope (JSON).
+# $@ mitigation ids
+at_full_scope() {
+  jq -nc '{kind: "Selected", mitigations: ($ARGS.positional | map({(.): {scope: "FullScope"}}) | add)}' --args "$@"
+}
+
+# The selection that applies one mitigation at the named nodes only (JSON).
+# $1 mitigation id, then the node ids
+at_nodes_only() {
+  local mitigation="$1"; shift
+  jq -nc --arg m "$mitigation" '{kind: "Selected", mitigations: {($m): {scope: "NodesOnly", nodes: $ARGS.positional}}}' --args "$@"
+}
+
+# One valuation per selection, each over the same nodes (JSON list).
+# $1 node ids (JSON list), then one selection (JSON) per valuation
+valuations() {
+  local nodes="$1"; shift
+  printf '%s\n' "$@" | jq -nc --argjson nodes "$nodes" '[inputs | {selection: ., nodeIds: $nodes}]'
+}
+
+# Prints one line per curve in a curves answer: one per valuation and node. The
+# mitigations column counts the selected mitigations that reach the node.
 print_figures() {
   jq -r '
     def money: if . >= 1000000 then "$\(. / 10000 | round / 100)M" elif . >= 1000 then "$\(. / 1000 | round)K" else "$\(. | round)" end;
-    .curves[][]
+    .valuations[]
+    | .selection.kind as $selection
+    | .curves[]
     | [ .curve.name,
-        (if (.withMitigations | length) == 0 then "without mitigations" else "with \(.withMitigations | length) mitigation(s)" end),
+        $selection,
+        (.withMitigations | length),
         (.curve.averageAnnualLoss | money),
         (.curve.quantiles.P95 | money),
         (.curve.quantiles.P99 | money) ]
     | @tsv' \
-    | awk -F'\t' 'BEGIN { printf "  %-18s %-22s %10s %10s %10s\n", "node", "reading", "avg/year", "P95", "P99" }
-                        { printf "  %-18s %-22s %10s %10s %10s\n", $1, $2, $3, $4, $5 }'
+    | awk -F'\t' 'BEGIN { printf "  %-18s %-10s %11s %10s %10s %10s\n", "node", "selection", "mitigations", "avg/year", "P95", "P99" }
+                        { printf "  %-18s %-10s %11s %10s %10s %10s\n", $1, $2, $3, $4, $5, $6 }'
 }
 
 # Runs a screening query and prints its verdict. $1 branch, $2 label, $3 query text
@@ -319,9 +347,9 @@ PORTFOLIO_IDS="[\"$ROOT_ID\", \"$CYBER_ID\", \"$OPS_ID\", \"$COMPLIANCE_ID\"]"
 # ── Step 3: Read the inherent figures ────────────────────────────────────────
 header "Step 3 — Inherent figures (no mitigation selected)"
 
-curves main '{}' "$PORTFOLIO_IDS" | print_figures
+curves main "$(valuations "$PORTFOLIO_IDS" "$INHERENT")" | print_figures
 THRESHOLD=1000000
-ok "Chance Enterprise loses \$1M or more in a year : $(exceedance main "$ROOT_ID" "$THRESHOLD" '{}')"
+ok "Chance Enterprise loses \$1M or more in a year : $(exceedance main "$ROOT_ID" "$THRESHOLD" "$INHERENT")"
 
 # ── Step 4: Two edits, then the history ──────────────────────────────────────
 header "Step 4 — Edit the tree twice (C2, C3) and read its history"
@@ -352,8 +380,8 @@ changed_nodes "$C1_HASH" \
   | jq -r --argjson names "$(node_names main)" \
       '.status.entries[] | select(.status != "Identical") | "     \($names[.nodeId] // .nodeId) : \(.status)"'
 
-P_AT_C1=$(exceedance main "$ROOT_ID" "$THRESHOLD" '{}' "$C1_HASH")
-P_AT_HEAD=$(exceedance main "$ROOT_ID" "$THRESHOLD" '{}')
+P_AT_C1=$(exceedance main "$ROOT_ID" "$THRESHOLD" "$INHERENT" "$C1_HASH")
+P_AT_HEAD=$(exceedance main "$ROOT_ID" "$THRESHOLD" "$INHERENT")
 ok "Chance Enterprise loses \$1M or more — at C1 : $P_AT_C1, at the head of main : $P_AT_HEAD"
 
 # ── Step 5: Fork a scenario ──────────────────────────────────────────────────
@@ -425,22 +453,22 @@ ok "Mitigations on with-controls : $MITIGATIONS_SCENARIO, on main : $MITIGATIONS
 # ── Step 8: Compare the figures with and without the mitigations ─────────────
 header "Step 8 — Figures with and without the mitigations"
 
-ALL="{\"fullScope\": [\"$MFA_ID\", \"$INSURANCE_ID\", \"$FRAUD_MON_ID\", \"$REMEDIATION_ID\"]}"
-curves with-controls "$ALL" "$PORTFOLIO_IDS" | print_figures
+curves with-controls "$(valuations "$PORTFOLIO_IDS" "$INHERENT" "$RESIDUAL")" | print_figures
 
 echo
 info "Chance Enterprise loses \$1M or more in a year, one selection at a time:"
 show() { printf '     %-50s %s\n' "$1" "$(exceedance with-controls "$ROOT_ID" "$THRESHOLD" "$2")"; }
-show "no mitigation (inherent)"                       '{}'
-show "MFA and awareness training alone"               "{\"fullScope\": [\"$MFA_ID\"]}"
-show "Cyber insurance alone"                          "{\"fullScope\": [\"$INSURANCE_ID\"]}"
-show "Fraud monitoring alone"                         "{\"fullScope\": [\"$FRAUD_MON_ID\"]}"
-show "Regulatory Fine after remediation alone"        "{\"fullScope\": [\"$REMEDIATION_ID\"]}"
-show "MFA and awareness training at Ransomware only"  "{\"nodesOnly\": [{\"node\": \"$RANSOM_ID\", \"mitigation\": \"$MFA_ID\"}]}"
-show "all four (residual)"                            "$ALL"
+show "no mitigation (inherent)"                       "$INHERENT"
+show "MFA and awareness training alone"               "$(at_full_scope "$MFA_ID")"
+show "Cyber insurance alone"                          "$(at_full_scope "$INSURANCE_ID")"
+show "Fraud monitoring alone"                         "$(at_full_scope "$FRAUD_MON_ID")"
+show "Regulatory Fine after remediation alone"        "$(at_full_scope "$REMEDIATION_ID")"
+show "MFA and awareness training at Ransomware only"  "$(at_nodes_only "$MFA_ID" "$RANSOM_ID")"
+show "all four, each named at its whole scope"        "$(at_full_scope "$MFA_ID" "$INSURANCE_ID" "$FRAUD_MON_ID" "$REMEDIATION_ID")"
+show "every mitigation (residual)"                    "$RESIDUAL"
 
-P_INHERENT=$(exceedance with-controls "$ROOT_ID" "$THRESHOLD" '{}')
-P_RESIDUAL=$(exceedance with-controls "$ROOT_ID" "$THRESHOLD" "$ALL")
+P_INHERENT=$(exceedance with-controls "$ROOT_ID" "$THRESHOLD" "$INHERENT")
+P_RESIDUAL=$(exceedance with-controls "$ROOT_ID" "$THRESHOLD" "$RESIDUAL")
 
 # ── Step 9: Screening queries, inherent against residual ─────────────────────
 header "Step 9 — The same screening query, inherent and residual"

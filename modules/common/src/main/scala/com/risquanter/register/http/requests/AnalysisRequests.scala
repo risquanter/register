@@ -1,43 +1,100 @@
 package com.risquanter.register.http.requests
 
+import io.github.iltotore.iron.autoRefine
 import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder}
 import zio.prelude.Validation
 import sttp.tapir.Schema
 
 import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
-import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt}
-import com.risquanter.register.domain.errors.{ErrorLocation, FieldName, ValidationError}
+import com.risquanter.register.domain.data.iron.{NodeId, NonNegativeInt, ValidationUtil}
+import com.risquanter.register.domain.errors.{BoundedCollection, ErrorLocation, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
-/** Body of the multi-node curve read: the nodes to draw, and the one selection
-  * the answer is computed under.
+/** One valuation of a curve request: a selection, and the nodes whose curves
+  * are wanted under it.
   */
-final case class LECCurvesMultiRequest private (
-  nodeIds: List[NodeId],
-  selection: MitigationSelection.Enumerated
-)
+final case class CurveValuationRequest private (selection: MitigationSelection, nodeIds: List[NodeId])
+
+object CurveValuationRequest:
+
+  /** A valuation names at most as many nodes as a tree can hold. */
+  def create(selection: MitigationSelection, nodeIds: List[NodeId]): Validation[ValidationError, CurveValuationRequest] =
+    RiskTree
+      .requireNodeCount(NonNegativeInt.count(nodeIds.size), ErrorLocation.requestField(FieldName.Nodes))
+      .as(new CurveValuationRequest(selection, nodeIds))
+
+  private case class Raw(selection: MitigationSelection, nodeIds: List[NodeId])
+  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+  private def fromRaw(raw: Raw): Validation[ValidationError, CurveValuationRequest] =
+    create(raw.selection, raw.nodeIds)
+
+  private def toRaw(r: CurveValuationRequest): Raw = Raw(r.selection, r.nodeIds)
+
+  /** Decode runs `create`, so no value of this type exists that breaks the
+    * bound. */
+  given codec: JsonCodec[CurveValuationRequest] = JsonCodec(
+    JsonEncoder[Raw].contramap(toRaw),
+    JsonDecoder[Raw].mapOrFail(raw =>
+      fromRaw(raw).toEither.left.map(_.toChunk.map(ValidationError.describe).mkString("; ")))
+  )
+
+  /** Derived from `Raw`, the shape the codec reads and writes (ADR-038 §1): the
+    * constructor is private. */
+  given schema: Schema[CurveValuationRequest] =
+    Schema.derived[Raw].map(raw => fromRaw(raw).toEither.toOption)(toRaw)
+
+/** Body of the multi-node curve read: the valuations to answer. */
+final case class LECCurvesMultiRequest private (valuations: List[CurveValuationRequest])
 
 object LECCurvesMultiRequest:
 
-  /** A request asks for at most as many nodes as a tree can hold. */
-  def create(
-    nodeIds: List[NodeId],
-    selection: MitigationSelection.Enumerated
-  ): Validation[ValidationError, LECCurvesMultiRequest] =
-    RiskTree
-      .requireNodeCount(NonNegativeInt.count(nodeIds.size), ErrorLocation.requestField(FieldName.Nodes))
-      .as(new LECCurvesMultiRequest(nodeIds, selection))
+  /** The most valuations one request states. Chosen by this project: each
+    * valuation whose selection is not inherent costs one mitigated fold. */
+  val MaxValuations: NonNegativeInt = 16
 
-  private case class Raw(nodeIds: List[NodeId], selection: Option[MitigationSelection.Enumerated])
+  /** At least one valuation, at most `MaxValuations`, and no two with equal
+    * selections. Every breach is reported together.
+    *
+    * {{{
+    * create(Nil)                                 // fails: Required at request.Valuations
+    * create(List(inherentOfA, inherentOfB))      // fails: DuplicateSelection(2) at request.Valuations
+    * create(List(inherentOfA, residualOfB))      // LECCurvesMultiRequest(List(inherentOfA, residualOfB))
+    * }}}
+    */
+  def create(valuations: List[CurveValuationRequest]): Validation[ValidationError, LECCurvesMultiRequest] =
+    val location = ErrorLocation.requestField(FieldName.Valuations)
+
+    val presentV: Validation[ValidationError, Unit] =
+      if valuations.isEmpty then Validation.fail(ValidationError(location, FieldProblem.Required))
+      else Validation.unit
+
+    val countV: Validation[ValidationError, Unit] =
+      ValidationUtil.requireAtMost(
+        BoundedCollection.Valuations, NonNegativeInt.count(valuations.size), MaxValuations, location)
+
+    val selections = valuations.map(_.selection)
+    val distinctV: Validation[ValidationError, Unit] =
+      Validation.validateAll(
+        selections.distinct
+          .map(selection => selections.count(_ == selection))
+          .filter(_ > 1)
+          .map(occurrences =>
+            Validation.fail(
+              ValidationError(location, FieldProblem.DuplicateSelection(NonNegativeInt.count(occurrences)))))
+      ).unit
+
+    Validation.validateWith(presentV, countV, distinctV)((_, _, _) => new LECCurvesMultiRequest(valuations))
+
+  private case class Raw(valuations: List[CurveValuationRequest])
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
 
-  private def fromRaw(raw: Raw): Validation[ValidationError, LECCurvesMultiRequest] =
-    create(raw.nodeIds, raw.selection.getOrElse(MitigationSelection.Inherent))
+  private def fromRaw(raw: Raw): Validation[ValidationError, LECCurvesMultiRequest] = create(raw.valuations)
 
-  private def toRaw(r: LECCurvesMultiRequest): Raw = Raw(r.nodeIds, Some(r.selection))
+  private def toRaw(r: LECCurvesMultiRequest): Raw = Raw(r.valuations)
 
-  /** Decode runs `create`, so no value of this type exists that breaks the
-    * bound. An absent `selection` means the inherent reading. */
+  /** Decode runs `create`, so no value of this type exists that breaks a
+    * bound or states one selection twice. */
   given codec: JsonCodec[LECCurvesMultiRequest] = JsonCodec(
     JsonEncoder[Raw].contramap(toRaw),
     JsonDecoder[Raw].mapOrFail(raw =>
@@ -45,33 +102,16 @@ object LECCurvesMultiRequest:
   )
 
   /** Derived from `Raw`, the shape the codec reads and writes (ADR-038 §1): the
-    * constructor is private, and the optionality of `selection` is a property
-    * of `Raw`. */
+    * constructor is private. */
   given schema: Schema[LECCurvesMultiRequest] =
     Schema.derived[Raw].map(raw => fromRaw(raw).toEither.toOption)(toRaw)
 
-/** Body of the exceedance-probability read. The node and the threshold stay
-  * where they are — in the path and the query string — so the body carries the
-  * selection alone.
+/** Body of the exceedance-probability read: the selection the figure is
+  * computed under. The node and the threshold are in the path and the query
+  * string.
   */
-final case class ProbOfExceedanceRequest(selection: MitigationSelection.Enumerated)
+final case class ProbOfExceedanceRequest(selection: MitigationSelection)
 
 object ProbOfExceedanceRequest:
-  private case class Raw(selection: Option[MitigationSelection.Enumerated])
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  private def fromRaw(raw: Raw): ProbOfExceedanceRequest =
-    ProbOfExceedanceRequest(raw.selection.getOrElse(MitigationSelection.Inherent))
-
-  private def toRaw(r: ProbOfExceedanceRequest): Raw = Raw(Some(r.selection))
-
-  given codec: JsonCodec[ProbOfExceedanceRequest] = JsonCodec(
-    JsonEncoder[Raw].contramap(toRaw),
-    JsonDecoder[Raw].map(fromRaw)
-  )
-
-  /** Derived from `Raw` so the published description shows `selection` as
-    * optional, which is what the codec reads. The decode is total, so the
-    * mapping never fails. */
-  given schema: Schema[ProbOfExceedanceRequest] =
-    Schema.derived[Raw].map(raw => Some(fromRaw(raw)))(toRaw)
+  given codec: JsonCodec[ProbOfExceedanceRequest] = DeriveJsonCodec.gen[ProbOfExceedanceRequest]
+  given schema: Schema[ProbOfExceedanceRequest]   = Schema.derived[ProbOfExceedanceRequest]

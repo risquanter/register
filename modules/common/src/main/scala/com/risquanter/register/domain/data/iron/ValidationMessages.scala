@@ -68,6 +68,8 @@ object ValidationMessages:
       s"Every portfolio must have at least one child: ${portfolios.map(_.value).mkString(", ")}"
     case FieldProblem.TooMany(collection, count, limit) =>
       s"too many ${entries(collection)}: $count exceeds the limit of $limit"
+    case FieldProblem.DuplicateSelection(occurrences) =>
+      s"duplicate selection — stated by $occurrences valuations; state it once and list every node under it."
 
     // A stored node named by a tree update
     case FieldProblem.StoredNodeListedTwice => "this id is listed more than once; each stored node appears once, in portfolios or in leaves"
@@ -174,6 +176,7 @@ object ValidationMessages:
     case BoundedCollection.Mitigations   => "mitigations"
     case BoundedCollection.Children      => "children"
     case BoundedCollection.PipelineSteps => "result-stage pipeline steps"
+    case BoundedCollection.Valuations    => "valuations"
 
   private def alphabet(allowed: Alphabet): String = allowed match
     case Alphabet.NodeName     => "letters, digits, spaces, hyphens, and forward slashes"

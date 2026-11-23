@@ -2252,6 +2252,12 @@ from its first ruling; the entry states both the new ruling and why it changed.
    therefore several requests, one per Compare slot, which is what makes
    Decision 6 load-bearing.
 
+   **Reversed for the curve read on 2026-11-22** by MTR-D-6 in
+   `docs/dev/plans/PLAN-MITIGATION-TREE-ROWS.md`: a curve request states a
+   list of valuations, each with its own selection, and every curve of the
+   answer shares one loss axis. The exceedance read still carries one
+   selection. Do not implement the curve read from the ruling above.
+
 12. **Where does the client get mitigation definitions and resolved scopes?**
    **RULED A — the tree read carries them.** The resolved scope is a function
    of the tree version and nothing else, so shipping it with the tree makes it

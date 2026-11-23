@@ -6,7 +6,7 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import sttp.model.StatusCode
 import zio.json.*
-import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest, LECCurvesMultiRequest, ProbOfExceedanceRequest, MitigationDefinitionRequest, MitigationSpecRequest, ResultTransformSpecRequest}
+import com.risquanter.register.http.requests.{RevertTreeRequest, RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, QueryRequest, ScenarioSourceDto, RiskTreeUpdateRequest, CurveValuationRequest, LECCurvesMultiRequest, ProbOfExceedanceRequest, MitigationDefinitionRequest, MitigationSpecRequest, ResultTransformSpecRequest}
 import com.risquanter.register.http.responses.{ScenarioResponse, TreeHistoryResponse, TreeListResponse, TreeStructureResponse, TreeSummaryResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.errors.{NotFoundKind, RejectionDetail, WireError}
 import com.risquanter.register.domain.data.{MitigationPrecedence, MitigationSelection, MitigationSpec, ResultTransformSpec, RiskLeaf}
@@ -354,7 +354,10 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           answers <- ZIO.foreach(List(
             onScenario.get(treeUri),
             onScenario.post(uri"$treeUri/nodes/lec-multi")
-              .body(LECCurvesMultiRequest.create(List(rootId), MitigationSelection.Inherent).toEither.toOption.get),
+              .body(
+                CurveValuationRequest.create(MitigationSelection.Inherent, List(rootId))
+                  .flatMap(valuation => LECCurvesMultiRequest.create(List(valuation)))
+                  .toEither.toOption.get),
             onScenario.post(uri"$treeUri/nodes/${rootId.value}/prob-of-exceedance?threshold=1000")
               .body(ProbOfExceedanceRequest(MitigationSelection.Inherent)),
             onScenario.put(treeUri).body(update),

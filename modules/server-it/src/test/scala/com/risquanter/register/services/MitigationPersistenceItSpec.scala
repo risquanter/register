@@ -13,7 +13,7 @@ import com.risquanter.register.domain.data.{
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceId, SafeName, ContentHash, BranchRef, Revision, SeedEntityId}
 import com.risquanter.register.domain.errors.ErrorSubject
 import com.risquanter.register.http.requests.{
-  AbsoluteReplacementRequest, BaseStampChoice, DistributionShapeRequest, MitigationDefinitionRequest,
+  AbsoluteReplacementRequest, BaseStampChoice, CurveValuationRequest, DistributionShapeRequest, MitigationDefinitionRequest,
   MitigationSpecRequest, MitigationUpdateRequest, RiskLeafDefinitionRequest, RiskLeafUpdateRequest,
   RiskPortfolioDefinitionRequest, RiskPortfolioUpdateRequest, RiskTreeDefinitionRequest, RiskTreeUpdateRequest
 }
@@ -205,14 +205,16 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
                          BranchRef.Main)
           structure <- service.getStructure(wsId, created.id, BranchRef.Main, None)
           (tree, scopes, stale) = structure
-          curves    <- service.getLECCurvesMulti(wsId, created.id, Set(created.rootId), seedEntity,
-                         false, BranchRef.Main, None, false, MitigationSelection.single(m.id))
+          valuations = List(MitigationSelection.Inherent, MitigationSelection.single(m.id))
+                         .map(selection => CurveValuationRequest.create(selection, List(created.rootId)).toEither.toOption.get)
+          answer    <-service.getLECCurvesMulti(wsId, created.id, valuations, seedEntity,
+                         false, BranchRef.Main, None, false)
         yield assertTrue(
           tree.mitigations.map(_.id) == List(m.id),
           m.target == MitigationTarget.Predicate(TargetingPredicate.ofNode(cyber.id)),
           scopes.outcomes == Map(m.id -> ScopeOutcome.Resolved(Set(cyber.id))),
           stale == Set(m.id),
-          curves(created.rootId).map(_.withMitigations) == List(Nil, List(m.id))
+          answer.map(_.curves.get(created.rootId).map(_.withMitigations)) == List(Some(Nil), Some(List(m.id)))
         )
       }
 

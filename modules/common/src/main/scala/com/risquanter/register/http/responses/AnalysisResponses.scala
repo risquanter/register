@@ -13,8 +13,8 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   * `withMitigations` names every mitigation whose resolved scope covers this
   * node or any node below it — decided by scope, so a selected mitigation that
   * covers nothing here is absent and a covering mitigation is named whether or
-  * not it visibly bent this curve. The mitigation-free curve is the entry whose
-  * list is empty, which is why there is no separately named field for it.
+  * not it visibly bent this curve. The list is empty when the valuation's
+  * selection reaches neither this node nor a node below it.
   */
 final case class LECNodeSeries(curve: LECNodeCurve, withMitigations: List[MitigationId])
 

@@ -29,12 +29,12 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
     authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceProbOfExceedance")
-      .description("Get probability of exceeding a loss threshold (workspace-scoped) under one mitigation selection; optional `at` commit pin")
+      .description("Get probability of exceeding a loss threshold (workspace-scoped) under the selection the body states; optional `at` commit pin")
       .in(nodesRoute / path[NodeId]("nodeId") / "prob-of-exceedance")
       .post
       .in(query[NonNegativeLong]("threshold").description("The loss the probability is of meeting or exceeding; zero answers 1."))
       .in(query[Boolean]("includeProvenance").default(false))
-      .in(jsonBody[ProbOfExceedanceRequest].description("The mitigation selection this reading is computed under"))
+      .in(jsonBody[ProbOfExceedanceRequest].description("The mitigation selection the figure is computed under"))
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
       .out(jsonBody[ExceedanceSeries])
@@ -43,11 +43,11 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
     authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceLECCurvesMulti")
-      .description("Get LEC curves for multiple nodes (workspace-scoped) under one mitigation selection; optional `at` commit pin")
+      .description("Get LEC curves for multiple nodes (workspace-scoped) for the valuations the body states; optional `at` commit pin")
       .in(nodesRoute / "lec-multi")
       .post
       .in(query[Boolean]("includeProvenance").default(false))
-      .in(jsonBody[LECCurvesMultiRequest].description("Requested node IDs and the mitigation selection"))
+      .in(jsonBody[LECCurvesMultiRequest].description("The valuations to answer: each a mitigation selection and the node IDs wanted under it"))
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
       .in(query[Boolean]("omitAbsent").default(false)

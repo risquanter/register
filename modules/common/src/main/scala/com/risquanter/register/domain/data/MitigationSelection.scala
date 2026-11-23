@@ -1,11 +1,14 @@
 package com.risquanter.register.domain.data
 
-import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder}
+import scala.collection.immutable.ListMap
+
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonDecoder, JsonEncoder, jsonDiscriminator}
 import zio.prelude.{Equal, Validation}
 import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, NonNegativeInt}
-import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, ValidationError}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName, FieldProblem, ValidationError}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** How far one selected mitigation reaches: its whole resolved scope, or the
@@ -16,22 +19,28 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
 sealed trait ScopeRestriction
 
 object ScopeRestriction:
+  /** The key naming which case a restriction states. */
+  final val ScopeField = "scope"
+
   case object FullScope extends ScopeRestriction
 
-  /** Built only by `MitigationSelection.create`, which bounds the set and never
-    * builds an empty one. */
-  final case class NodesOnly private[data] (ids: Set[NodeId]) extends ScopeRestriction
+  /** Built only by `nodesOnly`, which bounds the set and never builds an empty one. */
+  final case class NodesOnly private[ScopeRestriction] (ids: Set[NodeId]) extends ScopeRestriction
+
+  /** The restriction to `ids`. An empty set is refused with
+    * `FieldProblem.NodeIdsEmpty`, and a set above `RiskTree.MaxNodes` with
+    * `FieldProblem.TooMany`, both at `location`.
+    *
+    * {{{
+    * nodesOnly(Set(n1, n2), location) // NodesOnly(Set(n1, n2))
+    * nodesOnly(Set.empty, location)   // fails: NodeIdsEmpty at location
+    * }}}
+    */
+  def nodesOnly(ids: Set[NodeId], location: ErrorLocation): Validation[ValidationError, ScopeRestriction] =
+    if ids.isEmpty then Validation.fail(ValidationError(location, FieldProblem.NodeIdsEmpty))
+    else RiskTree.requireNodeCount(NonNegativeInt.count(ids.size), location).as(new NodesOnly(ids))
 
   given Equal[ScopeRestriction] = Equal.default
-
-/** One tick on a mitigation's row beneath a node: that mitigation applies at
-  * that node and nowhere else.
-  */
-final case class NodeMitigationEntry(node: NodeId, mitigation: MitigationId)
-
-object NodeMitigationEntry:
-  given codec: JsonCodec[NodeMitigationEntry] = DeriveJsonCodec.gen[NodeMitigationEntry]
-  given schema: Schema[NodeMitigationEntry]   = Schema.derived[NodeMitigationEntry]
 
 /** Which mitigations a valuation applies, each across its whole resolved scope
   * or at named nodes only. `Inherent` applies none. `Residual` applies every
@@ -40,11 +49,11 @@ object NodeMitigationEntry:
 sealed trait MitigationSelection
 
 object MitigationSelection:
+  /** The key naming which case a selection states. */
+  final val TagField = "kind"
 
-  /** A selection stated by naming its mitigations, which is what a request body
-    * can state. `Residual` is not one: it means every mitigation of a tree, so
-    * it has no statement without that tree, and only the query language's
-    * `residual` constant produces it. */
+  /** A selection stated by naming its mitigations, which is what the interface
+    * edits. */
   sealed trait Enumerated extends MitigationSelection
 
   /** The mitigation-free valuation: no mitigation applied. */
@@ -64,90 +73,96 @@ object MitigationSelection:
   def single(id: MitigationId): Enumerated =
     new Selected(Map(id -> ScopeRestriction.FullScope))
 
-  /** The selection two lists state. `fullScope` holds the mitigations that are
-    * on across their whole resolved scope, and `nodesOnly` the per-node ticks.
-    * Both lists empty is `Inherent`. A mitigation named in both lists applies
-    * across its whole resolved scope, because both lists say it is on and the
-    * wider statement subsumes the narrower.
-    *
-    * A selection names at most as many mitigations as a tree can hold, and
-    * ticks one mitigation at no more nodes than a tree can hold. Both bounds
-    * are `RiskTree`'s own, and every breach is reported together. Whether the
-    * named mitigations exist is not checked here: that is a lookup against a
-    * loaded tree.
+  /** The selection `entries` states. An empty map is `Inherent`. More entries
+    * than `RiskTree.MaxMitigations` are refused at
+    * `ErrorLocation.requestField(FieldName.Mitigations)`. Whether the named
+    * mitigations exist is not checked here: that is a lookup against a loaded
+    * tree.
     *
     * {{{
-    * create(Nil, Nil)                                        // Inherent
-    * create(List(m1), List((n1, m2), (n2, m2), (n1, m1)))
-    * // Selected(Map(m1 -> FullScope, m2 -> NodesOnly(Set(n1, n2))))
-    * create(1001 distinct ids, Nil)
+    * create(Map.empty)                                   // Inherent
+    * create(Map(m1 -> FullScope, m2 -> NodesOnly(Set(n1))))
+    * // Selected(Map(m1 -> FullScope, m2 -> NodesOnly(Set(n1))))
+    * create(1001 entries)
     * // fails: [request.Mitigations] too many mitigations: 1001 exceeds the limit of 1000
     * }}}
     */
-  def create(
-    fullScope: List[MitigationId],
-    nodesOnly: List[NodeMitigationEntry]
-  ): Validation[ValidationError, Enumerated] =
-    val full  = fullScope.toSet
-    val named = full ++ nodesOnly.map(_.mitigation)
+  def create(entries: Map[MitigationId, ScopeRestriction]): Validation[ValidationError, Enumerated] =
+    RiskTree
+      .requireMitigationCount(NonNegativeInt.count(entries.size), ErrorLocation.requestField(FieldName.Mitigations))
+      .as(if entries.isEmpty then Inherent else new Selected(entries))
 
-    val countV: Validation[ValidationError, Unit] =
-      RiskTree.requireMitigationCount(NonNegativeInt.count(named.size), ErrorLocation.requestField(FieldName.Mitigations))
+  /** The wire form of a restriction, tagged by `ScopeRestriction.ScopeField`. */
+  @jsonDiscriminator(ScopeRestriction.ScopeField)
+  private enum RawScope:
+    case FullScope
+    case NodesOnly(nodes: List[NodeId])
 
-    val perMitigationV: Validation[ValidationError, Unit] =
-      Validation.validateAll(
-        nodesOnly.groupBy(_.mitigation).toList.sortBy(_._1.value).map { (id, ticks) =>
-          RiskTree.requireNodeCount(
-            NonNegativeInt.count(ticks.size),
-            ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Nodes)
-          )
-        }
-      ).as(())
+  private object RawScope:
+    given codec: JsonCodec[RawScope] = DeriveJsonCodec.gen[RawScope]
 
-    Validation.validateWith(countV, perMitigationV) { (_, _) =>
-      val restricted: Map[MitigationId, ScopeRestriction] =
-        nodesOnly
-          .filterNot(entry => full.contains(entry.mitigation))
-          .groupMap(_.mitigation)(_.node)
-          .view.mapValues(nodes => ScopeRestriction.NodesOnly(nodes.toSet))
-          .toMap
-      val entries = restricted ++ full.map(_ -> ScopeRestriction.FullScope)
-      if entries.isEmpty then Inherent else new Selected(entries)
-    }
+    given schema: Schema[RawScope] =
+      given Configuration = Configuration.default.withDiscriminator(ScopeRestriction.ScopeField)
+      Schema.derived[RawScope]
 
-  /** The wire fields. Either list may be omitted and means the empty list. */
-  private case class Raw(
-    fullScope: Option[List[MitigationId]],
-    nodesOnly: Option[List[NodeMitigationEntry]]
-  )
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+  /** The wire form of a selection, tagged by `TagField`. */
+  @jsonDiscriminator(TagField)
+  private enum Raw:
+    case Inherent
+    case Residual
+    case Selected(mitigations: Map[MitigationId, RawScope])
 
-  private def fromRaw(raw: Raw): Validation[ValidationError, Enumerated] =
-    create(raw.fullScope.getOrElse(Nil), raw.nodesOnly.getOrElse(Nil))
+  private object Raw:
+    given codec: JsonCodec[Raw] = DeriveJsonCodec.gen[Raw]
 
-  /** The two lists a selection is stated by, each in identifier order. */
-  private def toRaw(selection: Enumerated): Raw = selection match
-    case Inherent => Raw(Some(Nil), Some(Nil))
-    case Selected(entries) =>
-      val ordered = entries.toList.sortBy(_._1.value)
-      Raw(
-        Some(ordered.collect { case (id, ScopeRestriction.FullScope) => id }),
-        Some(ordered.flatMap {
-          case (id, ScopeRestriction.NodesOnly(ids)) => ids.toList.sortBy(_.value).map(NodeMitigationEntry(_, id))
-          case (_, ScopeRestriction.FullScope)       => Nil
+    given schema: Schema[Raw] =
+      given Configuration = Configuration.default.withDiscriminator(TagField)
+      Schema.derived[Raw]
+
+  /** The selection a wire value states. Each node list is built through
+    * `ScopeRestriction.nodesOnly`, located at its mitigation, and the count of
+    * mitigations is bounded as `create` bounds it. Every breach is reported
+    * together. */
+  private def fromRaw(raw: Raw): Validation[ValidationError, MitigationSelection] = raw match
+    case Raw.Inherent => Validation.succeed(Inherent)
+    case Raw.Residual => Validation.succeed(Residual)
+    case Raw.Selected(mitigations) =>
+      val countV: Validation[ValidationError, Unit] =
+        RiskTree.requireMitigationCount(
+          NonNegativeInt.count(mitigations.size),
+          ErrorLocation.requestField(FieldName.Mitigations)
+        )
+      val entriesV: Validation[ValidationError, List[(MitigationId, ScopeRestriction)]] =
+        Validation.validateAll(mitigations.toList.sortBy(_._1).map {
+          case (id, RawScope.FullScope) => Validation.succeed(id -> ScopeRestriction.FullScope)
+          case (id, RawScope.NodesOnly(nodes)) =>
+            ScopeRestriction
+              .nodesOnly(nodes.toSet, ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Nodes))
+              .map(id -> _)
         })
-      )
+      Validation.validateWith(countV, entriesV)((_, entries) => entries.toMap).flatMap(create)
 
-  /** Decode runs `create`, so a decoded selection is as trustworthy as a
-    * constructed one, on the server and in the browser. Declared for
-    * `Enumerated`, so a body cannot state `Residual` and the encoder is total. */
-  given codec: JsonCodec[Enumerated] = JsonCodec(
+  /** The wire value of a selection, with mitigations and nodes in identifier
+    * order. */
+  private def toRaw(selection: MitigationSelection): Raw = selection match
+    case Inherent => Raw.Inherent
+    case Residual => Raw.Residual
+    case Selected(entries) =>
+      Raw.Selected(ListMap.from(entries.toList.sortBy(_._1).map {
+        case (id, ScopeRestriction.FullScope)      => id -> RawScope.FullScope
+        case (id, ScopeRestriction.NodesOnly(ids)) => id -> RawScope.NodesOnly(ids.toList.sorted)
+      }))
+
+  /** Decode runs `create` and `ScopeRestriction.nodesOnly`, so a decoded
+    * selection is as trustworthy as a constructed one, on the server and in
+    * the browser. */
+  given codec: JsonCodec[MitigationSelection] = JsonCodec(
     JsonEncoder[Raw].contramap(toRaw),
     JsonDecoder[Raw].mapOrFail(raw =>
       fromRaw(raw).toEither.left.map(_.toChunk.map(ValidationError.describe).mkString("; ")))
   )
 
   /** Derived from `Raw`, the shape the codec reads and writes, and mapped
-    * through the constructor the decoder uses (ADR-038 §1). */
-  given schema: Schema[Enumerated] =
+    * through the constructors the decoder uses (ADR-038 §1). */
+  given schema: Schema[MitigationSelection] =
     Schema.derived[Raw].map(raw => fromRaw(raw).toEither.toOption)(toRaw)

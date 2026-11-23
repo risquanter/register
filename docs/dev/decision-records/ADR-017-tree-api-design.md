@@ -233,8 +233,8 @@ header. `changed-nodes` names its two branches in the query instead.
 | `GET /w/{key}/risk-trees/{treeId}/changed-nodes` | query `a`, `aAt`, `b`, `bAt` | Nodes whose content hash differs between two revisions |
 | `GET /w/{key}/risk-trees/{treeId}/history` | query `n` | The tree's commits on a branch, oldest first |
 | `POST /w/{key}/risk-trees/{treeId}/revert` | `RevertTreeRequest` | Revert the tree to a chosen commit as one forward commit |
-| `POST /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance` | `ProbOfExceedanceRequest`, query `threshold`, optional `at` | Exceedance probability of one node under a mitigation selection (ADR-040) |
-| `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi` | `LECCurvesMultiRequest`, optional `at` | Loss exceedance curves of several nodes under a mitigation selection (ADR-040) |
+| `POST /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance` | `ProbOfExceedanceRequest`, query `threshold`, optional `at` | Exceedance probability of one node under the mitigation selection the body states (ADR-040) |
+| `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi` | `LECCurvesMultiRequest`, optional `at` | Loss exceedance curves for the valuations the body states, each a mitigation selection and the nodes wanted under it (ADR-040) |
 | `POST /w/{key}/risk-trees/{treeId}/query` | `QueryRequest` | Evaluate a vague-quantifier query (ADR-028) |
 | `POST /w/{key}/scenarios` | `CreateScenarioRequest` | Create a scenario |
 | `GET /w/{key}/scenarios` | — | List scenarios |

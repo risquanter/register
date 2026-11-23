@@ -173,6 +173,9 @@ object IronTapirCodecs {
 
   given treeIdKeyedMapSchema[V: Schema]: Schema[Map[TreeId, V]] = Schema.schemaForMap[TreeId, V](_.value)
 
+  given mitigationIdKeyedMapSchema[V: Schema]: Schema[Map[MitigationId, V]] =
+    Schema.schemaForMap[MitigationId, V](_.value)
+
   given Schema[TraceId] = Schema.string
 
   /** Codec for WorkspaceKeySecret (base64url, 22 chars).

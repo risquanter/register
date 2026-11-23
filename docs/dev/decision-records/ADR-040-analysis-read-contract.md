@@ -11,8 +11,8 @@
 - An analysis figure belongs to one version of a tree. A branch head moves, and a commit does not.
 - Two valuations of one node can be compared only if they are drawn on the same loss axis.
 - A mitigation selection names mitigations. A tree may lack a named mitigation, or hold one whose scope reaches nothing.
-- A selection is two lists with bounds. A query string cannot carry that shape and keep it typed.
-- A response that holds two readings of one node must say which mitigations shaped each, or a caller cannot tell an unmitigated figure from a mitigated one that happens to match it.
+- A selection is a tagged value with bounds, and a curve request states several. A query string cannot carry that shape and keep it typed.
+- An answer holding several valuations of one node must say, per curve, which mitigations shaped it, or a caller cannot tell an unmitigated figure from a mitigated one that happens to match it.
 
 ---
 
@@ -27,19 +27,29 @@ Both analysis endpoints take the required `X-Branch` header and an optional `at`
 .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
 ```
 
-### 2. Both Endpoints Are POST With a JSON Body Carrying the Selection
+### 2. Both Endpoints Are POST With a JSON Body Stating Selections
 
-The body carries a `MitigationSelection.Enumerated` as two lists. `fullScope` names mitigations applied across their whole resolved scope, and `nodesOnly` names per-node ticks. Both lists empty, or an absent `selection`, is the inherent reading. The decoder runs `MitigationSelection.create`, so a decoded selection is within its bounds on the server and in the browser (ADR-001, ADR-039).
+A selection is one of three alternatives, tagged by `kind`: `Inherent` applies no mitigation, `Residual` applies every mitigation the tree holds, and `Selected` maps each mitigation it names to how far it reaches. The reach is tagged by `scope`: `FullScope` is the mitigation's whole resolved scope, and `NodesOnly` carries the nodes it is restricted to. Each tag is the case name (ADR-037 §1). A selection is required: a body that omits it is refused, so one meaning has one spelling.
+
+The exceedance body is one selection. The curve body is a list of valuations. Each valuation is a selection and the nodes whose curves are wanted under it, and no two valuations of one request hold equal selections.
 
 ```json
-{ "nodeIds": ["01HQ…"], "selection": { "fullScope": ["01HM…"], "nodesOnly": [{ "node": "01HQ…", "mitigation": "01HN…" }] } }
+{ "valuations": [
+    { "selection": { "kind": "Inherent" }, "nodeIds": ["01HQ…"] },
+    { "selection": { "kind": "Selected",
+                     "mitigations": { "01HM…": { "scope": "FullScope" },
+                                      "01HN…": { "scope": "NodesOnly", "nodes": ["01HQ…"] } } },
+      "nodeIds": ["01HQ…", "01HR…"] } ] }
 ```
+
+The decoder runs `MitigationSelection.create` and `ScopeRestriction.nodesOnly`, so a decoded selection is within its bounds on the server and in the browser (ADR-001, ADR-039).
 
 ```scala
-def create(fullScope: List[MitigationId], nodesOnly: List[NodeMitigationEntry]): Validation[ValidationError, Enumerated]
+def create(entries: Map[MitigationId, ScopeRestriction]): Validation[ValidationError, Enumerated]
+def nodesOnly(ids: Set[NodeId], location: ErrorLocation): Validation[ValidationError, ScopeRestriction]
 ```
 
-A mitigation named in both lists applies across its whole scope. `Residual` is not an `Enumerated` value, so a body cannot state it.
+A `Selected` value with an empty `mitigations` map is the inherent selection. A `NodesOnly` restriction with no node is refused. A node named in a restriction that lies outside the mitigation's resolved scope has no effect and is not an error.
 
 ### 3. A Named but Absent Mitigation Fails the Request; One That Applies to Nothing Does Not
 
@@ -49,21 +59,22 @@ Whether a named mitigation exists is a lookup against the loaded tree, so it run
 ValidationError(ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Id), FieldProblem.MitigationNotFound)
 ```
 
-### 4. Two Response Shapes, One Reading of `withMitigations`
+### 4. One Curve Per Valuation and Node, One Meaning of `withMitigations`
 
-The curve endpoint answers a list of readings per node: the mitigation-free reading first, and a second reading when the selection reaches the node. Every curve is sampled at the same loss ticks, so both valuations land on one axis. The exceedance endpoint answers one reading, because a single probability has no axis to share.
+The curve endpoint answers one entry per valuation, in request order. Each entry repeats its selection and maps each node the valuation names to one curve. The answer adds no curve that was not asked for and leaves out none that was: a node the selection does not reach has its curve, with an empty `withMitigations`. Every curve of the answer, across all valuations, is sampled at the same loss ticks, so any two of them land on one axis. The exceedance endpoint answers one figure, because a single probability has no axis to share.
 
 ```scala
-final case class LECCurvesResponse(curves: Map[NodeId, List[LECNodeSeries]])
+final case class CurveValuationResponse(selection: MitigationSelection, curves: Map[NodeId, LECNodeSeries])
+final case class LECCurvesResponse(valuations: List[CurveValuationResponse])
 final case class LECNodeSeries(curve: LECNodeCurve, withMitigations: List[MitigationId])
 final case class ExceedanceSeries(probability: Probability, withMitigations: List[MitigationId])
 ```
 
-`withMitigations` names every mitigation whose resolved scope covers the node or a node below it. It is decided by scope: it is neither the set the caller selected nor the set that moved the number. The mitigation-free reading is the one whose list is empty.
+`withMitigations` names every mitigation the valuation's selection applies whose resolved scope covers the node or a node below it. It is decided by scope: it is neither the set the caller selected nor the set that moved the number.
 
-### 5. Payload Bounds Are the Tree's Own, Checked in the Decoder
+### 5. Payload Bounds Are Checked in the Decoder
 
-A curve request names at most `RiskTree.MaxNodes` nodes. A selection names at most `RiskTree.MaxMitigations` mitigations and ticks one mitigation at no more than `RiskTree.MaxNodes` nodes. Every breach is reported together, and an oversized body is refused before the handler runs.
+A curve request states between 1 and `LECCurvesMultiRequest.MaxValuations` valuations. That bound is 16 and is chosen by this project: each valuation whose selection is not inherent costs one mitigated fold of the tree. The other bounds are the tree's own. A valuation names at most `RiskTree.MaxNodes` nodes. A selection names at most `RiskTree.MaxMitigations` mitigations, and one restriction holds at most `RiskTree.MaxNodes` nodes. Every breach is reported together, and an oversized body is refused before the handler runs.
 
 ---
 
@@ -78,7 +89,7 @@ ADR-038 §3 rules the curve answer's enclosing object: `LECCurvesResponse` stays
 ### ❌ Selection in the Query String
 
 ```scala
-// BAD: two bounded lists flattened into strings, decoded by hand in the handler
+// BAD: a tagged, bounded value flattened into strings, decoded by hand in the handler
 .in(query[List[String]]("mitigations"))
 
 // GOOD: the domain type in the body, decoded through its smart constructor
@@ -89,10 +100,10 @@ ADR-038 §3 rules the curve answer's enclosing object: `LECCurvesResponse` stays
 
 ```scala
 // BAD: a stored version never changes, so this field states nothing
-final case class LECCurvesResponse(curves: Map[NodeId, List[LECNodeSeries]], revision: CommitHash)
+final case class LECCurvesResponse(valuations: List[CurveValuationResponse], revision: CommitHash)
 
 // GOOD: the caller names the version in the request
-final case class LECCurvesResponse(curves: Map[NodeId, List[LECNodeSeries]])
+final case class LECCurvesResponse(valuations: List[CurveValuationResponse])
 ```
 
 ### ❌ Refusing a Mitigation That Reaches Nothing
@@ -102,17 +113,17 @@ final case class LECCurvesResponse(curves: Map[NodeId, List[LECNodeSeries]])
 if scope.isEmpty then ZIO.fail(Failure.rejected(...))
 
 // GOOD: only an absent mitigation is refused; an empty scope has no effect
-requireKnownMitigations(tree, selection)
+requireKnownMitigations(tree, selections)
 ```
 
-### ❌ A Separate Field for the Mitigation-Free Reading
+### ❌ Adding a Curve the Request Did Not State
 
 ```scala
-// BAD: two fields for two readings of one node
-final case class NodeCurves(inherent: LECNodeCurve, mitigated: Option[LECNodeCurve])
+// BAD: the inherent curve of every requested node, added to an answer that asked for another selection
+CurveValuationResponse(selection, curves) :: CurveValuationResponse(MitigationSelection.Inherent, inherentCurves) :: Nil
 
-// GOOD: a list of readings, each naming what shaped it; the empty list is mitigation-free
-List[LECNodeSeries]
+// GOOD: one entry per valuation the request states, and the inherent curve when a valuation asks for it
+valuations.map(v => CurveValuationResponse(v.selection, curvesUnder(v)))
 ```
 
 ---
@@ -122,10 +133,12 @@ List[LECNodeSeries]
 | Location | Pattern |
 |----------|---------|
 | `WorkspaceAnalysisEndpoints` | Both routes are POST with a JSON body, `X-Branch` and optional `at` |
-| `MitigationSelection.create` | The two-list form, its bounds, and the decoder that runs it |
-| `LECCurvesMultiRequest.create` | The node-count bound |
-| `RiskTreeServiceLive.requireKnownMitigations` | Absent mitigations refused together, in identifier order |
-| `LECNodeSeries`, `ExceedanceSeries` | One reading of `withMitigations` across both responses |
+| `MitigationSelection.create`, `ScopeRestriction.nodesOnly` | The selection's three alternatives, their bounds, and the decoder that runs both |
+| `CurveValuationRequest.create` | One valuation and its node-count bound |
+| `LECCurvesMultiRequest.create` | The valuation-count bound, and no selection stated twice |
+| `RiskTreeServiceLive.requireKnownMitigations` | Absent mitigations refused together across valuations, in identifier order |
+| `CurveValuationResponse` | One valuation's answer: its selection and one curve per node |
+| `LECNodeSeries`, `ExceedanceSeries` | One meaning of `withMitigations` across both responses |
 
 ---
 

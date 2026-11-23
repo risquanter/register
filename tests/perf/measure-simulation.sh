@@ -196,7 +196,7 @@ for trials in $TRIALS; do
         fi
         tree="$BASE/w/$(jq -r .workspaceKey "$work/bootstrap.json")/risk-trees/$(jq -r .tree.id "$work/bootstrap.json")"
         curl -s -H 'X-Branch: main' "$tree/structure" | jq '.tree' > "$work/structure.json"
-        jq -c '{nodeIds: [.rootId]}' "$work/structure.json" > "$work/root.json"
+        jq -c '{valuations: [{selection: {kind: "Inherent"}, nodeIds: [.rootId]}]}' "$work/structure.json" > "$work/root.json"
         update_body < "$work/structure.json" > "$work/update.json"
 
         curve=(-X POST "$tree/nodes/lec-multi" -H 'X-Branch: main' -H 'Content-Type: application/json' -d @"$work/root.json")

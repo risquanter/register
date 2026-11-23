@@ -8,14 +8,15 @@ import io.github.iltotore.iron.*
 
 import app.chart.{CurveVariant, PaletteData}
 import app.core.LocalProblem
-import com.risquanter.register.domain.data.{LECNodeCurve, MitigationSelection, RiskTree}
+import com.risquanter.register.domain.data.{LECNodeCurve, MitigationSelection, RiskTree, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, MitigationId, NodeId, Probability, SafeName, TreeId, WorkspaceKeySecret}
-import com.risquanter.register.http.responses.LECNodeSeries
+import com.risquanter.register.http.responses.{CurveValuationResponse, LECCurvesResponse, LECNodeSeries}
 
 /** Tests for `LECChartState`'s user selection — the wholesale-replace write used
   * by the mirror-baseline sync, and the toggle's selection cap — for the
-  * readings each display mode draws from an analysis answer, and for the
-  * curve request a selection builds. */
+  * curves each display mode draws from an analysis answer, for the curve
+  * request a selection builds, and for the per-node form an answer is held
+  * in. */
 object LECChartStateSpec extends ZIOSpecDefault:
 
   private def node(i: Int): NodeId = NodeId.fromString(f"01HX9ABCDE00000000000000$i%02d").toOption.get
@@ -48,7 +49,7 @@ object LECChartStateSpec extends ZIOSpecDefault:
   private val mitigatedAtN1 = curve(n1, 50.0)
   private val inherentAtN2  = curve(n2, 70.0)
 
-  /** n1 has both readings; the selection does not reach n2. */
+  /** n1 has a curve under each valuation; the selection does not reach n2. */
   private val answer = Map(
     n1 -> List(LECNodeSeries(inherentAtN1, Nil), LECNodeSeries(mitigatedAtN1, List(mitigation))),
     n2 -> List(LECNodeSeries(inherentAtN2, Nil))
@@ -123,9 +124,49 @@ object LECChartStateSpec extends ZIOSpecDefault:
 
     test("a request under a selection names only the mitigations the tree holds") {
       val other  = MitigationId(n1.toSafeId)
-      val both   = MitigationSelection.create(List(mitigation, other), Nil).toOption.get
+      val both   = MitigationSelection.create(Map(
+        mitigation -> ScopeRestriction.FullScope,
+        other      -> ScopeRestriction.FullScope
+      )).toOption.get
       val result = LECChartState.requestFor(List(n1), both, held = Some(Set(mitigation)))
-      assertTrue(result.flatMap(_.toOption).map(_.selection) == Some(MitigationSelection.single(mitigation)))
+      assertTrue(
+        result.flatMap(_.toOption).map(_.valuations.map(_.selection)) ==
+          Some(List(MitigationSelection.Inherent, MitigationSelection.single(mitigation)))
+      )
+    },
+
+    test("a request states one valuation under the inherent selection, and two under any other, for the same nodes") {
+      val nodes    = List(n1, n2)
+      val inherent = LECChartState.requestFor(nodes, MitigationSelection.Inherent, held = None)
+      val selected = LECChartState.requestFor(nodes, MitigationSelection.single(mitigation), held = Some(Set(mitigation)))
+      assertTrue(
+        inherent.flatMap(_.toOption).map(_.valuations.map(v => v.selection -> v.nodeIds)) ==
+          Some(List(MitigationSelection.Inherent -> nodes)),
+        selected.flatMap(_.toOption).map(_.valuations.map(v => v.selection -> v.nodeIds)) ==
+          Some(List(MitigationSelection.Inherent -> nodes, MitigationSelection.single(mitigation) -> nodes))
+      )
+    },
+
+    test("an answer is held per node with the inherent curve first, without the second curve of an unreached node") {
+      val response = LECCurvesResponse(List(
+        // The selection's valuation comes first here, so the order held is not the order answered.
+        CurveValuationResponse(MitigationSelection.single(mitigation), Map(
+          n1 -> LECNodeSeries(mitigatedAtN1, List(mitigation)),
+          n2 -> LECNodeSeries(inherentAtN2, Nil)
+        )),
+        CurveValuationResponse(MitigationSelection.Inherent, Map(
+          n1 -> LECNodeSeries(inherentAtN1, Nil),
+          n2 -> LECNodeSeries(inherentAtN2, Nil)
+        ))
+      ))
+      assertTrue(LECChartState.seriesByNode(response) == answer)
+    },
+
+    test("an answer holding the inherent valuation alone is held as one curve per node") {
+      val response = LECCurvesResponse(List(
+        CurveValuationResponse(MitigationSelection.Inherent, Map(n1 -> LECNodeSeries(inherentAtN1, Nil)))
+      ))
+      assertTrue(LECChartState.seriesByNode(response) == Map(n1 -> List(LECNodeSeries(inherentAtN1, Nil))))
     },
 
     test("a request under a selection waits while the tree's mitigations are unknown") {

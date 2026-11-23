@@ -68,7 +68,7 @@ The percentage is the leaf's likelihood. The range is its loss distribution, in 
 
 ## Step 1 — Create the workspace and the tree
 
-**In the scripts:** the section that starts at `# ── Step 1:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L280) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L283).
+**In the scripts:** the section that starts at `# ── Step 1:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L308) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L311).
 
 One request creates a workspace and its first tree.
 
@@ -167,7 +167,7 @@ Steps 2 to 10 send four kinds of request again and again:
 |---|---|---|
 | `read_tree <branch>` | reads the tree's structure | steps 2, 4, 5, 6, 7, 10 |
 | `save_tree <branch>` | saves a new version of the tree, from a request body piped into it | steps 4, 6, 7, 10 |
-| `figures <branch> <node ids> <selection>` | reads curves and summary figures for several nodes | steps 3, 8 |
+| `figures <branch> <node ids> <selections>` | reads curves and summary figures for several nodes, once under each selection in the list | steps 3, 8 |
 | `chance <branch> <node id> <threshold> <selection>` | reads the chance that a node's loss reaches the threshold | steps 3, 4, 8 |
 
 Writing out the full curl or httpie command each time would repeat the same address and headers in every step. A shell function gives that command a short name. You define each function once, and then call it by name like any other command.
@@ -180,7 +180,7 @@ A **branch** is one line of saved versions of the workspace's trees. `main` is t
 ```bash
 read_tree() { curl -s -H "X-Branch: $1" "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/structure"; }
 save_tree() { curl -s -X PUT "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" -H 'Content-Type: application/json' -H "X-Branch: $1" -d @-; }
-figures()   { curl -s -X POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/lec-multi" -H 'Content-Type: application/json' -H "X-Branch: $1" -d "{\"nodeIds\": $2, \"selection\": $3}"; }
+figures()   { curl -s -X POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/lec-multi" -H 'Content-Type: application/json' -H "X-Branch: $1" -d "$(jq -nc --argjson nodes "$2" --argjson selections "$3" '{valuations: ($selections | map({selection: ., nodeIds: $nodes}))}')"; }
 chance()    { curl -s -X POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/$2/prob-of-exceedance?threshold=$3" -H 'Content-Type: application/json' -H "X-Branch: $1" -d "{\"selection\": $4}"; }
 ```
 
@@ -188,7 +188,7 @@ chance()    { curl -s -X POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/$2/prob
 ```bash
 read_tree() { http --ignore-stdin GET "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/structure" "X-Branch:$1"; }
 save_tree() { http PUT "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" "X-Branch:$1"; }
-figures()   { http --ignore-stdin POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/lec-multi" "X-Branch:$1" nodeIds:="$2" selection:="$3"; }
+figures()   { http --ignore-stdin POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/lec-multi" "X-Branch:$1" valuations:="$(jq -nc --argjson nodes "$2" --argjson selections "$3" '$selections | map({selection: ., nodeIds: $nodes})')"; }
 chance()    { http --ignore-stdin POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/$2/prob-of-exceedance?threshold=$3" "X-Branch:$1" selection:="$4"; }
 ```
 
@@ -206,7 +206,7 @@ From here on the steps call these four functions, and a command is the same for 
 
 ## Step 2 — Read the structure and note the ids
 
-**In the scripts:** the section that starts at `# ── Step 2:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L298) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L301).
+**In the scripts:** the section that starts at `# ── Step 2:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L326) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L329).
 
 The structure read returns every node with the id the server gave it.
 
@@ -238,41 +238,54 @@ FINE_ID=$(node_id "Regulatory Fine")
 
 ## Step 3 — Read the inherent figures
 
-**In the scripts:** the section that starts at `# ── Step 3:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L319) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L322).
+**In the scripts:** the section that starts at `# ── Step 3:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L347) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L350).
 
-[Inherent risk](TERMINOLOGY.md#44-inherent-risk-and-residual-risk) is the loss before any mitigation is applied. A read asks for it with an empty [selection](TERMINOLOGY.md#45-selection), `{}`. The tree has no mitigation yet, so this is the only reading there is.
-
-The curve read answers each node's [loss exceedance curve](TERMINOLOGY.md#111-loss-exceedance-curve) and a few summary figures. This `jq` filter keeps the summary figures:
+[Inherent risk](TERMINOLOGY.md#44-inherent-risk-and-residual-risk) is the loss before any mitigation is applied. Every analysis read states a [selection](TERMINOLOGY.md#45-selection), which says which mitigations the read applies. A selection is a JSON object, and its `kind` field names one of three cases. `{"kind": "Inherent"}` applies no mitigation. Keep it in a variable:
 
 ```bash
-SUMMARY='.curves[][] | { node: .curve.name, withMitigations: (.withMitigations | length),
-                         averageAnnualLoss: .curve.averageAnnualLoss, P95: .curve.quantiles.P95, P99: .curve.quantiles.P99 }'
+INHERENT='{"kind": "Inherent"}'
+```
 
-figures main "[\"$ROOT_ID\", \"$CYBER_ID\"]" '{}' | jq -c "$SUMMARY"
+The curve read answers each node's [loss exceedance curve](TERMINOLOGY.md#111-loss-exceedance-curve) and a few summary figures. Its body is a list named `valuations`. Each entry holds one selection and the nodes to draw under it:
+
+```json
+{ "valuations": [ { "selection": {"kind": "Inherent"}, "nodeIds": ["<Enterprise id>", "<Cyber id>"] } ] }
+```
+
+A request holds between 1 and 16 entries, a limit this project chose, and no two entries may state the same selection. The `figures` function builds one entry per selection in its third argument, each over the same nodes.
+
+The answer mirrors the request: one entry per valuation, holding that selection and one curve per node. This `jq` filter keeps the summary figures:
+
+```bash
+SUMMARY='.valuations[] | .selection.kind as $selection | .curves[]
+         | { selection: $selection, node: .curve.name, withMitigations: (.withMitigations | length),
+             averageAnnualLoss: .curve.averageAnnualLoss, P95: .curve.quantiles.P95, P99: .curve.quantiles.P99 }'
+
+figures main "[\"$ROOT_ID\", \"$CYBER_ID\"]" "[$INHERENT]" | jq -c "$SUMMARY"
 ```
 
 ```json
-{"node":"Enterprise","withMitigations":0,"averageAnnualLoss":2053940.7729,"P95":8073812.0,"P99":21239637}
-{"node":"Cyber","withMitigations":0,"averageAnnualLoss":1176682.8592,"P95":5468626.0,"P99":18091611}
+{"selection":"Inherent","node":"Enterprise","withMitigations":0,"averageAnnualLoss":2053940.7729,"P95":8073812.0,"P99":21239637}
+{"selection":"Inherent","node":"Cyber","withMitigations":0,"averageAnnualLoss":1176682.8592,"P95":5468626.0,"P99":18091611}
 ```
 
 `averageAnnualLoss` is the node's loss averaged over every trial of the simulation. `P95` is the loss that 95% of the trials stay at or below. Enterprise loses about 2.05 million in an average year, and in one year in twenty it loses 8.07 million or more.
 
-The second read answers one probability: the chance that a node's loss in the period is at or above a threshold. The threshold here is 1 million.
+The second read answers one probability: the chance that a node's loss in the period is at or above a threshold. Its body holds one selection, as `selection`. The threshold here is 1 million.
 
 ```bash
-chance main "$ROOT_ID" 1000000 '{}' | jq -c .
+chance main "$ROOT_ID" 1000000 "$INHERENT" | jq -c .
 ```
 
 ```json
 {"probability":0.3671,"withMitigations":[]}
 ```
 
-**Check:** every reading has an empty `withMitigations`. Your figures differ from these in the later digits, because your workspace has another seed entity id.
+**Check:** every answer has an empty `withMitigations`. Your figures differ from these in the later digits, because your workspace has another seed entity id.
 
 ## Step 4 — Change the tree twice and read its history
 
-**In the scripts:** the section that starts at `# ── Step 4:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L326) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L329).
+**In the scripts:** the section that starts at `# ── Step 4:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L354) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L357).
 
 ### How a tree is saved
 
@@ -408,17 +421,17 @@ The probability from step 3, at the first commit and now:
 **curl:**
 ```bash
 curl -s -X POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/$ROOT_ID/prob-of-exceedance?threshold=1000000&at=$C1" \
-  -H 'Content-Type: application/json' -H "X-Branch: main" -d '{"selection": {}}' | jq -c .
+  -H 'Content-Type: application/json' -H "X-Branch: main" -d "{\"selection\": $INHERENT}" | jq -c .
 ```
 
 **httpie:**
 ```bash
 http --ignore-stdin POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/nodes/$ROOT_ID/prob-of-exceedance" "X-Branch:main" \
-  threshold==1000000 at=="$C1" selection:='{}' | jq -c .
+  threshold==1000000 at=="$C1" selection:="$INHERENT" | jq -c .
 ```
 
 ```bash
-chance main "$ROOT_ID" 1000000 '{}' | jq -c .
+chance main "$ROOT_ID" 1000000 "$INHERENT" | jq -c .
 ```
 
 ```json
@@ -430,9 +443,9 @@ chance main "$ROOT_ID" 1000000 '{}' | jq -c .
 
 ## Step 5 — Fork a scenario
 
-**In the scripts:** the section that starts at `# ── Step 5:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L359) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L362).
+**In the scripts:** the section that starts at `# ── Step 5:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L387) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L390).
 
-A **scenario** is a named branch that starts as a copy of another branch and is then changed apart from it. A scenario is not needed to compare figures with and without mitigations: one tree gives both readings, as step 8 shows. This guide uses one for a different reason. The mitigations are a proposal, and a scenario holds a proposal without changing `main`.
+A **scenario** is a named branch that starts as a copy of another branch and is then changed apart from it. A scenario is not needed to compare figures with and without mitigations: one tree gives both sets of figures, as step 8 shows. This guide uses one for a different reason. The mitigations are a proposal, and a scenario holds a proposal without changing `main`.
 
 **curl:**
 ```bash
@@ -455,7 +468,7 @@ From now on a request with `X-Branch: with-controls` reads and changes the scena
 
 ## Step 6 — Add three mitigations
 
-**In the scripts:** the section that starts at `# ── Step 6:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L369) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L372).
+**In the scripts:** the section that starts at `# ── Step 6:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L397) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L400).
 
 A [mitigation](TERMINOLOGY.md#31-mitigation) is stored on the tree, so it is added with the same save as a node. A new one goes in `newMitigations`.
 
@@ -529,7 +542,7 @@ FRAUD_MON_ID=$(mitigation_id "Fraud monitoring")
 
 ## Step 7 — Add an absolute statement
 
-**In the scripts:** the section that starts at `# ── Step 7:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L399) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L402).
+**In the scripts:** the section that starts at `# ── Step 7:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L427) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L430).
 
 The three mitigations above are [relative statements](TERMINOLOGY.md#36-relative-and-absolute-statements): each changes a figure by a fraction. An absolute statement says what one leaf's figure is after the control. This one says that after a remediation programme, Regulatory Fine's likelihood is 3%.
 
@@ -574,30 +587,41 @@ read_tree main | jq '(.tree.mitigations // []) | length'
 
 ## Step 8 — Compare the figures with and without the mitigations
 
-**In the scripts:** the section that starts at `# ── Step 8:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L425) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L428).
+**In the scripts:** the section that starts at `# ── Step 8:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L453) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L456).
 
-A selection says which mitigations a read applies. `fullScope` lists mitigations applied to every node in their scope. Listing all four gives [residual risk](TERMINOLOGY.md#44-inherent-risk-and-residual-risk), the loss after every mitigation.
+Step 3 used the first of the three kinds of selection. The other two apply mitigations.
+
+`{"kind": "Residual"}` applies every mitigation the tree holds, each at every node in its scope. That gives [residual risk](TERMINOLOGY.md#44-inherent-risk-and-residual-risk), the loss after every mitigation.
+
+`{"kind": "Selected", …}` names the mitigations to apply, in a `mitigations` object keyed by mitigation id. Each entry carries a `scope`. `FullScope` applies the mitigation at every node in its scope. `NodesOnly` applies it at the nodes listed in `nodes`, and at no other.
+
+Keep the four selections this step uses:
 
 ```bash
-ALL="{\"fullScope\": [\"$MFA_ID\", \"$INSURANCE_ID\", \"$FRAUD_MON_ID\", \"$REMEDIATION_ID\"]}"
+RESIDUAL='{"kind": "Residual"}'
+INSURANCE_ONLY="{\"kind\": \"Selected\", \"mitigations\": {\"$INSURANCE_ID\": {\"scope\": \"FullScope\"}}}"
+MFA_AT_RANSOMWARE="{\"kind\": \"Selected\", \"mitigations\": {\"$MFA_ID\": {\"scope\": \"NodesOnly\", \"nodes\": [\"$RANSOM_ID\"]}}}"
+ALL_NAMED="{\"kind\": \"Selected\", \"mitigations\": {
+  \"$MFA_ID\": {\"scope\": \"FullScope\"}, \"$INSURANCE_ID\": {\"scope\": \"FullScope\"},
+  \"$FRAUD_MON_ID\": {\"scope\": \"FullScope\"}, \"$REMEDIATION_ID\": {\"scope\": \"FullScope\"}}}"
 ```
 
-### Both readings from one request
+### Two selections in one request
 
-The curve read answers two readings for a node the selection reaches. The first has no mitigation applied, and the second has the selection applied. Both come from the same tree.
+The curve read takes several selections at once. This request asks for the same two nodes under the inherent selection and under the residual one. Both come from the same tree, and all four curves share one set of loss thresholds, so they can be drawn on one chart.
 
 ```bash
-figures with-controls "[\"$ROOT_ID\", \"$CYBER_ID\"]" "$ALL" | jq -c "$SUMMARY"
+figures with-controls "[\"$ROOT_ID\", \"$CYBER_ID\"]" "[$INHERENT, $RESIDUAL]" | jq -c "$SUMMARY"
 ```
 
 ```json
-{"node":"Enterprise","withMitigations":0,"averageAnnualLoss":2397868.4034,"P95":8917341.0,"P99":21717725}
-{"node":"Enterprise","withMitigations":4,"averageAnnualLoss":1029539.5274,"P95":3581722.0,"P99":1.116797E+7}
-{"node":"Cyber","withMitigations":0,"averageAnnualLoss":1520610.4897,"P95":6649079.0,"P99":19144344}
-{"node":"Cyber","withMitigations":2,"averageAnnualLoss":429251.2498,"P95":250000.0,"P99":6614644.0}
+{"selection":"Inherent","node":"Enterprise","withMitigations":0,"averageAnnualLoss":2397868.4034,"P95":8917341.0,"P99":21717725}
+{"selection":"Inherent","node":"Cyber","withMitigations":0,"averageAnnualLoss":1520610.4897,"P95":6649079.0,"P99":19144344}
+{"selection":"Residual","node":"Enterprise","withMitigations":4,"averageAnnualLoss":1029539.5274,"P95":3581722.0,"P99":1.116797E+7}
+{"selection":"Residual","node":"Cyber","withMitigations":2,"averageAnnualLoss":429251.2498,"P95":250000.0,"P99":6614644.0}
 ```
 
-`withMitigations` counts the selected mitigations whose scope covers the node or a node below it. All four reach Enterprise. Two reach Cyber: the training, through Cyber's leaves, and the insurance.
+`withMitigations` counts the selected mitigations whose scope covers the node or a node below it. All four reach Enterprise. Two reach Cyber: the training, through Cyber's leaves, and the insurance. A node no selected mitigation reaches still has its curve under that selection. Its `withMitigations` is empty, and its figures equal the inherent ones.
 
 Three things to read off these lines:
 
@@ -610,10 +634,10 @@ Three things to read off these lines:
 The probability read takes the same selection. Each line below is one request, for the chance that Enterprise loses 1 million or more:
 
 ```bash
-chance with-controls "$ROOT_ID" 1000000 '{}' | jq -c .
-chance with-controls "$ROOT_ID" 1000000 "{\"fullScope\": [\"$INSURANCE_ID\"]}" | jq -c .
-chance with-controls "$ROOT_ID" 1000000 "{\"nodesOnly\": [{\"node\": \"$RANSOM_ID\", \"mitigation\": \"$MFA_ID\"}]}" | jq -c .
-chance with-controls "$ROOT_ID" 1000000 "$ALL" | jq -c .
+chance with-controls "$ROOT_ID" 1000000 "$INHERENT" | jq -c .
+chance with-controls "$ROOT_ID" 1000000 "$INSURANCE_ONLY" | jq -c .
+chance with-controls "$ROOT_ID" 1000000 "$MFA_AT_RANSOMWARE" | jq -c .
+chance with-controls "$ROOT_ID" 1000000 "$RESIDUAL" | jq -c .
 ```
 
 ```json
@@ -623,23 +647,23 @@ chance with-controls "$ROOT_ID" 1000000 "$ALL" | jq -c .
 {"probability":0.2013,"withMitigations":["<MFA id>","<insurance id>","<fraud monitoring id>","<remediation id>"]}
 ```
 
-The first line is the inherent reading. The second applies the insurance alone, which answers what that one control is worth. The third uses `nodesOnly`: it applies the training at Ransomware only, and leaves Data Breach and Phishing as they are. The fourth is the residual reading.
+The first line is the inherent figure. The second applies the insurance alone, which answers what that one control is worth. The third uses `NodesOnly`: it applies the training at Ransomware only, and leaves Data Breach and Phishing as they are. The fourth is the residual figure. `ALL_NAMED`, which names all four at `FullScope`, gives the same answer as the fourth line.
 
 ### The mitigations belong to the scenario
 
-Send the residual selection to `main`:
+Send the selection that names all four to `main`:
 
 ```bash
-chance main "$ROOT_ID" 1000000 "$ALL" | jq .
+chance main "$ROOT_ID" 1000000 "$ALL_NAMED" | jq .
 ```
 
-The server answers `422`, and the body names each mitigation with the problem `MitigationNotFound`. The tree on `main` holds none of them.
+The server answers `422`, and the body names each mitigation with the problem `MitigationNotFound`. The tree on `main` holds none of them. The residual selection names no mitigation, so `main` accepts it, and there it gives the inherent figure.
 
-**Check:** on `with-controls`, the empty selection gives the probability step 4 gave for the newest version of `main`. Adding mitigations did not change the inherent figures.
+**Check:** on `with-controls`, the inherent selection gives the probability step 4 gave for the newest version of `main`. Adding mitigations did not change the inherent figures.
 
 ## Step 9 — Ask a screening query both ways
 
-**In the scripts:** the section that starts at `# ── Step 9:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L445) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L448).
+**In the scripts:** the section that starts at `# ── Step 9:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L473) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L476).
 
 A screening query takes the selection as a word inside the query: `"inherent"` or `"residual"`. [VQL-QUERY-EXAMPLES.md](VQL-QUERY-EXAMPLES.md#the-mitigation-argument) describes the argument in full.
 
@@ -673,7 +697,7 @@ done
 
 ## Step 10 — Make the statement stale and re-affirm it
 
-**In the scripts:** the section that starts at `# ── Step 10:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L456) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L459).
+**In the scripts:** the section that starts at `# ── Step 10:` in [demo-mitigations-curl.sh](../../examples/demo-mitigations-curl.sh#L484) and [demo-mitigations-httpie.sh](../../examples/demo-mitigations-httpie.sh#L487).
 
 The absolute statement from step 7 was written about Regulatory Fine as it stood then. Re-estimate that leaf, and send the statement back as it is. `KEEP_ALL` sends it with `"stamp": {"kind": "KeepIfUnchanged"}`, which keeps the stored fingerprint:
 
@@ -769,7 +793,7 @@ A mitigation row takes the same clicks as a node row. Ctrl+click applies the mit
 
 Ctrl+click the `MFA and awareness training` row under `Ransomware`. `Ransomware` is added to the chart with an inherent and a mitigated curve, and the row takes `Ransomware`'s curve colour as its border. The rows under `Data Breach` and `Phishing` have no border. The checkbox at the top of the card shows a dash, the browser's mark for a box that is neither on nor off, because the mitigation is applied at part of its scope.
 
-This is the browser's form of the `nodesOnly` selection of step 8.
+This is the browser's form of the `NodesOnly` scope of step 8.
 
 **Check:** the `Enterprise (mitigated)` curve moves less than it did with the whole mitigation ticked.
 

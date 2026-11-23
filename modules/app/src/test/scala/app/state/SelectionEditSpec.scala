@@ -2,8 +2,9 @@ package app.state
 
 import zio.test.*
 
-import com.risquanter.register.domain.data.{MitigationSelection, NodeMitigationEntry}
+import com.risquanter.register.domain.data.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
+import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
 
 /** Pure tests for the interface's selection edits: the toggle each case reads
   * as, the whole-mitigation toggle, every per-node transition, and dropping
@@ -20,7 +21,14 @@ object SelectionEditSpec extends ZIOSpecDefault:
 
   private val on: MitigationSelection.Enumerated = MitigationSelection.single(m)
   private def at(nodes: NodeId*): MitigationSelection.Enumerated =
-    MitigationSelection.create(Nil, nodes.toList.map(NodeMitigationEntry(_, m))).toOption.get
+    ScopeRestriction
+      .nodesOnly(nodes.toSet, ErrorLocation.Field(ErrorSubject.Mitigation(m), FieldName.Nodes))
+      .flatMap(restriction => MitigationSelection.create(Map(m -> restriction)))
+      .toOption.get
+
+  /** Every given mitigation on across its whole scope. */
+  private def allOn(ids: MitigationId*): MitigationSelection.Enumerated =
+    MitigationSelection.create(ids.map(_ -> ScopeRestriction.FullScope).toMap).toOption.get
 
   private def edited(v: zio.prelude.Validation[?, MitigationSelection.Enumerated]): Option[MitigationSelection.Enumerated] =
     v.toOption
@@ -72,7 +80,7 @@ object SelectionEditSpec extends ZIOSpecDefault:
     },
 
     test("toggleAt leaves every other mitigation of the selection as it was") {
-      val withOther = MitigationSelection.create(List(other), Nil).toOption.get
+      val withOther = allOn(other)
       val result = edited(SelectionEdit.toggleAt(withOther, m, n, scope))
       assertTrue(
         result.exists(SelectionEdit.toggleOf(_, other) == MitigationToggle.On),
@@ -99,7 +107,7 @@ object SelectionEditSpec extends ZIOSpecDefault:
     },
 
     test("present drops a mitigation the tree does not hold and keeps the rest") {
-      val both = MitigationSelection.create(List(m, other), Nil).toOption.get
+      val both = allOn(m, other)
       assertTrue(
         SelectionEdit.present(both, Set(m)).toOption.contains((on, Set(other))),
         SelectionEdit.present(both, Set.empty).toOption.contains((MitigationSelection.Inherent, Set(m, other)))

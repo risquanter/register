@@ -308,7 +308,6 @@ object TreeDetailView:
       cls := "tree-detail-container",
       div(
         cls := "tree-detail-header",
-        Icons.treeRoot("tree-root-icon"),
         span(cls := "tree-name", tree.name.value.toString),
         child.maybe <-- view.selectionLocked.map { locked =>
           Option.when(locked)(span(cls := "selection-lock-hint", MirroringHint))

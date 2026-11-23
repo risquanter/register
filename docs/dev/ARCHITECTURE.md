@@ -387,16 +387,16 @@ request's own path to the new resource.
 
 ### **2. Compute LEC (On-Demand)**
 ```
-GET /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance
+POST /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance
 
 Load RiskTree from Repository
   ↓
 CachedResultResolver.ensureCached(tree, nodeId, seedEntityId,
                                   includeProvenance, selection, resolvedScopes)
   │
-  │  selection says which mitigation valuation to return; it defaults to
-  │  Inherent, the raw figure with no mitigation applied. resolvedScopes
-  │  carries the node set each mitigation was resolved to.
+  │  selection says which mitigation valuation to return, and the request
+  │  body states it. Inherent is the raw figure with no mitigation applied.
+  │  resolvedScopes carries the node set each mitigation was resolved to.
   │
   ├─→ Cache hit: Return cached LossDistribution
   │
@@ -412,10 +412,14 @@ Probability (JSON number in [0, 1])
 ```
 
 `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi` takes the same path for
-several nodes and ends in `LECGenerator.generateCurvePointsMulti`, which samples
-every curve at one shared set of thresholds. It answers `LECCurvesResponse`, an
-object whose `curves` field maps node id to `LECNodeCurve`, whose `quantiles` map is keyed by
-`QuantileLevel` (`P90`, `P95`, `P99`, `P995`).
+several valuations, each a selection and the nodes wanted under it. It ends in
+one `LECGenerator.generateCurvePointsMulti` call, which samples every curve of
+every valuation at one shared set of thresholds. It answers
+`LECCurvesResponse`, an object whose `valuations` field lists one
+`CurveValuationResponse` per valuation, in request order. Each repeats its
+selection and maps node id to `LECNodeSeries`: a `LECNodeCurve`, whose
+`quantiles` map is keyed by `QuantileLevel` (`P90`, `P95`, `P99`, `P995`), and
+the mitigations that reached the node.
 
 A tree the workspace holds but the read's branch or commit lacks answers `404`
 with a `NotFoundKind` naming which: `TreeNotOnBranch` with the branch, or

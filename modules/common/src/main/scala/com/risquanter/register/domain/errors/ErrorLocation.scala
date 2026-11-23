@@ -55,7 +55,7 @@ object SubmittedMitigations:
   * is a named value in the companion of the type that owns it (ADR-017 §6). */
 @jsonDiscriminator(TagField)
 enum BoundedCollection:
-  case Nodes, Mitigations, Children, PipelineSteps
+  case Nodes, Mitigations, Children, PipelineSteps, Valuations
 
 object BoundedCollection:
   given codec: JsonCodec[BoundedCollection] = DeriveJsonCodec.gen[BoundedCollection]
@@ -185,6 +185,9 @@ enum FieldName:
   // Mitigations and the transform parameters a mitigation spec carries
   case Mitigations, Precedence, Cap, Factor, TargetingSource
   case Deductible, Limit, Threshold, Anchor
+
+  // Analysis reads
+  case Valuations
 
   // References to a revision or a branch
   case Branch, Scenario, At, Source, ToCommit, CommitHash, ContentHash
@@ -531,6 +534,9 @@ enum FieldProblem:
   /** A bounded collection held more entries than its limit. */
   case TooMany(collection: BoundedCollection, count: NonNegativeInt, limit: NonNegativeInt)
 
+  /** Several valuations of one curve request state the same selection. */
+  case DuplicateSelection(occurrences: NonNegativeInt)
+
   // A stored node named by a tree update; the location carries its id
   case StoredNodeListedTwice
   case StoredNodeIsLeaf
@@ -639,6 +645,7 @@ object FieldProblem:
     case CycleDetected(_)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
     case PortfolioHasNoChildren(_)                  => ValidationErrorCode.EMPTY_COLLECTION
     case TooMany(_, _, _)                           => ValidationErrorCode.CONSTRAINT_VIOLATION
+    case DuplicateSelection(_)                      => ValidationErrorCode.DUPLICATE_VALUE
     case StoredNodeListedTwice                      => ValidationErrorCode.DUPLICATE_VALUE
     case StoredNodeIsLeaf                           => ValidationErrorCode.INVALID_NODE_TYPE
     case StoredNodeIsPortfolio                      => ValidationErrorCode.INVALID_NODE_TYPE

@@ -11,9 +11,10 @@ import app.core.{LocalProblem, ViewFailure}
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve, MitigationSelection}
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, MitigationId, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
+import com.risquanter.register.domain.errors.ValidationError
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
-import com.risquanter.register.http.requests.LECCurvesMultiRequest
-import com.risquanter.register.http.responses.LECNodeSeries
+import com.risquanter.register.http.requests.{CurveValuationRequest, LECCurvesMultiRequest}
+import com.risquanter.register.http.responses.{LECCurvesResponse, LECNodeSeries}
 
 /** Chart selection and LEC curve data state, separated from tree navigation.
   *
@@ -68,10 +69,10 @@ final class LECChartState(
   /** Node IDs satisfying the current query (set from AnalyzeView). */
   val satisfyingNodeIds: Var[Set[NodeId]] = Var(Set.empty)
 
-  /** Each node's readings as the `lec-multi` endpoint answered them: the
-    * mitigation-free reading, and a second one where the selection reaches
-    * the node. Keyed by `NodeId`, matching the domain type end-to-end
-    * (ADR-001 §3).
+  /** Each node's curves from the `lec-multi` answer, in the form
+    * `LECChartState.seriesByNode` gives: the inherent curve, and a second one
+    * where the selection reaches the node. Keyed by `NodeId`, matching the
+    * domain type end-to-end (ADR-001 §3).
     *
     * Written only by the trigger pipeline below — `loadCurves`/`clearCurves`/
     * `reset` emit triggers instead of setting this Var, so a new request or a
@@ -309,7 +310,7 @@ final class LECChartState(
                 // at the pinned commit (surfaced via droppedSelections) rather
                 // than fail the whole chart.
                 (userIdAccessor(), key, treeId, false, request, branchAccessor(), atAccessor(), true)
-              ).map(_.curves).toOutcomeEventStream
+              ).map(LECChartState.seriesByNode).toOutcomeEventStream
             ))
       case _ => () // No workspace or tree selected — nothing to do
 
@@ -324,14 +325,17 @@ object LECChartState:
   val MaxUserSelections: Int = 13
 
   /** The curve request for `nodeIds` under `selection`, restricted to the
-    * mitigations in `held`. `None` when the tree's mitigations are not known
-    * and the selection names some, so the request cannot be built yet. `Left`
-    * when a constructor refuses it.
+    * mitigations in `held`. It states the inherent valuation, and a second
+    * valuation under the selection for the same nodes when the selection is
+    * not inherent. `None` when the tree's mitigations are not known and the
+    * selection names some, so the request cannot be built yet. `Left` when a
+    * constructor refuses it.
     *
     * {{{
-    * requestFor(List(n1), Inherent, held = None)        // Some(Right(request for n1, Inherent))
-    * requestFor(List(n1), selecting(m), held = None)    // None
-    * requestFor(10001 nodes, Inherent, held = None)     // Some(Left(FormInvalid(too many nodes)))
+    * requestFor(List(n1), Inherent, held = None)           // Some(Right(n1 under Inherent))
+    * requestFor(List(n1), selecting(m), held = Some(Set(m))) // Some(Right(n1 under Inherent, n1 under m))
+    * requestFor(List(n1), selecting(m), held = None)       // None
+    * requestFor(10001 nodes, Inherent, held = None)        // Some(Left(FormInvalid(too many nodes)))
     * }}}
     */
   def requestFor(
@@ -344,9 +348,41 @@ object LECChartState:
       case (_, Some(ids))                    => Some(SelectionEdit.present(selection, ids).map(_._1))
       case (_, None)                         => None
     presentV.map { v =>
-      v.flatMap(LECCurvesMultiRequest.create(nodeIds, _))
+      v.flatMap(valuationsFor(nodeIds, _))
+        .flatMap(LECCurvesMultiRequest.create)
         .toEither.left.map(errors => LocalProblem.FormInvalid(errors.toList))
     }
+
+  /** The valuations of `nodeIds` the card asks for under `selection`: the
+    * inherent one, then the one under `selection` when it applies a
+    * mitigation. The node bound is the same for both, so the second is built
+    * only once the first is. */
+  private def valuationsFor(
+    nodeIds: List[NodeId],
+    selection: MitigationSelection.Enumerated
+  ): Validation[ValidationError, List[CurveValuationRequest]] =
+    val inherentV = CurveValuationRequest.create(MitigationSelection.Inherent, nodeIds)
+    selection match
+      case MitigationSelection.Inherent => inherentV.map(List(_))
+      case selected @ MitigationSelection.Selected(_) =>
+        inherentV.flatMap(inherent => CurveValuationRequest.create(selected, nodeIds).map(List(inherent, _)))
+
+  /** Each node's curves from the answer's valuations, in the form the card
+    * draws: the inherent valuation's curve first, then the other valuation's
+    * curve where its `withMitigations` names a mitigation.
+    *
+    * {{{
+    * // the answer holds Inherent and one selection; the selection reaches n1 and not n2
+    * seriesByNode(answer) // n1 -> [inherent, selected], n2 -> [inherent]
+    * }}}
+    */
+  def seriesByNode(response: LECCurvesResponse): Map[NodeId, List[LECNodeSeries]] =
+    val (inherent, others) = response.valuations.partition(_.selection match
+      case MitigationSelection.Inherent                                 => true
+      case MitigationSelection.Residual | MitigationSelection.Selected(_) => false)
+    val first  = inherent.flatMap(_.curves.toList)
+    val second = others.flatMap(_.curves.toList).filter((_, series) => series.withMitigations.nonEmpty)
+    (first ++ second).groupMap((id, _) => id)((_, series) => series)
 
   /** The readings a view draws, per node, under `display`. `Inherent` keeps
     * the reading that names no mitigation. `Mitigated` keeps the other reading
@@ -381,8 +417,8 @@ object LECChartState:
 
   /** Pure derivation extracted from `droppedSelections` so it's testable
     * without a Laminar harness: selected nodes not present in the loaded curve
-    * map. Every node present at the revision has its mitigation-free reading,
-    * so a node missing from the map is absent there. Non-loaded cache → empty
+    * map. Every node present at the revision has its inherent curve, so a node
+    * missing from the map is absent there. Non-loaded cache → empty
     * (nothing charted yet, nothing dropped). */
   def deriveDropped(selected: Set[NodeId], cache: LoadState[Map[NodeId, List[LECNodeSeries]]]): Set[NodeId] =
     cache match

@@ -4,8 +4,8 @@ import zio.test.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{
   AbsoluteReplacement, DistributionShape, Mitigation, MitigationPrecedence, MitigationSelection,
-  MitigationSpec, MitigationTarget, NodeMitigationEntry, RelativeLikelihood, RelativeSeverity,
-  ResultTransformSpec, RiskLeaf, RiskPortfolio, RiskTree, TargetingPredicate
+  MitigationSpec, MitigationTarget, RelativeLikelihood, RelativeSeverity,
+  ResultTransformSpec, RiskLeaf, RiskPortfolio, RiskTree, ScopeRestriction, TargetingPredicate
 }
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
 import com.risquanter.register.domain.errors.{ErrorLocation, ErrorSubject, FieldName}
@@ -43,12 +43,19 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
   private def scopes(pairs: (Mitigation, Set[String])*): Map[MitigationId, Set[NodeId]] =
     pairs.iterator.map { case (m, ns) => m.id -> ns.map(nodeId) }.toMap
 
-  /** A selection through its smart constructor: `full` on across their whole
-    * scope, `ticks` on at the named nodes only. Every fixture is within both
-    * bounds, so construction succeeds. */
+  /** A selection through its smart constructors: `full` on across their whole
+    * scope, `ticks` on at the named nodes only. A mitigation in both is on
+    * across its whole scope. Every fixture is within both bounds, so
+    * construction succeeds. */
   private def selection(full: List[Mitigation], ticks: List[(Mitigation, String)]): MitigationSelection =
+    val restricted: Map[MitigationId, ScopeRestriction] =
+      ticks.groupMap((m, _) => m.id)((_, n) => nodeId(n)).map { (id, nodes) =>
+        id -> unsafeGet(
+          ScopeRestriction.nodesOnly(nodes.toSet, ErrorLocation.Field(ErrorSubject.Mitigation(id), FieldName.Nodes)),
+          "restriction")
+      }
     unsafeGet(
-      MitigationSelection.create(full.map(_.id), ticks.map((m, n) => NodeMitigationEntry(nodeId(n), m.id))),
+      MitigationSelection.create(restricted ++ full.map(_.id -> ScopeRestriction.FullScope)),
       "selection")
 
   private def leaf(label: String, seedVarId: Long, prob: Double = 0.4,

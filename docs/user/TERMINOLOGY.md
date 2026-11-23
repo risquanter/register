@@ -623,6 +623,10 @@ under a targeted portfolio joins the scope. A predicate that no longer fits the
 tree's vocabulary resolves to no nodes and is reported, and the mitigation then
 changes nothing.
 
+A mitigation is **direct** at a node its resolved scope holds. It is
+**transitive** at a node when its resolved scope holds a node below that node.
+One mitigation can be both at the same node.
+
 ---
 
 ## Part 4 — Valuing a tree with and without mitigation
@@ -706,8 +710,8 @@ read from are the same figure.
 
 ### 4.4 Inherent risk and residual risk
 
-**Inherent risk** is the loss before any mitigation is applied. It is what every
-read returns unless a mitigated valuation is asked for explicitly.
+**Inherent risk** is the loss before any mitigation is applied. A curve read or
+an exceedance read returns it when the request states the inherent selection.
 
 It is not computed by separate machinery. It is the mitigated fold of 4.2 run
 with nothing selected, so every node's transform does nothing and every layer is

@@ -166,7 +166,7 @@ Use this when you already know the topic or the record's name. It answers "where
 | ADR-037 | `ADR-037-in-code-constants.md` | Constants and closed sets: enums in their owner's companion, declared versus derived spellings, forbidden defaults |
 | ADR-038 | `ADR-038-response-wire-shapes.md` | Response shapes: the two kinds of response and the shape each takes, no raw primitive where a refined type exists, no serialiser on a confidential identifier, `toWire` owned by the source |
 | ADR-039 | `ADR-039-trust-boundary-ingress-validation.md` | Trust-boundary ingress: where the trust region ends, which crossings have a border, and that everything crossing one is refined |
-| ADR-040 | `ADR-040-analysis-read-contract.md` | The analysis read contract: the version a read names, the selection in a POST body, absent versus empty-scope mitigations, the two response shapes and one reading of `withMitigations`, the payload bounds |
+| ADR-040 | `ADR-040-analysis-read-contract.md` | The analysis read contract: the version a read names, the selections a POST body states and the valuations of a curve request, absent versus empty-scope mitigations, one curve per valuation and node and one meaning of `withMitigations`, the payload bounds |
 | ADR-INFRA-006 | `ADR-INFRA-006.md` | Database credential delivery. Binds `register-infra`'s deployment, not this repository's code |
 | — | `ADR-00X.md` | The authoring template for a new record. Not a decision record |
 

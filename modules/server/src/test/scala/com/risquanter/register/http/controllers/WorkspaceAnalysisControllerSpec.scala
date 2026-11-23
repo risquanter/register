@@ -23,8 +23,10 @@ import com.risquanter.register.domain.data.iron.{
 }
 import com.risquanter.register.domain.errors.{ErrorSubject, Failure}
 import com.risquanter.register.http.errors.BindProblem
-import com.risquanter.register.http.requests.{ProbOfExceedanceRequest, RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries, TreeStructureResponse}
+import com.risquanter.register.http.requests.{
+  CurveValuationRequest, LECCurvesMultiRequest, ProbOfExceedanceRequest, RiskTreeDefinitionRequest, RiskTreeUpdateRequest
+}
+import com.risquanter.register.http.responses.{CurveValuationResponse, ExceedanceSeries, LECCurvesResponse, TreeStructureResponse}
 import com.risquanter.register.services.{ChangedNodesServiceLive, RiskTreeService, TreeHistoryService}
 import com.risquanter.register.services.cache.ResolvedScopes
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
@@ -32,14 +34,16 @@ import com.risquanter.register.telemetry.TelemetryLive
 import com.risquanter.register.testutil.TestHelpers.{lognormalShape, mitigationId, nodeId, retentionFactor, treeId, unsafeGet}
 import io.github.iltotore.iron.*
 
-/** The exceedance route and the structure route over HTTP. The exceedance route
-  * answers a POST carrying a selection, and a selection beyond its bound is
-  * refused by the decoder before any handler runs. The structure route answers
-  * the tree beside each mitigation's resolved scope and the stale override ids.
-  * The service is a stub that records the selection it was handed, so the
-  * second case can show the handler was never reached, and that answers every
-  * structure read with fixed values, so the third case shows what the handler
-  * puts on the wire.
+/** The exceedance route, the curve route and the structure route over HTTP.
+  * The exceedance route answers a POST carrying a selection, and the curve
+  * route a POST carrying valuations. A body beyond a bound, or one that states
+  * no selection, is refused by the decoder before any handler runs. The
+  * structure route answers the tree beside each mitigation's resolved scope
+  * and the stale override ids. The service is a stub that records every
+  * selection it was handed, so a refused case can show the handler was never
+  * reached. It answers each curve valuation with its selection and no curve,
+  * and every structure read with fixed values, so those cases show what the
+  * handler puts on the wire.
   */
 object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
 
@@ -87,8 +91,10 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
 
   private val structureStale: Set[MitigationId] = Set(resolvedMitigation.id)
 
-  /** Answers every exceedance read with `answer` and records the selection, and
-    * answers every structure read with the fixed structure above. */
+  /** Answers every exceedance read with `answer` and records the selection,
+    * answers every curve read with one empty entry per valuation and records
+    * each valuation's selection, and answers every structure read with the
+    * fixed structure above. */
   private def recordingService(seen: Ref[List[MitigationSelection]]): RiskTreeService = new RiskTreeService:
     private def unused[A]: IO[Failure, A] = ZIO.die(new UnsupportedOperationException("not exercised"))
     def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using Checked[Authority]): IO[Failure, RiskTree] = unused
@@ -100,7 +106,8 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
       ZIO.succeed((structureTree, structureScopes, structureStale))
     def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: NonNegativeLong, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], selection: MitigationSelection)(using Checked[Authority]): IO[Failure, ExceedanceSeries] =
       seen.update(_ :+ selection).as(ExceedanceSeries(answer, Nil))
-    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], omitAbsent: Boolean, selection: MitigationSelection)(using Checked[Authority]): IO[Failure, Map[NodeId, List[LECNodeSeries]]] = unused
+    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, valuations: List[CurveValuationRequest], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: BranchRef, at: Option[CommitHash], omitAbsent: Boolean)(using Checked[Authority]): IO[Failure, List[CurveValuationResponse]] =
+      seen.update(_ ++ valuations.map(_.selection)).as(valuations.map(v => CurveValuationResponse(v.selection, Map.empty)))
 
   /** A stub backend over the analysis and tree controllers, and a key whose
     * workspace holds `tree`. */
@@ -140,6 +147,16 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
       .body(body)
       .send(backend)
 
+  private def curves(
+    backend: SttpBackend[Task, Any], key: WorkspaceKeySecret, body: String
+  ): Task[Response[Either[String, String]]] =
+    basicRequest
+      .post(uri"http://localhost/w/${key.reveal}/risk-trees/${tree.value}/nodes/lec-multi")
+      .header("X-Branch", "main")
+      .contentType("application/json")
+      .body(body)
+      .send(backend)
+
   private def structure(backend: SttpBackend[Task, Any], key: WorkspaceKeySecret): Task[Response[Either[String, String]]] =
     basicRequest
       .get(uri"http://localhost/w/${key.reveal}/risk-trees/${tree.value}/structure")
@@ -147,7 +164,7 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
       .send(backend)
 
   def spec = suite("Workspace read routes — exceedance and structure")(
-    test("a POST carrying a selection is answered with one reading, and the selection reaches the service") {
+    test("a POST carrying a selection is answered with one figure, and the selection reaches the service") {
       val selection = MitigationSelection.single(mitigationId("m-one"))
       for
         seen            <- Ref.make(List.empty[MitigationSelection])
@@ -162,13 +179,61 @@ object WorkspaceAnalysisControllerSpec extends ZIOSpecDefault:
     },
 
     test("a selection naming more mitigations than a tree can hold is a 400 before the handler runs") {
-      val ids = (0 to RiskTree.MaxMitigations).map(i => s"\"${mitigationId(s"m-$i").value}\"").mkString(",")
+      val entries = (0 to RiskTree.MaxMitigations)
+        .map(i => s"\"${mitigationId(s"m-$i").value}\":{\"scope\":\"FullScope\"}").mkString(",")
       for
         seen            <- Ref.make(List.empty[MitigationSelection])
         (backend, key)  <- harness(seen)
-        response        <- exceedance(backend, key, s"""{"selection":{"fullScope":[$ids]}}""", DefaultThreshold)
+        response        <- exceedance(backend, key,
+                             s"""{"selection":{"kind":"Selected","mitigations":{$entries}}}""", DefaultThreshold)
         recorded        <- seen.get
       yield assertTrue(response.code == StatusCode.BadRequest, recorded.isEmpty)
+    },
+
+    test("an exceedance body with no selection is a 400 before the handler runs") {
+      for
+        seen            <- Ref.make(List.empty[MitigationSelection])
+        (backend, key)  <- harness(seen)
+        response        <- exceedance(backend, key, "{}", DefaultThreshold)
+        recorded        <- seen.get
+      yield assertTrue(response.code == StatusCode.BadRequest, recorded.isEmpty)
+    },
+
+    test("a curve POST's valuations reach the service in order, and the answer repeats each selection in that order") {
+      val selected = MitigationSelection.single(mitigationId("m-one"))
+      val request = unsafeGet(
+        LECCurvesMultiRequest.create(
+          List(MitigationSelection.Residual, MitigationSelection.Inherent, selected)
+            .map(selection => unsafeGet(CurveValuationRequest.create(selection, List(node)), "valuation"))),
+        "request")
+      for
+        seen            <- Ref.make(List.empty[MitigationSelection])
+        (backend, key)  <- harness(seen)
+        response        <- curves(backend, key, request.toJson)
+        recorded        <- seen.get
+        decoded          = response.body.toOption.flatMap(_.fromJson[LECCurvesResponse].toOption)
+      yield assertTrue(
+        response.code == StatusCode.Ok,
+        recorded == List(MitigationSelection.Residual, MitigationSelection.Inherent, selected),
+        decoded.map(_.valuations.map(_.selection)).contains(recorded)
+      )
+    },
+
+    test("a curve body stating one selection twice, or stating none, is a 400 before the handler runs") {
+      val inherent = s"""{"selection":{"kind":"Inherent"},"nodeIds":["${node.value}"]}"""
+      for
+        seen            <- Ref.make(List.empty[MitigationSelection])
+        (backend, key)  <- harness(seen)
+        twice           <- curves(backend, key, s"""{"valuations":[$inherent,$inherent]}""")
+        none            <- curves(backend, key, s"""{"valuations":[{"nodeIds":["${node.value}"]}]}""")
+        empty           <- curves(backend, key, """{"valuations":[]}""")
+        recorded        <- seen.get
+      yield assertTrue(
+        twice.code == StatusCode.BadRequest,
+        none.code == StatusCode.BadRequest,
+        empty.code == StatusCode.BadRequest,
+        recorded.isEmpty
+      )
     },
 
     test("a negative threshold is a 400 before the handler runs, and a threshold of zero is answered") {

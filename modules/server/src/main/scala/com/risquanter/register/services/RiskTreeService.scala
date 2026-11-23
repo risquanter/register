@@ -1,10 +1,10 @@
 package com.risquanter.register.services
 
 import zio.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
+import com.risquanter.register.http.requests.{CurveValuationRequest, RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{MitigationSelection, RiskTree}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, MitigationId, NonNegativeLong, PositiveInt, WorkspaceId, SeedEntityId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.http.responses.{ExceedanceSeries, LECNodeSeries}
+import com.risquanter.register.http.responses.{CurveValuationResponse, ExceedanceSeries}
 import com.risquanter.register.domain.errors.Failure
 import com.risquanter.register.auth.{Authority, Checked}
 import com.risquanter.register.services.cache.ResolvedScopes
@@ -106,7 +106,7 @@ trait RiskTreeService {
   /** Exceedance probability at a threshold for one node, under one mitigation
     * selection.
     *
-    * One reading, computed under the selection the caller passed.
+    * One figure, computed under the selection the caller passed.
     * `withMitigations` names the mitigations whose resolved scope reached this
     * node or any node below it, and is empty exactly when none did — which is
     * also the whole answer for the mitigation-free selection. A caller wanting
@@ -131,25 +131,30 @@ trait RiskTreeService {
     selection: MitigationSelection = MitigationSelection.Inherent
   )(using Checked[Authority]): IO[Failure, ExceedanceSeries]
 
-  /** LEC curves for several nodes on one shared tick domain, under one
-    * mitigation selection.
+  /** LEC curves for the valuations a request states, on one shared tick domain.
     *
-    * Each node carries the mitigation-free curve first, and a second curve when
-    * the selection reaches it. Every curve in the answer — both valuations of
-    * every node — is evaluated against one tick domain, so any two of them can
-    * be read against each other.
+    * The answer holds one entry per valuation, in the order given. Each entry
+    * repeats its selection and holds one curve per node the valuation names
+    * that is present at the revision read. A node the selection does not reach
+    * has its curve with an empty `withMitigations`. Every curve of every
+    * valuation is evaluated against one tick domain, so any two of them can be
+    * compared.
+    *
+    * A valuation naming no node is refused. A selected mitigation the tree
+    * does not hold is refused, every such mitigation of every valuation
+    * together. With `omitAbsent`, a node absent at the revision is left out of
+    * each valuation; without it, every absent node is refused together.
     */
   def getLECCurvesMulti(
     wsId: WorkspaceId,
     treeId: TreeId,
-    nodeIds: Set[NodeId],
+    valuations: List[CurveValuationRequest],
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean,
     branch: BranchRef,
     at: Option[CommitHash],
-    omitAbsent: Boolean = false,
-    selection: MitigationSelection = MitigationSelection.Inherent
-  )(using Checked[Authority]): IO[Failure, Map[NodeId, List[LECNodeSeries]]]
+    omitAbsent: Boolean = false
+  )(using Checked[Authority]): IO[Failure, List[CurveValuationResponse]]
 }
 
 object RiskTreeService:

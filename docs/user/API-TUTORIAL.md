@@ -246,7 +246,7 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
 
 ## 4. Mitigations
 
-A [mitigation](TERMINOLOGY.md#31-mitigation) is a risk reduction measure stored on the tree and applied to the nodes it targets. The nodes keep their own figures. A reading then asks for the tree's figures with mitigations applied or without them.
+A [mitigation](TERMINOLOGY.md#31-mitigation) is a risk reduction measure stored on the tree and applied to the nodes it targets. The nodes keep their own figures. A read then asks for the tree's figures with mitigations applied or without them.
 
 This section adds mitigations to the tree from step 1, reads which nodes each one reaches, and reads a node's figures under them. [MITIGATION-WALKTHROUGH.md](MITIGATION-WALKTHROUGH.md) runs the same features as one scripted sequence on a larger tree, with a commit history and a scenario. Every request and answer below was run against a server. Identifiers are shown as `<IT Risk id>` and similar, because each workspace gets its own.
 
@@ -332,31 +332,62 @@ Two more changes show what the predicate depends on:
 
 ### Read figures under a selection
 
-A [selection](TERMINOLOGY.md#45-selection) says which mitigations a reading applies. Both analysis reads take it in the body, as `selection`. `fullScope` lists mitigations applied across their whole scope. `nodesOnly` lists single ticks, each applying one mitigation at one node. An empty selection, `{}`, is the [inherent](TERMINOLOGY.md#44-inherent-risk-and-residual-risk) reading.
+A [selection](TERMINOLOGY.md#45-selection) says which mitigations a read applies. Both analysis reads state it in the body. It is an object whose `kind` field names one of three cases:
+
+| `kind` | Applies |
+|---|---|
+| `Inherent` | no mitigation. This is [inherent risk](TERMINOLOGY.md#44-inherent-risk-and-residual-risk). |
+| `Residual` | every mitigation the tree holds, each at every node in its scope. This is residual risk. |
+| `Selected` | the mitigations named in `mitigations`, an object keyed by mitigation id. |
+
+Each entry of `mitigations` carries a `scope`. `{"scope": "FullScope"}` applies the mitigation at every node in its scope. `{"scope": "NodesOnly", "nodes": [...]}` applies it at the listed nodes and at no other, and the list holds at least one node.
 
 ```bash
 curl -s -X POST -H "X-Branch: main" -H 'Content-Type: application/json' \
   "http://localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID/nodes/<IT Risk id>/prob-of-exceedance?threshold=1000000" \
-  -d '{"selection": {"fullScope": ["<Endpoint hardening id>", "<Cyber policy id>"]}}' | jq .
+  -d '{"selection": {"kind": "Residual"}}' | jq .
 ```
 
-Three readings of IT Risk's chance of a loss of at least 1 million, after Phishing was added:
+IT Risk's chance of a loss of at least 1 million under three selections, after Phishing was added:
 
 | `selection` | Answer |
 |---|---|
-| `{}` | `{"probability": 0.204, "withMitigations": []}` |
-| `{"fullScope": ["<Endpoint hardening id>", "<Cyber policy id>"]}` | `{"probability": 0.0354, "withMitigations": ["<Endpoint hardening id>", "<Cyber policy id>"]}` |
-| `{"nodesOnly": [{"node": "<Cyber Breach id>", "mitigation": "<Endpoint hardening id>"}]}` | `{"probability": 0.1276, "withMitigations": ["<Endpoint hardening id>"]}` |
+| `{"kind": "Inherent"}` | `{"probability": 0.204, "withMitigations": []}` |
+| `{"kind": "Residual"}` | `{"probability": 0.0354, "withMitigations": ["<Endpoint hardening id>", "<Cyber policy id>"]}` |
+| `{"kind": "Selected", "mitigations": {"<Endpoint hardening id>": {"scope": "NodesOnly", "nodes": ["<Cyber Breach id>"]}}}` | `{"probability": 0.1276, "withMitigations": ["<Endpoint hardening id>"]}` |
 
 `withMitigations` lists the selected mitigations whose scope covers this node or a node below it. The exact probabilities depend on the workspace's [seed entity id](TERMINOLOGY.md#16-random-stream), so another workspace gives other figures for the same tree.
 
-The curve read, `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi`, takes the same field beside the nodes to draw:
+The curve read, `POST /w/{key}/risk-trees/{treeId}/nodes/lec-multi`, takes a list named `valuations`. Each entry holds one selection and the nodes to draw under it:
 
 ```json
-{ "nodeIds": ["<IT Risk id>"], "selection": { "fullScope": ["<Cyber policy id>"] } }
+{
+  "valuations": [
+    { "selection": { "kind": "Inherent" }, "nodeIds": ["<IT Risk id>"] },
+    { "selection": { "kind": "Selected", "mitigations": { "<Cyber policy id>": { "scope": "FullScope" } } },
+      "nodeIds": ["<IT Risk id>"] }
+  ]
+}
 ```
 
-A request with no `selection` field reads the inherent figures.
+The answer mirrors the request. It holds one entry per valuation, in the request's order, and each entry holds its selection and one curve per node:
+
+```json
+{
+  "valuations": [
+    { "selection": { "kind": "Inherent" },
+      "curves": { "<IT Risk id>": { "curve": { "…": "…" }, "withMitigations": [] } } },
+    { "selection": { "kind": "Selected", "mitigations": { "<Cyber policy id>": { "scope": "FullScope" } } },
+      "curves": { "<IT Risk id>": { "curve": { "…": "…" }, "withMitigations": ["<Cyber policy id>"] } } }
+  ]
+}
+```
+
+Every curve in one answer is sampled at the same loss thresholds, so curves from different valuations can be drawn on one chart. A node that no selected mitigation reaches still has its curve under that selection, with an empty `withMitigations`.
+
+Three rules bound a curve request. It holds between 1 and 16 valuations, a limit this project chose. No two valuations state the same selection: to draw more nodes under one selection, list them all in that valuation's `nodeIds`. Every valuation lists at least one node.
+
+A request that breaks one of the first two rules, or that leaves out `selection`, is answered `400`. A valuation that lists no node is answered `422`. A `Selected` selection naming a mitigation the tree does not hold is answered `422`, and the body names every such mitigation.
 
 ### Absolute statements
 

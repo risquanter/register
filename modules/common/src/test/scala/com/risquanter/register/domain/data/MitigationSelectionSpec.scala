@@ -2,22 +2,26 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.json.{DecoderOps, EncoderOps}
-import com.risquanter.register.domain.data.iron.MitigationId
+import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
 import com.risquanter.register.domain.errors.{BoundedCollection, ErrorLocation, ErrorSubject, FieldName, FieldProblem}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId, unsafeGet}
 
-/** `MitigationSelection.create` builds the selection a request states, within
-  * the two bounds `RiskTree` sets, and the wire form decodes through it.
+/** `MitigationSelection.create` and `ScopeRestriction.nodesOnly` build the
+  * selection a request states, within the two bounds `RiskTree` sets, and the
+  * wire form decodes through them.
   */
 object MitigationSelectionSpec extends ZIOSpecDefault {
 
-  private val m1 = mitigationId("m-one")
-  private val m2 = mitigationId("m-two")
-  private val n1 = nodeId("n-one")
-  private val n2 = nodeId("n-two")
+  private val List(m1, m2) = List(mitigationId("m-one"), mitigationId("m-two")).sorted
+  private val List(n1, n2) = List(nodeId("n-one"), nodeId("n-two")).sorted
 
-  private def tick(node: String, m: MitigationId): NodeMitigationEntry =
-    NodeMitigationEntry(nodeId(node), m)
+  private val nodesLocation = ErrorLocation.Field(ErrorSubject.Mitigation(m2), FieldName.Nodes)
+
+  private def nodesOnly(ids: Set[NodeId]): ScopeRestriction =
+    unsafeGet(ScopeRestriction.nodesOnly(ids, nodesLocation), "restriction")
+
+  private def selected(entries: Map[MitigationId, ScopeRestriction]): MitigationSelection =
+    unsafeGet(MitigationSelection.create(entries), "selection")
 
   /** The entries of a built selection, or `None` for one with no entries. */
   private def entriesOf(s: MitigationSelection): Option[Map[MitigationId, ScopeRestriction]] =
@@ -25,27 +29,28 @@ object MitigationSelectionSpec extends ZIOSpecDefault {
       case MitigationSelection.Selected(entries)                      => Some(entries)
       case MitigationSelection.Inherent | MitigationSelection.Residual => None
 
-  def spec = suite("MitigationSelection.create")(
-    test("two empty lists are the mitigation-free selection") {
-      assertTrue(MitigationSelection.create(Nil, Nil).toEither == Right(MitigationSelection.Inherent))
+  private val mixed: MitigationSelection =
+    selected(Map(m1 -> ScopeRestriction.FullScope, m2 -> nodesOnly(Set(n2, n1))))
+
+  private val mixedJson: String =
+    s"""{"kind":"Selected","mitigations":{"${m1.value}":{"scope":"FullScope"},""" +
+    s""""${m2.value}":{"scope":"NodesOnly","nodes":["${n1.value}","${n2.value}"]}}}"""
+
+  def spec = suite("MitigationSelection")(
+    test("an empty map is the mitigation-free selection") {
+      assertTrue(MitigationSelection.create(Map.empty).toEither == Right(MitigationSelection.Inherent))
     },
 
-    test("the two lists state the entry map, with every node a mitigation is ticked at") {
-      val built = unsafeGet(MitigationSelection.create(List(m1), List(tick("n-one", m2), tick("n-two", m2))), "selection")
-      assertTrue(entriesOf(built) == Some(Map(
-        m1 -> ScopeRestriction.FullScope,
-        m2 -> ScopeRestriction.NodesOnly(Set(n1, n2))
-      )))
-    },
-
-    test("a mitigation named in both lists applies across its whole scope") {
-      val built = unsafeGet(MitigationSelection.create(List(m1), List(tick("n-one", m1))), "selection")
-      assertTrue(entriesOf(built) == Some(Map(m1 -> ScopeRestriction.FullScope)))
+    test("one entry is the selection of that mitigation") {
+      assertTrue(
+        entriesOf(selected(Map(m1 -> ScopeRestriction.FullScope))) == Some(Map(m1 -> ScopeRestriction.FullScope)),
+        selected(Map(m1 -> ScopeRestriction.FullScope)) == MitigationSelection.single(m1)
+      )
     },
 
     test("more mitigations than a tree can hold are refused at the request's mitigation list") {
-      val ids = (0 to RiskTree.MaxMitigations).toList.map(i => mitigationId(s"m-$i"))
-      val refused = MitigationSelection.create(ids, Nil).toEither.left.toOption.toList.flatMap(_.toList)
+      val entries = (0 to RiskTree.MaxMitigations).map(i => mitigationId(s"m-$i") -> ScopeRestriction.FullScope).toMap
+      val refused = MitigationSelection.create(entries).toEither.left.toOption.toList.flatMap(_.toList)
       assertTrue(
         refused.map(_.location) == List(ErrorLocation.requestField(FieldName.Mitigations)),
         refused.forall(_.problem match
@@ -54,35 +59,68 @@ object MitigationSelectionSpec extends ZIOSpecDefault {
       )
     },
 
-    test("every mitigation ticked at too many nodes is refused at its own subject, together with the count") {
-      val tooMany = (m: MitigationId) =>
-        (0 to RiskTree.MaxNodes).toList.map(i => tick(s"n-$i", m))
-      val ids = (0 to RiskTree.MaxMitigations).toList.map(i => mitigationId(s"m-$i"))
-      val refused = MitigationSelection.create(ids, tooMany(m1) ++ tooMany(m2)).toEither.left.toOption.toList.flatMap(_.toList)
+    test("an empty node set is refused at the location given") {
+      val refused = ScopeRestriction.nodesOnly(Set.empty, nodesLocation).toEither.left.toOption.toList.flatMap(_.toList)
       assertTrue(
-        refused.map(_.location).toSet == Set(
-          ErrorLocation.requestField(FieldName.Mitigations),
-          ErrorLocation.Field(ErrorSubject.Mitigation(m1), FieldName.Nodes),
-          ErrorLocation.Field(ErrorSubject.Mitigation(m2), FieldName.Nodes)
-        ),
-        refused.size == 3
+        refused.map(_.location) == List(nodesLocation),
+        refused.map(_.problem) == List(FieldProblem.NodeIdsEmpty)
       )
     },
 
-    test("an omitted list decodes as the empty list") {
+    test("more nodes than a tree can hold are refused at the location given") {
+      val ids     = (0 to RiskTree.MaxNodes).map(i => nodeId(s"n-$i")).toSet
+      val refused = ScopeRestriction.nodesOnly(ids, nodesLocation).toEither.left.toOption.toList.flatMap(_.toList)
       assertTrue(
-        "{}".fromJson[MitigationSelection.Enumerated] == Right(MitigationSelection.Inherent),
-        s"""{"fullScope":["${m1.value}"]}""".fromJson[MitigationSelection.Enumerated] == Right(MitigationSelection.single(m1))
+        refused.map(_.location) == List(nodesLocation),
+        refused.forall(_.problem match
+          case FieldProblem.TooMany(BoundedCollection.Nodes, _, limit) => limit == RiskTree.MaxNodes
+          case _                                                       => false)
+      )
+    },
+
+    test("each alternative and each restriction is written under its case name, in identifier order") {
+      assertTrue(
+        (MitigationSelection.Inherent: MitigationSelection).toJson == """{"kind":"Inherent"}""",
+        (MitigationSelection.Residual: MitigationSelection).toJson == """{"kind":"Residual"}""",
+        mixed.toJson == mixedJson
+      )
+    },
+
+    test("each alternative and each restriction is read from its case name") {
+      assertTrue(
+        """{"kind":"Inherent"}""".fromJson[MitigationSelection] == Right(MitigationSelection.Inherent),
+        """{"kind":"Residual"}""".fromJson[MitigationSelection] == Right(MitigationSelection.Residual),
+        mixedJson.fromJson[MitigationSelection] == Right(mixed)
+      )
+    },
+
+    test("an empty mitigations map reads as the mitigation-free selection") {
+      assertTrue(
+        """{"kind":"Selected","mitigations":{}}""".fromJson[MitigationSelection] == Right(MitigationSelection.Inherent)
+      )
+    },
+
+    test("a body with no kind is refused") {
+      assertTrue(
+        "{}".fromJson[MitigationSelection].isLeft,
+        s"""{"mitigations":{"${m1.value}":{"scope":"FullScope"}}}""".fromJson[MitigationSelection].isLeft
+      )
+    },
+
+    test("an empty node list is refused, and every such mitigation is named together") {
+      val body =
+        s"""{"kind":"Selected","mitigations":{"${m1.value}":{"scope":"NodesOnly","nodes":[]},""" +
+        s""""${m2.value}":{"scope":"NodesOnly","nodes":[]}}}"""
+      val refusal = body.fromJson[MitigationSelection].left.toOption
+      assertTrue(
+        refusal.exists(_.contains(m1.value)),
+        refusal.exists(_.contains(m2.value))
       )
     },
 
     test("decoding what the encoder writes gives the same selection") {
-      val built: List[MitigationSelection.Enumerated] = List(
-        MitigationSelection.Inherent,
-        MitigationSelection.single(m1),
-        unsafeGet(MitigationSelection.create(List(m1), List(tick("n-one", m2), tick("n-two", m2))), "selection")
-      )
-      assertTrue(built.forall(s => s.toJson.fromJson[MitigationSelection.Enumerated] == Right(s)))
+      val built: List[MitigationSelection] = List(MitigationSelection.Inherent, MitigationSelection.Residual, mixed)
+      assertTrue(built.forall(s => s.toJson.fromJson[MitigationSelection] == Right(s)))
     }
   )
 }
