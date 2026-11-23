@@ -3,22 +3,20 @@ package app.state
 import com.raquo.laminar.api.L.*
 
 import app.chart.PaletteData
-import com.risquanter.register.domain.data.MitigationSelection
-import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, TreeId}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** What a Compare slot is pointed at: a branch, plus either the tab's active
   * tree (`treeOverride = None` — the slot follows whatever tree the tab has
-  * selected) or a specific other tree (`Some(t)`, cross-tree comparison), a
-  * point in time, and the mitigations its valuation applies. The effective
-  * tree is resolved against the tab's active tree at the point the slot is
-  * consumed, so a following slot keeps tracking the active tree.
+  * selected) or a specific other tree (`Some(t)`, cross-tree comparison), and
+  * a point in time. The effective tree is resolved against the tab's active
+  * tree at the point the slot is consumed, so a following slot keeps tracking
+  * the active tree.
   */
 final case class SlotCoordinate(
   branch: BranchChoice,
   treeOverride: Option[TreeId],
-  at: Option[CommitHash],
-  selection: MitigationSelection.Enumerated
+  at: Option[CommitHash]
 ):
   /** The tree this slot compares on when the tab's selected tree is
     * `activeTree`: the pinned override, else the active tree. */
@@ -26,46 +24,34 @@ final case class SlotCoordinate(
     treeOverride.orElse(activeTree)
 
   /** True when this coordinate and `other` resolve to the same branch,
-    * effective tree and point in time under the tab's current active tree,
-    * whatever their selections. Two such coordinates read the same tree
-    * version. */
+    * effective tree and point in time under the tab's current active tree —
+    * the one relation every exclusion, engagement, and collision check
+    * delegates to. Two such coordinates read the same tree version. The pin
+    * is part of identity: a rewound slot on the baseline's tree is a distinct
+    * place (both chart), not a collision. */
   def samePlaceAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean =
     branch == other.branch && effectiveTree(activeTree) == other.effectiveTree(activeTree) && at == other.at
 
-  /** True when this coordinate and `other` are the same place under the same
-    * selection — the one relation every exclusion, engagement, and collision
-    * check delegates to. The pin and the selection are part of identity: a
-    * rewound slot, or one valued under other mitigations, on the baseline's
-    * tree is a distinct pair (both chart), not a collision. */
-  def samePairAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean =
-    samePlaceAs(other, activeTree) && selection == other.selection
-
-  /** True when this coordinate resolves to the same pair the tab itself shows.
-    * The tab is the coordinate (activeBranch, follow-active, its current pin,
-    * its selection), so a comparand at a different point in time or under a
-    * different selection is a distinct pair, not a collision. */
+  /** True when this coordinate resolves to the same place the tab itself
+    * shows. The tab is the coordinate (activeBranch, follow-active, its
+    * current pin), so a comparand at a different point in time is a distinct
+    * place, not a collision. */
   def collidesWith(
     activeBranch: BranchChoice,
     activeTree: Option[TreeId],
-    activeAt: Option[CommitHash],
-    activeSelection: MitigationSelection.Enumerated
+    activeAt: Option[CommitHash]
   ): Boolean =
-    samePairAs(SlotCoordinate.activeTab(activeBranch, activeAt, activeSelection), activeTree)
+    samePlaceAs(SlotCoordinate.activeTab(activeBranch, activeAt), activeTree)
 
 object SlotCoordinate:
   /** The active tab as a coordinate: its branch, following the active tree
-    * (no pinned override), at its current history pin (`baselineAt`) and under
-    * its selection (`baselineSelection`), so
+    * (no pinned override), at its current history pin (`baselineAt`), so
     * `effectiveTree(activeTreeId) == activeTreeId`. */
-  def activeTab(branch: BranchChoice, at: Option[CommitHash], selection: MitigationSelection.Enumerated): SlotCoordinate =
-    SlotCoordinate(branch, None, at, selection)
-
-/** Which readings a view draws for each charted node. */
-enum CurveDisplay:
-  case Inherent, Mitigated, Both
+  def activeTab(branch: BranchChoice, at: Option[CommitHash]): SlotCoordinate =
+    SlotCoordinate(branch, None, at)
 
 /** A side's complete state as copy-for-compare duplicates it. */
-final case class SideSnapshot(coordinate: SlotCoordinate, nodeSelection: Set[NodeId], display: CurveDisplay)
+final case class SideSnapshot(coordinate: SlotCoordinate, grid: CurveGrid)
 
 /** What a Compare branch picker slot currently holds — a chosen coordinate,
   * or nothing.
@@ -91,7 +77,7 @@ enum CompareLayout:
 
 /** One comparand picker slot. Slot identity is stable: choosing or clearing
   * one slot never moves another slot's coordinate, so the other slot's card
-  * keeps its tree and selection untouched.
+  * keeps its tree and its grid untouched.
   */
 final class CompareSlotState(val defaultPalette: Vector[HexColor]):
   val target: Var[CompareTarget] = Var(CompareTarget.NotChosen)
@@ -100,9 +86,9 @@ final class CompareSlotState(val defaultPalette: Vector[HexColor]):
     * other machinery (fetches, diffs, resets, viewer card) stays live. */
   val hidden: Var[Boolean] = Var(false)
 
-  /** Mirror state: while true this row's selection continuously tracks the
-    * baseline's charted set (the counterparts present in this row's tree), and
-    * manual Ctrl+click selection on the row is locked. */
+  /** Mirror state: while true this row's grid continuously tracks the
+    * baseline's (its ticks kept to the nodes present in this row's tree), and
+    * the row's boxes are disabled. */
   val mirror: Var[Boolean] = Var(false)
 
   /** This slot's curve/tree-highlight colour family. Slot-keyed, not branch:
@@ -112,13 +98,8 @@ final class CompareSlotState(val defaultPalette: Vector[HexColor]):
     * same family deliberately. */
   val palette: Var[Vector[HexColor]] = Var(defaultPalette)
 
-  /** Which readings this slot's chart draws. A comparand starts on its
-    * mitigated reading: it is compared against the baseline, which draws the
-    * mitigation-free one. */
-  val display: Var[CurveDisplay] = Var(CurveDisplay.Mitigated)
-
-  /** The node selection a copy carries until its tree loads. */
-  val pendingSeed: Var[Option[Set[NodeId]]] = Var(None)
+  /** The grid a copy carries until its tree loads. */
+  val pendingSeed: Var[Option[CurveGrid]] = Var(None)
 
   /** The slot's chosen branch as a signal (Main while `NotChosen`) — the
     * branch identity for the palette, and (materialized strict at the one
@@ -143,15 +124,8 @@ final class CompareSlotState(val defaultPalette: Vector[HexColor]):
     case CompareTarget.NotChosen => None
   }.distinct
 
-  /** The slot's selection, derived from `target` like `atSignal`. `Inherent`
-    * while nothing is chosen. */
-  val selectionSignal: Signal[MitigationSelection.Enumerated] = target.signal.map {
-    case CompareTarget.Target(c) => c.selection
-    case CompareTarget.NotChosen => MitigationSelection.Inherent
-  }.distinct
-
-  /** The slot's (branch, tree override, pin), distinct, so a selection change
-    * does not re-fire what depends on the place only. */
+  /** The slot's (branch, tree override, pin), distinct, so a write of an
+    * equal coordinate does not re-fire what depends on it. */
   val placeSignal: Signal[Option[(BranchChoice, Option[TreeId], Option[CommitHash])]] = target.signal.map {
     case CompareTarget.Target(c) => Some((c.branch, c.treeOverride, c.at))
     case CompareTarget.NotChosen => None
@@ -165,17 +139,9 @@ final class CompareSlotState(val defaultPalette: Vector[HexColor]):
       case CompareTarget.NotChosen => CompareTarget.NotChosen
     }
 
-  /** Set the slot's selection into its coordinate (no-op while nothing is
-    * chosen — there is no tree to value). */
-  def setSelection(selection: MitigationSelection.Enumerated): Unit =
-    target.update {
-      case CompareTarget.Target(c) => CompareTarget.Target(c.copy(selection = selection))
-      case CompareTarget.NotChosen => CompareTarget.NotChosen
-    }
-
 /** A compared-branch slot's full bundle: its picker state, the per-branch
-  * services built on it — an independent tree view (selection surface +
-  * curve cache on the slot's chosen coordinate) and the content-hash diff
+  * services built on it — an independent tree view (its own grid and curve
+  * cache on the slot's chosen coordinate) and the content-hash diff
   * against the tab's active branch — and the palette family that identifies
   * the branch in the Overlay chart, its card swatch, and its tree
   * highlights. Constructed once at startup (`Main`), one per slot.
@@ -225,14 +191,6 @@ final class CompareState:
     * history pin lives here rather than in a coordinate. `None` = live head. */
   val baselineAt: Var[Option[CommitHash]] = Var(None)
 
-  /** Baseline selection — held here beside the pin, for the same reason. */
-  val baselineSelection: Var[MitigationSelection.Enumerated] = Var(MitigationSelection.Inherent)
-
-  /** Which readings the baseline's chart draws. `Both` draws the
-    * mitigation-free reading alone while the selection is empty, and both
-    * readings once it is not. */
-  val baselineDisplay: Var[CurveDisplay] = Var(CurveDisplay.Both)
-
   /** Baseline (active tab) colour family — slot-keyed like the comparands, so
     * the baseline owns its colour independently of its branch. Default Aqua,
     * the single-branch chart's selected-node family. */
@@ -260,17 +218,16 @@ final class CompareState:
       .foreach(i => rows.update(_ :+ i))
 
   /** Claim the next free comparand slot and copy `source` into it: its
-    * coordinate, its display mode, and its node selection, which the slot
-    * holds until its tree loads. `None` when every slot is in use.
+    * coordinate, and its grid, which the slot holds until its tree loads.
+    * `None` when every slot is in use.
     *
     * {{{
-    * copyToNextFree(SideSnapshot(coordinate, Set(n1), CurveDisplay.Both))   // Some(0) on an empty stack
+    * copyToNextFree(SideSnapshot(coordinate, grid))   // Some(0) on an empty stack
     * }}}
     */
   def copyToNextFree(source: SideSnapshot): Option[Int] =
     CompareState.nextFreeSlot(rows.now(), slots.size).map { i =>
-      slots(i).pendingSeed.set(Some(source.nodeSelection))
-      slots(i).display.set(source.display)
+      slots(i).pendingSeed.set(Some(source.grid))
       slots(i).target.set(CompareTarget.Target(source.coordinate))
       rows.update(_ :+ i)
       i
@@ -282,5 +239,4 @@ final class CompareState:
     slots(poolIdx).hidden.set(false)
     slots(poolIdx).mirror.set(false)
     slots(poolIdx).palette.set(slots(poolIdx).defaultPalette)
-    slots(poolIdx).display.set(CurveDisplay.Mitigated)
     slots(poolIdx).pendingSeed.set(None)

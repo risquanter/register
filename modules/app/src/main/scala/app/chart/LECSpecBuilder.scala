@@ -53,20 +53,58 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   */
 final case class PinnedAxes(lossMax: Double, probabilityMax: Double)
 
-/** Which valuation a drawn curve is. `markerShape` is the Vega-Lite shape name,
-  * a contract with Vega rather than a serialised spelling. */
-enum CurveVariant(val markerShape: String):
-  case Inherent  extends CurveVariant("circle")
-  case Mitigated extends CurveVariant("triangle-up")
+/** A column a user adds to a card's grid. `markerShape` is the Vega symbol
+  * name, a contract with Vega. `glyph` is that shape as text, for the column
+  * header. */
+enum UserColumn(val markerShape: String, val glyph: String):
+  case A extends UserColumn("square", "■")
+  case B extends UserColumn("cross", "✚")
+  case C extends UserColumn("triangle-down", "▼")
+  case D extends UserColumn("triangle-right", "▶")
+  case E extends UserColumn("triangle-left", "◀")
+  case F extends UserColumn("diamond", "◆")
 
-/** One chart series: a node's curve, which valuation it is, its assigned
-  * colour, the series identity (`seriesId` — the data/colour-scale/legend
-  * key), and the legend text — `label` (the node name) stacked over `origin`
-  * ("branch · tree", when given) as two legend lines. A named type because
-  * the string fields are same-typed — as positional tuple members a swap
-  * would compile silently and render a legend of internal ids. */
+/** A column of a card's grid, and so the selection a drawn curve is under. */
+enum GridColumn:
+  case Inherent
+  case Residual
+  case User(column: UserColumn)
+
+object GridColumn:
+  /** The Vega symbol names of the two fixed columns, a contract with Vega, and
+    * each shape as text. */
+  private val InherentShape = "circle"
+  private val InherentGlyph = "●"
+  private val ResidualShape = "triangle-up"
+  private val ResidualGlyph = "▲"
+
+  /** Every column a grid can hold, in display order. */
+  val all: List[GridColumn] = Inherent :: Residual :: UserColumn.values.toList.map(User(_))
+
+  /** The column's title: its case name, and a user column's letter. */
+  def label(column: GridColumn): String = column match
+    case Inherent | Residual => column.toString
+    case User(user)          => user.toString
+
+  def markerShape(column: GridColumn): String = column match
+    case Inherent   => InherentShape
+    case Residual   => ResidualShape
+    case User(user) => user.markerShape
+
+  def glyph(column: GridColumn): String = column match
+    case Inherent   => InherentGlyph
+    case Residual   => ResidualGlyph
+    case User(user) => user.glyph
+
+/** One chart series: a node's curve, the column whose selection it is under,
+  * its assigned colour, the series identity (`seriesId` — the
+  * data/colour-scale/legend key), and the legend text — `label` (the node
+  * name) stacked over `origin` ("branch · tree", when given) as two legend
+  * lines. A named type because the string fields are same-typed — as
+  * positional tuple members a swap would compile silently and render a legend
+  * of internal ids. */
 final case class ChartSeries(
-  curve: LECNodeCurve, variant: CurveVariant, colour: HexColor,
+  curve: LECNodeCurve, column: GridColumn, colour: HexColor,
   seriesId: String, label: String, origin: Option[String]
 )
 
@@ -99,36 +137,42 @@ object LECSpecBuilder:
     * markers on a curve of 100 ticks. */
   val MarkerStride: Int = 10
 
-  /** What a mitigated series' id carries after its node id, so a node's two
-    * readings are two series. The mitigation-free series is the bare node id. */
-  private val MitigatedSuffix = "~mitigated"
+  /** What separates a node id from a column's label in a series id, so a
+    * node's curves under several columns are several series. Chosen by this
+    * project: the character is in no node id. */
+  private val SeriesSeparator = "~"
 
-  /** What a mitigated reading's legend text carries after the node's name,
-    * chosen by this project. */
-  private val MitigatedLabelSuffix = " (mitigated)"
+  /** The title of the marker legend. */
+  private val ShapeLegendTitle = "Selection"
 
   /** A marker's area in square pixels, chosen by this project to stay readable
     * on a 1.5-pixel line without hiding it. */
   private val MarkerSize: Int = 45
 
-  /** The series id of `node`'s reading under `variant`. The result is a Vega
-    * data key, which is text.
+  /** The series id of `node`'s curve under `column`. The Inherent column's is
+    * the bare node id. The result is a Vega data key, which is text.
     *
     * {{{
-    * seriesIdOf(node, CurveVariant.Inherent)    // 01HX…
-    * seriesIdOf(node, CurveVariant.Mitigated)   // 01HX…~mitigated
+    * seriesIdOf(node, GridColumn.Inherent)             // 01HX…
+    * seriesIdOf(node, GridColumn.User(UserColumn.A))   // 01HX…~A
     * }}}
     */
-  def seriesIdOf(node: NodeId, variant: CurveVariant): String = variant match
-    case CurveVariant.Inherent  => node.value
-    case CurveVariant.Mitigated => s"${node.value}$MitigatedSuffix"
+  def seriesIdOf(node: NodeId, column: GridColumn): String = column match
+    case GridColumn.Inherent                        => node.value
+    case GridColumn.Residual | GridColumn.User(_)   => s"${node.value}$SeriesSeparator${GridColumn.label(column)}"
 
-  /** The legend text of `curve`'s reading under `variant`: the node's name,
-    * marked when the reading is the mitigated one, so a node's two legend
-    * entries read apart. */
-  def labelOf(curve: LECNodeCurve, variant: CurveVariant): String = variant match
-    case CurveVariant.Inherent  => curve.name.value
-    case CurveVariant.Mitigated => s"${curve.name.value}$MitigatedLabelSuffix"
+  /** The legend text of `curve` under `column`: the node's name, followed by
+    * the column's label in brackets for every column but Inherent, so a node's
+    * legend entries can be told apart.
+    *
+    * {{{
+    * labelOf(cyber, GridColumn.Inherent)             // Cyber
+    * labelOf(cyber, GridColumn.User(UserColumn.A))   // Cyber (A)
+    * }}}
+    */
+  def labelOf(curve: LECNodeCurve, column: GridColumn): String = column match
+    case GridColumn.Inherent                      => curve.name.value
+    case GridColumn.Residual | GridColumn.User(_) => s"${curve.name.value} (${GridColumn.label(column)})"
 
   /** Build a Vega-Lite spec from paired curve data and colours.
     *
@@ -137,8 +181,8 @@ object LECSpecBuilder:
     * declares those signals at their defaults (`Interpolation.default` /
     * `LecAnnotation.defaultOn`), so no initial-value parameter is taken here.
     *
-    * @param curves        Ordered triples of (curve data, which valuation it
-    *                      is, assigned colour)
+    * @param curves        Ordered triples of (curve data, the column it is
+    *                      under, assigned colour)
     * @param origin        Second legend line for every series ("branch ·
     *                      tree") — the legend format is the same in every
     *                      mode, so single-tree and compare read alike
@@ -155,7 +199,7 @@ object LECSpecBuilder:
     * @return Vega-Lite spec as `js.Dynamic`, ready for `vegaEmbed`
     */
   def build(
-    curves: Vector[(LECNodeCurve, CurveVariant, HexColor)],
+    curves: Vector[(LECNodeCurve, GridColumn, HexColor)],
     origin: Option[String],
     width: Int = 950,
     height: Int = 400,
@@ -164,8 +208,8 @@ object LECSpecBuilder:
     zoomable: Boolean = false
   ): js.Dynamic =
     buildFromSeries(
-      curves.map { case (nc, variant, color) =>
-        ChartSeries(nc, variant, color, seriesIdOf(nc.id, variant), labelOf(nc, variant), origin)
+      curves.map { case (nc, column, color) =>
+        ChartSeries(nc, column, color, seriesIdOf(nc.id, column), labelOf(nc, column), origin)
       },
       width, height, pinned, responsive, zoomable)
 
@@ -318,16 +362,16 @@ object LECSpecBuilder:
       )
 
     // Marker layer: every `MarkerStride`-th tick of each series drawn as a
-    // point whose shape names the series' valuation. Colour stays the node's,
-    // so a node's two readings share a colour and differ in marker. The shape
-    // scale lists both variants, so its legend names them on every chart.
+    // point whose shape names the series' column. Colour stays the node's, so
+    // a node's curves under several columns share a colour and differ in
+    // marker. The shape scale lists the columns drawn, in display order.
     def makeMarkerValues(): js.Array[js.Any] =
       val arr = js.Array[js.Any]()
       ordered.foreach { s =>
         s.curve.curve.zipWithIndex.collect { case (pt, i) if i % MarkerStride == 0 => pt }.foreach { pt =>
           arr.push(js.Dynamic.literal(
             "curveId"    -> s.seriesId,
-            "variant"    -> s.variant.toString,
+            "column"     -> GridColumn.label(s.column),
             "loss"       -> pt.loss.toDouble,
             "exceedance" -> (pt.exceedanceProbability: Double)
           ))
@@ -335,11 +379,12 @@ object LECSpecBuilder:
       }
       arr
 
-    val shapeDomain = js.Array[js.Any]()
-    val shapeRange  = js.Array[js.Any]()
-    CurveVariant.values.foreach { v =>
-      shapeDomain.push(v.toString)
-      shapeRange.push(v.markerShape)
+    val drawnColumns = ordered.map(_.column).toSet
+    val shapeDomain  = js.Array[js.Any]()
+    val shapeRange   = js.Array[js.Any]()
+    GridColumn.all.filter(drawnColumns.contains).foreach { column =>
+      shapeDomain.push(GridColumn.label(column))
+      shapeRange.push(GridColumn.markerShape(column))
     }
 
     val markerLayer = js.Dynamic.literal(
@@ -350,9 +395,9 @@ object LECSpecBuilder:
         "y"     -> js.Dynamic.literal("field" -> "exceedance", "type" -> "quantitative"),
         "color" -> makeColorEncoding(),
         "shape" -> js.Dynamic.literal(
-          "field" -> "variant",
+          "field" -> "column",
           "type"  -> "nominal",
-          "title" -> "Valuation",
+          "title" -> ShapeLegendTitle,
           "scale" -> js.Dynamic.literal("domain" -> shapeDomain, "range" -> shapeRange)
         ),
         "opacity" -> VegaSpecShared.hoverOpacityConditions("false", HoverParamName)

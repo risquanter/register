@@ -4,8 +4,8 @@ import com.raquo.laminar.api.L.*
 
 /** Bordered, collapsible container for one slot's tree view: the slot's
   * (tree, branch) picker row lives in the header, the slot's own tree view is
-  * the body. Each card is an independent Ctrl+click surface — selection
-  * identity is the pair (branch, node).
+  * the body. Each card holds its own grid of ticks — a tick's identity is
+  * the card and the cell.
   *
   * Owns only the local open/collapsed flag; everything else comes in as
   * arguments (ADR-019 Pattern 4).

@@ -2,15 +2,15 @@ package app.views
 
 import zio.test.*
 
+import app.chart.GridColumn
 import app.components.BranchBar
-import app.state.{CompareTarget, SlotCoordinate}
-import com.risquanter.register.domain.data.MitigationSelection
-import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, MitigationId, NodeId, ScenarioName, TreeId}
+import app.state.{CompareTarget, CurveGrid, LECChartState, SlotCoordinate}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, ScenarioName, TreeId}
 
-/** Pure tests for `AnalyzeView`'s comparison rules: `computeSeed` (what a
-  * compare card gets selected when its branch enters the comparison),
-  * `copySeed` (what a copied card gets instead), `engagedSlots` (which slots
-  * take part), and the two picker exclusion functions.
+/** Pure tests for `AnalyzeView`'s comparison rules: `computeSeed` (which
+  * nodes a compare card gets ticked when its branch enters the comparison),
+  * `copySeed` (the grid a copied card gets instead), `engagedSlots` (which
+  * slots take part), and the two picker exclusion functions.
   */
 object AnalyzeViewSeedSpec extends ZIOSpecDefault:
 
@@ -28,12 +28,9 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
 
   private val scenarioB = BranchChoice.Scenario(ScenarioName.fromString("scenario-b").toOption.get)
 
-  private val inherent = MitigationSelection.Inherent
-  private val selectingM: MitigationSelection.Enumerated = MitigationSelection.single(MitigationId(nid(50).toSafeId))
-
-  /** A coordinate at the head, under no mitigation. */
+  /** A coordinate at the head. */
   private def coord(branch: BranchChoice, treeOverride: Option[TreeId]): SlotCoordinate =
-    SlotCoordinate(branch, treeOverride, None, inherent)
+    SlotCoordinate(branch, treeOverride, None)
 
   def spec = suite("AnalyzeView pure helpers")(
 
@@ -113,18 +110,25 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
       )
     },
 
-    test("a copy's pending seed wins: its nodes the slot's tree holds, in id order, and no root fallback") {
-      val seeds = AnalyzeView.copySeed(pending = Set(leaf3, leaf1, root), compareTreeNodeIds = Set(leaf1, leaf3, croot))
+    test("a copy's pending seed wins: the source's columns, with its ticks kept to the nodes the slot's tree holds, and no root fallback") {
+      val cap = LECChartState.MaxTickedNodes
+      val pending = List(leaf3, leaf1, root)
+        .foldLeft(CurveGrid.empty.addColumn.get)((grid, n) => grid.tick(GridColumn.Inherent, n, cap).get)
+      val seeded = AnalyzeView.copySeed(pending, compareTreeNodeIds = Set(leaf1, leaf3, croot))
       val (_, derived) = AnalyzeView.computeSeed(Set.empty, Some(root), Set(leaf1, leaf3, croot), Some(croot))
-      assertTrue(seeds == List(leaf1, leaf3), derived != seeds)
+      assertTrue(
+        seeded.tickedNodes == Set(leaf1, leaf3),
+        seeded.columns == pending.columns,
+        derived.toSet != seeded.tickedNodes
+      )
     },
 
-    test("engagedSlots drops a slot whose pair duplicates an earlier engaged slot's (earlier wins)") {
+    test("engagedSlots drops a slot whose place duplicates an earlier engaged slot's (earlier wins)") {
       val targets = Vector(
         CompareTarget.Target(coord(scenarioB, Some(tid))),
-        CompareTarget.Target(coord(scenarioB, None)) // follows active tree = tid: same pair
+        CompareTarget.Target(coord(scenarioB, None)) // follows active tree = tid: same place
       )
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), None, inherent)
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), None)
       assertTrue(engaged == Vector((0, scenarioB)))
     },
 
@@ -133,23 +137,17 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
         CompareTarget.Target(coord(scenarioB, Some(tid))),
         CompareTarget.Target(coord(scenarioB, Some(tid2)))
       )
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, None, None, inherent)
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, None, None)
       assertTrue(engaged == Vector((0, scenarioB), (1, scenarioB)))
     },
 
-    test("engagedSlots drops a slot colliding with the tab's own pair") {
+    test("engagedSlots drops a slot colliding with the tab's own place") {
       val targets = Vector(
-        CompareTarget.Target(coord(BranchChoice.Main, None)), // = the tab's own pair
+        CompareTarget.Target(coord(BranchChoice.Main, None)), // = the tab's own place
         CompareTarget.Target(coord(scenarioB, None))
       )
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), None, inherent)
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), None)
       assertTrue(engaged == Vector((1, scenarioB)))
-    },
-
-    test("engagedSlots keeps a slot whose selection differs from the active tab's") {
-      val targets = Vector(CompareTarget.Target(coord(BranchChoice.Main, None).copy(selection = selectingM)))
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), None, inherent)
-      assertTrue(engaged == Vector((0, BranchChoice.Main)))
     },
 
     test("engagedSlots keeps a comparand at head when the baseline is pinned to the past") {
@@ -158,7 +156,7 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
       val targets = Vector(CompareTarget.Target(coord(BranchChoice.Main, None)))
       // active tab pinned to `commit`: the comparand at head is a distinct point
       // in time, so it engages instead of colliding
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), Some(commit), inherent)
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), Some(commit))
       assertTrue(engaged == Vector((0, BranchChoice.Main)))
     },
 
@@ -174,14 +172,10 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
       )
     },
 
-    test("excludedBranchValues compares the head under no mitigation, which is what a branch pick produces") {
+    test("excludedBranchValues compares the head, which is what a branch pick produces") {
       val commit = CommitHash.fromString("d" * 40).toOption.get
-      val rewound = SlotCoordinate(scenarioB, None, Some(commit), inherent)
-      val mitigated = coord(scenarioB, None).copy(selection = selectingM)
-      assertTrue(
-        AnalyzeView.excludedBranchValues(None, Vector(rewound), Some(tid)).isEmpty,
-        AnalyzeView.excludedBranchValues(None, Vector(mitigated), Some(tid)).isEmpty
-      )
+      val rewound = SlotCoordinate(scenarioB, None, Some(commit))
+      assertTrue(AnalyzeView.excludedBranchValues(None, Vector(rewound), Some(tid)).isEmpty)
     },
 
     test("excludedTreeOverrideValues hides follow-active when another same-branch slot follows the active tree") {
@@ -189,7 +183,7 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
       val excluded = AnalyzeView.excludedTreeOverrideValues(
         scenarioB, None, values, Vector(coord(scenarioB, None)), Some(tid)
       )
-      // pinning the active tree resolves to the same pair as following it,
+      // pinning the active tree resolves to the same place as following it,
       // so its explicit value is excluded alongside ""
       assertTrue(excluded == Set("", tid.value.toString))
     },
@@ -205,7 +199,7 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
     test("excludedTreeOverrideValues compares at the slot's own pin, which a tree pick keeps") {
       val commit = CommitHash.fromString("e" * 40).toOption.get
       val values = "" :: List(tid.value.toString, tid2.value.toString)
-      val other  = SlotCoordinate(scenarioB, Some(tid2), Some(commit), inherent)
+      val other  = SlotCoordinate(scenarioB, Some(tid2), Some(commit))
       assertTrue(
         AnalyzeView.excludedTreeOverrideValues(scenarioB, Some(commit), values, Vector(other), Some(tid)) == Set(tid2.value.toString),
         AnalyzeView.excludedTreeOverrideValues(scenarioB, None, values, Vector(other), Some(tid)).isEmpty

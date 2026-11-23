@@ -5,7 +5,7 @@ import com.raquo.laminar.api.L.*
 import scala.scalajs.js
 import zio.prelude.Validation
 
-import app.chart.{ColorAssigner, CurveVariant, LECSpecBuilder}
+import app.chart.{ColorAssigner, GridColumn, LECSpecBuilder, UserColumn}
 import app.core.ZJS.*
 import app.core.{LocalProblem, ViewFailure}
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve, MitigationSelection}
@@ -16,20 +16,19 @@ import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
 import com.risquanter.register.http.requests.{CurveValuationRequest, LECCurvesMultiRequest}
 import com.risquanter.register.http.responses.{LECCurvesResponse, LECNodeSeries}
 
-/** Chart selection and LEC curve data state, separated from tree navigation.
+/** One card's chart state, separated from tree navigation.
   *
-  * Owns the user's manual node selection for charting (Ctrl+click picks),
-  * the fetched curve data cache, and the bus-based toggle with a guard at
-  * `LECChartState.MaxUserSelections`.
+  * Owns the card's grid — its columns, the selection each states and the
+  * nodes ticked in each — and the curves fetched for it. The view changes the
+  * grid only through the edits below, and a tick past
+  * `LECChartState.MaxTickedNodes` is refused.
   *
-  * Fetches each node's readings via `lec-multi`, under the mitigation
-  * selection `selectionAccessor` returns. The Vega-Lite spec is built
-  * client-side from the readings `display` keeps.
+  * Fetches through `lec-multi`, one valuation per distinct selection among
+  * the columns holding a tick. The Vega-Lite spec is built client-side from
+  * the curves of the columns not hidden.
   *
-  * The reactive `loadCurves` call that merges query-matched nodes with
-  * user selections is driven from `AnalyzeView`, where both
-  * `AnalyzeQueryState.satisfyingNodeIds` and this state's
-  * `userSelectedNodeIds` are in scope.
+  * The fetch is driven from `AnalyzeView`, which calls `reloadCurrentCurves`
+  * when `requested` changes.
   *
   * Extends `WorkspaceAnalysisEndpoints` to access workspace-scoped Tapir endpoint
   * definitions for ZJS bridge calls.
@@ -40,10 +39,8 @@ import com.risquanter.register.http.responses.{LECCurvesResponse, LECNodeSeries}
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   * @param branchAccessor Returns this tab's active branch (BranchChoice) — BranchBar.
   * @param atAccessor     Returns the commit the reads are pinned to; `None` is the head.
-  * @param selectionAccessor Returns the mitigations the curve read applies.
-  * @param display        Which of each node's readings the chart draws.
-  * @param userPalette    Palette family for user-selected (Ctrl+click) nodes.
-  *                       A signal: the family follows this slot's own palette
+  * @param userPalette    Palette family for ticked nodes. A signal: the family
+  *                       follows this slot's own palette
   *                       (`CompareSlotState.palette` / `CompareState
   *                       .baselinePalette`), so the tree highlights and curve
   *                       colours match the slot's family in the Overlay chart.
@@ -56,41 +53,43 @@ final class LECChartState(
   userIdAccessor: () => Option[UserId.Authenticated],
   branchAccessor: () => BranchChoice,
   atAccessor: () => Option[CommitHash],
-  selectionAccessor: () => MitigationSelection.Enumerated,
-  display: Signal[CurveDisplay],
   userPalette: Signal[Vector[HexColor]],
   origin: Signal[Option[String]]
 ) extends WorkspaceAnalysisEndpoints:
 
-  // ── User selection state ──────────────────────────────────────
-  /** Node IDs manually Ctrl+clicked by the user for LEC chart overlay. */
-  val userSelectedNodeIds: Var[Set[NodeId]] = Var(Set.empty)
+  // ── Grid state ────────────────────────────────────────────────
+  private val gridVar: Var[CurveGrid] = Var(CurveGrid.empty)
+
+  /** The card's grid. Changed only through the edits below. */
+  val grid: StrictSignal[CurveGrid] = gridVar.signal
 
   /** Node IDs satisfying the current query (set from AnalyzeView). */
   val satisfyingNodeIds: Var[Set[NodeId]] = Var(Set.empty)
 
-  /** Each node's curves from the `lec-multi` answer, in the form
-    * `LECChartState.seriesByNode` gives: the inherent curve, and a second one
-    * where the selection reaches the node. Keyed by `NodeId`, matching the
-    * domain type end-to-end (ADR-001 §3).
+  /** Each requested selection's curves, by node, from the `lec-multi` answer.
+    * Keyed by the selection each valuation repeats and by `NodeId`, matching
+    * the domain types end-to-end (ADR-001 §3).
     *
-    * Written only by the trigger pipeline below — `loadCurves`/`clearCurves`/
-    * `reset` emit triggers instead of setting this Var, so a new request or a
-    * reset supersedes whatever the previous request was still doing and a
-    * stale response can never overwrite a newer one. Same mechanism as
-    * `ChangedNodesState.diffResult` and `TreeListState`.
+    * Written only by the trigger pipeline below — `reloadCurrentCurves`/
+    * `clearCurves`/`reset` emit triggers instead of setting this Var, so a new
+    * request or a reset supersedes whatever the previous request was still
+    * doing and a stale response can never overwrite a newer one. Same
+    * mechanism as `ChangedNodesState.diffResult` and `TreeListState`.
     */
-  val curveCache: Var[LoadState[Map[NodeId, List[LECNodeSeries]]]] = Var(LoadState.Idle)
+  val curveCache: Var[LoadState[Map[MitigationSelection, Map[NodeId, LECNodeSeries]]]] = Var(LoadState.Idle)
 
   // The failure side is a `ViewFailure`, because a request this state refuses
   // to send settles the cache the same way a request the server refused does.
   private val curvesTrigger =
-    new EventBus[Option[() => EventStream[Either[ViewFailure, Map[NodeId, List[LECNodeSeries]]]]]]
+    new EventBus[Option[() => EventStream[Either[ViewFailure, Map[MitigationSelection, Map[NodeId, LECNodeSeries]]]]]]
 
   // Write-guarded: callers fire on signal ticks, not only on real
   // transitions, and Var.set emits even when the value is unchanged — an
   // unguarded write would rebuild the chart spec for a no-op.
-  requestPipeline[Either[ViewFailure, Map[NodeId, List[LECNodeSeries]]], LoadState[Map[NodeId, List[LECNodeSeries]]]](
+  requestPipeline[
+    Either[ViewFailure, Map[MitigationSelection, Map[NodeId, LECNodeSeries]]],
+    LoadState[Map[MitigationSelection, Map[NodeId, LECNodeSeries]]]
+  ](
     curvesTrigger.events,
     idle    = LoadState.Idle,
     loading = LoadState.Loading,
@@ -124,8 +123,11 @@ final class LECChartState(
       case (overrides, None)             => overrides
     }.distinct
 
-  /** Union of query-matched + user-selected node IDs — the set of nodes
-    * whose curves should be rendered in the chart.
+  /** The nodes ticked in at least one column, distinct. */
+  private val tickedNodes: Signal[Set[NodeId]] = grid.map(_.tickedNodes).distinct
+
+  /** Union of query-matched and ticked node IDs — the set of nodes whose
+    * curves should be rendered in the chart.
     */
   // .distinct at the producer (here and on nodeColorMap below), not at each
   // consumer: Var.set emits even when the value is unchanged, and every
@@ -135,63 +137,84 @@ final class LECChartState(
   // e.g. a query re-run writing an equal satisfyingNodeIds set — for all of
   // them.
   val visibleCurves: Signal[Set[NodeId]] =
-    userSelectedNodeIds.signal
+    tickedNodes
       .combineWith(satisfyingNodeIds.signal)
-      .map { (user, query) => user ++ query }
+      .map { (ticked, query) => ticked ++ query }
       .distinct
 
-  /** User-selected nodes with no curve in the current cache — selections that
-    * do not exist at the pinned commit. Empty at head (every selection has
-    * a curve). Drives the transient "not present at this point in time" notice;
+  /** Ticked nodes with no curve in the current cache — nodes that do not
+    * exist at the pinned commit. Empty at head (every ticked node has a
+    * curve). Drives the transient "not present at this point in time" notice;
     * the chart already omits them. */
   val droppedSelections: Signal[Set[NodeId]] =
-    userSelectedNodeIds.signal
+    tickedNodes
       .combineWith(curveCache.signal)
       .map(LECChartState.deriveDropped)
       .distinct
 
   /** Node → hex colour mapping for chart curves and tree highlights.
-    * Derived from current visible nodes classified into query/user/overlap
+    * Derived from current visible nodes classified into query/ticked/overlap
     * groups, each assigned a palette shade via `ColorAssigner`.
     */
   val nodeColorMap: Signal[Map[NodeId, HexColor]] =
     satisfyingNodeIds.signal
-      .combineWith(userSelectedNodeIds.signal, colorOverrides.signal, previewOverride.signal, userPalette)
-      .map { (query, user, overrides, preview, palette) =>
-        val base = ColorAssigner.assign(query, user, overrides, aquaPalette = palette)
+      .combineWith(tickedNodes, colorOverrides.signal, previewOverride.signal, userPalette)
+      .map { (query, ticked, overrides, preview, palette) =>
+        val base = ColorAssigner.assign(query, ticked, overrides, aquaPalette = palette)
         preview match
           case Some((nid, hex)) if base.contains(nid) => base.updated(nid, hex)
           case _                                      => base
       }
       .distinct
 
+  /** What the next curve request states, emitted only when it changes. */
+  val requested: Signal[Map[GridColumn, (MitigationSelection, Set[NodeId])]] =
+    grid.combineWith(satisfyingNodeIds.signal).map((g, query) => g.requested(query)).distinct
+
+  /** The mitigations of the tree last loaded. Kept while a reload is in
+    * flight, so the curves drawn do not change until the reload settles. */
+  private val lastHeld: Signal[Set[MitigationId]] =
+    selectedTree.scanLeft(LECChartState.heldBy(_).getOrElse(Set.empty)) { (previous, tree) =>
+      tree match
+        case LoadState.Loading => previous
+        case other             => LECChartState.heldBy(other).getOrElse(Set.empty)
+    }
+
+  /** The curves the card draws, per node, each with its column. */
+  val drawnCurves: Signal[LoadState[Map[NodeId, List[(GridColumn, LECNodeCurve)]]]] =
+    curveCache.signal.distinct
+      .combineWith(requested, grid.map(_.hidden).distinct, lastHeld)
+      .map { (cache, asked, hidden, held) => cache.map(LECChartState.drawn(asked, hidden, held, _)) }
+      .distinct
+
   /** Complete Vega-Lite spec ready for `vegaEmbed`, derived reactively from
-    * the curve cache, visible node set, and colour assignments.
+    * the drawn curves, visible node set, and colour assignments.
     *
     * Composes `ColorAssigner.pairWithColors` → `LECSpecBuilder.build`
     * inside `LoadState.map`, eliminating manual Idle/Loading/Failed threading.
     */
   val specSignal: Signal[LoadState[js.Dynamic]] =
     // All inputs are deduplicated (structural equality on
-    // LoadState/Set/Map — visibleCurves/nodeColorMap at their definitions
-    // above): every recompute below creates a NEW js.Dynamic, and
-    // LECChartView re-embeds the whole Vega chart on every emission —
-    // resetting the chart's own toggle params. Without the dedup, any no-op
-    // Var write upstream (e.g. TreeDetailView's close-picker-on-any-click
-    // → clearPreview chain) tore the chart down on every plain tree click.
-    curveCache.signal.distinct
-      .combineWith(visibleCurves, nodeColorMap, origin, display)
-      .map { (cacheState, visible, colorMap, o, shown) =>
-        // Short-circuit to Idle when no curves are selected.
-        // Without this guard, deselecting the last node causes a transient
+    // LoadState/Set/Map — at their definitions above): every recompute below
+    // creates a NEW js.Dynamic, and LECChartView re-embeds the whole Vega
+    // chart on every emission — resetting the chart's own toggle params.
+    // Without the dedup, any no-op Var write upstream (e.g. TreeDetailView's
+    // close-picker-on-any-click → clearPreview chain) tore the chart down on
+    // every plain tree click.
+    drawnCurves
+      .combineWith(visibleCurves, nodeColorMap, origin)
+      .map { (drawnState, visible, colorMap, o) =>
+        // Short-circuit to Idle when no node is visible.
+        // Without this guard, unticking the last node causes a transient
         // Loaded(emptySpec) emission (curveCache still holds stale data)
-        // before AnalyzeView resets curveCache to Idle.  That transient causes
-        // LECChartView to mount a new Vega container which immediately gets
-        // replaced — leaving a stale EmbedResult that breaks the next select.
+        // before the fetch subscription resets curveCache to Idle. That
+        // transient causes LECChartView to mount a new Vega container which
+        // immediately gets replaced — leaving a stale EmbedResult that breaks
+        // the next tick.
         if visible.isEmpty then LoadState.Idle
-        else cacheState.map { allCurves =>
+        else drawnState.map { curves =>
           LECSpecBuilder.build(
-            ColorAssigner.pairWithColors(LECChartState.readings(allCurves, shown), visible, colorMap),
+            ColorAssigner.pairWithColors(curves, visible, colorMap),
             origin = o,
             pinned = None,
             responsive = true,
@@ -200,35 +223,53 @@ final class LECChartState(
         }
       }
 
-  // ── Bus-based toggle (ADR-019 P2: events up) ─────────────────
-
-  /** WriteBus exposed to views for Ctrl+click toggle events.
-    *
-    * Views emit node IDs into this bus; the internal observer handles
-    * set toggle + selection-cap guard. This keeps mutation logic encapsulated
-    * inside the state owner (ADR-019 P2: events up, not imperative calls).
-    */
-  private val userSelectionBus: EventBus[NodeId] = new EventBus[NodeId]
-  val userSelectionToggle: WriteBus[NodeId] = userSelectionBus.writer
+  // ── Grid edits (ADR-019: the owner changes its state) ────────
 
   private val capReachedBus: EventBus[Unit] = new EventBus[Unit]
 
-  /** Emits when a selection is refused because `MaxUserSelections` are already
-    * selected. The view that took the click shows the notice beside the tree. */
+  /** Emits when a tick is refused because `MaxTickedNodes` nodes already hold
+    * one. The view that took the click shows the notice beside the tree. */
   val selectionCapReached: EventStream[Unit] = capReachedBus.events
 
-  // Internal observer — handles the toggle + cap logic. A refused selection
-  // leaves the set unchanged and emits on `selectionCapReached`.
-  // Uses unsafeWindowOwner: LECChartState lives for the app lifetime.
-  userSelectionBus.events.foreach { nodeId =>
-    val current = userSelectedNodeIds.now()
-    if current.contains(nodeId) then
-      userSelectedNodeIds.update(_ - nodeId)
-    else if current.size >= LECChartState.MaxUserSelections then
-      capReachedBus.emit(())
-    else
-      userSelectedNodeIds.update(_ + nodeId)
-  }(using unsafeWindowOwner)
+  /** Write the grid, unless it is the one held: `Var.set` emits even when the
+    * value is unchanged. */
+  private def write(next: CurveGrid): Unit =
+    if gridVar.now() != next then gridVar.set(next)
+
+  /** Tick or untick one cell. A tick the limit refuses leaves the grid as it
+    * is and emits on `selectionCapReached`. */
+  def setTick(column: GridColumn, node: NodeId, on: Boolean): Unit =
+    if on then
+      gridVar.now().tick(column, node, LECChartState.MaxTickedNodes) match
+        case Some(ticked) => write(ticked)
+        case None         => capReachedBus.emit(())
+    else write(gridVar.now().untick(column, node))
+
+  /** Add the next free user column. Does nothing when all are held. */
+  def addColumn(): Unit =
+    gridVar.now().addColumn.foreach(write)
+
+  def removeColumn(column: UserColumn): Unit =
+    write(gridVar.now().removeColumn(column))
+
+  /** Apply `edit` to a user column's selection. An edit its constructor
+    * refuses leaves the grid as it is. */
+  def editSelection(
+    column: UserColumn,
+    edit:   MitigationSelection.Enumerated => Validation[ValidationError, MitigationSelection.Enumerated]
+  ): Unit =
+    gridVar.now().editSelection(column, edit).toOption.foreach(write)
+
+  def toggleHidden(column: GridColumn): Unit =
+    write(gridVar.now().toggleHidden(column))
+
+  /** Replace the grid whole, for the mirror and a copy's seed. Skips an equal one. */
+  def setGrid(grid: CurveGrid): Unit =
+    write(grid)
+
+  /** Empty the grid, for a tree switch. */
+  def clearGrid(): Unit =
+    write(CurveGrid.empty)
 
   // ── Actions ───────────────────────────────────────────────────
 
@@ -255,16 +296,10 @@ final class LECChartState(
       case Some(_) => previewOverride.set(None)
       case None    => ()
 
-  /** Replace the user selection wholesale (mirror-baseline sync). Writes
-    * directly, like `reset()`, so the whole set changes in one transaction
-    * rather than one toggle per node; skips the write when nothing changes. */
-  def setUserSelection(ids: Set[NodeId]): Unit =
-    if userSelectedNodeIds.now() != ids then userSelectedNodeIds.set(ids)
-
-  /** Reset chart state (called when tree selection changes). Also supersedes
-    * an in-flight curve fetch, if one was still running. */
+  /** Reset chart state for a reload of the tree: the ticks go and the columns
+    * stay. Also supersedes an in-flight curve fetch, if one was still running. */
   def reset(): Unit =
-    userSelectedNodeIds.set(Set.empty)
+    write(gridVar.now().withoutTicks)
     satisfyingNodeIds.set(Set.empty)
     clearCurves()
     colorOverrides.set(Map.empty)
@@ -274,154 +309,145 @@ final class LECChartState(
   def clearCurves(): Unit =
     curvesTrigger.emit(None)
 
-  /** Re-fetch the current visible selection's curves at the current pin — used
-    * when only the point-in-time (`at`) changes: the selection is unchanged but
-    * its curves must be re-read at the new commit, so the same curves scrub
-    * through history. Empty selection → clear. Nodes absent at the pin come
-    * back missing from the cache and surface via `droppedSelections`. */
-  def reloadCurrentCurves(): Unit =
-    (userSelectedNodeIds.now() ++ satisfyingNodeIds.now()).toList match
-      case Nil => clearCurves()
-      case ids => loadCurves(ids)
+  /** What the grid and the query ask for now. */
+  private[state] def currentRequest: Map[GridColumn, (MitigationSelection, Set[NodeId])] =
+    gridVar.now().requested(satisfyingNodeIds.now())
 
-  /** Fetch the given nodes' readings from the backend, under the current
-    * selection.
+  /** Fetch the curves the grid asks for, at the current pin. Nothing asked
+    * for clears the cache. Nodes absent at the pin come back missing and
+    * surface via `droppedSelections`.
     *
-    * The request names only the selected mitigations the loaded tree holds,
-    * because the server refuses a request naming one the tree lacks. A
-    * request this state cannot build settles the cache as a failed form, with
-    * the refusals it was built with. While the tree is not loaded a non-empty
-    * selection cannot be checked against it, and nothing is fetched: the
-    * owner calls `reloadCurrentCurves` once the tree arrives.
-    *
-    * @param nodeIds List of node IDs to fetch curves for
+    * A user column's selection is sent without the mitigations the loaded
+    * tree does not hold, because the server refuses a request naming one the
+    * tree lacks. A request this state cannot build settles the cache as a
+    * failed form, with the refusals it was built with. While the tree is not
+    * loaded a selection naming a mitigation cannot be checked against it, and
+    * nothing is fetched: the owner calls this again once the tree arrives.
     */
-  def loadCurves(nodeIds: List[NodeId]): Unit =
-    (keySignal.now(), selectedTreeId.now()) match
-      case (Some(key), Some(treeId)) =>
-        LECChartState.requestFor(nodeIds, selectionAccessor(), heldMitigations) match
-          case None => ()
-          case Some(Left(problem)) =>
-            curvesTrigger.emit(Some(() => EventStream.fromValue(Left(problem), emitOnce = true)))
-          case Some(Right(request)) =>
-            curvesTrigger.emit(Some(() =>
-              getWorkspaceLECCurvesMultiEndpoint(
-                // omitAbsent = true: a rewound read must drop nodes that don't exist
-                // at the pinned commit (surfaced via droppedSelections) rather
-                // than fail the whole chart.
-                (userIdAccessor(), key, treeId, false, request, branchAccessor(), atAccessor(), true)
-              ).map(LECChartState.seriesByNode).toOutcomeEventStream
-            ))
-      case _ => () // No workspace or tree selected — nothing to do
-
-  /** The mitigations of the loaded tree, or none while it is not loaded. */
-  private def heldMitigations: Option[Set[MitigationId]] =
-    selectedTree.now() match
-      case LoadState.Loaded(tree) => Some(tree.mitigations.map(_.id).toSet)
-      case _                      => None
+  def reloadCurrentCurves(): Unit =
+    val asked = currentRequest
+    if asked.isEmpty then clearCurves()
+    else
+      (keySignal.now(), selectedTreeId.now()) match
+        case (Some(key), Some(treeId)) =>
+          LECChartState.requestFor(asked, LECChartState.heldBy(selectedTree.now())) match
+            case None => ()
+            case Some(Left(problem)) =>
+              curvesTrigger.emit(Some(() => EventStream.fromValue(Left(problem), emitOnce = true)))
+            case Some(Right(request)) =>
+              curvesTrigger.emit(Some(() =>
+                getWorkspaceLECCurvesMultiEndpoint(
+                  // omitAbsent = true: a rewound read must drop nodes that don't exist
+                  // at the pinned commit (surfaced via droppedSelections) rather
+                  // than fail the whole chart.
+                  (userIdAccessor(), key, treeId, false, request, branchAccessor(), atAccessor(), true)
+                ).map(LECChartState.curvesBySelection).toOutcomeEventStream
+              ))
+        case _ => () // No workspace or tree selected — nothing to do
 
 object LECChartState:
-  /** The most curves a user may select by Ctrl+click, chosen by this project. */
-  val MaxUserSelections: Int = 13
+  /** The most nodes a card may hold a tick for, chosen by this project. */
+  val MaxTickedNodes: Int = 13
 
-  /** The curve request for `nodeIds` under `selection`, restricted to the
-    * mitigations in `held`. It states the inherent valuation, and a second
-    * valuation under the selection for the same nodes when the selection is
-    * not inherent. `None` when the tree's mitigations are not known and the
-    * selection names some, so the request cannot be built yet. `Left` when a
-    * constructor refuses it.
+  /** The mitigations of a loaded tree, or none while it is not loaded. */
+  private def heldBy(tree: LoadState[RiskTree]): Option[Set[MitigationId]] = tree match
+    case LoadState.Loaded(loaded) => Some(loaded.mitigations.map(_.id).toSet)
+    case _                        => None
+
+  /** Whether a column of `requested` states a selection that names a
+    * mitigation, so that the request needs the tree's mitigations. */
+  private[state] def namesMitigation(requested: Map[GridColumn, (MitigationSelection, Set[NodeId])]): Boolean =
+    requested.values.exists { (selection, _) =>
+      selection match
+        case MitigationSelection.Selected(_)                              => true
+        case MitigationSelection.Inherent | MitigationSelection.Residual => false
+    }
+
+  /** `selection` without the mitigations not in `held`. `Inherent` and
+    * `Residual` name none and pass unchanged. */
+  def sentSelection(selection: MitigationSelection, held: Set[MitigationId]): Validation[ValidationError, MitigationSelection] =
+    selection match
+      case enumerated: MitigationSelection.Enumerated => SelectionEdit.present(enumerated, held).map(_._1)
+      case MitigationSelection.Residual               => Validation.succeed(MitigationSelection.Residual)
+
+  /** The curve request for `requested`: one valuation per distinct sent
+    * selection, naming the union of its columns' nodes in identifier order.
+    * `None` when a requested selection names a mitigation and `held` is not
+    * known. `Left` when a constructor refuses it. `requested` is not empty.
     *
     * {{{
-    * requestFor(List(n1), Inherent, held = None)           // Some(Right(n1 under Inherent))
-    * requestFor(List(n1), selecting(m), held = Some(Set(m))) // Some(Right(n1 under Inherent, n1 under m))
-    * requestFor(List(n1), selecting(m), held = None)       // None
-    * requestFor(10001 nodes, Inherent, held = None)        // Some(Left(FormInvalid(too many nodes)))
+    * // Inherent holds n1; column A applies m and holds n1
+    * requestFor(asked, held = Some(Set(m)))   // Some(Right(n1 under Inherent, n1 under m))
+    * requestFor(asked, held = Some(Set()))    // Some(Right(n1 under Inherent)): A now applies nothing
+    * requestFor(asked, held = None)           // None
     * }}}
     */
   def requestFor(
-    nodeIds: List[NodeId],
-    selection: MitigationSelection.Enumerated,
-    held: Option[Set[MitigationId]]
+    requested: Map[GridColumn, (MitigationSelection, Set[NodeId])],
+    held:      Option[Set[MitigationId]]
   ): Option[Either[LocalProblem, LECCurvesMultiRequest]] =
-    val presentV = (selection, held) match
-      case (MitigationSelection.Inherent, _) => Some(Validation.succeed(MitigationSelection.Inherent))
-      case (_, Some(ids))                    => Some(SelectionEdit.present(selection, ids).map(_._1))
-      case (_, None)                         => None
-    presentV.map { v =>
-      v.flatMap(valuationsFor(nodeIds, _))
+    val inColumnOrder = GridColumn.all.flatMap(requested.get)
+    val sentV = (held, namesMitigation(requested)) match
+      case (Some(ids), _) =>
+        Some(Validation.validateAll(inColumnOrder.map((selection, nodes) => sentSelection(selection, ids).map(_ -> nodes))))
+      case (None, false) => Some(Validation.succeed(inColumnOrder))
+      case (None, true)  => None
+    sentV.map { v =>
+      v.flatMap(valuationsFor)
         .flatMap(LECCurvesMultiRequest.create)
         .toEither.left.map(errors => LocalProblem.FormInvalid(errors.toList))
     }
 
-  /** The valuations of `nodeIds` the card asks for under `selection`: the
-    * inherent one, then the one under `selection` when it applies a
-    * mitigation. The node bound is the same for both, so the second is built
-    * only once the first is. */
+  /** One valuation per distinct selection of `sent`, in first-seen order,
+    * naming the union of the nodes asked for under it. */
   private def valuationsFor(
-    nodeIds: List[NodeId],
-    selection: MitigationSelection.Enumerated
+    sent: List[(MitigationSelection, Set[NodeId])]
   ): Validation[ValidationError, List[CurveValuationRequest]] =
-    val inherentV = CurveValuationRequest.create(MitigationSelection.Inherent, nodeIds)
-    selection match
-      case MitigationSelection.Inherent => inherentV.map(List(_))
-      case selected @ MitigationSelection.Selected(_) =>
-        inherentV.flatMap(inherent => CurveValuationRequest.create(selected, nodeIds).map(List(inherent, _)))
+    val nodesUnder = sent.groupMapReduce(_._1)(_._2)(_ ++ _)
+    Validation.validateAll(
+      sent.map(_._1).distinct.map(selection =>
+        CurveValuationRequest.create(selection, nodesUnder(selection).toList.sortBy(_.value)))
+    )
 
-  /** Each node's curves from the answer's valuations, in the form the card
-    * draws: the inherent valuation's curve first, then the other valuation's
-    * curve where its `withMitigations` names a mitigation.
+  /** The answer's valuations, keyed by the selection each repeats. */
+  def curvesBySelection(response: LECCurvesResponse): Map[MitigationSelection, Map[NodeId, LECNodeSeries]] =
+    response.valuations.map(valuation => valuation.selection -> valuation.curves).toMap
+
+  /** The curves to draw: for each column of `requested` not in `hidden`, the
+    * curve of each of its nodes under its sent selection, where the answer
+    * holds one. A node's curves are in column order.
     *
     * {{{
-    * // the answer holds Inherent and one selection; the selection reaches n1 and not n2
-    * seriesByNode(answer) // n1 -> [inherent, selected], n2 -> [inherent]
+    * // Inherent and A both hold n1; A is hidden
+    * drawn(asked, hidden = Set(A), held, curves)   // n1 -> [Inherent -> its inherent curve]
     * }}}
     */
-  def seriesByNode(response: LECCurvesResponse): Map[NodeId, List[LECNodeSeries]] =
-    val (inherent, others) = response.valuations.partition(_.selection match
-      case MitigationSelection.Inherent                                 => true
-      case MitigationSelection.Residual | MitigationSelection.Selected(_) => false)
-    val first  = inherent.flatMap(_.curves.toList)
-    val second = others.flatMap(_.curves.toList).filter((_, series) => series.withMitigations.nonEmpty)
-    (first ++ second).groupMap((id, _) => id)((_, series) => series)
-
-  /** The readings a view draws, per node, under `display`. `Inherent` keeps
-    * the reading that names no mitigation. `Mitigated` keeps the other reading
-    * where the node has one, and the mitigation-free one where it does not,
-    * because that is the node's figure under a selection that does not reach
-    * it. `Both` keeps every reading. The variant is read off the reading, so a
-    * curve's marker says which valuation it is under every display mode.
-    *
-    * {{{
-    * // n1 has both readings, n2 only the mitigation-free one
-    * readings(curves, Inherent)    // n1 -> [Inherent], n2 -> [Inherent]
-    * readings(curves, Mitigated)   // n1 -> [Mitigated], n2 -> [Inherent]
-    * readings(curves, Both)        // n1 -> [Inherent, Mitigated], n2 -> [Inherent]
-    * }}}
-    */
-  def readings(
-    curves: Map[NodeId, List[LECNodeSeries]],
-    display: CurveDisplay
-  ): Map[NodeId, List[(CurveVariant, LECNodeCurve)]] =
-    curves.view.mapValues { series =>
-      val (inherent, mitigated) = series.partition(_.withMitigations.isEmpty)
-      val tagged =
-        inherent.map(s => CurveVariant.Inherent -> s.curve) ++ mitigated.map(s => CurveVariant.Mitigated -> s.curve)
-      display match
-        case CurveDisplay.Both      => tagged
-        case CurveDisplay.Inherent  => tagged.filter(_._1 == CurveVariant.Inherent)
-        case CurveDisplay.Mitigated =>
-          tagged.filter(_._1 == CurveVariant.Mitigated) match
-            case Nil  => tagged
-            case kept => kept
-    }.toMap
+  def drawn(
+    requested: Map[GridColumn, (MitigationSelection, Set[NodeId])],
+    hidden:    Set[GridColumn],
+    held:      Set[MitigationId],
+    curves:    Map[MitigationSelection, Map[NodeId, LECNodeSeries]]
+  ): Map[NodeId, List[(GridColumn, LECNodeCurve)]] =
+    val perColumn =
+      for
+        column             <- GridColumn.all.filterNot(hidden.contains)
+        (selection, nodes) <- requested.get(column).toList
+        sent               <- sentSelection(selection, held).toOption.toList
+        byNode             <- curves.get(sent).toList
+        node               <- nodes.toList
+        series             <- byNode.get(node).toList
+      yield node -> (column -> series.curve)
+    perColumn.groupMap(_._1)(_._2)
 
   /** Pure derivation extracted from `droppedSelections` so it's testable
-    * without a Laminar harness: selected nodes not present in the loaded curve
-    * map. Every node present at the revision has its inherent curve, so a node
-    * missing from the map is absent there. Non-loaded cache → empty
-    * (nothing charted yet, nothing dropped). */
-  def deriveDropped(selected: Set[NodeId], cache: LoadState[Map[NodeId, List[LECNodeSeries]]]): Set[NodeId] =
+    * without a Laminar harness: ticked nodes that no valuation of the loaded
+    * answer holds a curve for. Every node present at the revision has a curve
+    * in each valuation naming it, so a node in none is absent there.
+    * Non-loaded cache → empty (nothing charted yet, nothing dropped). */
+  def deriveDropped(
+    selected: Set[NodeId],
+    cache:    LoadState[Map[MitigationSelection, Map[NodeId, LECNodeSeries]]]
+  ): Set[NodeId] =
     cache match
-      case LoadState.Loaded(m) => selected -- m.keySet
-      case _                   => Set.empty
-
+      case LoadState.Loaded(curves) => selected -- curves.values.flatMap(_.keySet)
+      case _                        => Set.empty

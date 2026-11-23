@@ -13,8 +13,8 @@ import com.risquanter.register.domain.data.LECNodeCurve
 object CompareColorAssigner:
 
   /** One branch's contribution to the Overlay chart. Each branch carries its
-    * own visible set — each branch card is an independent Ctrl+click
-    * surface, so the sides' selections need not agree.
+    * own visible set — each branch card holds its own grid, so the sides'
+    * ticks need not agree.
     *
     * @param slotLabel Stable series-id suffix ("active"/"s1"/"s2"…) — the
     *   side's chart identity, unique even when two sides pin the same
@@ -27,7 +27,7 @@ object CompareColorAssigner:
     *   and the side-by-side panels.
     */
   final case class OverlaySide(
-    curves:       Map[NodeId, List[(CurveVariant, LECNodeCurve)]],
+    curves:       Map[NodeId, List[(GridColumn, LECNodeCurve)]],
     visible:      Set[NodeId],
     palette:      Vector[HexColor],
     slotLabel:    String,
@@ -36,10 +36,10 @@ object CompareColorAssigner:
   )
 
   /** For each side's visible nodes present in that side's curve map, emit
-    * one series per reading, carrying the side's colour (explicit pick if
+    * one series per curve, carrying the side's colour (explicit pick if
     * present, else the palette shade), a series id distinct from the same
     * node's entry on any other side, and the legend label. The id is the
-    * node's reading id (`LECSpecBuilder.seriesIdOf`) followed by the side's
+    * curve's own series id (`LECSpecBuilder.seriesIdOf`) followed by the side's
     * stable SLOT label, not its branch name — so two sides on the same
     * branch but different trees (cross-tree comparison) still get distinct
     * series (`NodeId` alone can't disambiguate several sides' curves for
@@ -53,13 +53,13 @@ object CompareColorAssigner:
   def pairForOverlay(sides: Vector[OverlaySide]): Vector[ChartSeries] =
     sides.flatMap { s =>
       s.visible.toVector.sortBy(_.value).flatMap { nid =>
-        s.curves.getOrElse(nid, Nil).map { (variant, curve) =>
+        s.curves.getOrElse(nid, Nil).map { (column, curve) =>
           ChartSeries(
             curve,
-            variant,
+            column,
             s.overrides.getOrElse(nid, ColorAssigner.shade(s.palette, nid)),
-            s"${LECSpecBuilder.seriesIdOf(nid, variant)}@${s.slotLabel}",
-            LECSpecBuilder.labelOf(curve, variant),
+            s"${LECSpecBuilder.seriesIdOf(nid, column)}@${s.slotLabel}",
+            LECSpecBuilder.labelOf(curve, column),
             Some(s.displayLabel)
           )
         }

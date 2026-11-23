@@ -17,7 +17,7 @@ import com.risquanter.register.http.responses.{LECNodeSeries, TreeStructureRespo
   * Owns the data lifecycle for the tree-list and selected tree structure,
   * plus UI navigation state (expand/collapse/select).
   *
-  * Chart selection and LEC spec concerns are delegated to `LECChartState`.
+  * The card's grid and the LEC spec are delegated to `LECChartState`.
   *
   * Views receive this as a constructor argument (ADR-019 Pattern 2).
   *
@@ -39,15 +39,12 @@ import com.risquanter.register.http.responses.{LECNodeSeries, TreeStructureRespo
   *                           of this state gets current data on a branch switch without
   *                           having to remember to wire that reload themselves.
   * @param atSignal           The commit the reads are pinned to; `None` is the head.
-  * @param selectionSignal    The mitigations this view's curves are valued under.
-  *                           A change re-reads the current curves at the same pin.
-  * @param display            Which of each node's readings this view's chart draws.
-  * @param userPalette        Palette family for user-selected (Ctrl+click) nodes,
-  *                           passed through to `LECChartState`. A signal so the
-  *                           family follows this slot's own palette
-  *                           (`CompareSlotState.palette` / `CompareState
-  *                           .baselinePalette`) — the tree highlights match the
-  *                           slot's curve family.
+  * @param userPalette        Palette family for ticked nodes, passed through to
+  *                           `LECChartState` and read by the card for the tint
+  *                           of its boxes. A signal so the family follows this
+  *                           slot's own palette (`CompareSlotState.palette` /
+  *                           `CompareState.baselinePalette`) — the tree
+  *                           highlights match the slot's curve family.
   * @param branchDisplay      Renders a `BranchChoice` as its display name for
   *                           `chartOrigin` (legend origin lines). Injected as a
   *                           function so this state layer doesn't import the
@@ -60,26 +57,19 @@ final class TreeViewState(
   userIdAccessor: () => Option[UserId.Authenticated],
   activeBranchSignal: StrictSignal[BranchChoice],
   atSignal: StrictSignal[Option[CommitHash]],
-  selectionSignal: StrictSignal[MitigationSelection.Enumerated],
-  display: Signal[CurveDisplay],
-  userPalette: Signal[Vector[HexColor]],
+  val userPalette: Signal[Vector[HexColor]],
   branchDisplay: Option[BranchChoice => String]
 ) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()
   private def atAccessor(): Option[CommitHash] = atSignal.now()
-  private def selectionAccessor(): MitigationSelection.Enumerated = selectionSignal.now()
 
   // A rewind (pin change) re-reads the selected tree at the new pin and
-  // re-fetches the current selection's curves there, WITHOUT clearing the
-  // selection — so the same curves scrub back and forth through history
-  // (nodes absent at the pin drop via the `droppedSelections` notice and return on moving
-  // forward). Distinct from a branch/tree switch, which resets the chart.
+  // re-fetches the grid's curves there, WITHOUT clearing the ticks — so the
+  // same curves scrub back and forth through history (nodes absent at the pin
+  // drop via the `droppedSelections` notice and return on moving forward).
+  // Distinct from a branch/tree switch, which clears the ticks.
   atSignal.changes.foreach(_ => rewindReload())(using unsafeWindowOwner)
-
-  // A selection change re-reads the current curves at the same pin, keeping
-  // the node selection, as a rewind does.
-  selectionSignal.changes.foreach(_ => chartState.reloadCurrentCurves())(using unsafeWindowOwner)
 
   // Set by a caller (DesignView) immediately before it reverts the active branch
   // itself (a declined confirm dialog) — suppresses exactly that one echo so the
@@ -148,24 +138,14 @@ final class TreeViewState(
     if structureVar.now() != v then structureVar.set(v)
   }(using unsafeWindowOwner)
 
-  // A curve read under a non-empty selection waits for the tree, because the
-  // request may name only the mitigations the tree holds. Once the tree is
-  // loaded the current curves are read.
+  // A curve read whose columns name a mitigation waits for the tree, because
+  // the request may name only the mitigations the tree holds. Once the tree is
+  // loaded the grid's curves are read.
   structure.changes.foreach {
     case LoadState.Loaded(_) =>
-      selectionAccessor() match
-        case MitigationSelection.Inherent => ()
-        case _                            => chartState.reloadCurrentCurves()
+      if LECChartState.namesMitigation(chartState.currentRequest) then chartState.reloadCurrentCurves()
     case _ => ()
   }(using unsafeWindowOwner)
-
-  /** Selected mitigations the tree at this revision does not hold. */
-  val absentSelected: Signal[Set[MitigationId]] =
-    selectionSignal.combineWith(selectedTree).map {
-      case (selection, LoadState.Loaded(tree)) =>
-        SelectionEdit.present(selection, tree.mitigations.map(_.id).toSet).toOption.fold(Set.empty)(_._2)
-      case _ => Set.empty
-    }.distinct
 
   // ── UI state (uses NodeId per ADR-001 §3) ─────────────────────
   val expandedNodes: Var[Set[NodeId]] = Var(Set.empty)
@@ -192,21 +172,30 @@ final class TreeViewState(
   // ── Chart state (delegated) ───────────────────────────────────
   val chartState: LECChartState = LECChartState(
     keySignal, selectedTreeId.signal, selectedTree, userIdAccessor, branchAccessor, atAccessor,
-    selectionAccessor, display, userPalette, chartOrigin)
+    userPalette, chartOrigin)
+
+  /** The mitigations the user columns name that the tree at this revision
+    * does not hold. */
+  val absentSelected: Signal[Set[MitigationId]] =
+    chartState.grid.combineWith(selectedTree).map {
+      case (grid, LoadState.Loaded(tree)) =>
+        val held = tree.mitigations.map(_.id).toSet
+        grid.userColumns.values
+          .flatMap(selection => SelectionEdit.present(selection, held).toOption.fold(Set.empty)(_._2))
+          .toSet
+      case _ => Set.empty
+    }.distinct
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
-  // Mutations go through userSelectionToggle bus (ADR-019: events up).
-  /** Node IDs manually Ctrl+clicked for LEC chart overlay (read-only). */
-  def userSelectedNodeIds: StrictSignal[Set[NodeId]] = chartState.userSelectedNodeIds.signal
-  /** Each node's readings as answered (read-only). Vega-Lite spec built client-side. */
-  def curveCache: Signal[LoadState[Map[NodeId, List[LECNodeSeries]]]] = chartState.curveCache.signal
+  // The grid changes through `chartState`'s edits (ADR-019: the owner
+  // changes its state).
+  /** Each requested selection's curves as answered (read-only). Vega-Lite spec built client-side. */
+  def curveCache: Signal[LoadState[Map[MitigationSelection, Map[NodeId, LECNodeSeries]]]] = chartState.curveCache.signal
   /** Node → hex colour map for chart curves and tree highlights (read-only). */
   def nodeColorMap: Signal[Map[NodeId, HexColor]] = chartState.nodeColorMap
   /** Vega-Lite spec lifecycle for the LEC chart (read-only). */
   def specSignal: Signal[LoadState[js.Dynamic]] = chartState.specSignal
-  /** WriteBus for Ctrl+click toggle events (delegates to LECChartState). */
-  def userSelectionToggle: WriteBus[NodeId] = chartState.userSelectionToggle
 
   /** Commit a manual colour override for a node's chart curve. */
   def setColorOverride(nodeId: NodeId, hex: HexColor): Unit = chartState.setColorOverride(nodeId, hex)
@@ -232,7 +221,7 @@ final class TreeViewState(
 
   /** Emit only the structure fetch at the current (branch, pin) — no chart,
     * expand, or node-selection resets. Shared by `loadTreeStructure` (after
-    * its resets) and `rewindReload` (which keeps the chart selection). */
+    * its resets) and `rewindReload` (which keeps the grid's ticks). */
   private def emitStructureFetch(id: TreeId): Unit =
     keySignal.now() match
       case Some(key) =>
@@ -243,8 +232,9 @@ final class TreeViewState(
       case None => ()
 
   /** Fetch the full tree structure for the given id, resetting UI + chart
-    * state — the tree-switch path (a different tree has a different node
-    * lineage, so the old selection must go). */
+    * state — the path of a tree switch, a branch switch and a refresh. The
+    * grid's ticks go, because the nodes they name may not be in what is
+    * loaded next, and its columns stay. */
   def loadTreeStructure(id: TreeId): Unit =
     expandedNodes.set(Set.empty)
     selectedNodeId.set(None)
@@ -252,15 +242,13 @@ final class TreeViewState(
     emitStructureFetch(id)
 
   /** Pin change (history slider): re-read the selected tree at the new pin and
-    * re-fetch the current selection's curves there, preserving the selection.
-    * Under a non-empty selection the curves wait for the tree at the new pin,
-    * which the structure subscription above reads them for; the tree still
-    * loaded is the previous pin's. No-op when nothing is selected. */
+    * re-fetch the grid's curves there, preserving the grid. Where a column
+    * names a mitigation the curves wait for the tree at the new pin, which
+    * the structure subscription above reads them for; the tree still loaded
+    * is the previous pin's. No-op when no tree is selected. */
   private def rewindReload(): Unit =
     selectedTreeId.now().foreach(emitStructureFetch)
-    selectionAccessor() match
-      case MitigationSelection.Inherent => chartState.reloadCurrentCurves()
-      case _                            => ()
+    if !LECChartState.namesMitigation(chartState.currentRequest) then chartState.reloadCurrentCurves()
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */
   def selectTree(id: TreeId): Unit =
@@ -272,13 +260,15 @@ final class TreeViewState(
     selectedTreeId.now().foreach(loadTreeStructure)
 
   /** Clear the tree selection entirely — id, loaded structure, and chart
-    * state, which must be cleared together. No-op when nothing is selected. */
+    * state with its whole grid, which must be cleared together. No-op when
+    * no tree is selected. */
   def deselectTree(): Unit =
     if selectedTreeId.now().isDefined then
       selectedTreeId.set(None)
       // Resolves the pipeline to Idle and supersedes any in-flight load.
       treeTrigger.emit(None)
       chartState.reset()
+      chartState.clearGrid()
 
   def toggleExpanded(nodeId: NodeId): Unit =
     expandedNodes.update { nodes =>

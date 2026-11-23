@@ -49,7 +49,10 @@ object BlockedMessages:
     s"At most $slots trees can be compared."
 
   def selectionCapReached(cap: Int): String =
-    s"At most $cap curves can be selected. Remove a selection before adding more."
+    s"At most $cap nodes can be ticked. Untick a node before ticking another."
+
+  def columnsFull(columns: Int): String =
+    s"A card holds at most $columns columns."
 
   // ── The merge modal ──
 

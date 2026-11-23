@@ -5,7 +5,7 @@ import io.github.iltotore.iron.autoRefine
 
 import app.core.LocalProblem
 import com.risquanter.register.domain.data.iron.{NodeId, CommitHash, SafeName}
-import com.risquanter.register.domain.data.LECNodeCurve
+import com.risquanter.register.domain.data.{LECNodeCurve, MitigationSelection}
 import com.risquanter.register.http.responses.{LECNodeSeries, TreeHistoryResponse, TreeHistoryEntry, HistoryOperation, TreeWriteKind}
 
 /** Pure tests for the history derivations — no Laminar Var/Signal harness,
@@ -18,9 +18,12 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
   private val n1 = NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get
   private val n2 = NodeId.fromString("01HX9ABCDE0000000000000002").toOption.get
 
-  /** A node's mitigation-free reading, the one every present node has. */
-  private def curve(id: NodeId): List[LECNodeSeries] =
-    List(LECNodeSeries(LECNodeCurve(id, SafeName.fromString("n").toOption.get, Vector.empty, Map.empty, 0.0, 0.0), Nil))
+  /** An answer holding one valuation, the Inherent one, with a curve for each
+    * given node. */
+  private def inherentCurves(ids: NodeId*): Map[MitigationSelection, Map[NodeId, LECNodeSeries]] =
+    Map(MitigationSelection.Inherent -> ids.map(id =>
+      id -> LECNodeSeries(LECNodeCurve(id, SafeName.fromString("n").toOption.get, Vector.empty, Map.empty, 0.0, 0.0), Nil)
+    ).toMap)
 
   def spec = suite("History pure derivations")(
 
@@ -41,12 +44,12 @@ object TreeHistoryStateSpec extends ZIOSpecDefault:
     },
 
     test("deriveDropped: selected nodes absent from the loaded curve map are dropped") {
-      val cache = LoadState.Loaded(Map(n1 -> curve(n1)))
+      val cache = LoadState.Loaded(inherentCurves(n1))
       assertTrue(LECChartState.deriveDropped(Set(n1, n2), cache) == Set(n2))
     },
 
     test("deriveDropped: every selection present → empty") {
-      val cache = LoadState.Loaded(Map(n1 -> curve(n1), n2 -> curve(n2)))
+      val cache = LoadState.Loaded(inherentCurves(n1, n2))
       assertTrue(LECChartState.deriveDropped(Set(n1, n2), cache) == Set.empty)
     },
 

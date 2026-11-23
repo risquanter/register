@@ -26,7 +26,7 @@ object CompareColorAssignerSpec extends ZIOSpecDefault:
       probabilityOfNoLoss = 1.0
     )
 
-  /** A side drawing each node's mitigation-free reading only. */
+  /** A side drawing each node's curve under the Inherent column only. */
   private def side(
     curves: Map[NodeId, LECNodeCurve],
     visible: Set[NodeId],
@@ -35,7 +35,7 @@ object CompareColorAssignerSpec extends ZIOSpecDefault:
     displayLabel: String = "main · Demo Tree",
     overrides: Map[NodeId, HexColor] = Map.empty
   ) = CompareColorAssigner.OverlaySide(
-    curves.view.mapValues(c => List(CurveVariant.Inherent -> c)).toMap,
+    curves.view.mapValues(c => List(GridColumn.Inherent -> c)).toMap,
     visible, palette, slotLabel, displayLabel, overrides)
 
   def spec = suite("CompareColorAssigner.pairForOverlay")(
@@ -156,19 +156,20 @@ object CompareColorAssignerSpec extends ZIOSpecDefault:
       assertTrue(paired.head.colour == picked)
     },
 
-    test("a node's two readings on one side are two series in one colour, the mitigated one marked") {
+    test("a node's curves under two columns on one side are two series in one colour, the user column's marked") {
       val inherent  = curve(leaf1)
       val mitigated = curve(leaf1).copy(averageAnnualLoss = 1.0)
+      val columnA   = GridColumn.User(UserColumn.A)
       val paired = CompareColorAssigner.pairForOverlay(Vector(
         CompareColorAssigner.OverlaySide(
-          Map(leaf1 -> List(CurveVariant.Inherent -> inherent, CurveVariant.Mitigated -> mitigated)),
+          Map(leaf1 -> List(GridColumn.Inherent -> inherent, columnA -> mitigated)),
           Set(leaf1), PaletteData.Purple, "s1", "main · Demo Tree", Map.empty)
       ))
       assertTrue(
-        paired.map(_.seriesId).toSet == Set(s"${leaf1.value}@s1", s"${leaf1.value}~mitigated@s1"),
-        paired.map(_.variant) == Vector(CurveVariant.Inherent, CurveVariant.Mitigated),
+        paired.map(_.seriesId).toSet == Set(s"${leaf1.value}@s1", s"${leaf1.value}~A@s1"),
+        paired.map(_.column) == Vector(GridColumn.Inherent, columnA),
         paired.map(_.colour).distinct.size == 1,
-        paired.find(_.variant == CurveVariant.Mitigated).get.label == s"Leaf ${leaf1.value} (mitigated)"
+        paired.find(_.column == columnA).get.label == s"Leaf ${leaf1.value} (A)"
       )
     },
 

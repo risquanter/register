@@ -7,9 +7,9 @@ import com.risquanter.register.domain.data.LECNodeCurve
 /** Assigns hex colours to chart nodes based on their classification.
   *
   * Classification:
-  *   - Overlap (in both query + user sets) → Purple palette
-  *   - Query-only                          → Green palette
-  *   - User-only                           → Aqua palette
+  *   - Overlap (matched by the query and ticked) → Purple palette
+  *   - Query-only                                → Green palette
+  *   - Ticked-only                               → Aqua palette
   *
   * Shade selection uses hash-based rotation: `id.value.hashCode & 0x7fffffff % 8`.
   * This is deterministic (same node always gets the same shade) and avoids
@@ -30,7 +30,7 @@ object ColorAssigner:
   /** Classify nodes and assign hex colours.
     *
     * @param queryNodes    Node IDs matched by the current query
-    * @param userNodes     Node IDs manually selected by the user
+    * @param userNodes     Node IDs the user ticked
     * @param overrides     Manual colour overrides (applied on top of automatic)
     * @param greenPalette  Shades for query-only nodes
     * @param aquaPalette   Shades for user-only nodes
@@ -56,29 +56,29 @@ object ColorAssigner:
 
     automatic ++ overrides.view.filterKeys(automatic.contains)
 
-  /** Select the visible nodes' readings and pair each with the node's colour.
+  /** Select the visible nodes' curves and pair each with the node's colour.
     *
-    * Pure function bridging the readings + colour map into the triples
-    * `LECSpecBuilder.build` expects. A node's readings share its colour, and
-    * the variant tells them apart. Nodes missing from either the readings or
+    * Pure function bridging the curves + colour map into the triples
+    * `LECSpecBuilder.build` expects. A node's curves share its colour, and
+    * the column tells them apart. Nodes missing from either the curves or
     * the colour map are silently dropped (defensive against mid-update signal
     * races in Laminar).
     *
-    * @param readings Each node's readings to draw, each with its variant
+    * @param curves   Each node's curves to draw, each with its column
     * @param visible  Set of node IDs that should appear in the chart
     * @param colorMap Colour assignments (output of `assign`)
-    * @return The readings sorted by NodeId for deterministic legend order
+    * @return The curves sorted by NodeId for deterministic legend order
     */
   def pairWithColors(
-    readings: Map[NodeId, List[(CurveVariant, LECNodeCurve)]],
+    curves: Map[NodeId, List[(GridColumn, LECNodeCurve)]],
     visible: Set[NodeId],
     colorMap: Map[NodeId, HexColor]
-  ): Vector[(LECNodeCurve, CurveVariant, HexColor)] =
+  ): Vector[(LECNodeCurve, GridColumn, HexColor)] =
     visible.toVector
       .sortBy(_.value)
       .flatMap { nid =>
         for
-          color            <- colorMap.get(nid).toVector
-          (variant, curve) <- readings.getOrElse(nid, Nil)
-        yield (curve, variant, color)
+          color           <- colorMap.get(nid).toVector
+          (column, curve) <- curves.getOrElse(nid, Nil)
+        yield (curve, column, color)
       }

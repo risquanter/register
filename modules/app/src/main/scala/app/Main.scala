@@ -5,11 +5,10 @@ import org.scalajs.dom
 
 import app.components.{AppShell, BranchBar}
 import app.chart.PaletteData
-import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, CompareState, CompareSlot, ChangedNodesState, CurveDisplay, OverrideEditEvent, OverrideEditState, Section, TreeHistoryState}
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, CompareState, CompareSlot, ChangedNodesState, OverrideEditEvent, OverrideEditState, Section, TreeHistoryState}
 import app.views.{DesignView, AnalyzeView, ErrorMessages}
 import app.core.ZJS
 import app.core.RequestFailure
-import com.risquanter.register.domain.data.MitigationSelection
 import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, MitigationId, TreeId}
 
 object Main:
@@ -53,30 +52,26 @@ object Main:
     )
 
     val builderState = new TreeBuilderState
-    // The Design view reads the head of its branch, mitigation-free.
+    // The Design view reads the head of its branch.
     val designTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, () => wsState.currentUserId, designScenarioState.activeBranch.signal,
       atSignal = Val(Option.empty[CommitHash]),
-      selectionSignal = Val(MitigationSelection.Inherent),
-      display = Val(CurveDisplay.Inherent),
       userPalette = Val(PaletteData.Aqua),
       branchDisplay = Some(BranchBar.branchDisplayName)
     )
     // Compare state is built before the baseline tree view so the baseline
-    // slider's pin (`baselineAt`), selection and display feed the baseline's
-    // own tree view.
+    // slider's pin (`baselineAt`) and palette feed the baseline's own tree
+    // view.
     val analyzeCompareState = new CompareState
     val analyzeTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal,
       atSignal = analyzeCompareState.baselineAt.signal,
-      selectionSignal = analyzeCompareState.baselineSelection.signal,
-      display = analyzeCompareState.baselineDisplay.signal,
       userPalette = analyzeCompareState.baselinePalette.signal,
       branchDisplay = Some(BranchBar.branchDisplayName)
     )
     val analyzeBaselineHistoryState = new TreeHistoryState(wsState.keySignal, () => wsState.currentUserId)
     // Compare cards: each compared-branch slot gets its own full
-    // TreeViewState — an independent tree view, Ctrl+click surface, and
+    // TreeViewState — an independent tree view, its own grid, and
     // curve cache on the slot's chosen branch — plus its own hash-diff
     // state. Colour identity is the slot's own per-slot family
     // (`CompareSlotState.palette`, default set by `CompareState`), so two
@@ -87,14 +82,12 @@ object Main:
         state = slotState,
         treeViewState = new TreeViewState(
           wsState.keySignal, treeListState, () => wsState.currentUserId,
-          // The slot's branch, pin and selection derive from its target;
+          // The slot's branch and pin derive from its target;
           // TreeViewState needs StrictSignals (it reads .now()), so observe the
           // derived signals for the app's lifetime instead of keeping
           // hand-synced Vars.
           slotState.branchSignal.observe(using unsafeWindowOwner),
           atSignal = slotState.atSignal.observe(using unsafeWindowOwner),
-          selectionSignal = slotState.selectionSignal.observe(using unsafeWindowOwner),
-          display = slotState.display.signal,
           userPalette = slotState.palette.signal,
           branchDisplay = Some(BranchBar.branchDisplayName)
         ),

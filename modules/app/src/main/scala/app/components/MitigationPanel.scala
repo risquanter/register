@@ -2,23 +2,17 @@ package app.components
 
 import com.raquo.laminar.api.L.*
 
-import app.state.{LoadState, MitigationReadout, MitigationToggle, SelectionEdit}
-import com.risquanter.register.domain.data.{Mitigation, MitigationSelection, MitigationSpec, MitigationTarget}
+import app.state.MitigationReadout
+import com.risquanter.register.domain.data.{Mitigation, MitigationSpec, MitigationTarget}
 import com.risquanter.register.domain.data.iron.MitigationId
 import com.risquanter.register.http.errors.BindProblem
 import com.risquanter.register.http.responses.TreeStructureResponse
 
-/** The tree's mitigations at the top of a tree card, one line each in
-  * precedence order: a tri-state checkbox applying the mitigation across its
-  * whole scope, its name and stage, a warning when its predicate does not
-  * bind, and the stale badge on an absolute statement whose leaf has changed.
-  * The predicate's source is the line's tooltip, each named node shown with its
-  * name in this tree version.
+/** What a tree card shows of one mitigation beside its boxes: its name and
+  * stage, a warning when its predicate does not bind, and the stale badge on
+  * an absolute statement whose leaf has changed.
   *
-  * Stateless (ADR-019 Pattern 5): the selection is the caller's, and a click
-  * reports the mitigation through `onToggleWhole`.
-  *
-  * @param staleAction What a stale statement's badge offers on this card.
+  * Stateless (ADR-019 Pattern 5): it holds no selection and creates no `Var`.
   */
 object MitigationPanel:
 
@@ -30,28 +24,6 @@ object MitigationPanel:
     case ReadOnly
     /** A Design list row, whose Edit button opens the popup. */
     case EditInPlace
-
-  def apply(
-    structure: Signal[LoadState[TreeStructureResponse]],
-    selection: Signal[MitigationSelection.Enumerated],
-    onToggleWhole: MitigationId => Unit,
-    locked: Signal[Boolean],
-    staleAction: StaleBadgeAction
-  ): HtmlElement =
-    div(
-      cls := "mitigation-panel",
-      child <-- structure.map {
-        case LoadState.Loaded(response) =>
-          MitigationReadout.mitigations(response) match
-            case Nil         => emptyNode
-            case mitigations =>
-              div(
-                cls := "mitigation-panel-lines",
-                mitigations.map(m => line(response, m, selection, onToggleWhole, locked, staleAction))
-              )
-        case _ => emptyNode
-      }
-    )
 
   /** The words naming a mitigation's stage. */
   private def stageLabel(mitigation: Mitigation): String = mitigation.spec match
@@ -78,30 +50,16 @@ object MitigationPanel:
   private def bindTooltip(problems: Iterable[BindProblem]): String =
     problems.map(BindProblem.describe).mkString("\n")
 
-  private def line(
-    response: TreeStructureResponse,
-    mitigation: Mitigation,
-    selection: Signal[MitigationSelection.Enumerated],
-    onToggleWhole: MitigationId => Unit,
-    locked: Signal[Boolean],
-    staleAction: StaleBadgeAction
-  ): HtmlElement =
+  /** A mitigation's name, stage, binding warning and stale badge, with its
+    * predicate as tooltip: the name cell of its line in a card's grid. The
+    * tooltip shows the predicate's source and each node it names with that
+    * node's name in this tree version. */
+  def nameCell(response: TreeStructureResponse, mitigation: Mitigation, staleAction: StaleBadgeAction): HtmlElement =
     val id = mitigation.id
-    val toggle = selection.map(SelectionEdit.toggleOf(_, id))
     val stale = response.staleMitigationIds.contains(id)
     div(
-      cls := "mitigation-line",
+      cls := "mitigation-name-cell",
       title := predicateTooltip(response, mitigation),
-      input(
-        typ := "checkbox",
-        cls := "mitigation-toggle",
-        checked <-- toggle.map(_ == MitigationToggle.On),
-        indeterminate <-- toggle.map(_ == MitigationToggle.Partial),
-        disabled <-- locked,
-        // The browser flips the box on the click, and the two bindings above
-        // then write the state the new selection gives it.
-        onClick --> (_ => onToggleWhole(id))
-      ),
       span(cls := "mitigation-name", mitigation.name.value),
       span(cls := "mitigation-stage", stageLabel(mitigation)),
       MitigationReadout.failuresOf(response, id).map { problems =>

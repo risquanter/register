@@ -845,32 +845,6 @@ body {
   cursor: not-allowed;
 }
 
-/* Three-way Inherent / Mitigated / Both control in a card's action row. */
-.curve-display-toggle {
-  display: inline-flex;
-  height: var(--lt-control-h, 32px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  margin-right: auto;
-}
-.curve-display-option {
-  padding: 0 var(--sp-2);
-  background: transparent;
-  border: none;
-  color: var(--foreground-muted);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.curve-display-option:hover {
-  color: var(--foreground);
-}
-.curve-display-option--active {
-  background: var(--surface-overlay);
-  color: var(--foreground);
-  font-weight: var(--font-weight-medium);
-}
-
 .slot-card-remove {
   font-size: var(--text-lg);
   line-height: 1;
@@ -892,7 +866,7 @@ body {
   border-color: var(--accent);
 }
 
-/* Persistent header hint marking a mirrored (selection-locked) tree viewer. */
+/* Persistent header hint marking a tree card that mirrors the baseline. */
 .selection-lock-hint {
   margin-left: var(--sp-2);
   font-size: var(--text-xs);
@@ -900,9 +874,8 @@ body {
   font-style: italic;
 }
 
-/* Transient bubble pulsed when a Ctrl-gesture is blocked: on a mirrored row,
-   or because the curve selection is full. */
-.selection-locked-notice,
+/* Transient bubble pulsed when a tick is refused because the limit of ticked
+   nodes is reached. */
 .selection-cap-notice {
   position: absolute;
   top: var(--sp-2);
@@ -2424,23 +2397,112 @@ button.summary-list-entry:hover {
   font-style: italic;
 }
 
-.tree-detail-header {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-3);
+/* A loaded tree card's grid: one table whose rows are the tree's mitigations
+   and nodes and whose columns are selections. The header row and the name
+   column stay in view while the card scrolls. Their background is the card's,
+   so the rows scrolling under them do not show through. */
+.tree-grid {
+  border-collapse: separate;
+  border-spacing: 0;
   font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+.tree-grid th,
+.tree-grid td {
+  padding: 0;
+  white-space: nowrap;
+  text-align: left;
+  font-weight: var(--font-weight-normal, 400);
+}
+.tree-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: var(--surface-raised);
+  padding-bottom: var(--sp-1);
+}
+.tree-grid-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--surface-raised);
+  padding-right: var(--sp-2);
+}
+.tree-grid thead th.tree-grid-corner {
+  z-index: 3;
   font-weight: var(--font-weight-medium);
   color: var(--foreground);
   font-size: var(--text-base);
 }
+.tree-grid th.tree-grid-col,
+.tree-grid td.tree-grid-cell {
+  text-align: center;
+  padding: 0 var(--sp-2);
+}
+/* The hovered row and the hovered column are tinted. The tint is an image
+   over the cell's own background, so a sticky cell stays opaque. */
+.tree-grid-row:hover td,
+.tree-grid .tree-grid-cell--col-hover {
+  background-image: linear-gradient(var(--surface-overlay-hover), var(--surface-overlay-hover));
+}
+.tree-grid-col-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.tree-grid-col-title--hidden {
+  color: var(--foreground-muted);
+  text-decoration: line-through;
+}
+.tree-grid-col-title:disabled,
+.tree-grid-col-remove:disabled {
+  cursor: not-allowed;
+}
+.tree-grid-col-remove,
+.tree-grid-add-btn {
+  margin-left: var(--sp-1);
+  padding: 0 var(--sp-1);
+  background: transparent;
+  border: none;
+  color: var(--foreground-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.tree-grid-col-remove:hover,
+.tree-grid-add-btn:hover {
+  color: var(--foreground);
+}
+.tree-grid-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* The boxes take the card's palette colour, which the view sets on the table. */
+.tree-grid-box {
+  accent-color: var(--grid-accent, var(--accent));
+  margin: 0;
+  vertical-align: middle;
+}
+.mitigation-name-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-0-5) var(--sp-1);
+  font-size: var(--text-xs);
+}
 
-/* A section of a loaded tree card: a title that opens and closes it, and a
-   body that slides. The body animates its single grid row between 1fr and
-   0fr, because a height cannot be animated to or from auto. 200ms is chosen
-   by this project. */
-.tree-section {
-  margin-bottom: var(--sp-2);
+/* A section's title row in a tree card's grid. A click on the title shows or
+   hides the section's rows. */
+.tree-grid-section td {
+  position: sticky;
+  left: 0;
 }
 .tree-section-title {
   display: flex;
@@ -2464,25 +2526,6 @@ button.summary-list-entry:hover {
   height: 12px;
   flex-shrink: 0;
 }
-.tree-section-body {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition: grid-template-rows 200ms ease;
-}
-.tree-section--collapsed .tree-section-body {
-  grid-template-rows: 0fr;
-}
-.tree-section-inner {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.tree-detail-nodes {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-}
-
 .tree-detail-inline {
   display: inline-flex;
   align-items: center;
@@ -2727,7 +2770,7 @@ button.summary-list-entry:hover {
   background-color: transparent;
   flex: 0 0 auto;
   max-height: var(--slot-tree-max-h, 20rem);
-  overflow-y: auto;
+  overflow: auto;
   resize: vertical;
 }
 
@@ -2740,21 +2783,6 @@ button.summary-list-entry:hover {
 }
 
 /* ── Mitigations on a tree card ── */
-.mitigation-panel-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--sp-1) var(--sp-2);
-  margin-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--border);
-}
-.mitigation-line {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--text-xs);
-  min-width: 0;
-}
 .mitigation-name {
   overflow: hidden;
   text-overflow: ellipsis;
